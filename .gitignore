@@ -1,0 +1,25 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.iml
+.idea/
+build/
+.DS_Store
+data/
+*.log
+
+# Local kubeconfigs must never be committed
+*.kubeconfig
+kubeconfig
+.kube/
+
+# Claude Code personal per-project settings
+.claude/settings.local.json
+
+# dev-crew transient run handoffs
+.claude/dev-crew/runs/
+
+# prompt-coach local mastery state (per-machine, not shared)
+.claude/prompt-coach/
+
+# Screenshot-tour output lands in the module dir (surefire CWD); the deck lives in /presentation
+kweblens-web/presentation/

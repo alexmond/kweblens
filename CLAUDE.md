@@ -1,0 +1,138 @@
+# CLAUDE.md
+
+Guidance for Claude Code when working in this repository.
+
+## Project Overview
+
+kweblens is a **web-based Kubernetes IDE** — Freelens/Lens reimagined as a self-hosted
+Spring Boot web app instead of an Electron desktop app. It connects to one or more clusters
+(via kubeconfig), browses their resources, and (over time) will edit YAML, stream pod logs,
+show events and metrics, and exec into pods — all from a browser. It also exposes the same
+read-only cluster view to AI assistants over **MCP**.
+
+Built with **Spring Boot 4.0.6 / Java 21**, a multi-module Maven build
+(`org.alexmond:kweblens-parent`, version `0.1.0-SNAPSHOT`). Cluster access is via the
+**fabric8 Kubernetes client**; the dashboard is **Thymeleaf + htmx + Bootstrap** (all assets
+served in-jar via WebJars — no CDN).
+
+## Build, Test & Verify
+
+```bash
+scripts/dev-verify.sh                 # format + whole-reactor verify — green here = green PR
+scripts/dev-test.sh <selector>        # targeted -Dtest run (last arg = selector); e.g.
+scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
+./mvnw spring-javaformat:apply        # auto-format (run before committing)
+```
+
+- `dev-verify.sh` / `dev-test.sh` are the intended entry points (allowlist them in
+  `.claude/settings.json` to run without prompts).
+- CI (`.github/workflows/ci.yml`) runs `./mvnw -B verify` on JDK 21 — same gates as `dev-verify`.
+- Tests are **hermetic**: no live cluster. The fabric8 `kubernetes-server-mock`
+  (`@EnableKubernetesMockClient(crud = true)`) serves an in-JVM API server; web tests set
+  `kweblens.load-kubeconfig=false` so the registry starts empty and the test seeds its own client.
+
+## Architecture (modules)
+
+- **`kweblens-core`** — the cluster access layer, no web concerns. `cluster/` (the
+  `ClusterRegistry` that owns one fabric8 `KubernetesClient` per cluster id + the `ClusterInfo`
+  view), `resource/` (`ResourceService` projects Kubernetes objects into kind-agnostic
+  `ResourceSummary` rows), `config/` (`KweblensProperties`). **Published** to Maven Central.
+- **`kweblens-web`** — the runnable Spring Boot app. `web/api/` (read-only JSON API +
+  `ProblemDetail` error mapping), `web/ui/` (`DashboardController` + Thymeleaf `templates/`),
+  `web/security/` (`SecurityConfig` — open by default, see gotchas), `web/mcp/` (`ClusterTools`
+  `@Tool` methods + `McpConfig` provider), `web/config/` (`ClusterBootstrap` seeds the ambient
+  kubeconfig as cluster `default` on startup). `/actuator/{health,info,metrics,prometheus}`
+  exposed. **Not published** — ships as a container image.
+- **`kweblens-cli`** — a dependency-light cluster inspector (picocli). Prints the cluster the
+  ambient kubeconfig points at. **Published**; runnable fat jar is the `exec` classifier.
+- **`kweblens-it`** — on-demand operational tasks (connectivity/health) tagged `it`, excluded
+  from the default build. Not published.
+
+Config is env-var driven (`kweblens-web/src/main/resources/application.yml`): `PORT`,
+`KWEBLENS_LOAD_KUBECONFIG`, plus `kweblens.clusters[*]` for statically-configured clusters.
+Settings class: `KweblensProperties` (`kweblens.*`).
+
+## Code Style & Quality (all fail the build at `validate`)
+
+- **spring-javaformat** 0.0.47 — tabs, Spring conventions. Run `:apply` before committing.
+- **Checkstyle** 3.6.0 (+ Spring checks) — `checkstyle.xml` / `checkstyle-suppressions.xml`;
+  hard-fails `FileLength` at 800, `MethodLength` at 80.
+- **PMD** 3.28.0 — `pmd-ruleset.xml`.
+- **JaCoCo** 0.8.15 line gates: `kweblens-core` 0.70, `kweblens-web` 0.50, `kweblens-cli` 0.60
+  (entry-point classes excluded). Raise these as real coverage grows.
+- **Lombok** `@RequiredArgsConstructor` for constructor injection; `@ConfigurationProperties`
+  for config.
+- **File size** — target source files **under ~500 lines**; split fat controllers into per-page
+  `*PageService` helpers. Guideline, not a gate (Checkstyle hard-fails at 800).
+
+Recurring lint rules that bite: **SpringLambda** requires parentheses around a single lambda arg
+(`(e) -> …`, never `e -> …`) — `spring-javaformat:apply` does **not** add these, so it fails at
+`validate` on the next build; **SpringTernary** wants `(a != b) ? x : y` (parenthesized,
+prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegistry.Entry`);
+**UseUnderscoresInNumericLiterals** (`86_400`); **AppendCharacterWithChar** (`sb.append('m')`).
+
+## Gotchas (load-bearing)
+
+- **Building a fabric8 client does not connect.** `new KubernetesClientBuilder().build()` only
+  resolves config; the first API call is what reaches the cluster. This is why `ClusterBootstrap`
+  can seed `default` at startup and why tests need no live cluster — but it also means a bad
+  kubeconfig fails *lazily* on first use, not at boot.
+- **The `ClusterRegistry` owns client lifecycles.** Never `new` a `KubernetesClient` in a
+  controller/service — ask the registry (`require(id)` / `client(id)`). Re-registering an id
+  closes the previous client. Everything is addressed by cluster **id**, never by a raw client.
+- **Tests must not hit a real cluster.** Use `@EnableKubernetesMockClient(crud = true)` and set
+  `kweblens.load-kubeconfig=false` so `ClusterBootstrap` skips ambient discovery; then register
+  the mock `client` into the autowired `ClusterRegistry` in `@BeforeEach`.
+- **Spring Boot 4 moved packages.** Actuator health is `org.springframework.boot.health.*`;
+  autoconfigure is split per-module. Verify imports against the jars, not Boot 3 memory.
+- **Security is open by default.** `SecurityConfig` permits every request and disables CSRF on
+  `/api/**` so the scaffold is immediately usable. kweblens surfaces cluster data (and will add
+  mutating actions) — real deployments MUST put auth in front. Tighten as write endpoints land.
+- **fabric8 version is BOM-pinned.** `kubernetes-client-bom` (`${fabric8.version}`) aligns
+  client + model + mock-server; bump the one property, never individual fabric8 artifacts.
+- **kubeconfigs are secrets.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig`, `.kube/` — never
+  commit one. Mount it into the container / point `KUBECONFIG` at it instead.
+
+## Deployment
+
+- **Image**: built by Cloud Native Buildpacks via the `docker` Maven profile
+  (`./mvnw -Pdocker -pl kweblens-web -am package -Ddocker.image.name=… -Ddocker.publish=true`).
+  Only `kweblens-web` declares the Spring Boot plugin, so only it produces an image.
+- **In-cluster vs out-of-cluster**: with a service account mounted, the fabric8 client
+  auto-detects in-cluster config; otherwise it uses the mounted kubeconfig. Give the pod a
+  (read-only, to start) RBAC role scoped to what the dashboard lists.
+
+## Release (Maven Central)
+
+- **Only the libraries publish**: `kweblens-core`, `kweblens-cli` (+ parent pom). The app
+  `kweblens-web` is **not** in the top-level `<modules>` — it lives in an `activeByDefault`
+  `default` profile. So `-Prelease` deactivates `default` and drops web from the reactor (apps
+  don't go to Central); the `docker` profile **re-adds** web. **Gotcha:** any new `-P` profile
+  that needs the app must also list `<module>kweblens-web</module>`.
+- **Cut a release** via the `Maven release` workflow (`workflow_dispatch`, inputs
+  `releaseVersion` / `nextVersion`): `versions:set` → `verify` → tag `v<version>` →
+  `deploy -Prelease` (GPG sign + `central-publishing-maven-plugin`) → bump to next SNAPSHOT.
+  Publishing is **irreversible** — never trigger without explicit go-ahead.
+- Versions are numeric `MAJOR.MINOR.PATCH` (no `-RC`/`-M` qualifiers); `-SNAPSHOT` only on dev.
+- Secrets (repo-level, from infra's `gh-release-secrets.sh`): `OSSRH_USERNAME`, `OSSRH_PASSWORD`,
+  `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`.
+
+## MCP server
+
+`kweblens-web` runs an in-jar MCP server (SSE over WebMVC) exposing the read-only `ClusterTools`
+(`listClusters`, `listNamespaces`, `listPods`) to AI assistants. A new tool is one `@Tool`-annotated
+method on a bean wired into `McpConfig`'s `MethodToolCallbackProvider`.
+
+## Planned integrations / roadmap
+
+- **Helm — use jhelm, not shelling out to the `helm` binary.** Freelens has a Helm-releases view;
+  kweblens's Helm slice MUST be built on the sibling **jhelm** library
+  (`org.alexmond:jhelm-core`, currently `1.3.1-SNAPSHOT`) — kweblens is also a **dogfood** of
+  jhelm. `jhelm-core` is Spring-Boot-autoconfigured (`JhelmCoreAutoConfiguration`) and exposes an
+  `action/` API (`StatusAction`, `HistoryAction`, `ListAction`, `CreateAction`/upgrade, etc.);
+  wrap those in a `HelmService` in core and a `web/helm/` slice. Pin the version via a
+  `jhelm.version` property (BOM-align with the Boot line). Do **not** add a `helm` CLI dependency.
+- **Later Freelens-parity surfaces**: pod logs (SSE), YAML view/edit + apply, events, live
+  metrics, exec-into-pod. Each is a new `web/<area>/` slice over `kweblens-core` access services.
+- **Design references**: capture Freelens (desktop/Electron) screens under `xvfb` for a headless
+  reference deck to guide the dashboard's IA.

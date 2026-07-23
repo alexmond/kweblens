@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: kweblens
+
+  cloud:
+    config:
+      # The central config server is OPTIONAL. Don't hard-require spring.config.import so dev/test
+      # (and any deploy without a config server) start with the config client inert. Prod injects
+      # SPRING_CONFIG_IMPORT=optional:configserver:<url> to pull central config normally.
+      import-check:
+        enabled: false
+    discovery:
+      client:
+        # spring-cloud-starter-config transitively registers a DiscoveryClientHealthIndicator;
+        # kweblens runs no discovery client, so disable it here to keep /actuator/health clean.
+        health-indicator:
+          enabled: false
+
+  # Grace window for in-flight requests on shutdown (pairs with server.shutdown: graceful).
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  # Bounded, short-TTL cache for hot list/get reads against the API server.
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=2000,expireAfterWrite=10s
+
+  # In-jar MCP server (SSE over WebMVC) exposing read-only cluster tools.
+  ai:
+    mcp:
+      server:
+        name: kweblens
+        version: 0.1.0
+        type: SYNC
+
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+# kweblens cluster discovery — see org.alexmond.kweblens.config.KweblensProperties
+kweblens:
+  load-kubeconfig: ${KWEBLENS_LOAD_KUBECONFIG:true}
+  clusters: []
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  info:
+    git:
+      mode: full
+
+logging:
+  level:
+    io.fabric8.kubernetes.client: WARN

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title layout:title-pattern="$CONTENT_TITLE · kweblens">kweblens</title>
+    <link rel="stylesheet" th:href="@{/webjars/bootstrap/5.3.8/css/bootstrap.min.css}"/>
+    <link rel="stylesheet" th:href="@{/webjars/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css}"/>
+    <link rel="stylesheet" th:href="@{/css/app.css}"/>
+    <script th:src="@{/webjars/htmx.org/2.0.4/dist/htmx.min.js}" defer></script>
+</head>
+<body class="bg-body-tertiary">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-semibold" th:href="@{/}">
+            <i class="bi bi-hexagon-fill"></i> kweblens
+        </a>
+        <span class="navbar-text small text-white-50">web Kubernetes IDE</span>
+    </div>
+</nav>
+<main class="container-fluid py-4">
+    <div layout:fragment="content">
+        <p>Content goes here.</p>
+    </div>
+</main>
+</body>
+</html>

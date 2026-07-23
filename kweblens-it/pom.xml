@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.alexmond</groupId>
+        <artifactId>kweblens-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>kweblens-it</artifactId>
+    <name>kweblens Integration Tasks</name>
+    <description>
+        Spring-backed, on-demand operational/verification tasks (API smoke, health sweeps,
+        cluster connectivity checks) that run against any environment selected by a Spring
+        config profile. Not published to Maven Central.
+    </description>
+
+    <!-- Server-only test scaffolding -> AGPL-3.0 (overrides the parent's Apache; see root LICENSE). -->
+    <licenses>
+        <license>
+            <name>GNU Affero General Public License v3.0 only</name>
+            <url>https://www.gnu.org/licenses/agpl-3.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <properties>
+        <!-- Task tests are tagged "it" and excluded by default, so a normal `verify` only compiles
+             this module (no live cluster needed). Run the tasks by clearing this on the command line
+             (a CLI -D always wins and, unlike a -P profile, doesn't deactivate the reactor's
+             activeByDefault `default` profile that lists this module):
+               mvn -pl kweblens-it test -Dkweblens.it.excluded-groups= \
+                   -Dspring.profiles.active=lab [-Dtest=SmokeTasks] -->
+        <kweblens.it.excluded-groups>it</kweblens.it.excluded-groups>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- The access layer under test, plus fabric8 (transitively) for connectivity tasks. -->
+        <dependency>
+            <groupId>org.alexmond</groupId>
+            <artifactId>kweblens-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludedGroups>${kweblens.it.excluded-groups}</excludedGroups>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

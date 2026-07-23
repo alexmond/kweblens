@@ -1,0 +1,12 @@
+/* kweblens dashboard tweaks layered on top of Bootstrap. */
+body {
+	font-size: 0.95rem;
+}
+
+code {
+	color: var(--bs-emphasis-color);
+}
+
+.navbar-brand .bi {
+	color: #4f9cf9;
+}

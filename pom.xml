@@ -1,0 +1,468 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.0.6</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>org.alexmond</groupId>
+    <artifactId>kweblens-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>kweblens-parent</name>
+    <description>kweblens parent POM — a web-based Kubernetes IDE (Freelens on Spring Boot)</description>
+    <url>https://github.com/alexmond/kweblens</url>
+
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/alexmond/kweblens/issues</url>
+    </issueManagement>
+
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Alex Mondshain</name>
+            <email>alex.mondshain@gmail.com</email>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git@github.com:alexmond/kweblens.git</connection>
+        <developerConnection>scm:git:git@github.com:alexmond/kweblens.git</developerConnection>
+        <tag>HEAD</tag>
+        <url>https://github.com/alexmond/kweblens</url>
+    </scm>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+
+        <!-- Browser-driven screenshot/capture tests (@Tag("ui")) are presentation tooling,
+             not correctness gates: they need a real Chrome and are timing-sensitive, so
+             they're excluded from the default build (and CI's `mvn verify`) to keep the gate
+             reliable. Run them on demand with `-DexcludedGroups=`. -->
+        <excludedGroups>ui</excludedGroups>
+
+        <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+        <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version>
+        <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
+        <spring-javaformat.version>0.0.47</spring-javaformat.version>
+        <checkstyle.version>13.6.0</checkstyle.version>
+
+        <maven-gpg-plugin.version>3.2.8</maven-gpg-plugin.version>
+        <central-publishing-maven-plugin.version>0.11.0</central-publishing-maven-plugin.version>
+
+        <!-- Kubernetes access: fabric8 kubernetes-client (7.x targets Java 17+ / Jackson used
+             by Boot 4). The BOM aligns the whole client + model + mock-server set. -->
+        <fabric8.version>7.3.1</fabric8.version>
+
+        <!-- Spring AI (MCP server) — 2.0.x line targets Spring Boot 4 / Spring Framework 7 -->
+        <spring-ai.version>2.0.0</spring-ai.version>
+        <!-- Boot-4.0-aligned train — for the optional config-server client. -->
+        <spring-cloud.version>2025.1.2</spring-cloud.version>
+
+        <!-- Front-end assets served in-jar via WebJars (no CDN for the self-hosted app). -->
+        <bootstrap.version>5.3.8</bootstrap.version>
+        <bootstrap-icons.version>1.11.3</bootstrap-icons.version>
+        <htmx.version>2.0.4</htmx.version>
+        <thymeleaf-layout-dialect.version>3.4.0</thymeleaf-layout-dialect.version>
+        <picocli.version>4.7.7</picocli.version>
+
+        <!-- SonarQube analysis scope. The CLI is a console app whose stdout IS its output
+             (S106); test sources aren't a quality gate. Host URL + token passed at scan time. -->
+        <sonar.projectKey>kweblens</sonar.projectKey>
+        <sonar.projectName>kweblens</sonar.projectName>
+        <sonar.issue.ignore.multicriteria>cliStdout,testSources</sonar.issue.ignore.multicriteria>
+        <sonar.issue.ignore.multicriteria.cliStdout.ruleKey>java:S106</sonar.issue.ignore.multicriteria.cliStdout.ruleKey>
+        <sonar.issue.ignore.multicriteria.cliStdout.resourceKey>**/kweblens-cli/**</sonar.issue.ignore.multicriteria.cliStdout.resourceKey>
+        <sonar.issue.ignore.multicriteria.testSources.ruleKey>*</sonar.issue.ignore.multicriteria.testSources.ruleKey>
+        <sonar.issue.ignore.multicriteria.testSources.resourceKey>**/src/test/**</sonar.issue.ignore.multicriteria.testSources.resourceKey>
+    </properties>
+
+    <!--
+        Only the publishable libraries live here, so `mvn -Prelease deploy` (which deactivates the
+        activeByDefault 'default' profile) publishes just these to Maven Central. The runnable app
+        (kweblens-web) is an application, not a library — it's added by the 'default' and 'docker'
+        profiles below and is never published.
+    -->
+    <modules>
+        <module>kweblens-core</module>
+        <module>kweblens-cli</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Internal modules -->
+            <dependency>
+                <groupId>org.alexmond</groupId>
+                <artifactId>kweblens-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- fabric8 Kubernetes client BOM — aligns client, model, and mock-server. -->
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-client-bom</artifactId>
+                <version>${fabric8.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Spring AI (MCP server) — 2.0.x line targets Spring Boot 4 / Spring Framework 7 -->
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Spring Cloud BOM — import scope only; the config-server client is the only starter pulled. -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco-maven-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>prepare-agent</id>
+                            <goals>
+                                <goal>prepare-agent</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>report</id>
+                            <phase>test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                            <configuration>
+                                <formats>
+                                    <format>XML</format>
+                                    <format>HTML</format>
+                                </formats>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- Lombok annotation processing -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
+
+                <!-- Code style: Spring Java Format -->
+                <plugin>
+                    <groupId>io.spring.javaformat</groupId>
+                    <artifactId>spring-javaformat-maven-plugin</artifactId>
+                    <version>${spring-javaformat.version}</version>
+                    <executions>
+                        <execution>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>validate</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- PMD -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-pmd-plugin</artifactId>
+                    <version>${maven-pmd-plugin.version}</version>
+                    <configuration>
+                        <targetJdk>${java.version}</targetJdk>
+                        <linkXRef>false</linkXRef>
+                        <failOnViolation>true</failOnViolation>
+                        <printFailingErrors>true</printFailingErrors>
+                        <includeTests>false</includeTests>
+                        <rulesets>
+                            <ruleset>${maven.multiModuleProjectDirectory}/pmd-ruleset.xml</ruleset>
+                        </rulesets>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>pmd-check</id>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- Checkstyle (Spring checks via spring-javaformat) -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-checkstyle-plugin</artifactId>
+                    <version>${maven-checkstyle-plugin.version}</version>
+                    <dependencies>
+                        <dependency>
+                            <groupId>io.spring.javaformat</groupId>
+                            <artifactId>spring-javaformat-checkstyle</artifactId>
+                            <version>${spring-javaformat.version}</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>com.puppycrawl.tools</groupId>
+                            <artifactId>checkstyle</artifactId>
+                            <version>${checkstyle.version}</version>
+                        </dependency>
+                    </dependencies>
+                    <executions>
+                        <execution>
+                            <id>checkstyle-validation</id>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                            <configuration>
+                                <configLocation>${maven.multiModuleProjectDirectory}/checkstyle.xml</configLocation>
+                                <suppressionsLocation>${maven.multiModuleProjectDirectory}/checkstyle-suppressions.xml</suppressionsLocation>
+                                <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- Release helpers (active under the 'release' profile) -->
+                <plugin>
+                    <groupId>io.github.git-commit-id</groupId>
+                    <artifactId>git-commit-id-maven-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>revision</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <verbose>true</verbose>
+                        <dateFormat>yyyy-MM-dd'T'HH:mm:ssZ</dateFormat>
+                        <generateGitPropertiesFile>true</generateGitPropertiesFile>
+                        <generateGitPropertiesFilename>
+                            ${project.build.outputDirectory}/git.properties
+                        </generateGitPropertiesFilename>
+                        <skipPoms>false</skipPoms>
+                        <useNativeGit>true</useNativeGit>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-source-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <id>attach-sources</id>
+                            <goals>
+                                <goal>jar-no-fork</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-javadoc-plugin</artifactId>
+                    <configuration>
+                        <failOnError>false</failOnError>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>attach-javadocs</id>
+                            <goals>
+                                <goal>jar</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-gpg-plugin</artifactId>
+                    <version>${maven-gpg-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>sign-artifacts</id>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>sign</goal>
+                            </goals>
+                            <configuration>
+                                <gpgArguments>
+                                    <arg>--pinentry-mode</arg>
+                                    <arg>loopback</arg>
+                                </gpgArguments>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.sonatype.central</groupId>
+                    <artifactId>central-publishing-maven-plugin</artifactId>
+                    <version>${central-publishing-maven-plugin.version}</version>
+                    <extensions>true</extensions>
+                    <configuration>
+                        <publishingServerId>central</publishingServerId>
+                        <autoPublish>true</autoPublish>
+                        <!--
+                            Return once Central has validated the bundle (signatures, metadata,
+                            structure). autoPublish then publishes in the background. 'published'
+                            blocks until full Maven Central propagation, which routinely exceeds
+                            the plugin's poll timeout and fails an otherwise-successful release.
+                        -->
+                        <waitUntil>validated</waitUntil>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
+        <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>io.spring.javaformat</groupId>
+                <artifactId>spring-javaformat-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!--
+            Adds the runnable app to every normal build (verify, dev, CI). Active unless another
+            profile is explicitly requested — so `-Prelease` drops kweblens-web from the reactor
+            (it must not reach Maven Central), while `-Pdocker` re-adds it (see below) to keep the
+            image build working.
+        -->
+        <profile>
+            <id>default</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <modules>
+                <module>kweblens-web</module>
+                <module>kweblens-it</module>
+            </modules>
+        </profile>
+
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                    </plugin>
+                    <plugin>
+                        <groupId>io.github.git-commit-id</groupId>
+                        <artifactId>git-commit-id-maven-plugin</artifactId>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+            Build an OCI image with Cloud Native Buildpacks (no Dockerfile needed):
+              ./mvnw -Pdocker package                          (build all modules + the web image)
+              ./mvnw -Pdocker -pl kweblens-web -am package     (just the runnable module's image)
+            Override the tag or publish to a registry:
+              ./mvnw -Pdocker -Ddocker.image.name=ghcr.io/alexmond/kweblens:0.1.0 -Ddocker.publish=true package
+            Requires a running Docker daemon. Only kweblens-web (which declares the Spring Boot
+            plugin) produces an image; the config lives in pluginManagement so other modules are
+            unaffected.
+        -->
+        <profile>
+            <id>docker</id>
+            <!-- Re-add the app: explicitly activating this profile deactivates 'default'. -->
+            <modules>
+                <module>kweblens-web</module>
+            </modules>
+            <properties>
+                <docker.image.name>kweblens:${project.version}</docker.image.name>
+                <docker.publish>false</docker.publish>
+            </properties>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-maven-plugin</artifactId>
+                            <configuration>
+                                <image>
+                                    <name>${docker.image.name}</name>
+                                    <env>
+                                        <BP_JVM_VERSION>${java.version}</BP_JVM_VERSION>
+                                    </env>
+                                </image>
+                                <publish>${docker.publish}</publish>
+                            </configuration>
+                            <executions>
+                                <execution>
+                                    <id>build-image</id>
+                                    <phase>package</phase>
+                                    <goals>
+                                        <goal>build-image</goal>
+                                    </goals>
+                                </execution>
+                            </executions>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+    </profiles>
+</project>

@@ -1,0 +1,111 @@
+<?xml version="1.0"?>
+<ruleset name="kweblens PMD Rules"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>PMD ruleset for the kweblens project</description>
+
+    <!-- Best Practices -->
+    <rule ref="category/java/bestpractices.xml">
+        <exclude name="UnitTestContainsTooManyAsserts"/>
+        <exclude name="UnitTestAssertionsShouldIncludeMessage"/>
+        <exclude name="LooseCoupling"/>
+        <exclude name="UseVarargs"/>
+        <exclude name="LiteralsFirstInComparisons"/>
+        <exclude name="UnusedAssignment"/>
+        <exclude name="GuardLogStatement"/>
+        <exclude name="JUnitTestsShouldIncludeAssert"/>
+    </rule>
+
+    <!-- Code Style -->
+    <rule ref="category/java/codestyle.xml">
+        <exclude name="AtLeastOneConstructor"/>
+        <exclude name="OnlyOneReturn"/>
+        <exclude name="LocalVariableCouldBeFinal"/>
+        <exclude name="MethodArgumentCouldBeFinal"/>
+        <exclude name="ShortVariable"/>
+        <exclude name="LongVariable"/>
+        <exclude name="ShortMethodName"/>
+        <exclude name="ShortClassName"/>
+        <exclude name="CommentDefaultAccessModifier"/>
+        <exclude name="CallSuperInConstructor"/>
+        <exclude name="ConfusingTernary"/>
+        <exclude name="TooManyStaticImports"/>
+        <exclude name="UseExplicitTypes"/>
+        <exclude name="UselessParentheses"/>
+        <exclude name="FieldDeclarationsShouldBeAtStartOfClass"/>
+        <exclude name="FieldNamingConventions"/>
+        <exclude name="OneDeclarationPerLine"/>
+        <exclude name="LinguisticNaming"/>
+        <!-- Conflicts with Checkstyle's SpringLambda (which wants parenthesised lambda args) on
+             idiomatic Spring Security DSL customizers like frame -> frame.sameOrigin(). -->
+        <exclude name="LambdaCanBeMethodReference"/>
+    </rule>
+    <rule ref="category/java/codestyle.xml/ClassNamingConventions">
+        <properties>
+            <property name="utilityClassPattern" value="[A-Z][a-zA-Z0-9]*"/>
+        </properties>
+    </rule>
+
+    <!-- Design -->
+    <rule ref="category/java/design.xml">
+        <exclude name="ImmutableField"/>
+        <exclude name="LawOfDemeter"/>
+        <exclude name="LoosePackageCoupling"/>
+        <exclude name="DataClass"/>
+        <exclude name="TooManyMethods"/>
+        <exclude name="ExcessiveImports"/>
+        <exclude name="CouplingBetweenObjects"/>
+        <exclude name="AvoidCatchingGenericException"/>
+        <exclude name="ExcessiveParameterList"/>
+        <exclude name="CyclomaticComplexity"/>
+        <exclude name="NcssCount"/>
+        <exclude name="NPathComplexity"/>
+        <exclude name="GodClass"/>
+        <exclude name="TooManyFields"/>
+        <exclude name="AvoidThrowingRawExceptionTypes"/>
+        <exclude name="SignatureDeclareThrowsException"/>
+        <exclude name="UseObjectForClearerAPI"/>
+        <exclude name="CognitiveComplexity"/>
+        <exclude name="SimplifyBooleanReturns"/>
+        <exclude name="AvoidDeeplyNestedIfStmts"/>
+        <exclude name="CollapsibleIfStatements"/>
+        <!-- Spring Boot @SpringBootApplication main class has only a static main() -->
+        <exclude name="UseUtilityClass"/>
+        <!-- DTO holder classes group nested records behind a private constructor -->
+        <exclude name="MissingStaticMethodInNonInstantiatableClass"/>
+    </rule>
+
+    <!-- Error Prone -->
+    <rule ref="category/java/errorprone.xml">
+        <exclude name="NonSerializableClass"/>
+        <exclude name="AvoidLiteralsInIfCondition"/>
+        <exclude name="AvoidDuplicateLiterals"/>
+        <exclude name="MissingSerialVersionUID"/>
+        <exclude name="AvoidFieldNameMatchingMethodName"/>
+        <exclude name="AvoidFieldNameMatchingTypeName"/>
+        <exclude name="NullAssignment"/>
+        <exclude name="ReturnEmptyCollectionRatherThanNull"/>
+        <exclude name="AssignmentInOperand"/>
+        <exclude name="TestClassWithoutTestCases"/>
+        <exclude name="ReplaceJavaUtilDate"/>
+        <!-- Borrowed KubernetesClients are owned by the ClusterRegistry, never by the caller —
+             services/controllers must NOT close a client they got from require()/client(). -->
+        <exclude name="CloseResource"/>
+    </rule>
+
+    <!-- Multithreading -->
+    <rule ref="category/java/multithreading.xml">
+        <exclude name="UseConcurrentHashMap"/>
+        <exclude name="DoNotUseThreads"/>
+    </rule>
+
+    <!-- Performance -->
+    <rule ref="category/java/performance.xml">
+        <exclude name="AvoidInstantiatingObjectsInLoops"/>
+        <exclude name="ConsecutiveAppendsShouldReuse"/>
+        <exclude name="InsufficientStringBufferDeclaration"/>
+    </rule>
+
+</ruleset>
