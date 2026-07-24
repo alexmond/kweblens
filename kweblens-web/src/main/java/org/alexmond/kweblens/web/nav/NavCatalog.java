@@ -23,6 +23,10 @@ public class NavCatalog {
 
 	private static final String RBAC = "rbac.authorization.k8s.io";
 
+	private static final String NETWORKING = "networking.k8s.io";
+
+	private static final String ADMISSION = "admissionregistration.k8s.io";
+
 	private final List<NavCategory> categories = List.of(
 			new NavCategory("Cluster", "bi-diagram-3",
 					List.of(ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes"))),
@@ -36,14 +40,43 @@ public class NavCatalog {
 					ResourceDescriptor.namespaced("replicasets", "Replica Sets", "ReplicaSet", APPS, "v1",
 							"replicasets"),
 					ResourceDescriptor.namespaced("jobs", "Jobs", "Job", BATCH, "v1", "jobs"),
-					ResourceDescriptor.namespaced("cronjobs", "Cron Jobs", "CronJob", BATCH, "v1", "cronjobs"))),
-			new NavCategory("Config", "bi-sliders",
-					List.of(ResourceDescriptor.coreNamespaced("configmaps", "Config Maps", "ConfigMap", "configmaps"),
-							ResourceDescriptor.coreNamespaced("secrets", "Secrets", "Secret", "secrets"))),
-			new NavCategory("Network", "bi-diagram-2",
-					List.of(ResourceDescriptor.coreNamespaced("services", "Services", "Service", "services"),
-							ResourceDescriptor.namespaced("ingresses", "Ingresses", "Ingress", "networking.k8s.io",
-									"v1", "ingresses"))),
+					ResourceDescriptor.namespaced("cronjobs", "Cron Jobs", "CronJob", BATCH, "v1", "cronjobs"),
+					ResourceDescriptor.coreNamespaced("replicationcontrollers", "Replication Controllers",
+							"ReplicationController", "replicationcontrollers"))),
+			new NavCategory("Config", "bi-sliders", List.of(
+					ResourceDescriptor.coreNamespaced("configmaps", "Config Maps", "ConfigMap", "configmaps"),
+					ResourceDescriptor.coreNamespaced("secrets", "Secrets", "Secret", "secrets"),
+					ResourceDescriptor.coreNamespaced("resourcequotas", "Resource Quotas", "ResourceQuota",
+							"resourcequotas"),
+					ResourceDescriptor.coreNamespaced("limitranges", "Limit Ranges", "LimitRange", "limitranges"),
+					ResourceDescriptor.namespaced("horizontalpodautoscalers", "Horizontal Pod Autoscalers",
+							"HorizontalPodAutoscaler", "autoscaling", "v2", "horizontalpodautoscalers"),
+					ResourceDescriptor.namespaced("poddisruptionbudgets", "Pod Disruption Budgets",
+							"PodDisruptionBudget", "policy", "v1", "poddisruptionbudgets"),
+					ResourceDescriptor.cluster("priorityclasses", "Priority Classes", "PriorityClass",
+							"scheduling.k8s.io", "v1", "priorityclasses"),
+					ResourceDescriptor.cluster("runtimeclasses", "Runtime Classes", "RuntimeClass", "node.k8s.io", "v1",
+							"runtimeclasses"),
+					ResourceDescriptor.namespaced("leases", "Leases", "Lease", "coordination.k8s.io", "v1", "leases"),
+					ResourceDescriptor.cluster("mutatingwebhookconfigurations", "Mutating Webhook Configs",
+							"MutatingWebhookConfiguration", ADMISSION, "v1", "mutatingwebhookconfigurations"),
+					ResourceDescriptor.cluster("validatingwebhookconfigurations", "Validating Webhook Configs",
+							"ValidatingWebhookConfiguration", ADMISSION, "v1", "validatingwebhookconfigurations"),
+					ResourceDescriptor.cluster("validatingadmissionpolicies", "Validating Admission Policies",
+							"ValidatingAdmissionPolicy", ADMISSION, "v1", "validatingadmissionpolicies"),
+					ResourceDescriptor.cluster("validatingadmissionpolicybindings",
+							"Validating Admission Policy Bindings", "ValidatingAdmissionPolicyBinding", ADMISSION, "v1",
+							"validatingadmissionpolicybindings"))),
+			new NavCategory("Network", "bi-diagram-2", List.of(
+					ResourceDescriptor.coreNamespaced("services", "Services", "Service", "services"),
+					ResourceDescriptor.namespaced("ingresses", "Ingresses", "Ingress", NETWORKING, "v1", "ingresses"),
+					ResourceDescriptor.namespaced("endpointslices", "Endpoint Slices", "EndpointSlice",
+							"discovery.k8s.io", "v1", "endpointslices"),
+					ResourceDescriptor.coreNamespaced("endpoints", "Endpoints", "Endpoints", "endpoints"),
+					ResourceDescriptor.cluster("ingressclasses", "Ingress Classes", "IngressClass", NETWORKING, "v1",
+							"ingressclasses"),
+					ResourceDescriptor.namespaced("networkpolicies", "Network Policies", "NetworkPolicy", NETWORKING,
+							"v1", "networkpolicies"))),
 			new NavCategory("Storage", "bi-hdd-stack",
 					List.of(ResourceDescriptor.coreNamespaced("persistentvolumeclaims", "Persistent Volume Claims",
 							"PersistentVolumeClaim", "persistentvolumeclaims"),

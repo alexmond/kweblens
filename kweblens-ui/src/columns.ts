@@ -154,6 +154,41 @@ export const COLUMNS: Record<string, ColumnDef[]> = {
     { key: 'provisioner', header: 'Provisioner', render: (o) => dash(str(o.provisioner)) },
     { key: 'reclaim', header: 'Reclaim Policy', render: (o) => dash(str(o.reclaimPolicy)) },
   ],
+  horizontalpodautoscalers: [
+    { key: 'min', header: 'Min', render: (o) => String(num(spec(o).minReplicas)) },
+    { key: 'max', header: 'Max', render: (o) => String(num(spec(o).maxReplicas)) },
+    { key: 'replicas', header: 'Replicas', render: (o) => String(num(status(o).currentReplicas)) },
+  ],
+  poddisruptionbudgets: [
+    { key: 'minavail', header: 'Min Available', render: (o) => dash(str(spec(o).minAvailable)) },
+    { key: 'maxunavail', header: 'Max Unavailable', render: (o) => dash(str(spec(o).maxUnavailable)) },
+    { key: 'current', header: 'Current Healthy', render: (o) => String(num(status(o).currentHealthy)) },
+    { key: 'desired', header: 'Desired Healthy', render: (o) => String(num(status(o).desiredHealthy)) },
+  ],
+  priorityclasses: [
+    { key: 'value', header: 'Value', render: (o) => (o.value === undefined ? '—' : String(o.value)) },
+    { key: 'default', header: 'Global Default', render: (o) => (o.globalDefault ? 'Yes' : 'No') },
+  ],
+  runtimeclasses: [{ key: 'handler', header: 'Handler', render: (o) => dash(str(o.handler)) }],
+  leases: [{ key: 'holder', header: 'Holder', render: (o) => dash(str(spec(o).holderIdentity)) }],
+  ingressclasses: [{ key: 'controller', header: 'Controller', render: (o) => dash(str(spec(o).controller)) }],
+  networkpolicies: [
+    {
+      key: 'ptypes',
+      header: 'Policy Types',
+      render: (o) => dash(((spec(o).policyTypes as unknown[]) ?? []).map(String).join(', ')),
+    },
+  ],
+  endpointslices: [
+    { key: 'atype', header: 'Address Type', render: (o) => dash(str(o.addressType)) },
+    { key: 'eps', header: 'Endpoints', render: (o) => String(((o.endpoints as unknown[]) ?? []).length) },
+  ],
+  mutatingwebhookconfigurations: [
+    { key: 'wh', header: 'Webhooks', render: (o) => String(((o.webhooks as unknown[]) ?? []).length) },
+  ],
+  validatingwebhookconfigurations: [
+    { key: 'wh', header: 'Webhooks', render: (o) => String(((o.webhooks as unknown[]) ?? []).length) },
+  ],
   events: [
     { key: 'type', header: 'Type', render: (o) => dash(str(o.type)) },
     { key: 'reason', header: 'Reason', render: (o) => dash(str(o.reason)) },
