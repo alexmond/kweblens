@@ -7,8 +7,13 @@
 -->
 <aside th:fragment="sidebar" class="kw-nav border-end pe-3 me-3 flex-shrink-0" style="width: 15rem;">
     <a th:href="@{/}" class="small text-decoration-none">&larr; Clusters</a>
-    <div class="fw-semibold mt-2 mb-3 text-truncate"
+    <div class="fw-semibold mt-2 text-truncate"
          th:text="${cluster != null ? cluster.name() : clusterId}">cluster</div>
+    <a class="nav-link py-1 px-2 small mb-2"
+       th:classappend="${selectedId == 'metrics'} ? 'active fw-semibold' : 'link-body-emphasis'"
+       th:href="@{/clusters/{c}/metrics(c=${clusterId})}">
+        <i class="bi bi-speedometer2"></i> Metrics
+    </a>
 
     <div th:each="cat : ${categories}" class="mb-3">
         <div class="text-uppercase text-muted small mb-1">

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.event.EventService;
+import org.alexmond.kweblens.metric.MetricService;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.web.nav.NavCatalog;
@@ -28,6 +29,8 @@ public class DashboardController {
 	private final ResourceService resources;
 
 	private final EventService events;
+
+	private final MetricService metrics;
 
 	private final NavCatalog navCatalog;
 
@@ -61,6 +64,16 @@ public class DashboardController {
 		model.addAttribute("namespace", namespace);
 		model.addAttribute("events", events.list(clusterId, namespace));
 		return "events";
+	}
+
+	@GetMapping("/clusters/{clusterId}/metrics")
+	public String metrics(@PathVariable String clusterId, @RequestParam(required = false) String namespace,
+			Model model) {
+		shell(model, clusterId, "metrics");
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("nodeUsage", metrics.nodeUsage(clusterId));
+		model.addAttribute("podUsage", metrics.podUsage(clusterId, namespace));
+		return "metrics";
 	}
 
 	@GetMapping("/clusters/{clusterId}/pods/{namespace}/{pod}/logs")

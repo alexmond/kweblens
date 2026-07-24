@@ -23,6 +23,7 @@ import org.alexmond.kweblens.web.mcp.ClusterTools;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -176,6 +177,23 @@ class ClusterEndpointsTest {
 			.andExpect(view().name("logs"))
 			.andExpect(model().attribute("pod", "nginx"))
 			.andExpect(model().attribute("namespace", "web"));
+	}
+
+	@Test
+	void dashboardMetricsPageRenders() throws Exception {
+		// No metrics-server in the mock -> the page still renders with empty usage
+		// tables.
+		mvc.perform(get("/clusters/test/metrics"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("metrics"))
+			.andExpect(model().attributeExists("nodeUsage", "podUsage"));
+	}
+
+	@Test
+	void apiMetricsDegradesToEmptyWhenAbsent() throws Exception {
+		mvc.perform(get("/api/v1/clusters/test/metrics/nodes"))
+			.andExpect(status().isOk())
+			.andExpect(content().json("[]"));
 	}
 
 	@Test
