@@ -5,7 +5,8 @@
       "Bash(echo \"MVN_EXIT=$?\")",
       "Bash(wait)",
       "Bash(echo \"pushed: $?\")",
-      "Bash(echo \"push exit: $?\")"
+      "Bash(echo \"push exit: $?\")",
+      "Bash(echo \"push: $?\")"
     ]
   }
 }
