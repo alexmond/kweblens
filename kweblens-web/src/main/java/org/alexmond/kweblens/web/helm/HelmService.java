@@ -1,11 +1,18 @@
 package org.alexmond.kweblens.web.helm;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.kubernetes.client.openapi.ApiClient;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.alexmond.jhelm.core.action.HistoryAction;
 import org.alexmond.jhelm.core.action.ListAction;
 import org.alexmond.jhelm.core.action.StatusAction;
@@ -29,6 +36,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
  * it to a per-cluster jhelm {@link KubeService}. This keeps Helm cluster-scoped through
  * the same {@link ClusterRegistry} everything else uses.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class HelmService {
@@ -62,13 +70,63 @@ public class HelmService {
 		KubernetesClient fabric8 = clusters.require(clusterId);
 		io.fabric8.kubernetes.client.Config config = fabric8.getConfiguration();
 		ApiClient apiClient = new ApiClient();
-		apiClient.setBasePath(config.getMasterUrl());
-		apiClient.setVerifyingSsl(false);
+		apiClient.setBasePath(stripTrailingSlash(config.getMasterUrl()));
+		configureTls(apiClient, config);
 		String token = config.getOauthToken();
 		if (StringUtils.hasText(token)) {
 			apiClient.addDefaultHeader("Authorization", "Bearer " + token);
 		}
 		return new HelmKubeService(new KubeClient(apiClient));
+	}
+
+	/**
+	 * Mirror the cluster's fabric8 TLS trust onto the official client: verify by default,
+	 * feed the cluster's CA so self-signed API servers still validate, and only skip
+	 * verification when that cluster explicitly opted in
+	 * ({@code insecure-skip-tls-verify} / fabric8 {@code trustCerts}). TLS verification
+	 * is never disabled as a blanket default.
+	 */
+	private void configureTls(ApiClient apiClient, io.fabric8.kubernetes.client.Config config) {
+		if (config.isTrustCerts()) {
+			apiClient.setVerifyingSsl(false);
+			return;
+		}
+		apiClient.setVerifyingSsl(true);
+		byte[] caCert = caCertBytes(config);
+		if (caCert != null) {
+			apiClient.setSslCaCert(new ByteArrayInputStream(caCert));
+		}
+	}
+
+	private byte[] caCertBytes(io.fabric8.kubernetes.client.Config config) {
+		try {
+			if (StringUtils.hasText(config.getCaCertData())) {
+				return pemBytes(config.getCaCertData());
+			}
+			if (StringUtils.hasText(config.getCaCertFile())) {
+				return Files.readAllBytes(Path.of(config.getCaCertFile()));
+			}
+		}
+		catch (IllegalArgumentException | IOException ex) {
+			log.warn("Could not load CA certificate for cluster TLS; verification may fail: {}", ex.getMessage());
+		}
+		return null;
+	}
+
+	/**
+	 * Accepts either raw PEM or the base64-of-PEM form kubeconfig uses
+	 * (certificate-authority-data).
+	 */
+	private byte[] pemBytes(String data) {
+		String trimmed = data.trim();
+		if (trimmed.startsWith("-----BEGIN")) {
+			return trimmed.getBytes(StandardCharsets.UTF_8);
+		}
+		return Base64.getDecoder().decode(trimmed);
+	}
+
+	private String stripTrailingSlash(String url) {
+		return (url != null && url.endsWith("/")) ? url.substring(0, url.length() - 1) : url;
 	}
 
 	private HelmReleaseSummary toSummary(Release release) {
