@@ -346,6 +346,30 @@ body {
   }
 }
 
+.search {
+  font-size: 13px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  width: 220px;
+}
+
+.grid th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.grid th.sortable:hover {
+  color: var(--text);
+}
+
+.sort-ind {
+  color: var(--accent);
+  font-size: 10px;
+}
+
 .spacer {
   flex: 1;
 }

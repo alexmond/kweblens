@@ -27,6 +27,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject } | null>(null);
   const [cols, setCols] = useState<ColumnDef[]>([]);
+  const [query, setQuery] = useState('');
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
 
@@ -65,6 +66,7 @@ export function App() {
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
     let cancelled = false;
     setDetail(null);
+    setQuery('');
     setLoading(true);
     setError(null);
     api
@@ -155,6 +157,19 @@ export function App() {
 
   const activeCluster = useMemo(() => clusters.find((c) => c.id === cluster) ?? null, [clusters, cluster]);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      return objects;
+    }
+    return objects.filter(
+      (o) =>
+        objName(o).toLowerCase().includes(q) ||
+        (objNs(o) ?? '').toLowerCase().includes(q) ||
+        (o.kind ?? '').toLowerCase().includes(q),
+    );
+  }, [objects, query]);
+
   return (
     <div className="app">
       <header className="brandbar">
@@ -213,12 +228,21 @@ export function App() {
             <>
               <div className="content-head">
                 <h1>{selected.label}</h1>
-                <span className="count">{objects.length} items</span>
+                <span className="count">
+                  {query ? `${filtered.length} of ${objects.length}` : `${objects.length} items`}
+                </span>
                 {live && (
                   <span className="live" title="Live-updating (SSE watch)">
                     <span className="dot" /> live
                   </span>
                 )}
+                <input
+                  className="search"
+                  type="search"
+                  placeholder={`Search ${selected.label}…`}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
                 <div className="spacer" />
                 {selected.namespaced ? (
                   <label className="ns-select">
@@ -237,7 +261,7 @@ export function App() {
                 )}
               </div>
               <ResourceTable
-                objects={objects}
+                objects={filtered}
                 columns={cols}
                 namespaced={selected.namespaced}
                 loading={loading}
@@ -344,6 +368,7 @@ function ResourceTable(props: {
   onOpen: (obj: KubeObject) => void;
 }) {
   const { objects, columns: cols, namespaced, loading, selectedKey, onOpen } = props;
+  const [sort, setSort] = useState<{ key: string; dir: number }>({ key: 'name', dir: 1 });
   if (loading) {
     return <div className="empty">Loading…</div>;
   }
@@ -353,19 +378,44 @@ function ResourceTable(props: {
   const showNs = namespaced && objects.some((o) => objNs(o));
   // Some CRD printer columns already include an Age column; don't render ours twice.
   const showAge = !cols.some((c) => c.header.toLowerCase() === 'age');
-  const sorted = [...objects].sort(
-    (a, b) => (objNs(a) ?? '').localeCompare(objNs(b) ?? '') || objName(a).localeCompare(objName(b)),
-  );
+
+  const headerCols: { key: string; header: string }[] = [
+    { key: 'name', header: 'Name' },
+    ...(showNs ? [{ key: 'namespace', header: 'Namespace' }] : []),
+    ...cols.map((c) => ({ key: c.key, header: c.header })),
+    ...(showAge ? [{ key: 'age', header: 'Age' }] : []),
+  ];
+  const textValue = (o: KubeObject, key: string): string => {
+    if (key === 'name') {
+      return objName(o);
+    }
+    if (key === 'namespace') {
+      return objNs(o) ?? '';
+    }
+    const c = cols.find((x) => x.key === key);
+    return c ? c.render(o) : '';
+  };
+  const sorted = [...objects].sort((a, b) => {
+    if (sort.key === 'age') {
+      const ta = Date.parse(a.metadata?.creationTimestamp ?? '') || 0;
+      const tb = Date.parse(b.metadata?.creationTimestamp ?? '') || 0;
+      return (ta - tb) * sort.dir;
+    }
+    return textValue(a, sort.key).localeCompare(textValue(b, sort.key), undefined, { numeric: true }) * sort.dir;
+  });
+  const clickHeader = (key: string) =>
+    setSort((prev) => (prev.key === key ? { key, dir: -prev.dir } : { key, dir: 1 }));
+
   return (
     <table className="grid clickable">
       <thead>
         <tr>
-          <th>Name</th>
-          {showNs && <th>Namespace</th>}
-          {cols.map((c) => (
-            <th key={c.key}>{c.header}</th>
+          {headerCols.map((h) => (
+            <th key={h.key} className="sortable" onClick={() => clickHeader(h.key)}>
+              {h.header}
+              {sort.key === h.key && <span className="sort-ind">{sort.dir === 1 ? ' ▲' : ' ▼'}</span>}
+            </th>
           ))}
-          {showAge && <th>Age</th>}
         </tr>
       </thead>
       <tbody>
