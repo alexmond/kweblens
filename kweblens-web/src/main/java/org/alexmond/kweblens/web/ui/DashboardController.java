@@ -175,10 +175,13 @@ public class DashboardController {
 		return "redirect:/clusters/" + clusterId + "/r/" + resource + query;
 	}
 
-	/** Populate the model attributes the in-cluster shell (left nav) needs. */
+	/**
+	 * Populate the model attributes the in-cluster shell (cluster rail + left nav) needs.
+	 */
 	private void shell(Model model, String clusterId, String selectedId) {
 		model.addAttribute("clusterId", clusterId);
 		model.addAttribute("cluster", clusters.info(clusterId).orElse(null));
+		model.addAttribute("allClusters", clusters.list());
 		model.addAttribute("categories", clusterNav.categories(clusterId));
 		model.addAttribute("selectedId", selectedId);
 	}

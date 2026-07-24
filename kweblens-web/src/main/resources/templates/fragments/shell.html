@@ -2,10 +2,24 @@
 <html xmlns:th="http://www.thymeleaf.org" lang="en">
 <body>
 <!--
-  Reusable in-cluster left navigation. Expects the model to carry: categories, clusterId,
-  cluster, selectedId. Included by every in-cluster page (resource lists, events, …).
+  Reusable in-cluster shell: a cluster-switcher rail + the left category nav. Expects the model to
+  carry: allClusters, categories, clusterId, cluster, selectedId. Included by every in-cluster page.
 -->
-<aside th:fragment="sidebar" class="kw-nav border-end pe-3 me-3 flex-shrink-0" style="width: 15rem;">
+<div th:fragment="sidebar" class="d-flex flex-shrink-0">
+    <!-- Cluster rail: one tile per connected cluster (Freelens-style switcher) -->
+    <div class="kw-rail d-flex flex-column align-items-center pe-2 me-2 border-end">
+        <a th:href="@{/}" class="kw-rail-tile kw-rail-home mb-2" title="All clusters">
+            <i class="bi bi-grid-3x3-gap-fill"></i>
+        </a>
+        <a th:each="c : ${allClusters}" th:href="@{/clusters/{id}(id=${c.id()})}"
+           class="kw-rail-tile mb-2 text-decoration-none"
+           th:classappend="${c.id() == clusterId} ? 'active' : ''"
+           th:title="${c.name()}"
+           th:text="${#strings.toUpperCase(c.id().length() >= 2 ? c.id().substring(0,2) : c.id())}">DE</a>
+    </div>
+
+    <!-- Category nav -->
+    <aside class="kw-nav pe-3 me-1" style="width: 14rem;">
     <a th:href="@{/}" class="small text-decoration-none">&larr; Clusters</a>
     <div class="fw-semibold mt-2 text-truncate"
          th:text="${cluster != null ? cluster.name() : clusterId}">cluster</div>
@@ -41,6 +55,7 @@
             </li>
         </ul>
     </div>
-</aside>
+    </aside>
+</div>
 </body>
 </html>
