@@ -176,6 +176,8 @@ public class DashboardController {
 			case "delete" -> resources.delete(clusterId, descriptor, namespace, name);
 			case "scale" -> resources.scale(clusterId, descriptor, namespace, name, (replicas != null) ? replicas : 0);
 			case "restart" -> resources.rolloutRestart(clusterId, descriptor, namespace, name);
+			case "cordon" -> resources.setUnschedulable(clusterId, name, true);
+			case "uncordon" -> resources.setUnschedulable(clusterId, name, false);
 			default -> throw new IllegalArgumentException("Unknown action: " + action);
 		}
 		audit.record(clusterId, action, descriptor.kind() + "/" + namespace + "/" + name);

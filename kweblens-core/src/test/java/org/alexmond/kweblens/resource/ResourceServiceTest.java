@@ -2,6 +2,7 @@ package org.alexmond.kweblens.resource;
 
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
+import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
@@ -148,6 +149,17 @@ class ResourceServiceTest {
 		service.delete("mock", CONFIG_MAPS, "default", "doomed");
 
 		assertThat(service.getYaml("mock", CONFIG_MAPS, "default", "doomed")).isNull();
+	}
+
+	@Test
+	void cordonMarksTheNodeUnschedulable() {
+		client.nodes().resource(new NodeBuilder().withNewMetadata().withName("node-x").endMetadata().build()).create();
+		ResourceService service = serviceFor("mock");
+
+		service.setUnschedulable("mock", "node-x", true);
+
+		ResourceDescriptor nodes = ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes");
+		assertThat(service.getYaml("mock", nodes, null, "node-x")).contains("unschedulable: true");
 	}
 
 	@Test

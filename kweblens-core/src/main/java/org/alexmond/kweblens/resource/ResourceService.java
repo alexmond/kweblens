@@ -152,9 +152,22 @@ public class ResourceService {
 		strategicPatch(clusterId, descriptor, namespace, name, patch);
 	}
 
+	/**
+	 * Cordon ({@code unschedulable=true}) or uncordon a node — mark it (un)schedulable,
+	 * the safe half of a drain.
+	 */
+	public void setUnschedulable(String clusterId, String nodeName, boolean unschedulable) {
+		ResourceDescriptor nodes = ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes");
+		strategicPatch(clusterId, nodes, null, nodeName, "{\"spec\":{\"unschedulable\":" + unschedulable + "}}");
+	}
+
 	private void strategicPatch(String clusterId, ResourceDescriptor descriptor, String namespace, String name,
 			String patchJson) {
-		PatchContext context = new PatchContext.Builder().withPatchType(PatchType.STRATEGIC_MERGE).build();
+		// JSON merge patch: recursively merges objects and sets leaf fields — correct for
+		// the
+		// simple spec edits here (replicas, unschedulable, an added annotation) and
+		// widely supported.
+		PatchContext context = new PatchContext.Builder().withPatchType(PatchType.JSON_MERGE).build();
 		resource(clusterId, descriptor, namespace, name).patch(context, patchJson);
 	}
 
