@@ -189,6 +189,25 @@ export const COLUMNS: Record<string, ColumnDef[]> = {
   validatingwebhookconfigurations: [
     { key: 'wh', header: 'Webhooks', render: (o) => String(((o.webhooks as unknown[]) ?? []).length) },
   ],
+  customresourcedefinitions: [
+    { key: 'resource', header: 'Resource', render: (o) => dash(str((spec(o).names as Any)?.kind)) },
+    { key: 'group', header: 'Group', render: (o) => dash(str(spec(o).group)) },
+    {
+      key: 'version',
+      header: 'Version',
+      render: (o) => {
+        const vs = (spec(o).versions as Any[]) ?? [];
+        const storage = vs.find((v) => (v as Any).storage) ?? vs[0];
+        return dash(str((storage as Any)?.name));
+      },
+    },
+    { key: 'scope', header: 'Scope', render: (o) => dash(str(spec(o).scope)) },
+    {
+      key: 'short',
+      header: 'Short Names',
+      render: (o) => dash((((spec(o).names as Any)?.shortNames as unknown[]) ?? []).map(String).join(', ')),
+    },
+  ],
   events: [
     { key: 'type', header: 'Type', render: (o) => dash(str(o.type)) },
     { key: 'reason', header: 'Reason', render: (o) => dash(str(o.reason)) },

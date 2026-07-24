@@ -97,7 +97,10 @@ public class NavCatalog {
 							ResourceDescriptor.cluster("clusterrolebindings", "Cluster Role Bindings",
 									"ClusterRoleBinding", RBAC, "v1", "clusterrolebindings"),
 							ResourceDescriptor.namespaced("rolebindings", "Role Bindings", "RoleBinding", RBAC, "v1",
-									"rolebindings"))));
+									"rolebindings"))),
+			new NavCategory("Custom Resources", "bi-puzzle",
+					List.of(ResourceDescriptor.cluster("customresourcedefinitions", "Definitions",
+							"CustomResourceDefinition", "apiextensions.k8s.io", "v1", "customresourcedefinitions"))));
 
 	/** The category tree for the left navigation. */
 	public List<NavCategory> categories() {
