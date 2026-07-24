@@ -557,6 +557,67 @@ body {
   word-break: break-word;
 }
 
+.ov-sec {
+  margin-top: 16px;
+}
+
+.ov-sec h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chip {
+  font-size: 11px;
+  background: rgba(10, 122, 194, 0.1);
+  color: #0a5a8f;
+  border-radius: 10px;
+  padding: 2px 8px;
+  word-break: break-all;
+}
+
+.chip.subtle {
+  background: #eef1f4;
+  color: var(--muted);
+}
+
+.mini {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mini th,
+.mini td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.mini th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.mini tr.warn td {
+  background: #fff6e6;
+}
+
+.mono {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
 .yaml-toolbar {
   display: flex;
   justify-content: flex-end;

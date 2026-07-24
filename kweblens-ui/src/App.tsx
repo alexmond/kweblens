@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from './api';
 import { auth } from './auth';
 import { age, columnsFor } from './columns';
-import type { KubeObject, NavCategory, NavItem } from './types';
+import type { EventSummary, KubeObject, NavCategory, NavItem } from './types';
 
 function initials(id: string): string {
   return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
@@ -369,10 +369,12 @@ function Detail(props: {
   onClose: () => void;
 }) {
   const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onClose } = props;
-  const [tab, setTab] = useState<'overview' | 'yaml'>('overview');
+  const [tab, setTab] = useState<'overview' | 'yaml' | 'events'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [events, setEvents] = useState<EventSummary[] | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [replicas, setReplicas] = useState(1);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -382,7 +384,6 @@ function Detail(props: {
   const name = objName(obj);
   const ns = objNs(obj) ?? '';
   const isNode = kind === 'Node';
-  const status = (obj.status as Record<string, unknown>) ?? {};
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -415,6 +416,28 @@ function Detail(props: {
       cancelled = true;
     };
   }, [tab, yaml, yamlError, cluster, resourceId, name, ns]);
+
+  useEffect(() => {
+    if (tab !== 'events' || events !== null || eventsError !== null) {
+      return;
+    }
+    let cancelled = false;
+    api
+      .objectEvents(cluster, kind, name, ns || undefined)
+      .then((e) => {
+        if (!cancelled) {
+          setEvents(e);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setEventsError(String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, events, eventsError, cluster, kind, name, ns]);
 
   const copy = () => {
     if (yaml) {
@@ -472,30 +495,13 @@ function Detail(props: {
         <button className={'tab' + (tab === 'yaml' ? ' active' : '')} onClick={() => setTab('yaml')}>
           YAML
         </button>
+        <button className={'tab' + (tab === 'events' ? ' active' : '')} onClick={() => setTab('events')}>
+          Events
+        </button>
       </div>
       <div className="drawer-body">
-        {tab === 'overview' && (
-          <dl className="kv">
-            <dt>Kind</dt>
-            <dd>{kind}</dd>
-            {ns && (
-              <>
-                <dt>Namespace</dt>
-                <dd>{ns}</dd>
-              </>
-            )}
-            <dt>Name</dt>
-            <dd>{name}</dd>
-            {typeof status.phase === 'string' && (
-              <>
-                <dt>Status</dt>
-                <dd>{status.phase as string}</dd>
-              </>
-            )}
-            <dt>Age</dt>
-            <dd>{age(obj.metadata?.creationTimestamp)}</dd>
-          </dl>
-        )}
+        {tab === 'overview' && <Overview obj={obj} />}
+        {tab === 'events' && <EventsPane events={events} error={eventsError} />}
         {tab === 'yaml' && (
           <div className="yaml-pane">
             <div className="yaml-toolbar">
@@ -567,6 +573,175 @@ function Detail(props: {
         {actionMsg && <span className={'act-msg' + (actionErr ? ' err' : '')}>{actionMsg}</span>}
       </div>
     </div>
+  );
+}
+
+function Overview(props: { obj: KubeObject }) {
+  const { obj } = props;
+  const md = obj.metadata ?? {};
+  const spec = (obj.spec as Record<string, unknown>) ?? {};
+  const status = (obj.status as Record<string, unknown>) ?? {};
+  const labels = md.labels ?? {};
+  const annotations = md.annotations ?? {};
+  const owners = md.ownerReferences ?? [];
+  const conditions = (status.conditions as Record<string, unknown>[]) ?? [];
+  const containers = (spec.containers as Record<string, unknown>[]) ?? [];
+  const containerStatuses = (status.containerStatuses as Record<string, unknown>[]) ?? [];
+  const restartsFor = (n: string) => {
+    const cs = containerStatuses.find((c) => c.name === n);
+    return cs ? Number(cs.restartCount ?? 0) : 0;
+  };
+  const readyFor = (n: string) => {
+    const cs = containerStatuses.find((c) => c.name === n);
+    return cs ? Boolean(cs.ready) : false;
+  };
+
+  return (
+    <div className="ov">
+      <dl className="kv">
+        <dt>Kind</dt>
+        <dd>{obj.kind ?? '—'}</dd>
+        {md.namespace && (
+          <>
+            <dt>Namespace</dt>
+            <dd>{md.namespace}</dd>
+          </>
+        )}
+        <dt>Name</dt>
+        <dd>{md.name ?? '—'}</dd>
+        {typeof status.phase === 'string' && (
+          <>
+            <dt>Status</dt>
+            <dd>{status.phase as string}</dd>
+          </>
+        )}
+        <dt>Created</dt>
+        <dd>
+          {age(md.creationTimestamp)}
+          {md.creationTimestamp ? ` · ${md.creationTimestamp}` : ''}
+        </dd>
+        {owners.length > 0 && (
+          <>
+            <dt>Controlled By</dt>
+            <dd>{owners.map((o) => `${o.kind}/${o.name}`).join(', ')}</dd>
+          </>
+        )}
+      </dl>
+
+      {Object.keys(labels).length > 0 && (
+        <section className="ov-sec">
+          <h3>Labels</h3>
+          <div className="chips">
+            {Object.entries(labels).map(([k, v]) => (
+              <span className="chip" key={k}>
+                {k}={v}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {Object.keys(annotations).length > 0 && (
+        <section className="ov-sec">
+          <h3>Annotations</h3>
+          <div className="chips">
+            {Object.entries(annotations).map(([k, v]) => (
+              <span className="chip subtle" key={k} title={`${k}=${v}`}>
+                {k}={v.length > 48 ? v.slice(0, 48) + '…' : v}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {containers.length > 0 && (
+        <section className="ov-sec">
+          <h3>Containers</h3>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Image</th>
+                <th>Ready</th>
+                <th>Restarts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {containers.map((c) => {
+                const cn = String(c.name ?? '');
+                return (
+                  <tr key={cn}>
+                    <td>{cn}</td>
+                    <td className="mono">{String(c.image ?? '')}</td>
+                    <td>{readyFor(cn) ? 'Yes' : 'No'}</td>
+                    <td>{restartsFor(cn)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {conditions.length > 0 && (
+        <section className="ov-sec">
+          <h3>Conditions</h3>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {conditions.map((c, i) => (
+                <tr key={String(c.type ?? i)}>
+                  <td>{String(c.type ?? '')}</td>
+                  <td>{String(c.status ?? '')}</td>
+                  <td>{String(c.reason ?? '')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function EventsPane(props: { events: EventSummary[] | null; error: string | null }) {
+  const { events, error } = props;
+  if (error) {
+    return <div className="error">{error}</div>;
+  }
+  if (events === null) {
+    return <div className="empty">Loading…</div>;
+  }
+  if (events.length === 0) {
+    return <div className="empty">No events.</div>;
+  }
+  return (
+    <table className="mini">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Reason</th>
+          <th>Message</th>
+          <th>Age</th>
+        </tr>
+      </thead>
+      <tbody>
+        {events.map((e, i) => (
+          <tr key={i} className={e.type === 'Warning' ? 'warn' : ''}>
+            <td>{e.type}</td>
+            <td>{e.reason}</td>
+            <td>{e.message}</td>
+            <td>{e.age}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

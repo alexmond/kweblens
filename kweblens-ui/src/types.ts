@@ -36,9 +36,19 @@ export interface KubeObject {
     namespace?: string;
     creationTimestamp?: string;
     labels?: Record<string, string>;
+    annotations?: Record<string, string>;
     ownerReferences?: { kind: string; name: string }[];
   };
   spec?: Record<string, unknown>;
   status?: Record<string, unknown>;
   [k: string]: unknown;
+}
+
+export interface EventSummary {
+  type: string;
+  reason: string;
+  object: string;
+  namespace: string | null;
+  message: string;
+  age: string;
 }

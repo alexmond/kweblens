@@ -1,5 +1,5 @@
 import { auth } from './auth';
-import type { ClusterInfo, KubeObject, NavCategory, ResourceRow } from './types';
+import type { ClusterInfo, EventSummary, KubeObject, NavCategory, ResourceRow } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -52,6 +52,13 @@ export const api = {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/objects` +
         (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
     ),
+  objectEvents: (cluster: string, kind: string, name: string, namespace?: string) => {
+    const p = new URLSearchParams({ kind, name });
+    if (namespace) {
+      p.set('namespace', namespace);
+    }
+    return getJson<EventSummary[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/events?${p.toString()}`);
+  },
   resources: (cluster: string, resourceId: string, namespace?: string) =>
     getJson<ResourceRow[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}` +
