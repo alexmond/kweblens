@@ -9,12 +9,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
+import org.alexmond.kweblens.web.nav.NavCatalog;
 
 /**
- * Server-rendered Kubernetes dashboard. Each page is a Thymeleaf view over the same
- * access layer the JSON API uses; htmx swaps the resource table fragment as the operator
- * navigates.
+ * Server-rendered Kubernetes dashboard. The cluster index lists connected clusters;
+ * inside a cluster, a Freelens-style shell (left category nav + resource table) renders
+ * any kind through the generic access path, driven entirely by the {@link NavCatalog}.
  */
 @Controller
 @RequiredArgsConstructor
@@ -24,26 +26,32 @@ public class DashboardController {
 
 	private final ResourceService resources;
 
+	private final NavCatalog navCatalog;
+
 	@GetMapping("/")
 	public String home(Model model) {
 		model.addAttribute("clusters", clusters.list());
 		return "clusters";
 	}
 
-	@GetMapping("/clusters/{clusterId}/namespaces")
-	public String namespaces(@PathVariable String clusterId, Model model) {
-		model.addAttribute("clusterId", clusterId);
-		model.addAttribute("kind", "Namespaces");
-		model.addAttribute("rows", resources.listNamespaces(clusterId));
-		return "resources";
+	@GetMapping("/clusters/{clusterId}")
+	public String cluster(@PathVariable String clusterId) {
+		return "redirect:/clusters/" + clusterId + "/r/pods";
 	}
 
-	@GetMapping("/clusters/{clusterId}/pods")
-	public String pods(@PathVariable String clusterId, @RequestParam(required = false) String namespace, Model model) {
+	@GetMapping("/clusters/{clusterId}/r/{resourceId}")
+	public String resource(@PathVariable String clusterId, @PathVariable String resourceId,
+			@RequestParam(required = false) String namespace, Model model) {
+		ResourceDescriptor descriptor = navCatalog.find(resourceId)
+			.orElseThrow(() -> new UnknownResourceException(resourceId));
 		model.addAttribute("clusterId", clusterId);
-		model.addAttribute("kind", "Pods");
-		model.addAttribute("rows", resources.listPods(clusterId, namespace));
-		return "resources";
+		model.addAttribute("cluster", clusters.info(clusterId).orElse(null));
+		model.addAttribute("categories", navCatalog.categories());
+		model.addAttribute("selectedId", resourceId);
+		model.addAttribute("descriptor", descriptor);
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("rows", resources.list(clusterId, descriptor, namespace));
+		return "resource";
 	}
 
 }

@@ -2,6 +2,7 @@ package org.alexmond.kweblens.web;
 
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +62,14 @@ class ClusterEndpointsTest {
 				.endStatus()
 				.build())
 			.create();
+		client.apps()
+			.deployments()
+			.resource(new DeploymentBuilder().withNewMetadata()
+				.withName("api")
+				.withNamespace("web")
+				.endMetadata()
+				.build())
+			.create();
 	}
 
 	@Test
@@ -92,11 +101,30 @@ class ClusterEndpointsTest {
 	}
 
 	@Test
-	void dashboardPodsPageRendersResourcesView() throws Exception {
-		mvc.perform(get("/clusters/test/pods"))
+	void apiListsResourcesGenerically() throws Exception {
+		mvc.perform(get("/api/v1/clusters/test/resources/deployments").param("namespace", "web"))
 			.andExpect(status().isOk())
-			.andExpect(view().name("resources"))
-			.andExpect(model().attribute("kind", "Pods"));
+			.andExpect(jsonPath("$[0].name").value("api"))
+			.andExpect(jsonPath("$[0].kind").value("Deployment"));
+	}
+
+	@Test
+	void apiReturns404ForUnknownResourceKind() throws Exception {
+		mvc.perform(get("/api/v1/clusters/test/resources/widgets")).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void dashboardResourcePageRendersShell() throws Exception {
+		mvc.perform(get("/clusters/test/r/pods"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("resource"))
+			.andExpect(model().attribute("selectedId", "pods"))
+			.andExpect(model().attributeExists("categories", "descriptor", "rows"));
+	}
+
+	@Test
+	void dashboardClusterRootRedirects() throws Exception {
+		mvc.perform(get("/clusters/test")).andExpect(status().is3xxRedirection());
 	}
 
 	@Test

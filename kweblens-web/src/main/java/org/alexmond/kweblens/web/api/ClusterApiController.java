@@ -12,8 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import org.alexmond.kweblens.cluster.ClusterInfo;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.ResourceSummary;
+import org.alexmond.kweblens.web.nav.NavCatalog;
+import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
  * Read-only JSON API over the registered clusters. Mirrors the dashboard's data so the
@@ -28,9 +31,19 @@ public class ClusterApiController {
 
 	private final ResourceService resources;
 
+	private final NavCatalog navCatalog;
+
 	@GetMapping
 	public List<ClusterInfo> clusters() {
 		return clusters.list();
+	}
+
+	@GetMapping("/{clusterId}/resources/{resourceId}")
+	public List<ResourceSummary> resources(@PathVariable String clusterId, @PathVariable String resourceId,
+			@RequestParam(required = false) String namespace) {
+		ResourceDescriptor descriptor = navCatalog.find(resourceId)
+			.orElseThrow(() -> new UnknownResourceException(resourceId));
+		return resources.list(clusterId, descriptor, namespace);
 	}
 
 	@GetMapping("/{clusterId}/namespaces")

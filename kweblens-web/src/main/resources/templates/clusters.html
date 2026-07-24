@@ -31,9 +31,7 @@
             <td class="text-truncate" style="max-width: 22rem;" th:text="${c.masterUrl()}">https://…</td>
             <td class="text-end">
                 <a class="btn btn-sm btn-outline-primary"
-                   th:href="@{/clusters/{id}/namespaces(id=${c.id()})}">Namespaces</a>
-                <a class="btn btn-sm btn-outline-primary"
-                   th:href="@{/clusters/{id}/pods(id=${c.id()})}">Pods</a>
+                   th:href="@{/clusters/{id}(id=${c.id()})}">Open</a>
             </td>
         </tr>
         </tbody>
