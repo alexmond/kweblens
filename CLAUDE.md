@@ -132,7 +132,18 @@ method on a bean wired into `McpConfig`'s `MethodToolCallbackProvider`.
   `action/` API (`StatusAction`, `HistoryAction`, `ListAction`, `CreateAction`/upgrade, etc.);
   wrap those in a `HelmService` in core and a `web/helm/` slice. Pin the version via a
   `jhelm.version` property (BOM-align with the Boot line). Do **not** add a `helm` CLI dependency.
+- **AI troubleshooting agent** (issues #10/#11): a Spring AI `ChatClient` that **tool-calls the
+  existing cluster access layer** (`ClusterTools` + read tools) to validate/diagnose, then
+  proposes guarded fixes. Model-configurable (default Anthropic Claude, inert without a key),
+  mirroring the unitrack `AiAnalyzer`. **Remediation is suggest→approve→apply with a dry-run/diff
+  by default — never autonomous, always audited, all writes behind auth.** Helm fixes go through
+  jhelm; manifest fixes through the YAML apply path.
 - **Later Freelens-parity surfaces**: pod logs (SSE), YAML view/edit + apply, events, live
   metrics, exec-into-pod. Each is a new `web/<area>/` slice over `kweblens-core` access services.
-- **Design references**: capture Freelens (desktop/Electron) screens under `xvfb` for a headless
-  reference deck to guide the dashboard's IA.
+- **Dashboard shell + left-nav IA** (issue #12): grow past the scaffold's trivial table into the
+  Freelens-style shell — cluster rail, collapsible category nav, per-category tab bar, one reusable
+  resource-list component, dockable terminal. Model the left menu as a **declarative nav registry**
+  (category → kind → list-route); the **Custom Resources** section is **dynamic**, generated from
+  the cluster's CRDs grouped by API group. Full IA + screenshots: `docs/references/freelens-ia.md`.
+- **Design references**: `docs/references/` holds captured Freelens screens; extend with a headless
+  `xvfb` deck (#9) as needed.

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x /home/alexm/IdeaProjects/kweblens/scripts/*.sh)",
+      "Bash(echo \"MVN_EXIT=$?\")",
+      "Bash(wait)",
+      "Bash(echo \"pushed: $?\")"
+    ]
+  }
+}
