@@ -4,7 +4,7 @@ import { ApiError, api } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
 import { age, columnsFor, printerColumnDefs } from './columns';
-import type { ClusterInfo, EventSummary, KubeObject, NavCategory, NavItem } from './types';
+import type { ClusterInfo, EventSummary, HelmRelease, KubeObject, NavCategory, NavItem } from './types';
 
 function initials(id: string): string {
   return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
@@ -14,16 +14,23 @@ const objName = (o: KubeObject): string => o.metadata?.name ?? '';
 const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
-// Synthetic nav items (dashboards, not resource kinds) use this id prefix.
-const OVERVIEW_PREFIX = 'overview:';
+// Synthetic nav items are client-only views (dashboards, Helm) rather than resource kinds.
+const isSynthetic = (id: string): boolean => id.startsWith('overview:') || id.startsWith('helm:');
 
-// Inject a "Overview" dashboard item at the top of the Workloads category.
-function withWorkloadsOverview(cats: NavCategory[]): NavCategory[] {
-  return cats.map((c) =>
+// Inject a "Overview" dashboard item at the top of the Workloads category, and a Helm
+// section (client-only views, not resource kinds).
+function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
+  const withOverview = cats.map((c) =>
     c.label === 'Workloads'
-      ? { ...c, items: [{ id: OVERVIEW_PREFIX + 'workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] }
+      ? { ...c, items: [{ id: 'overview:workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] }
       : c,
   );
+  const helm: NavCategory = {
+    label: 'Helm',
+    icon: 'bi-hexagon',
+    items: [{ id: 'helm:releases', label: 'Releases', kind: '', namespaced: false }],
+  };
+  return [...withOverview, helm];
 }
 
 export function App() {
@@ -65,7 +72,7 @@ export function App() {
     setError(null);
     api
       .nav(cluster)
-      .then((cats) => setNav(withWorkloadsOverview(cats)))
+      .then((cats) => setNav(withSyntheticNav(cats)))
       .catch((e) => setError(String(e)));
     api
       .namespaces(cluster)
@@ -75,7 +82,7 @@ export function App() {
 
   // Fetch the selected kind's raw objects on kind/namespace change.
   useEffect(() => {
-    if (!cluster || !selected || selected.id.startsWith(OVERVIEW_PREFIX)) {
+    if (!cluster || !selected || isSynthetic(selected.id)) {
       setObjects([]);
       return;
     }
@@ -111,7 +118,7 @@ export function App() {
   // Columns for the selected kind: built-in registry, or the CRD's printer columns for
   // custom kinds (their id is "group.plural"), falling back to Name/Namespace/Age.
   useEffect(() => {
-    if (!cluster || !selected || selected.id.startsWith(OVERVIEW_PREFIX)) {
+    if (!cluster || !selected || isSynthetic(selected.id)) {
       setCols([]);
       return;
     }
@@ -135,7 +142,7 @@ export function App() {
 
   // Live object stream: patch the table in place.
   useEffect(() => {
-    if (!cluster || !selected || selected.id.startsWith(OVERVIEW_PREFIX)) {
+    if (!cluster || !selected || isSynthetic(selected.id)) {
       return;
     }
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
@@ -247,8 +254,9 @@ export function App() {
               namespaceCount={namespaces.length}
             />
           )}
-          {cluster && selected?.id === OVERVIEW_PREFIX + 'workloads' && <WorkloadsOverview cluster={cluster} />}
-          {selected && !selected.id.startsWith(OVERVIEW_PREFIX) && (
+          {cluster && selected?.id === 'overview:workloads' && <WorkloadsOverview cluster={cluster} />}
+          {cluster && selected?.id === 'helm:releases' && <HelmReleases cluster={cluster} />}
+          {selected && !isSynthetic(selected.id) && (
             <>
               <div className="content-head">
                 <h1>{selected.label}</h1>
@@ -844,6 +852,67 @@ function EventsPane(props: { events: EventSummary[] | null; error: string | null
         ))}
       </tbody>
     </table>
+  );
+}
+
+function HelmReleases(props: { cluster: string }) {
+  const { cluster } = props;
+  const [releases, setReleases] = useState<HelmRelease[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReleases(null);
+    setError(null);
+    api
+      .helmReleases(cluster)
+      .then((r) => !cancelled && setReleases(r))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
+
+  return (
+    <div className="overview">
+      <div className="content-head">
+        <h1>Helm Releases</h1>
+        <span className="count">{releases ? `${releases.length} items` : ''}</span>
+      </div>
+      {error && <div className="error">{error}</div>}
+      {releases === null ? (
+        <div className="empty">Loading…</div>
+      ) : releases.length === 0 ? (
+        <div className="empty">No releases.</div>
+      ) : (
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Namespace</th>
+              <th>Chart</th>
+              <th>Rev</th>
+              <th>App Version</th>
+              <th>Status</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {releases.map((r) => (
+              <tr key={r.namespace + '/' + r.name}>
+                <td className="name">{r.name}</td>
+                <td>{r.namespace}</td>
+                <td>{r.chart}</td>
+                <td>{r.revision}</td>
+                <td>{r.appVersion}</td>
+                <td>{r.status}</td>
+                <td>{r.updated ? age(r.updated) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
