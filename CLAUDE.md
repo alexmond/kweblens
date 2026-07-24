@@ -145,5 +145,7 @@ method on a bean wired into `McpConfig`'s `MethodToolCallbackProvider`.
   resource-list component, dockable terminal. Model the left menu as a **declarative nav registry**
   (category → kind → list-route); the **Custom Resources** section is **dynamic**, generated from
   the cluster's CRDs grouped by API group. Full IA + screenshots: `docs/references/freelens-ia.md`.
-- **Design references**: `docs/references/` holds captured Freelens screens; extend with a headless
-  `xvfb` deck (#9) as needed.
+- **Design references**: `docs/references/freelens-reference-deck.md` — captioned Freelens
+  walkthrough mapping each surface to kweblens; `freelens-ia.md` is the full IA map. Headless
+  `xvfb` capture is documented there but blocked on this box (no `xdotool`/compositor → black
+  frames); the deck uses real captures.
