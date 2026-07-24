@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<body>
+<!--
+  Reusable in-cluster left navigation. Expects the model to carry: categories, clusterId,
+  cluster, selectedId. Included by every in-cluster page (resource lists, events, …).
+-->
+<aside th:fragment="sidebar" class="kw-nav border-end pe-3 me-3 flex-shrink-0" style="width: 15rem;">
+    <a th:href="@{/}" class="small text-decoration-none">&larr; Clusters</a>
+    <div class="fw-semibold mt-2 mb-3 text-truncate"
+         th:text="${cluster != null ? cluster.name() : clusterId}">cluster</div>
+
+    <div th:each="cat : ${categories}" class="mb-3">
+        <div class="text-uppercase text-muted small mb-1">
+            <i class="bi" th:classappend="${cat.icon()}"></i>
+            <span th:text="${cat.label()}">Category</span>
+        </div>
+        <ul class="nav flex-column">
+            <li class="nav-item" th:each="item : ${cat.items()}">
+                <a class="nav-link py-1 px-2 small"
+                   th:classappend="${item.id() == selectedId} ? 'active fw-semibold' : 'link-body-emphasis'"
+                   th:href="${item.id() == 'events'}
+                            ? @{/clusters/{c}/events(c=${clusterId})}
+                            : @{/clusters/{c}/r/{id}(c=${clusterId},id=${item.id()})}"
+                   th:text="${item.label()}">Kind</a>
+            </li>
+        </ul>
+    </div>
+</aside>
+</body>
+</html>

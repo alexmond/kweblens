@@ -1,9 +1,13 @@
 package org.alexmond.kweblens.web;
 
+import java.util.Map;
+
+import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,6 +74,27 @@ class ClusterEndpointsTest {
 				.endMetadata()
 				.build())
 			.create();
+		client
+			.genericKubernetesResources(new ResourceDefinitionContext.Builder().withGroup("")
+				.withVersion("v1")
+				.withKind("Event")
+				.withPlural("events")
+				.withNamespaced(true)
+				.build())
+			.inNamespace("web")
+			.resource(new GenericKubernetesResourceBuilder().withApiVersion("v1")
+				.withKind("Event")
+				.withNewMetadata()
+				.withName("evt1")
+				.withNamespace("web")
+				.endMetadata()
+				.addToAdditionalProperties("type", "Warning")
+				.addToAdditionalProperties("reason", "BackOff")
+				.addToAdditionalProperties("message", "Back-off restarting")
+				.addToAdditionalProperties("involvedObject", Map.of("kind", "Pod", "name", "nginx"))
+				.addToAdditionalProperties("lastTimestamp", "2024-06-01T12:00:00Z")
+				.build())
+			.create();
 	}
 
 	@Test
@@ -125,6 +150,23 @@ class ClusterEndpointsTest {
 	@Test
 	void dashboardClusterRootRedirects() throws Exception {
 		mvc.perform(get("/clusters/test")).andExpect(status().is3xxRedirection());
+	}
+
+	@Test
+	void apiListsEvents() throws Exception {
+		mvc.perform(get("/api/v1/clusters/test/events").param("namespace", "web"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].reason").value("BackOff"))
+			.andExpect(jsonPath("$[0].object").value("Pod/nginx"));
+	}
+
+	@Test
+	void dashboardEventsPageRenders() throws Exception {
+		mvc.perform(get("/clusters/test/events"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("events"))
+			.andExpect(model().attribute("selectedId", "events"))
+			.andExpect(model().attributeExists("events", "categories"));
 	}
 
 	@Test

@@ -35,6 +35,15 @@ public class ResourceService {
 	 * kinds list across all namespaces when it is null/blank.
 	 */
 	public List<ResourceSummary> list(String clusterId, ResourceDescriptor descriptor, String namespace) {
+		return listRaw(clusterId, descriptor, namespace).stream().map((r) -> toSummary(descriptor.kind(), r)).toList();
+	}
+
+	/**
+	 * List a kind's resources as raw {@link GenericKubernetesResource}s — the shared
+	 * generic path that {@link #list} projects and that specialised services (events,
+	 * etc.) map differently.
+	 */
+	public List<GenericKubernetesResource> listRaw(String clusterId, ResourceDescriptor descriptor, String namespace) {
 		KubernetesClient client = clusters.require(clusterId);
 		ResourceDefinitionContext ctx = new ResourceDefinitionContext.Builder().withGroup(descriptor.group())
 			.withVersion(descriptor.version())
@@ -43,17 +52,13 @@ public class ResourceService {
 			.withNamespaced(descriptor.namespaced())
 			.build();
 		var op = client.genericKubernetesResources(ctx);
-		List<GenericKubernetesResource> items;
 		if (!descriptor.namespaced()) {
-			items = op.list().getItems();
+			return op.list().getItems();
 		}
-		else if (namespace == null || namespace.isBlank()) {
-			items = op.inAnyNamespace().list().getItems();
+		if (namespace == null || namespace.isBlank()) {
+			return op.inAnyNamespace().list().getItems();
 		}
-		else {
-			items = op.inNamespace(namespace).list().getItems();
-		}
-		return items.stream().map((r) -> toSummary(descriptor.kind(), r)).toList();
+		return op.inNamespace(namespace).list().getItems();
 	}
 
 	/** List every namespace in the cluster. */
