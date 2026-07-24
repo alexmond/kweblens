@@ -39,6 +39,14 @@
             <artifactId>jhelm-kube</artifactId>
             <version>${jhelm.version}</version>
         </dependency>
+        <!-- Credential providers (client-cert / token) to authenticate Helm's official ApiClient
+             the same way the cluster's kubeconfig does — jhelm-kube only pulls client-java-api. The
+             io.kubernetes.client.util.credentials.* classes live in the main client-java artifact. -->
+        <dependency>
+            <groupId>io.kubernetes</groupId>
+            <artifactId>client-java</artifactId>
+            <version>${kubernetes-client.version}</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

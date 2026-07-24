@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x /home/alexm/IdeaProjects/kweblens/scripts/*.sh)",
+      "Bash(echo \"MVN_EXIT=$?\")",
+      "Bash(wait)",
+      "Bash(echo \"pushed: $?\")",
+      "Bash(echo \"push exit: $?\")",
+      "Bash(echo \"push: $?\")",
+      "Bash(xargs grep -oE \"[A-Z_]{3,}\")",
+      "Bash(grep -E \"kweblens-\\(core|cli|web|it\\) \\\\.\\\\.\\\\.|BUILD \\(SUCCESS|FAILURE\\)|MVN_EXIT|Tests run: [0-9]+, F.*Skipped: 0$\" /tmp/claude-1000/-home-alexm-IdeaProjects-kweblens/5d73ebc5-607a-4d62-8b53-814ce6419df2/scratchpad/verify.log)",
+      "Bash(grep -E \"kweblens-\\(core|cli|web|it\\) \\\\.\\\\.\\\\.|BUILD \\(SUCCESS|FAILURE\\)|MVN_EXIT|Tests run: [0-9]+, Fail.*Skipped: 0$\" /tmp/claude-1000/-home-alexm-IdeaProjects-kweblens/5d73ebc5-607a-4d62-8b53-814ce6419df2/scratchpad/verify.log)",
+      "Bash(timeout 70 xvfb-run -a -s '-screen 0 1600x1000x24' bash -c ' *)",
+      "Bash(convert /home/alexm/IdeaProjects/kweblens/docs/references/captures/freelens-launch.png -format \"%wx%h %[mean]\" info:)",
+      "Bash(timeout 60 xvfb-run -a -s '-screen 0 1600x1000x24' bash -c ' *)",
+      "Bash(PORT=8899 KWEBLENS_AI_ENABLED=false java -jar kweblens-web/target/kweblens.jar --server.port=8899)",
+      "Bash(echo \"launched pid $!\")",
+      "Bash(break)",
+      "Bash(pkill -f \"kweblens-web/target/kweblens.jar\")",
+      "Bash(pkill -9 -f \"kweblens.jar\")",
+      "Bash(KWEBLENS_AI_ENABLED=false nohup java -jar kweblens-web/target/kweblens.jar --server.port=8899)",
+      "Bash(echo \"relaunched pid $!\")",
+      "Bash(KWEBLENS_AI_ENABLED=false java -jar kweblens-web/target/kweblens.jar --server.port=8899)",
+      "Bash(java -jar /home/alexm/IdeaProjects/kweblens/kweblens-web/target/kweblens.jar --server.port=8899 --kweblens.ai.enabled=false)",
+      "Bash(KWEBLENS_AI_ENABLED=false java -jar /home/alexm/IdeaProjects/kweblens/kweblens-web/target/kweblens.jar --server.port=8899)",
+      "Bash(echo \"rc=$? \\(124=timeout, i.e. it kept running\\)\")",
+      "Bash(echo \"commit rc=$?\")"
+    ]
+  }
+}

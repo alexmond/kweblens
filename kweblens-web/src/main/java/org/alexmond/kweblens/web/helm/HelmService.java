@@ -11,6 +11,8 @@ import java.util.Optional;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.util.credentials.AccessTokenAuthentication;
+import io.kubernetes.client.util.credentials.ClientCertificateAuthentication;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.alexmond.jhelm.core.action.HistoryAction;
@@ -72,11 +74,27 @@ public class HelmService {
 		ApiClient apiClient = new ApiClient();
 		apiClient.setBasePath(stripTrailingSlash(config.getMasterUrl()));
 		configureTls(apiClient, config);
+		configureAuth(apiClient, config);
+		return new HelmKubeService(new KubeClient(apiClient));
+	}
+
+	/**
+	 * Give the official client the same credentials the cluster's kubeconfig uses: a
+	 * client certificate + key (mTLS) when present, otherwise a bearer token. Without
+	 * this, cert-auth clusters reject Helm's Secret reads even though fabric8 (which has
+	 * the certs) works.
+	 */
+	private void configureAuth(ApiClient apiClient, io.fabric8.kubernetes.client.Config config) {
+		byte[] clientCert = pemMaterial(config.getClientCertData(), config.getClientCertFile());
+		byte[] clientKey = pemMaterial(config.getClientKeyData(), config.getClientKeyFile());
+		if (clientCert != null && clientKey != null) {
+			new ClientCertificateAuthentication(clientCert, clientKey).provide(apiClient);
+			return;
+		}
 		String token = config.getOauthToken();
 		if (StringUtils.hasText(token)) {
-			apiClient.addDefaultHeader("Authorization", "Bearer " + token);
+			new AccessTokenAuthentication(token).provide(apiClient);
 		}
-		return new HelmKubeService(new KubeClient(apiClient));
 	}
 
 	/**
@@ -99,16 +117,24 @@ public class HelmService {
 	}
 
 	private byte[] caCertBytes(io.fabric8.kubernetes.client.Config config) {
+		return pemMaterial(config.getCaCertData(), config.getCaCertFile());
+	}
+
+	/**
+	 * Load PEM bytes from inline data (raw PEM or base64-of-PEM) or, failing that, a file
+	 * path.
+	 */
+	private byte[] pemMaterial(String data, String file) {
 		try {
-			if (StringUtils.hasText(config.getCaCertData())) {
-				return pemBytes(config.getCaCertData());
+			if (StringUtils.hasText(data)) {
+				return pemBytes(data);
 			}
-			if (StringUtils.hasText(config.getCaCertFile())) {
-				return Files.readAllBytes(Path.of(config.getCaCertFile()));
+			if (StringUtils.hasText(file)) {
+				return Files.readAllBytes(Path.of(file));
 			}
 		}
 		catch (IllegalArgumentException | IOException ex) {
-			log.warn("Could not load CA certificate for cluster TLS; verification may fail: {}", ex.getMessage());
+			log.warn("Could not load PEM material for cluster auth/TLS: {}", ex.getMessage());
 		}
 		return null;
 	}
