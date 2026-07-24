@@ -94,6 +94,34 @@ public class ResourceService {
 	}
 
 	/**
+	 * Watch a kind and deliver each change as (action, raw object) — the full
+	 * {@link GenericKubernetesResource}, so the web layer can project kind-specific
+	 * columns. The returned {@link Watch} must be closed to stop watching.
+	 */
+	public Watch watchRaw(String clusterId, ResourceDescriptor descriptor, String namespace,
+			BiConsumer<String, GenericKubernetesResource> onEvent) {
+		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
+		Watcher<GenericKubernetesResource> watcher = new Watcher<>() {
+			@Override
+			public void eventReceived(Action action, GenericKubernetesResource resource) {
+				onEvent.accept(action.name(), resource);
+			}
+
+			@Override
+			public void onClose(WatcherException cause) {
+				// The web layer completes the SSE emitter via its own close hooks.
+			}
+		};
+		if (!descriptor.namespaced()) {
+			return op.watch(watcher);
+		}
+		if (namespace == null || namespace.isBlank()) {
+			return op.inAnyNamespace().watch(watcher);
+		}
+		return op.inNamespace(namespace).watch(watcher);
+	}
+
+	/**
 	 * The YAML of a single resource, or null if it does not exist.
 	 */
 	public String getYaml(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {

@@ -4,8 +4,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 
 import io.fabric8.kubernetes.client.dsl.LogWatch;
@@ -23,15 +21,13 @@ import org.alexmond.kweblens.log.LogService;
 
 /**
  * Pod log API: a plain-text tail snapshot and a live Server-Sent-Events stream. The
- * stream bridges fabric8's {@code watchLog(OutputStream)} to an {@link SseEmitter} via a
- * piped reader thread, so each log line is delivered as one SSE event.
+ * stream reads fabric8's {@link LogWatch#getOutput()} on a daemon thread and delivers
+ * each log line as one SSE event.
  */
 @Slf4j
 @RestController
 @RequiredArgsConstructor
 public class LogApiController {
-
-	private static final int PIPE_BUFFER = 16 * 1024;
 
 	private final LogService logs;
 
@@ -47,20 +43,17 @@ public class LogApiController {
 	public SseEmitter stream(@PathVariable String clusterId, @PathVariable String namespace, @PathVariable String pod,
 			@RequestParam(required = false) String container) {
 		SseEmitter emitter = new SseEmitter(0L);
-		PipedInputStream source;
 		LogWatch watch;
 		try {
-			PipedOutputStream sink = new PipedOutputStream();
-			source = new PipedInputStream(sink, PIPE_BUFFER);
-			watch = logs.watch(clusterId, namespace, pod, container, sink);
+			watch = logs.watch(clusterId, namespace, pod, container);
 		}
-		catch (IOException | RuntimeException ex) {
+		catch (RuntimeException ex) {
 			emitter.completeWithError(ex);
 			return emitter;
 		}
 		emitter.onCompletion(watch::close);
 		emitter.onTimeout(watch::close);
-		Thread reader = new Thread(() -> pump(emitter, source, watch), "log-sse-" + pod);
+		Thread reader = new Thread(() -> pump(emitter, watch.getOutput(), watch), "log-sse-" + pod);
 		reader.setDaemon(true);
 		reader.start();
 		return emitter;

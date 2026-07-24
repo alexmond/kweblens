@@ -48,4 +48,50 @@ class CrdServiceTest {
 		});
 	}
 
+	@Test
+	void printerColumnsFromTheServedVersion() {
+		CustomResourceDefinition crd = new CustomResourceDefinitionBuilder().withNewMetadata()
+			.withName("certificates.cert-manager.io")
+			.endMetadata()
+			.withNewSpec()
+			.withGroup("cert-manager.io")
+			.withScope("Namespaced")
+			.withNewNames()
+			.withPlural("certificates")
+			.withKind("Certificate")
+			.endNames()
+			.addNewVersion()
+			.withName("v1")
+			.withServed(true)
+			.withStorage(true)
+			.addNewAdditionalPrinterColumn()
+			.withName("Ready")
+			.withJsonPath(".status.conditions[?(@.type==\"Ready\")].status")
+			.withType("string")
+			.endAdditionalPrinterColumn()
+			.addNewAdditionalPrinterColumn()
+			.withName("Wide")
+			.withJsonPath(".spec.secretName")
+			.withType("string")
+			.withPriority(1)
+			.endAdditionalPrinterColumn()
+			.endVersion()
+			.endSpec()
+			.build();
+		client.apiextensions().v1().customResourceDefinitions().resource(crd).create();
+
+		ClusterRegistry registry = new ClusterRegistry();
+		registry.register("c1", "c1", client);
+
+		// The served version's columns are returned; wide (priority > 0) columns are
+		// dropped.
+		assertThat(new CrdService(registry).printerColumns("c1", "cert-manager.io.certificates")).singleElement()
+			.satisfies((c) -> {
+				assertThat(c.name()).isEqualTo("Ready");
+				assertThat(c.type()).isEqualTo("string");
+			});
+		// Built-in kinds (no matching CRD) get no columns.
+		assertThat(new CrdService(registry).printerColumns("c1", "pods")).isEmpty();
+	}
+
 }

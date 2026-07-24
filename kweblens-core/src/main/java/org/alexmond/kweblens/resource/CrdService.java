@@ -48,6 +48,57 @@ public class CrdService {
 		}
 	}
 
+	/**
+	 * The CRD-declared printer columns for a custom kind (by its {@code group.plural}
+	 * id), or empty for built-in kinds or when the CRD cannot be read. Wide columns
+	 * (priority &gt; 0) are omitted, matching {@code kubectl}'s default view.
+	 */
+	public List<PrinterColumn> printerColumns(String clusterId, String resourceId) {
+		try {
+			KubernetesClient client = clusters.require(clusterId);
+			return client.apiextensions()
+				.v1()
+				.customResourceDefinitions()
+				.list()
+				.getItems()
+				.stream()
+				.filter((crd) -> resourceId.equals(idOf(crd)))
+				.findFirst()
+				.map(this::columnsOf)
+				.orElseGet(List::of);
+		}
+		catch (RuntimeException ex) {
+			log.warn("Could not read printer columns for '{}' on '{}': {}", resourceId, clusterId, ex.getMessage());
+			return List.of();
+		}
+	}
+
+	private String idOf(CustomResourceDefinition crd) {
+		CustomResourceDefinitionSpec spec = crd.getSpec();
+		if (spec == null || spec.getNames() == null || spec.getGroup() == null) {
+			return null;
+		}
+		return spec.getGroup() + "." + spec.getNames().getPlural();
+	}
+
+	private List<PrinterColumn> columnsOf(CustomResourceDefinition crd) {
+		CustomResourceDefinitionSpec spec = crd.getSpec();
+		String served = servedVersion(spec);
+		CustomResourceDefinitionVersion version = spec.getVersions()
+			.stream()
+			.filter((v) -> v.getName().equals(served))
+			.findFirst()
+			.orElse(null);
+		if (version == null || version.getAdditionalPrinterColumns() == null) {
+			return List.of();
+		}
+		return version.getAdditionalPrinterColumns()
+			.stream()
+			.filter((c) -> c.getPriority() == null || c.getPriority() == 0)
+			.map((c) -> new PrinterColumn(c.getName(), c.getJsonPath(), c.getType()))
+			.toList();
+	}
+
 	private ResourceDescriptor toDescriptor(CustomResourceDefinition crd) {
 		CustomResourceDefinitionSpec spec = crd.getSpec();
 		if (spec == null || spec.getNames() == null) {
