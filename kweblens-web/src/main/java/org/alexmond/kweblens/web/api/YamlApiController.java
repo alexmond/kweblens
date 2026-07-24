@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.ResourceSummary;
-import org.alexmond.kweblens.web.nav.NavCatalog;
+import org.alexmond.kweblens.web.nav.ClusterNavService;
 import org.alexmond.kweblens.web.security.AuditService;
 import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
@@ -29,14 +29,14 @@ public class YamlApiController {
 
 	private final ResourceService resources;
 
-	private final NavCatalog navCatalog;
+	private final ClusterNavService clusterNav;
 
 	private final AuditService audit;
 
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/yaml", produces = "application/yaml")
 	public ResponseEntity<String> yaml(@PathVariable String clusterId, @RequestParam String resource,
 			@RequestParam(required = false) String namespace, @RequestParam String name) {
-		ResourceDescriptor descriptor = navCatalog.find(resource)
+		ResourceDescriptor descriptor = clusterNav.find(clusterId, resource)
 			.orElseThrow(() -> new UnknownResourceException(resource));
 		String yaml = resources.getYaml(clusterId, descriptor, namespace, name);
 		return (yaml != null) ? ResponseEntity.ok(yaml) : ResponseEntity.notFound().build();

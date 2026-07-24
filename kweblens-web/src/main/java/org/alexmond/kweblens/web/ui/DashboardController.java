@@ -18,7 +18,7 @@ import org.alexmond.kweblens.resource.ResourceSummary;
 import org.alexmond.kweblens.web.ai.DiagnoseService;
 import org.alexmond.kweblens.web.ai.RemediationService;
 import org.alexmond.kweblens.web.helm.HelmService;
-import org.alexmond.kweblens.web.nav.NavCatalog;
+import org.alexmond.kweblens.web.nav.ClusterNavService;
 import org.alexmond.kweblens.web.security.AuditService;
 
 /**
@@ -46,7 +46,7 @@ public class DashboardController {
 
 	private final AuditService audit;
 
-	private final NavCatalog navCatalog;
+	private final ClusterNavService clusterNav;
 
 	@GetMapping("/")
 	public String home(Model model) {
@@ -62,7 +62,7 @@ public class DashboardController {
 	@GetMapping("/clusters/{clusterId}/r/{resourceId}")
 	public String resource(@PathVariable String clusterId, @PathVariable String resourceId,
 			@RequestParam(required = false) String namespace, Model model) {
-		ResourceDescriptor descriptor = navCatalog.find(resourceId)
+		ResourceDescriptor descriptor = clusterNav.find(clusterId, resourceId)
 			.orElseThrow(() -> new UnknownResourceException(resourceId));
 		shell(model, clusterId, resourceId);
 		model.addAttribute("descriptor", descriptor);
@@ -140,7 +140,7 @@ public class DashboardController {
 	@GetMapping("/clusters/{clusterId}/yaml")
 	public String yaml(@PathVariable String clusterId, @RequestParam String resource,
 			@RequestParam(required = false) String namespace, @RequestParam String name, Model model) {
-		ResourceDescriptor descriptor = navCatalog.find(resource)
+		ResourceDescriptor descriptor = clusterNav.find(clusterId, resource)
 			.orElseThrow(() -> new UnknownResourceException(resource));
 		shell(model, clusterId, resource);
 		model.addAttribute("resource", resource);
@@ -164,7 +164,7 @@ public class DashboardController {
 	private void shell(Model model, String clusterId, String selectedId) {
 		model.addAttribute("clusterId", clusterId);
 		model.addAttribute("cluster", clusters.info(clusterId).orElse(null));
-		model.addAttribute("categories", navCatalog.categories());
+		model.addAttribute("categories", clusterNav.categories(clusterId));
 		model.addAttribute("selectedId", selectedId);
 	}
 

@@ -15,7 +15,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.ResourceSummary;
-import org.alexmond.kweblens.web.nav.NavCatalog;
+import org.alexmond.kweblens.web.nav.ClusterNavService;
 import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
@@ -31,7 +31,7 @@ public class ClusterApiController {
 
 	private final ResourceService resources;
 
-	private final NavCatalog navCatalog;
+	private final ClusterNavService clusterNav;
 
 	@GetMapping
 	public List<ClusterInfo> clusters() {
@@ -41,7 +41,7 @@ public class ClusterApiController {
 	@GetMapping("/{clusterId}/resources/{resourceId}")
 	public List<ResourceSummary> resources(@PathVariable String clusterId, @PathVariable String resourceId,
 			@RequestParam(required = false) String namespace) {
-		ResourceDescriptor descriptor = navCatalog.find(resourceId)
+		ResourceDescriptor descriptor = clusterNav.find(clusterId, resourceId)
 			.orElseThrow(() -> new UnknownResourceException(resourceId));
 		return resources.list(clusterId, descriptor, namespace);
 	}
