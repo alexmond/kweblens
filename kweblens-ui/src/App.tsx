@@ -14,6 +14,18 @@ const objName = (o: KubeObject): string => o.metadata?.name ?? '';
 const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
+// Synthetic nav items (dashboards, not resource kinds) use this id prefix.
+const OVERVIEW_PREFIX = 'overview:';
+
+// Inject a "Overview" dashboard item at the top of the Workloads category.
+function withWorkloadsOverview(cats: NavCategory[]): NavCategory[] {
+  return cats.map((c) =>
+    c.label === 'Workloads'
+      ? { ...c, items: [{ id: OVERVIEW_PREFIX + 'workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] }
+      : c,
+  );
+}
+
 export function App() {
   const [clusters, setClusters] = useState<ClusterInfo[]>([]);
   const [cluster, setCluster] = useState<string | null>(null);
@@ -51,7 +63,10 @@ export function App() {
     setSelected(null);
     setObjects([]);
     setError(null);
-    api.nav(cluster).then(setNav).catch((e) => setError(String(e)));
+    api
+      .nav(cluster)
+      .then((cats) => setNav(withWorkloadsOverview(cats)))
+      .catch((e) => setError(String(e)));
     api
       .namespaces(cluster)
       .then((ns) => setNamespaces(ns.map((r) => r.name).sort()))
@@ -60,7 +75,8 @@ export function App() {
 
   // Fetch the selected kind's raw objects on kind/namespace change.
   useEffect(() => {
-    if (!cluster || !selected) {
+    if (!cluster || !selected || selected.id.startsWith(OVERVIEW_PREFIX)) {
+      setObjects([]);
       return;
     }
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
@@ -95,7 +111,7 @@ export function App() {
   // Columns for the selected kind: built-in registry, or the CRD's printer columns for
   // custom kinds (their id is "group.plural"), falling back to Name/Namespace/Age.
   useEffect(() => {
-    if (!cluster || !selected) {
+    if (!cluster || !selected || selected.id.startsWith(OVERVIEW_PREFIX)) {
       setCols([]);
       return;
     }
@@ -119,7 +135,7 @@ export function App() {
 
   // Live object stream: patch the table in place.
   useEffect(() => {
-    if (!cluster || !selected) {
+    if (!cluster || !selected || selected.id.startsWith(OVERVIEW_PREFIX)) {
       return;
     }
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
@@ -231,7 +247,8 @@ export function App() {
               namespaceCount={namespaces.length}
             />
           )}
-          {selected && (
+          {cluster && selected?.id === OVERVIEW_PREFIX + 'workloads' && <WorkloadsOverview cluster={cluster} />}
+          {selected && !selected.id.startsWith(OVERVIEW_PREFIX) && (
             <>
               <div className="content-head">
                 <h1>{selected.label}</h1>
@@ -827,6 +844,95 @@ function EventsPane(props: { events: EventSummary[] | null; error: string | null
         ))}
       </tbody>
     </table>
+  );
+}
+
+const WORKLOAD_KINDS = [
+  { id: 'pods', label: 'Pods' },
+  { id: 'deployments', label: 'Deployments' },
+  { id: 'statefulsets', label: 'Stateful Sets' },
+  { id: 'daemonsets', label: 'Daemon Sets' },
+  { id: 'replicasets', label: 'Replica Sets' },
+  { id: 'jobs', label: 'Jobs' },
+  { id: 'cronjobs', label: 'Cron Jobs' },
+];
+
+function isHealthy(kindId: string, o: KubeObject): boolean {
+  const s = (o.status as Record<string, unknown>) ?? {};
+  const sp = (o.spec as Record<string, unknown>) ?? {};
+  const n = (v: unknown) => (typeof v === 'number' ? v : 0);
+  switch (kindId) {
+    case 'pods':
+      return s.phase === 'Running' || s.phase === 'Succeeded';
+    case 'deployments':
+    case 'statefulsets':
+    case 'replicasets':
+      // Scaled-to-zero counts as healthy (intentionally scaled down, not failing).
+      return n(s.readyReplicas) === n(sp.replicas);
+    case 'daemonsets':
+      return n(s.numberReady) === n(s.desiredNumberScheduled);
+    case 'jobs':
+      return n(s.succeeded) > 0;
+    default:
+      return true;
+  }
+}
+
+function WorkloadsOverview(props: { cluster: string }) {
+  const { cluster } = props;
+  const [counts, setCounts] = useState<Record<string, { total: number; ready: number }>>({});
+  const [events, setEvents] = useState<EventSummary[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCounts({});
+    setEvents(null);
+    WORKLOAD_KINDS.forEach((k) => {
+      api
+        .objects(cluster, k.id)
+        .then((objs) => {
+          if (cancelled) {
+            return;
+          }
+          setCounts((prev) => ({
+            ...prev,
+            [k.id]: { total: objs.length, ready: objs.filter((o) => isHealthy(k.id, o)).length },
+          }));
+        })
+        .catch(() => undefined);
+    });
+    api
+      .events(cluster)
+      .then((e) => !cancelled && setEvents(e))
+      .catch(() => !cancelled && setEvents([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
+
+  return (
+    <div className="overview">
+      <h1 className="ov-title">Workloads</h1>
+      <div className="ov-cards">
+        {WORKLOAD_KINDS.map((k) => {
+          const c = counts[k.id];
+          const unhealthy = c ? c.total - c.ready : 0;
+          return (
+            <div className={'ov-card' + (unhealthy > 0 ? ' danger' : '')} key={k.id}>
+              <div className="ov-num">{c ? c.total : '…'}</div>
+              <div className="ov-lbl">
+                {k.label}
+                {c ? ` · ${c.ready} ready` : ''}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <section className="ov-sec">
+        <h3>Recent Events</h3>
+        <EventsPane events={events ? events.slice(0, 25) : null} error={null} />
+      </section>
+    </div>
   );
 }
 
