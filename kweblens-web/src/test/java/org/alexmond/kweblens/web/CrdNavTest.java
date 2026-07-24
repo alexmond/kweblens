@@ -32,7 +32,7 @@ class CrdNavTest {
 
 	@Test
 	void crdsAppearAsAGroupCategoryAndResolve() {
-		registry.register("test", "Test cluster", client);
+		registry.register("crd-cluster", "Test cluster", client);
 		client.apiextensions()
 			.v1()
 			.customResourceDefinitions()
@@ -55,8 +55,8 @@ class CrdNavTest {
 				.build())
 			.create();
 
-		assertThat(clusterNav.categories("test")).extracting(NavCategory::label).contains("traefik.io");
-		assertThat(clusterNav.find("test", "traefik.io.ingressroutes")).get()
+		assertThat(clusterNav.categories("crd-cluster")).extracting(NavCategory::label).contains("traefik.io");
+		assertThat(clusterNav.find("crd-cluster", "traefik.io.ingressroutes")).get()
 			.extracting("kind")
 			.isEqualTo("IngressRoute");
 	}

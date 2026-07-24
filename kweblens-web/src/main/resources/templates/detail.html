@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}"
+      lang="en">
+<head>
+    <title th:text="${name}">Detail</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex">
+        <div th:replace="~{fragments/shell :: sidebar}"></div>
+
+        <section class="flex-grow-1 min-width-0">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item">
+                        <a th:href="@{/clusters/{c}/r/{id}(c=${clusterId},id=${resource})}"
+                           th:text="${descriptor.label()}">Kind</a>
+                    </li>
+                    <li class="breadcrumb-item active" th:if="${namespace}" th:text="${namespace}">ns</li>
+                    <li class="breadcrumb-item active" th:text="${name}">name</li>
+                </ol>
+            </nav>
+
+            <div th:if="${detail == null}" class="alert alert-warning">Resource not found.</div>
+
+            <div th:if="${detail != null}">
+                <div class="d-flex align-items-center mb-3">
+                    <h1 class="h5 mb-0">
+                        <span class="text-muted" th:text="${detail.kind()}">Kind</span>
+                        <span th:text="${detail.name()}">name</span>
+                    </h1>
+                    <span th:if="${detail.status()}" class="badge text-bg-light border ms-2"
+                          th:text="${detail.status()}">Status</span>
+                    <div class="ms-auto btn-group">
+                        <a class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/clusters/{c}/yaml(c=${clusterId},resource=${resource},namespace=${namespace},name=${name})}">
+                            <i class="bi bi-file-earmark-code"></i> YAML
+                        </a>
+                        <a th:if="${descriptor.kind() == 'Pod'}" class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/clusters/{c}/pods/{ns}/{p}/logs(c=${clusterId},ns=${namespace},p=${name})}">
+                            <i class="bi bi-terminal"></i> logs
+                        </a>
+                        <a th:if="${descriptor.kind() == 'Pod'}" class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/clusters/{c}/pods/{ns}/{p}/exec(c=${clusterId},ns=${namespace},p=${name})}">
+                            <i class="bi bi-terminal-fill"></i> exec
+                        </a>
+                    </div>
+                </div>
+
+                <dl class="row small">
+                    <dt class="col-sm-2">Namespace</dt>
+                    <dd class="col-sm-10" th:text="${detail.namespace()} ?: '—'">ns</dd>
+                    <dt class="col-sm-2">Age</dt>
+                    <dd class="col-sm-10" th:text="${detail.age()}">age</dd>
+                    <dt class="col-sm-2">Labels</dt>
+                    <dd class="col-sm-10">
+                        <span th:if="${detail.labels().isEmpty()}" class="text-muted">none</span>
+                        <span th:each="l : ${detail.labels()}" class="badge text-bg-light border me-1"
+                              th:text="${l.key} + '=' + ${l.value}">k=v</span>
+                    </dd>
+                </dl>
+
+                <h2 class="h6 text-muted mt-4">Events</h2>
+                <table class="table table-sm bg-body shadow-sm rounded">
+                    <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Reason</th>
+                        <th>Message</th>
+                        <th>Age</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="e : ${events}">
+                        <td th:text="${e.type()} ?: '—'">Normal</td>
+                        <td th:text="${e.reason()} ?: '—'">Reason</td>
+                        <td class="text-break small" th:text="${e.message()}">message</td>
+                        <td th:text="${e.age()}">age</td>
+                    </tr>
+                    <tr th:if="${#lists.isEmpty(events)}">
+                        <td colspan="4" class="text-muted">No events for this object.</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+</div>
+</body>
+</html>

@@ -109,4 +109,23 @@ class ResourceServiceTest {
 		assertThat(applied.kind()).isEqualTo("ConfigMap");
 	}
 
+	@Test
+	void detailProjectsKindNameAndLabels() {
+		client.configMaps()
+			.resource(new ConfigMapBuilder().withNewMetadata()
+				.withName("cm-detail")
+				.withNamespace("default")
+				.addToLabels("app", "x")
+				.endMetadata()
+				.build())
+			.create();
+
+		assertThat(serviceFor("mock").detail("mock", CONFIG_MAPS, "default", "cm-detail")).get().satisfies((d) -> {
+			assertThat(d.kind()).isEqualTo("ConfigMap");
+			assertThat(d.name()).isEqualTo("cm-detail");
+			assertThat(d.labels()).containsEntry("app", "x");
+		});
+		assertThat(serviceFor("mock").detail("mock", CONFIG_MAPS, "default", "absent")).isEmpty();
+	}
+
 }

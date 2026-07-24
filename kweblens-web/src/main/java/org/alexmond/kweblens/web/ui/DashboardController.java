@@ -137,6 +137,21 @@ public class DashboardController {
 		return "exec";
 	}
 
+	@GetMapping("/clusters/{clusterId}/detail")
+	public String detail(@PathVariable String clusterId, @RequestParam String resource,
+			@RequestParam(required = false) String namespace, @RequestParam String name, Model model) {
+		ResourceDescriptor descriptor = clusterNav.find(clusterId, resource)
+			.orElseThrow(() -> new UnknownResourceException(resource));
+		shell(model, clusterId, resource);
+		model.addAttribute("resource", resource);
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("name", name);
+		model.addAttribute("descriptor", descriptor);
+		model.addAttribute("detail", resources.detail(clusterId, descriptor, namespace, name).orElse(null));
+		model.addAttribute("events", events.listForObject(clusterId, namespace, descriptor.kind(), name));
+		return "detail";
+	}
+
 	@GetMapping("/clusters/{clusterId}/yaml")
 	public String yaml(@PathVariable String clusterId, @RequestParam String resource,
 			@RequestParam(required = false) String namespace, @RequestParam String name, Model model) {

@@ -36,7 +36,11 @@
                 <tbody>
                 <tr th:each="r : ${rows}">
                     <td th:if="${descriptor.namespaced()}" th:text="${r.namespace()} ?: '—'">default</td>
-                    <td class="text-break" th:text="${r.name()}">name</td>
+                    <td class="text-break">
+                        <a class="text-decoration-none"
+                           th:href="@{/clusters/{c}/detail(c=${clusterId},resource=${selectedId},namespace=${r.namespace()},name=${r.name()})}"
+                           th:text="${r.name()}">name</a>
+                    </td>
                     <td>
                         <span th:if="${r.status()}" class="badge text-bg-light border" th:text="${r.status()}">Status</span>
                         <span th:unless="${r.status()}" class="text-muted">—</span>

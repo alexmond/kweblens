@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.HasMetadata;
@@ -59,10 +60,27 @@ public class ResourceService {
 	 * The YAML of a single resource, or null if it does not exist.
 	 */
 	public String getYaml(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
-		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
-		GenericKubernetesResource resource = descriptor.namespaced() ? op.inNamespace(namespace).withName(name).get()
-				: op.withName(name).get();
+		GenericKubernetesResource resource = getRaw(clusterId, descriptor, namespace, name);
 		return (resource != null) ? Serialization.asYaml(resource) : null;
+	}
+
+	/** The detail projection of a single resource, or empty if it does not exist. */
+	public Optional<ResourceDetail> detail(String clusterId, ResourceDescriptor descriptor, String namespace,
+			String name) {
+		GenericKubernetesResource resource = getRaw(clusterId, descriptor, namespace, name);
+		if (resource == null) {
+			return Optional.empty();
+		}
+		Map<String, String> labels = (resource.getMetadata() != null && resource.getMetadata().getLabels() != null)
+				? resource.getMetadata().getLabels() : Map.of();
+		return Optional.of(new ResourceDetail(descriptor.kind(), namespace(resource), name(resource), phase(resource),
+				age(resource), labels));
+	}
+
+	private GenericKubernetesResource getRaw(String clusterId, ResourceDescriptor descriptor, String namespace,
+			String name) {
+		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
+		return descriptor.namespaced() ? op.inNamespace(namespace).withName(name).get() : op.withName(name).get();
 	}
 
 	/**

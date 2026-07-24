@@ -91,6 +91,16 @@ class YamlEndpointsTest {
 	}
 
 	@Test
+	void detailPageRenders() throws Exception {
+		mvc.perform(get("/clusters/test/detail").param("resource", "configmaps")
+			.param("namespace", "default")
+			.param("name", "cm1"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("detail"))
+			.andExpect(model().attributeExists("detail", "events"));
+	}
+
+	@Test
 	void yamlPageRenders() throws Exception {
 		mvc.perform(get("/clusters/test/yaml").param("resource", "configmaps")
 			.param("namespace", "default")
