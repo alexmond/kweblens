@@ -170,6 +170,15 @@ class ClusterEndpointsTest {
 	}
 
 	@Test
+	void dashboardLogsPageRenders() throws Exception {
+		mvc.perform(get("/clusters/test/pods/web/nginx/logs"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("logs"))
+			.andExpect(model().attribute("pod", "nginx"))
+			.andExpect(model().attribute("namespace", "web"));
+	}
+
+	@Test
 	void mcpToolsProjectTheSameData() {
 		assertThat(tools.listClusters()).extracting("id").contains("test");
 		assertThat(tools.listNamespaces("test")).extracting("name").contains("web");

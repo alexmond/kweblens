@@ -63,6 +63,16 @@ public class DashboardController {
 		return "events";
 	}
 
+	@GetMapping("/clusters/{clusterId}/pods/{namespace}/{pod}/logs")
+	public String logs(@PathVariable String clusterId, @PathVariable String namespace, @PathVariable String pod,
+			@RequestParam(required = false) String container, Model model) {
+		shell(model, clusterId, "pods");
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("pod", pod);
+		model.addAttribute("container", container);
+		return "logs";
+	}
+
 	/** Populate the model attributes the in-cluster shell (left nav) needs. */
 	private void shell(Model model, String clusterId, String selectedId) {
 		model.addAttribute("clusterId", clusterId);
