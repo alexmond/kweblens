@@ -1,7 +1,9 @@
 package org.alexmond.kweblens.web.helm;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,6 +13,8 @@ import java.util.Optional;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.util.ClientBuilder;
+import io.kubernetes.client.util.KubeConfig;
 import io.kubernetes.client.util.credentials.AccessTokenAuthentication;
 import io.kubernetes.client.util.credentials.ClientCertificateAuthentication;
 import lombok.RequiredArgsConstructor;
@@ -69,13 +73,49 @@ public class HelmService {
 	}
 
 	private KubeService kubeService(String clusterId) {
+		return new HelmKubeService(new KubeClient(apiClientFor(clusterId)));
+	}
+
+	/**
+	 * Prefer the official client's own kubeconfig loader — it wires CA +
+	 * client-certificate + exec auth correctly, keyed by context (the cluster id, for
+	 * ambient clusters). Fall back to deriving an ApiClient from the fabric8 config for
+	 * clusters not backed by the ambient kubeconfig.
+	 */
+	private ApiClient apiClientFor(String clusterId) {
+		Path kubeconfig = ambientKubeconfigPath();
+		if (kubeconfig != null && Files.isReadable(kubeconfig)) {
+			try (Reader reader = Files.newBufferedReader(kubeconfig)) {
+				KubeConfig kubeConfig = KubeConfig.loadKubeConfig(reader);
+				if (kubeConfig.setContext(clusterId)) {
+					return ClientBuilder.kubeconfig(kubeConfig).build();
+				}
+			}
+			catch (IOException | RuntimeException ex) {
+				log.warn("Kubeconfig client for '{}' failed ({}); deriving from fabric8 config", clusterId,
+						ex.getMessage());
+			}
+		}
+		return derivedApiClient(clusterId);
+	}
+
+	private ApiClient derivedApiClient(String clusterId) {
 		KubernetesClient fabric8 = clusters.require(clusterId);
 		io.fabric8.kubernetes.client.Config config = fabric8.getConfiguration();
 		ApiClient apiClient = new ApiClient();
 		apiClient.setBasePath(stripTrailingSlash(config.getMasterUrl()));
 		configureTls(apiClient, config);
 		configureAuth(apiClient, config);
-		return new HelmKubeService(new KubeClient(apiClient));
+		return apiClient;
+	}
+
+	private Path ambientKubeconfigPath() {
+		String env = System.getenv("KUBECONFIG");
+		if (StringUtils.hasText(env)) {
+			return Path.of(env.split(File.pathSeparator)[0]);
+		}
+		String home = System.getProperty("user.home");
+		return StringUtils.hasText(home) ? Path.of(home, ".kube", "config") : null;
 	}
 
 	/**
