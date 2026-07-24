@@ -63,8 +63,6 @@
                                 <input type="hidden" name="action" th:value="${p.action()}"/>
                                 <input type="hidden" name="namespace" th:value="${p.namespace()}"/>
                                 <input type="hidden" name="target" th:value="${p.target()}"/>
-                                <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}"
-                                       th:value="${_csrf.token}"/>
                                 <button type="submit" class="btn btn-sm btn-outline-primary">Approve &amp; apply</button>
                             </form>
                         </div>

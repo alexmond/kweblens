@@ -31,6 +31,13 @@
             <artifactId>kweblens-core</artifactId>
         </dependency>
 
+        <!-- The React SPA, packaged as classpath static resources under static/ui (served at /ui). -->
+        <dependency>
+            <groupId>org.alexmond</groupId>
+            <artifactId>kweblens-ui</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Helm releases via the sibling jhelm library (dogfood). jhelm-kube brings jhelm-core +
              the official io.kubernetes client; jhelm's own auto-configuration is excluded (see
              application.yml) so we use it purely as a library, one KubeService per cluster. -->

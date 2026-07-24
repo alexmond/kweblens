@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.util.StringUtils;
@@ -56,7 +57,8 @@ public class SecurityConfig {
 	@Bean
 	public SecurityFilterChain filterChain(HttpSecurity http, SecurityProperties properties) throws Exception {
 		http.authorizeHttpRequests((auth) -> {
-			auth.requestMatchers("/actuator/health/**", "/actuator/info", "/login", "/error", "/css/**", "/webjars/**")
+			auth.requestMatchers("/actuator/health/**", "/actuator/info", "/login", "/error", "/css/**", "/webjars/**",
+					"/ui", "/ui/**")
 				.permitAll();
 			// Pod exec is privileged: the WebSocket handshake always requires auth, even
 			// in open-mode.
@@ -69,6 +71,8 @@ public class SecurityConfig {
 			.formLogin(Customizer.withDefaults())
 			.httpBasic(Customizer.withDefaults())
 			.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**"))
+			// Materialise the CSRF token before view rendering commits the response.
+			.addFilterAfter(new CsrfTokenEagerFilter(), CsrfFilter.class)
 			// The JSON API and WebSocket answer unauthenticated calls with 401, not a
 			// redirect.
 			.exceptionHandling(

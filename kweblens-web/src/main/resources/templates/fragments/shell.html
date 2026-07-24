@@ -18,43 +18,51 @@
            th:text="${#strings.toUpperCase(c.id().length() >= 2 ? c.id().substring(0,2) : c.id())}">DE</a>
     </div>
 
-    <!-- Category nav -->
-    <aside class="kw-nav pe-3 me-1" style="width: 14rem;">
-    <a th:href="@{/}" class="small text-decoration-none">&larr; Clusters</a>
-    <div class="fw-semibold mt-2 text-truncate"
-         th:text="${cluster != null ? cluster.name() : clusterId}">cluster</div>
-    <a class="nav-link py-1 px-2 small"
-       th:classappend="${selectedId == 'metrics'} ? 'active fw-semibold' : 'link-body-emphasis'"
-       th:href="@{/clusters/{c}/metrics(c=${clusterId})}">
-        <i class="bi bi-speedometer2"></i> Metrics
-    </a>
-    <a class="nav-link py-1 px-2 small"
-       th:classappend="${selectedId == 'helm'} ? 'active fw-semibold' : 'link-body-emphasis'"
-       th:href="@{/clusters/{c}/helm(c=${clusterId})}">
-        <i class="bi bi-hexagon"></i> Helm
-    </a>
-    <a class="nav-link py-1 px-2 small mb-2"
-       th:classappend="${selectedId == 'diagnose'} ? 'active fw-semibold' : 'link-body-emphasis'"
-       th:href="@{/clusters/{c}/diagnose(c=${clusterId})}">
-        <i class="bi bi-heart-pulse"></i> Diagnose
-    </a>
+    <!-- Category nav: a collapsible vCenter-style Navigator tree -->
+    <aside class="kw-nav pe-2 me-1">
+        <a th:href="@{/}" class="small text-decoration-none d-inline-block mb-2">&larr; Clusters</a>
+        <div class="fw-semibold mb-2 text-truncate kw-nav-title"
+             th:text="${cluster != null ? cluster.name() : clusterId}">cluster</div>
 
-    <div th:each="cat : ${categories}" class="mb-3">
-        <div class="text-uppercase text-muted small mb-1">
-            <i class="bi" th:classappend="${cat.icon()}"></i>
-            <span th:text="${cat.label()}">Category</span>
+        <!-- Pinned cluster-wide views -->
+        <a class="kw-tree-leaf"
+           th:classappend="${selectedId == 'metrics'} ? 'active' : ''"
+           th:href="@{/clusters/{c}/metrics(c=${clusterId})}">
+            <i class="bi bi-speedometer2"></i><span>Metrics</span>
+        </a>
+        <a class="kw-tree-leaf"
+           th:classappend="${selectedId == 'helm'} ? 'active' : ''"
+           th:href="@{/clusters/{c}/helm(c=${clusterId})}">
+            <i class="bi bi-hexagon"></i><span>Helm</span>
+        </a>
+        <a class="kw-tree-leaf mb-2"
+           th:classappend="${selectedId == 'diagnose'} ? 'active' : ''"
+           th:href="@{/clusters/{c}/diagnose(c=${clusterId})}">
+            <i class="bi bi-heart-pulse"></i><span>Diagnose</span>
+        </a>
+
+        <!-- Resource categories: each is a collapsible tree node, opened when it holds the selection -->
+        <div class="kw-tree">
+            <details th:each="cat : ${categories}" class="kw-tree-group"
+                     th:with="active=${#lists.contains(cat.items().![id()], selectedId)}"
+                     th:attr="open=${active} ? 'open' : null">
+                <summary>
+                    <i class="bi bi-chevron-right kw-chevron"></i>
+                    <i class="bi" th:classappend="${cat.icon()}"></i>
+                    <span th:text="${cat.label()}">Category</span>
+                </summary>
+                <ul class="kw-tree-children">
+                    <li th:each="item : ${cat.items()}">
+                        <a class="kw-tree-leaf"
+                           th:classappend="${item.id() == selectedId} ? 'active' : ''"
+                           th:href="${item.id() == 'events'}
+                                    ? @{/clusters/{c}/events(c=${clusterId})}
+                                    : @{/clusters/{c}/r/{id}(c=${clusterId},id=${item.id()})}"
+                           th:text="${item.label()}">Kind</a>
+                    </li>
+                </ul>
+            </details>
         </div>
-        <ul class="nav flex-column">
-            <li class="nav-item" th:each="item : ${cat.items()}">
-                <a class="nav-link py-1 px-2 small"
-                   th:classappend="${item.id() == selectedId} ? 'active fw-semibold' : 'link-body-emphasis'"
-                   th:href="${item.id() == 'events'}
-                            ? @{/clusters/{c}/events(c=${clusterId})}
-                            : @{/clusters/{c}/r/{id}(c=${clusterId},id=${item.id()})}"
-                   th:text="${item.label()}">Kind</a>
-            </li>
-        </ul>
-    </div>
     </aside>
 </div>
 </body>

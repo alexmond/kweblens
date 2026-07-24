@@ -57,7 +57,6 @@
                         <input type="hidden" name="resource" th:value="${resource}"/>
                         <input type="hidden" name="namespace" th:value="${namespace}"/>
                         <input type="hidden" name="name" th:value="${name}"/>
-                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                         <input type="number" name="replicas" min="0" value="1" class="form-control form-control-sm"
                                style="width: 5rem;"/>
                         <button type="submit" class="btn btn-sm btn-outline-primary">Scale</button>
@@ -69,7 +68,6 @@
                         <input type="hidden" name="resource" th:value="${resource}"/>
                         <input type="hidden" name="namespace" th:value="${namespace}"/>
                         <input type="hidden" name="name" th:value="${name}"/>
-                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                         <button type="submit" class="btn btn-sm btn-outline-warning">
                             <i class="bi bi-arrow-clockwise"></i> Restart
                         </button>
@@ -80,7 +78,6 @@
                         <input type="hidden" name="action" value="cordon"/>
                         <input type="hidden" name="resource" th:value="${resource}"/>
                         <input type="hidden" name="name" th:value="${name}"/>
-                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                         <button type="submit" class="btn btn-sm btn-outline-warning">
                             <i class="bi bi-pause-circle"></i> Cordon
                         </button>
@@ -90,7 +87,6 @@
                         <input type="hidden" name="action" value="uncordon"/>
                         <input type="hidden" name="resource" th:value="${resource}"/>
                         <input type="hidden" name="name" th:value="${name}"/>
-                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                         <button type="submit" class="btn btn-sm btn-outline-success">
                             <i class="bi bi-play-circle"></i> Uncordon
                         </button>
@@ -101,7 +97,6 @@
                         <input type="hidden" name="resource" th:value="${resource}"/>
                         <input type="hidden" name="namespace" th:value="${namespace}"/>
                         <input type="hidden" name="name" th:value="${name}"/>
-                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                         <button type="submit" class="btn btn-sm btn-outline-danger">
                             <i class="bi bi-trash"></i> Delete
                         </button>

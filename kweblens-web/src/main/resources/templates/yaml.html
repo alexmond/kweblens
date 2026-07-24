@@ -28,7 +28,6 @@
             <form th:if="${yaml != null}" method="post" th:action="@{/clusters/{c}/apply(c=${clusterId})}">
                 <input type="hidden" name="resource" th:value="${resource}"/>
                 <input type="hidden" name="namespace" th:value="${namespace}"/>
-                <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                 <textarea class="form-control font-monospace small" name="manifest" rows="24"
                           spellcheck="false" th:text="${yaml}"></textarea>
                 <div class="d-flex mt-2">

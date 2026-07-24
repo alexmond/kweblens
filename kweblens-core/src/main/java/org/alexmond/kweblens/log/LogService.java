@@ -1,7 +1,5 @@
 package org.alexmond.kweblens.log;
 
-import java.io.OutputStream;
-
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.ContainerResource;
 import io.fabric8.kubernetes.client.dsl.LogWatch;
@@ -15,7 +13,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 
 /**
  * Pod log access: a bounded snapshot ({@link #tail}) and a live follow ({@link #watch})
- * that streams into an {@link OutputStream} (bridged to SSE by the web layer). A blank
+ * that returns a {@link LogWatch} the web layer reads from and bridges to SSE. A blank
  * container selects the pod's default container.
  */
 @Service
@@ -30,11 +28,13 @@ public class LogService {
 	}
 
 	/**
-	 * Follow a pod/container's log, writing new output to {@code out}. The returned
-	 * {@link LogWatch} must be closed by the caller to stop following.
+	 * Follow a pod/container's log. The returned {@link LogWatch} exposes the live output
+	 * via {@link LogWatch#getOutput()}; fabric8 owns that stream (passing our own piped
+	 * stream is rejected by the client), and the caller must close the watch to stop
+	 * following.
 	 */
-	public LogWatch watch(String clusterId, String namespace, String pod, String container, OutputStream out) {
-		return loggable(clusterId, namespace, pod, container).watchLog(out);
+	public LogWatch watch(String clusterId, String namespace, String pod, String container) {
+		return loggable(clusterId, namespace, pod, container).watchLog();
 	}
 
 	private ContainerResource loggable(String clusterId, String namespace, String pod, String container) {

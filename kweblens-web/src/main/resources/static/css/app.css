@@ -1,4 +1,52 @@
-/* kweblens dashboard tweaks layered on top of Bootstrap. */
+/*
+ * kweblens skins. Each skin is a set of CSS custom properties selected by the
+ * data-skin attribute on <html> (set from the kw-skin cookie); data-bs-theme flips
+ * Bootstrap's own light/dark content palette. The chrome below (navbar, skin picker,
+ * cluster rail, nav) reads only these tokens, so adding a skin is just another token block.
+ */
+
+/* ---- Default tokens (vCenter / ESXi look) ---- */
+:root,
+[data-skin="vcenter"] {
+	--kw-navbar-bg: #1b2a33;
+	--kw-navbar-fg: #e8eef2;
+	--kw-navbar-muted: #9fb3bf;
+	--kw-navbar-border: rgba(255, 255, 255, 0.12);
+	--kw-accent: #0a7ac2;
+	--kw-accent-contrast: #ffffff;
+	--kw-brand: #4bb4e6;
+}
+
+[data-skin="proxmox"] {
+	--kw-navbar-bg: #f7f7f7;
+	--kw-navbar-fg: #2c2c2c;
+	--kw-navbar-muted: #7a7a7a;
+	--kw-navbar-border: #d9d9d9;
+	--kw-accent: #e57000;
+	--kw-accent-contrast: #ffffff;
+	--kw-brand: #e57000;
+}
+
+[data-skin="freelens"] {
+	--kw-navbar-bg: #20232a;
+	--kw-navbar-fg: #e6e6e6;
+	--kw-navbar-muted: #8b9199;
+	--kw-navbar-border: rgba(255, 255, 255, 0.1);
+	--kw-accent: #4f9cf9;
+	--kw-accent-contrast: #ffffff;
+	--kw-brand: #4f9cf9;
+}
+
+[data-skin="dark"] {
+	--kw-navbar-bg: #212529;
+	--kw-navbar-fg: #dee2e6;
+	--kw-navbar-muted: #9aa0a6;
+	--kw-navbar-border: rgba(255, 255, 255, 0.1);
+	--kw-accent: #0d6efd;
+	--kw-accent-contrast: #ffffff;
+	--kw-brand: #6ea8fe;
+}
+
 body {
 	font-size: 0.95rem;
 }
@@ -7,11 +55,106 @@ code {
 	color: var(--bs-emphasis-color);
 }
 
-.navbar-brand .bi {
-	color: #4f9cf9;
+/* Slightly denser tables across all skins (vCenter/Proxmox feel). */
+.table > :not(caption) > * > * {
+	padding: 0.4rem 0.5rem;
 }
 
-/* Cluster-switcher rail (Freelens-style) */
+/* ---- Top brand bar ---- */
+.kw-navbar {
+	background: var(--kw-navbar-bg);
+	color: var(--kw-navbar-fg);
+	border-bottom: 1px solid var(--kw-navbar-border);
+	padding-top: 0.4rem;
+	padding-bottom: 0.4rem;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.kw-navbar .navbar-brand {
+	color: var(--kw-navbar-fg);
+}
+
+.kw-navbar .navbar-brand .bi {
+	color: var(--kw-brand);
+}
+
+.kw-navbar-sub {
+	color: var(--kw-navbar-muted) !important;
+}
+
+.kw-navbar-link {
+	color: var(--kw-navbar-fg);
+	text-decoration: none;
+}
+
+.kw-navbar-link:hover {
+	color: var(--kw-brand);
+}
+
+/* ---- Skin picker (JS-free <details> dropdown) ---- */
+.kw-skinpicker {
+	position: relative;
+}
+
+.kw-skinpicker > summary {
+	list-style: none;
+	cursor: pointer;
+	user-select: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	color: var(--kw-navbar-fg);
+	border: 1px solid var(--kw-navbar-border);
+	border-radius: 0.375rem;
+	padding: 0.25rem 0.6rem;
+	font-size: 0.85rem;
+}
+
+.kw-skinpicker > summary::-webkit-details-marker {
+	display: none;
+}
+
+.kw-skinpicker[open] > summary {
+	border-color: var(--kw-brand);
+}
+
+.kw-skinpicker > ul {
+	position: absolute;
+	right: 0;
+	top: calc(100% + 0.35rem);
+	z-index: 1050;
+	min-width: 12rem;
+	margin: 0;
+	padding: 0.35rem;
+	list-style: none;
+	background: var(--bs-body-bg);
+	color: var(--bs-body-color);
+	border: 1px solid var(--bs-border-color);
+	border-radius: 0.5rem;
+	box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.18);
+}
+
+.kw-skinpicker > ul a {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.35rem 0.5rem;
+	border-radius: 0.375rem;
+	color: var(--bs-body-color);
+	text-decoration: none;
+	font-size: 0.9rem;
+}
+
+.kw-skinpicker > ul a:hover {
+	background: var(--bs-tertiary-bg);
+}
+
+.kw-skinpicker > ul a.active {
+	color: var(--kw-brand);
+	font-weight: 600;
+}
+
+/* ---- Cluster-switcher rail ---- */
 .kw-rail-tile {
 	display: flex;
 	align-items: center;
@@ -31,11 +174,81 @@ code {
 }
 
 .kw-rail-tile.active {
-	background: #4f9cf9;
-	color: #fff;
-	border-color: #4f9cf9;
+	background: var(--kw-accent);
+	color: var(--kw-accent-contrast);
+	border-color: var(--kw-accent);
 }
 
 .kw-rail-home {
 	color: var(--bs-secondary-color);
+}
+
+/* ---- Left Navigator: collapsible vCenter-style tree ---- */
+.kw-nav {
+	width: 15rem;
+}
+
+.kw-nav-title {
+	font-size: 0.95rem;
+}
+
+.kw-tree-group > summary {
+	list-style: none;
+	cursor: pointer;
+	user-select: none;
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.25rem 0.4rem;
+	border-radius: 0.375rem;
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	color: var(--bs-secondary-color);
+}
+
+.kw-tree-group > summary::-webkit-details-marker {
+	display: none;
+}
+
+.kw-tree-group > summary:hover {
+	background: var(--bs-tertiary-bg);
+}
+
+.kw-chevron {
+	font-size: 0.7rem;
+	color: var(--bs-secondary-color);
+	transition: transform 0.15s ease;
+}
+
+.kw-tree-group[open] > summary .kw-chevron {
+	transform: rotate(90deg);
+}
+
+.kw-tree-children {
+	list-style: none;
+	margin: 0.1rem 0 0.35rem 0;
+	padding-left: 1.2rem;
+}
+
+.kw-tree-leaf {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	padding: 0.2rem 0.45rem;
+	border-radius: 0.375rem;
+	font-size: 0.85rem;
+	text-decoration: none;
+	color: var(--bs-body-color);
+}
+
+.kw-tree-leaf:hover {
+	background: var(--bs-tertiary-bg);
+}
+
+.kw-tree-leaf.active {
+	background: color-mix(in srgb, var(--kw-accent) 16%, transparent);
+	color: var(--kw-accent);
+	font-weight: 600;
 }

@@ -391,6 +391,7 @@
                 <activeByDefault>true</activeByDefault>
             </activation>
             <modules>
+                <module>kweblens-ui</module>
                 <module>kweblens-web</module>
                 <module>kweblens-it</module>
             </modules>
@@ -436,8 +437,9 @@
         -->
         <profile>
             <id>docker</id>
-            <!-- Re-add the app: explicitly activating this profile deactivates 'default'. -->
+            <!-- Re-add the app (+ its UI): explicitly activating this profile deactivates 'default'. -->
             <modules>
+                <module>kweblens-ui</module>
                 <module>kweblens-web</module>
             </modules>
             <properties>
