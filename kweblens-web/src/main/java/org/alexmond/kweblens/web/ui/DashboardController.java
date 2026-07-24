@@ -102,6 +102,16 @@ public class DashboardController {
 		return "logs";
 	}
 
+	@GetMapping("/clusters/{clusterId}/pods/{namespace}/{pod}/exec")
+	public String exec(@PathVariable String clusterId, @PathVariable String namespace, @PathVariable String pod,
+			@RequestParam(required = false) String container, Model model) {
+		shell(model, clusterId, "pods");
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("pod", pod);
+		model.addAttribute("container", container);
+		return "exec";
+	}
+
 	@GetMapping("/clusters/{clusterId}/yaml")
 	public String yaml(@PathVariable String clusterId, @RequestParam String resource,
 			@RequestParam(required = false) String namespace, @RequestParam String name, Model model) {

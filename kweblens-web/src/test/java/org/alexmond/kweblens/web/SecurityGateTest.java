@@ -49,4 +49,11 @@ class SecurityGateTest {
 			.andExpect(status().isMethodNotAllowed());
 	}
 
+	@Test
+	void podExecRequiresAuthEvenInOpenMode() throws Exception {
+		// The /ws exec handshake is a GET, but exec is privileged — it must not be
+		// public.
+		mvc.perform(get("/ws/exec")).andExpect(status().isUnauthorized());
+	}
+
 }

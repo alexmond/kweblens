@@ -19,6 +19,7 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.util.StringUtils;
 
 /**
@@ -57,6 +58,9 @@ public class SecurityConfig {
 		http.authorizeHttpRequests((auth) -> {
 			auth.requestMatchers("/actuator/health/**", "/actuator/info", "/login", "/error", "/css/**", "/webjars/**")
 				.permitAll();
+			// Pod exec is privileged: the WebSocket handshake always requires auth, even
+			// in open-mode.
+			auth.requestMatchers("/ws/**").authenticated();
 			if (properties.isOpenMode()) {
 				auth.requestMatchers(HttpMethod.GET, "/**").permitAll();
 			}
@@ -65,11 +69,12 @@ public class SecurityConfig {
 			.formLogin(Customizer.withDefaults())
 			.httpBasic(Customizer.withDefaults())
 			.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**"))
-			// The JSON API answers unauthenticated calls with 401 instead of a login
+			// The JSON API and WebSocket answer unauthenticated calls with 401, not a
 			// redirect.
 			.exceptionHandling(
 					(ex) -> ex.defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
-							PathPatternRequestMatcher.pathPattern("/api/**")))
+							new OrRequestMatcher(PathPatternRequestMatcher.pathPattern("/api/**"),
+									PathPatternRequestMatcher.pathPattern("/ws/**"))))
 			.headers((headers) -> headers.frameOptions((frame) -> frame.sameOrigin()));
 		return http.build();
 	}

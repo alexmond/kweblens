@@ -47,6 +47,10 @@
                            th:href="@{/clusters/{c}/pods/{ns}/{p}/logs(c=${clusterId},ns=${r.namespace()},p=${r.name()})}">
                             <i class="bi bi-terminal"></i> logs
                         </a>
+                        <a th:if="${descriptor.kind() == 'Pod'}" class="btn btn-sm btn-outline-secondary py-0"
+                           th:href="@{/clusters/{c}/pods/{ns}/{p}/exec(c=${clusterId},ns=${r.namespace()},p=${r.name()})}">
+                            <i class="bi bi-terminal-fill"></i> exec
+                        </a>
                         <a class="btn btn-sm btn-outline-secondary py-0"
                            th:href="@{/clusters/{c}/yaml(c=${clusterId},resource=${selectedId},namespace=${r.namespace()},name=${r.name()})}">
                             <i class="bi bi-file-earmark-code"></i> yaml

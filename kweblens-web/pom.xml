@@ -60,6 +60,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
+        <!-- WebSocket: bridges an in-browser terminal to a pod exec session (#6). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
 
         <!-- Spring Cloud Config client: OPTIONAL import (import-check disabled in application.yml),
              so dev/test and any deploy without a config server boot with the client inert. -->
@@ -96,6 +101,12 @@
             <groupId>org.webjars.npm</groupId>
             <artifactId>bootstrap-icons</artifactId>
             <version>${bootstrap-icons.version}</version>
+        </dependency>
+        <!-- xterm.js terminal emulator for the in-browser pod exec (served in-jar). -->
+        <dependency>
+            <groupId>org.webjars.npm</groupId>
+            <artifactId>xterm</artifactId>
+            <version>${xterm.version}</version>
         </dependency>
         <!-- One base layout (head/topbar/footer) for every page. -->
         <dependency>

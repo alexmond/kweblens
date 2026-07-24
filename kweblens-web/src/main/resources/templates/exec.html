@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}"
+      lang="en">
+<head>
+    <title th:text="'Exec · ' + ${pod}">Exec</title>
+    <link rel="stylesheet" th:href="@{/webjars/xterm/5.3.0/css/xterm.css}"/>
+    <script th:src="@{/webjars/xterm/5.3.0/lib/xterm.js}"></script>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex">
+        <div th:replace="~{fragments/shell :: sidebar}"></div>
+
+        <section class="flex-grow-1 min-width-0">
+            <div class="d-flex align-items-center mb-2">
+                <h1 class="h6 mb-0">
+                    <i class="bi bi-terminal-fill"></i>
+                    <span th:text="${namespace} + ' / ' + ${pod}">ns / pod</span>
+                    <span class="text-muted" th:if="${container}" th:text="'· ' + ${container}"></span>
+                </h1>
+                <span id="exec-status" class="badge text-bg-secondary ms-2">connecting…</span>
+            </div>
+
+            <div id="terminal" class="bg-dark p-2 rounded" style="height: 65vh;"
+                 th:data-cluster="${clusterId}" th:data-namespace="${namespace}" th:data-pod="${pod}"
+                 th:data-container="${container}"></div>
+        </section>
+    </div>
+
+    <script th:inline="none">
+        (function () {
+            const el = document.getElementById('terminal');
+            const status = document.getElementById('exec-status');
+            const term = new Terminal({ cursorBlink: true, fontSize: 13 });
+            term.open(el);
+
+            const params = new URLSearchParams({
+                cluster: el.dataset.cluster, namespace: el.dataset.namespace, pod: el.dataset.pod
+            });
+            if (el.dataset.container) { params.set('container', el.dataset.container); }
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const ws = new WebSocket(proto + '://' + location.host + '/ws/exec?' + params.toString());
+
+            ws.onopen = () => { status.textContent = 'connected'; status.className = 'badge text-bg-success ms-2'; term.focus(); };
+            ws.onmessage = (e) => term.write(e.data);
+            ws.onclose = () => { status.textContent = 'closed'; status.className = 'badge text-bg-secondary ms-2'; };
+            ws.onerror = () => { status.textContent = 'error'; status.className = 'badge text-bg-danger ms-2'; };
+            term.onData((data) => { if (ws.readyState === WebSocket.OPEN) { ws.send(data); } });
+            window.addEventListener('beforeunload', () => ws.close());
+        })();
+    </script>
+</div>
+</body>
+</html>
