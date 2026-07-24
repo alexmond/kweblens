@@ -56,6 +56,11 @@ export const api = {
     getJson<PrinterColumn[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/columns`,
     ),
+  events: (cluster: string, namespace?: string) =>
+    getJson<EventSummary[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/events` +
+        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+    ),
   objectEvents: (cluster: string, kind: string, name: string, namespace?: string) => {
     const p = new URLSearchParams({ kind, name });
     if (namespace) {

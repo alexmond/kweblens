@@ -4,7 +4,7 @@ import { ApiError, api } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
 import { age, columnsFor, printerColumnDefs } from './columns';
-import type { EventSummary, KubeObject, NavCategory, NavItem } from './types';
+import type { ClusterInfo, EventSummary, KubeObject, NavCategory, NavItem } from './types';
 
 function initials(id: string): string {
   return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
@@ -15,7 +15,7 @@ const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
 export function App() {
-  const [clusters, setClusters] = useState<{ id: string; name: string }[]>([]);
+  const [clusters, setClusters] = useState<ClusterInfo[]>([]);
   const [cluster, setCluster] = useState<string | null>(null);
   const [nav, setNav] = useState<NavCategory[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
@@ -223,7 +223,14 @@ export function App() {
 
         <main className="content">
           {error && <div className="error">{error}</div>}
-          {!selected && !error && <div className="empty">Pick a resource kind from the Navigator.</div>}
+          {!selected && !error && cluster && (
+            <ClusterOverview
+              cluster={cluster}
+              name={activeCluster?.name ?? cluster}
+              masterUrl={activeCluster?.masterUrl}
+              namespaceCount={namespaces.length}
+            />
+          )}
           {selected && (
             <>
               <div className="content-head">
@@ -820,6 +827,93 @@ function EventsPane(props: { events: EventSummary[] | null; error: string | null
         ))}
       </tbody>
     </table>
+  );
+}
+
+function ClusterOverview(props: { cluster: string; name: string; masterUrl?: string; namespaceCount: number }) {
+  const { cluster, name, masterUrl, namespaceCount } = props;
+  const [nodes, setNodes] = useState<KubeObject[] | null>(null);
+  const [warnings, setWarnings] = useState<EventSummary[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setNodes(null);
+    setWarnings(null);
+    setErr(null);
+    api
+      .objects(cluster, 'nodes')
+      .then((n) => !cancelled && setNodes(n))
+      .catch((e) => !cancelled && setErr(String(e)));
+    api
+      .events(cluster)
+      .then((ev) => !cancelled && setWarnings(ev.filter((x) => x.type === 'Warning')))
+      .catch(() => !cancelled && setWarnings([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
+
+  const nodeReady = (o: KubeObject): boolean => {
+    const conds = ((o.status as Record<string, unknown>)?.conditions as Record<string, unknown>[]) ?? [];
+    const r = conds.find((c) => c.type === 'Ready');
+    return r ? r.status === 'True' : false;
+  };
+  const readyNodes = (nodes ?? []).filter(nodeReady).length;
+
+  return (
+    <div className="overview">
+      <h1 className="ov-title">{name}</h1>
+      <div className="ov-cards">
+        <div className="ov-card">
+          <div className="ov-num">{nodes ? nodes.length : '…'}</div>
+          <div className="ov-lbl">Nodes{nodes ? ` · ${readyNodes} ready` : ''}</div>
+        </div>
+        <div className="ov-card">
+          <div className="ov-num">{namespaceCount}</div>
+          <div className="ov-lbl">Namespaces</div>
+        </div>
+        <div className={'ov-card' + (warnings && warnings.length > 0 ? ' danger' : '')}>
+          <div className="ov-num">{warnings ? warnings.length : '…'}</div>
+          <div className="ov-lbl">Warnings</div>
+        </div>
+      </div>
+      {masterUrl && (
+        <div className="ov-api">
+          API server: <span className="mono">{masterUrl}</span>
+        </div>
+      )}
+      {err && <div className="error">{err}</div>}
+      <section className="ov-sec">
+        <h3>Warnings</h3>
+        {warnings === null ? (
+          <div className="empty">Loading…</div>
+        ) : warnings.length === 0 ? (
+          <div className="empty">No warnings.</div>
+        ) : (
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Reason</th>
+                <th>Object</th>
+                <th>Message</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {warnings.slice(0, 30).map((w, i) => (
+                <tr key={i} className="warn">
+                  <td>{w.reason}</td>
+                  <td>{w.object}</td>
+                  <td>{w.message}</td>
+                  <td>{w.age}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
   );
 }
 
