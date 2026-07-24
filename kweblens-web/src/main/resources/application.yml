@@ -37,6 +37,10 @@ spring:
 
   # In-jar MCP server (SSE over WebMVC) exposing read-only cluster tools.
   ai:
+    # Placeholder key so the Anthropic ChatClient bean constructs; it is never called unless
+    # kweblens.ai.enabled=true. Set a real key (ANTHROPIC_API_KEY) to turn on AI enrichment.
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:not-set}
     mcp:
       server:
         name: kweblens
@@ -55,6 +59,10 @@ server:
 kweblens:
   load-kubeconfig: ${KWEBLENS_LOAD_KUBECONFIG:true}
   clusters: []
+  # AI diagnosis (#10). Deterministic validators always run; LLM enrichment only when enabled
+  # AND an Anthropic API key is configured.
+  ai:
+    enabled: ${KWEBLENS_AI_ENABLED:false}
 
 management:
   endpoints:

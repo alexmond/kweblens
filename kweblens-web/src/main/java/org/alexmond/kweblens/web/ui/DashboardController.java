@@ -15,6 +15,8 @@ import org.alexmond.kweblens.metric.MetricService;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.ResourceSummary;
+import org.alexmond.kweblens.web.ai.DiagnoseService;
+import org.alexmond.kweblens.web.ai.RemediationService;
 import org.alexmond.kweblens.web.helm.HelmService;
 import org.alexmond.kweblens.web.nav.NavCatalog;
 import org.alexmond.kweblens.web.security.AuditService;
@@ -37,6 +39,10 @@ public class DashboardController {
 	private final MetricService metrics;
 
 	private final HelmService helm;
+
+	private final DiagnoseService diagnose;
+
+	private final RemediationService remediation;
 
 	private final AuditService audit;
 
@@ -80,6 +86,25 @@ public class DashboardController {
 		model.addAttribute("namespace", namespace);
 		model.addAttribute("releases", helm.listReleases(clusterId, namespace));
 		return "helm";
+	}
+
+	@GetMapping("/clusters/{clusterId}/diagnose")
+	public String diagnose(@PathVariable String clusterId, @RequestParam(required = false) String namespace,
+			Model model) {
+		shell(model, clusterId, "diagnose");
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("diagnosis", diagnose.diagnose(clusterId, namespace));
+		model.addAttribute("proposals", remediation.propose(clusterId, namespace));
+		return "diagnose";
+	}
+
+	@PostMapping("/clusters/{clusterId}/remediate")
+	public String remediate(@PathVariable String clusterId, @RequestParam String namespace, @RequestParam String action,
+			@RequestParam String target, Model model) {
+		// Reached only via the confirm form; the security gate already required auth for
+		// this POST.
+		remediation.apply(clusterId, namespace, action, target, true);
+		return "redirect:/clusters/" + clusterId + "/diagnose?namespace=" + namespace;
 	}
 
 	@GetMapping("/clusters/{clusterId}/metrics")

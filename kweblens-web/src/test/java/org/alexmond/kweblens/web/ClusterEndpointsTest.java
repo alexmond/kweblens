@@ -197,6 +197,14 @@ class ClusterEndpointsTest {
 	}
 
 	@Test
+	void dashboardDiagnosePageRenders() throws Exception {
+		mvc.perform(get("/clusters/test/diagnose").param("namespace", "web"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("diagnose"))
+			.andExpect(model().attributeExists("diagnosis"));
+	}
+
+	@Test
 	void dashboardExecPageRenders() throws Exception {
 		mvc.perform(get("/clusters/test/pods/web/nginx/exec"))
 			.andExpect(status().isOk())
