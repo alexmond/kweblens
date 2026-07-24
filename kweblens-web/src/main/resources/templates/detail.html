@@ -49,6 +49,44 @@
                     </div>
                 </div>
 
+                <!-- Write actions (auth-gated + audited). Scale/restart for workload kinds. -->
+                <div class="d-flex gap-2 mb-3 flex-wrap">
+                    <form th:if="${#lists.contains({'Deployment','StatefulSet','ReplicaSet'}, descriptor.kind())}"
+                          method="post" th:action="@{/clusters/{c}/resource-action(c=${clusterId})}" class="d-flex gap-1">
+                        <input type="hidden" name="action" value="scale"/>
+                        <input type="hidden" name="resource" th:value="${resource}"/>
+                        <input type="hidden" name="namespace" th:value="${namespace}"/>
+                        <input type="hidden" name="name" th:value="${name}"/>
+                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                        <input type="number" name="replicas" min="0" value="1" class="form-control form-control-sm"
+                               style="width: 5rem;"/>
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Scale</button>
+                    </form>
+                    <form th:if="${#lists.contains({'Deployment','StatefulSet','DaemonSet'}, descriptor.kind())}"
+                          method="post" th:action="@{/clusters/{c}/resource-action(c=${clusterId})}"
+                          onsubmit="return confirm('Rolling-restart this workload?');">
+                        <input type="hidden" name="action" value="restart"/>
+                        <input type="hidden" name="resource" th:value="${resource}"/>
+                        <input type="hidden" name="namespace" th:value="${namespace}"/>
+                        <input type="hidden" name="name" th:value="${name}"/>
+                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                        <button type="submit" class="btn btn-sm btn-outline-warning">
+                            <i class="bi bi-arrow-clockwise"></i> Restart
+                        </button>
+                    </form>
+                    <form method="post" th:action="@{/clusters/{c}/resource-action(c=${clusterId})}" class="ms-auto"
+                          onsubmit="return confirm('Delete this resource? This cannot be undone.');">
+                        <input type="hidden" name="action" value="delete"/>
+                        <input type="hidden" name="resource" th:value="${resource}"/>
+                        <input type="hidden" name="namespace" th:value="${namespace}"/>
+                        <input type="hidden" name="name" th:value="${name}"/>
+                        <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </form>
+                </div>
+
                 <dl class="row small">
                     <dt class="col-sm-2">Namespace</dt>
                     <dd class="col-sm-10" th:text="${detail.namespace()} ?: '—'">ns</dd>

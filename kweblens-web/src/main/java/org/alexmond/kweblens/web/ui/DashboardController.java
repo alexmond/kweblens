@@ -166,6 +166,27 @@ public class DashboardController {
 		return "yaml";
 	}
 
+	@PostMapping("/clusters/{clusterId}/resource-action")
+	public String resourceAction(@PathVariable String clusterId, @RequestParam String action,
+			@RequestParam String resource, @RequestParam(required = false) String namespace, @RequestParam String name,
+			@RequestParam(required = false) Integer replicas) {
+		ResourceDescriptor descriptor = clusterNav.find(clusterId, resource)
+			.orElseThrow(() -> new UnknownResourceException(resource));
+		switch (action) {
+			case "delete" -> resources.delete(clusterId, descriptor, namespace, name);
+			case "scale" -> resources.scale(clusterId, descriptor, namespace, name, (replicas != null) ? replicas : 0);
+			case "restart" -> resources.rolloutRestart(clusterId, descriptor, namespace, name);
+			default -> throw new IllegalArgumentException("Unknown action: " + action);
+		}
+		audit.record(clusterId, action, descriptor.kind() + "/" + namespace + "/" + name);
+		if ("delete".equals(action)) {
+			String query = (namespace != null && !namespace.isBlank()) ? "?namespace=" + namespace : "";
+			return "redirect:/clusters/" + clusterId + "/r/" + resource + query;
+		}
+		return "redirect:/clusters/" + clusterId + "/detail?resource=" + resource + "&namespace="
+				+ ((namespace != null) ? namespace : "") + "&name=" + name;
+	}
+
 	@PostMapping("/clusters/{clusterId}/apply")
 	public String apply(@PathVariable String clusterId, @RequestParam String manifest, @RequestParam String resource,
 			@RequestParam(required = false) String namespace) {

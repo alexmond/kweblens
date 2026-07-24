@@ -14,6 +14,9 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
+import io.fabric8.kubernetes.client.dsl.Resource;
+import io.fabric8.kubernetes.client.dsl.base.PatchContext;
+import io.fabric8.kubernetes.client.dsl.base.PatchType;
 import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 import io.fabric8.kubernetes.client.utils.Serialization;
 import lombok.RequiredArgsConstructor;
@@ -126,6 +129,39 @@ public class ResourceService {
 		HasMetadata parsed = Serialization.unmarshal(yaml);
 		HasMetadata applied = client.resource(parsed).serverSideApply();
 		return new ResourceSummary(applied.getKind(), namespace(applied), name(applied), null, "-");
+	}
+
+	/** Delete a single resource. */
+	public void delete(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
+		resource(clusterId, descriptor, namespace, name).delete();
+	}
+
+	/** Set a workload's replica count (Deployments, StatefulSets, ReplicaSets). */
+	public void scale(String clusterId, ResourceDescriptor descriptor, String namespace, String name, int replicas) {
+		strategicPatch(clusterId, descriptor, namespace, name, "{\"spec\":{\"replicas\":" + replicas + "}}");
+	}
+
+	/**
+	 * Trigger a rolling restart by stamping the pod template with a restart annotation
+	 * (the same mechanism as {@code kubectl rollout restart}). Works for
+	 * Deployments/StatefulSets/DaemonSets.
+	 */
+	public void rolloutRestart(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
+		String patch = "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{"
+				+ "\"kweblens.alexmond.org/restartedAt\":\"" + Instant.now() + "\"}}}}}";
+		strategicPatch(clusterId, descriptor, namespace, name, patch);
+	}
+
+	private void strategicPatch(String clusterId, ResourceDescriptor descriptor, String namespace, String name,
+			String patchJson) {
+		PatchContext context = new PatchContext.Builder().withPatchType(PatchType.STRATEGIC_MERGE).build();
+		resource(clusterId, descriptor, namespace, name).patch(context, patchJson);
+	}
+
+	private Resource<GenericKubernetesResource> resource(String clusterId, ResourceDescriptor descriptor,
+			String namespace, String name) {
+		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
+		return descriptor.namespaced() ? op.inNamespace(namespace).withName(name) : op.withName(name);
 	}
 
 	private ResourceDefinitionContext contextFor(ResourceDescriptor descriptor) {

@@ -134,6 +134,23 @@ class ResourceServiceTest {
 	}
 
 	@Test
+	void deleteRemovesTheResource() {
+		client.configMaps()
+			.resource(new ConfigMapBuilder().withNewMetadata()
+				.withName("doomed")
+				.withNamespace("default")
+				.endMetadata()
+				.build())
+			.create();
+		ResourceService service = serviceFor("mock");
+		assertThat(service.getYaml("mock", CONFIG_MAPS, "default", "doomed")).isNotNull();
+
+		service.delete("mock", CONFIG_MAPS, "default", "doomed");
+
+		assertThat(service.getYaml("mock", CONFIG_MAPS, "default", "doomed")).isNull();
+	}
+
+	@Test
 	void detailProjectsKindNameAndLabels() {
 		client.configMaps()
 			.resource(new ConfigMapBuilder().withNewMetadata()
