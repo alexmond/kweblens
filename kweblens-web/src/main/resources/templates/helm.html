@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}"
+      lang="en">
+<head>
+    <title>Helm Releases</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex">
+        <div th:replace="~{fragments/shell :: sidebar}"></div>
+
+        <section class="flex-grow-1 min-width-0">
+            <div class="d-flex align-items-center mb-3">
+                <h1 class="h5 mb-0"><i class="bi bi-hexagon"></i> Helm Releases</h1>
+                <span class="badge text-bg-secondary ms-2" th:text="${#lists.size(releases)} + ' items'">0 items</span>
+                <form class="ms-auto" method="get">
+                    <input class="form-control form-control-sm" type="search" name="namespace"
+                           placeholder="filter namespace…" th:value="${namespace}"/>
+                </form>
+            </div>
+
+            <table class="table table-sm table-hover bg-body shadow-sm rounded align-middle">
+                <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Namespace</th>
+                    <th>Revision</th>
+                    <th>Status</th>
+                    <th>Chart</th>
+                    <th>App version</th>
+                    <th>Updated</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="r : ${releases}">
+                    <td class="text-break" th:text="${r.name()}">name</td>
+                    <td th:text="${r.namespace()}">ns</td>
+                    <td th:text="${r.revision()}">1</td>
+                    <td>
+                        <span class="badge"
+                              th:classappend="${r.status() == 'DEPLOYED'} ? 'text-bg-success' : 'text-bg-light border'"
+                              th:text="${r.status()} ?: '—'">DEPLOYED</span>
+                    </td>
+                    <td th:text="${r.chart()} ?: '—'">chart</td>
+                    <td th:text="${r.appVersion()} ?: '—'">app</td>
+                    <td class="small text-muted" th:text="${r.updated()} ?: '—'">updated</td>
+                </tr>
+                <tr th:if="${#lists.isEmpty(releases)}">
+                    <td colspan="7" class="text-muted">No Helm releases.</td>
+                </tr>
+                </tbody>
+            </table>
+        </section>
+    </div>
+</div>
+</body>
+</html>

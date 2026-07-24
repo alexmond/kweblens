@@ -2,6 +2,15 @@ spring:
   application:
     name: kweblens
 
+  # jhelm is used as a plain library (we build one KubeService per cluster from each cluster's
+  # client), so its ambient-kubeconfig auto-configuration must not run — it would try to reach a
+  # single default cluster at startup.
+  autoconfigure:
+    exclude:
+      - org.alexmond.jhelm.core.JhelmCoreAutoConfiguration
+      - org.alexmond.jhelm.core.JhelmMetricsAutoConfiguration
+      - org.alexmond.jhelm.kube.JhelmKubeAutoConfiguration
+
   cloud:
     config:
       # The central config server is OPTIONAL. Don't hard-require spring.config.import so dev/test

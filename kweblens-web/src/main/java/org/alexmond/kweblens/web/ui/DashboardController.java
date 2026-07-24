@@ -13,6 +13,7 @@ import org.alexmond.kweblens.event.EventService;
 import org.alexmond.kweblens.metric.MetricService;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
+import org.alexmond.kweblens.web.helm.HelmService;
 import org.alexmond.kweblens.web.nav.NavCatalog;
 
 /**
@@ -31,6 +32,8 @@ public class DashboardController {
 	private final EventService events;
 
 	private final MetricService metrics;
+
+	private final HelmService helm;
 
 	private final NavCatalog navCatalog;
 
@@ -64,6 +67,14 @@ public class DashboardController {
 		model.addAttribute("namespace", namespace);
 		model.addAttribute("events", events.list(clusterId, namespace));
 		return "events";
+	}
+
+	@GetMapping("/clusters/{clusterId}/helm")
+	public String helm(@PathVariable String clusterId, @RequestParam(required = false) String namespace, Model model) {
+		shell(model, clusterId, "helm");
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("releases", helm.listReleases(clusterId, namespace));
+		return "helm";
 	}
 
 	@GetMapping("/clusters/{clusterId}/metrics")

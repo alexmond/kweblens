@@ -9,10 +9,15 @@
     <a th:href="@{/}" class="small text-decoration-none">&larr; Clusters</a>
     <div class="fw-semibold mt-2 text-truncate"
          th:text="${cluster != null ? cluster.name() : clusterId}">cluster</div>
-    <a class="nav-link py-1 px-2 small mb-2"
+    <a class="nav-link py-1 px-2 small"
        th:classappend="${selectedId == 'metrics'} ? 'active fw-semibold' : 'link-body-emphasis'"
        th:href="@{/clusters/{c}/metrics(c=${clusterId})}">
         <i class="bi bi-speedometer2"></i> Metrics
+    </a>
+    <a class="nav-link py-1 px-2 small mb-2"
+       th:classappend="${selectedId == 'helm'} ? 'active fw-semibold' : 'link-body-emphasis'"
+       th:href="@{/clusters/{c}/helm(c=${clusterId})}">
+        <i class="bi bi-hexagon"></i> Helm
     </a>
 
     <div th:each="cat : ${categories}" class="mb-3">

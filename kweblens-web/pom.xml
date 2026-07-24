@@ -31,6 +31,15 @@
             <artifactId>kweblens-core</artifactId>
         </dependency>
 
+        <!-- Helm releases via the sibling jhelm library (dogfood). jhelm-kube brings jhelm-core +
+             the official io.kubernetes client; jhelm's own auto-configuration is excluded (see
+             application.yml) so we use it purely as a library, one KubeService per cluster. -->
+        <dependency>
+            <groupId>org.alexmond</groupId>
+            <artifactId>jhelm-kube</artifactId>
+            <version>${jhelm.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
