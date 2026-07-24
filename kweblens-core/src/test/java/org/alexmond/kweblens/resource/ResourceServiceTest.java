@@ -110,6 +110,30 @@ class ResourceServiceTest {
 	}
 
 	@Test
+	void watchDeliversAddedEvents() throws InterruptedException {
+		ResourceService service = serviceFor("mock");
+		// Latch specifically on our object (the shared crud server may replay
+		// pre-existing ones).
+		java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+		io.fabric8.kubernetes.client.Watch watch = service.watch("mock", CONFIG_MAPS, "default", (type, row) -> {
+			if ("ADDED".equals(type) && "watched".equals(row.name())) {
+				latch.countDown();
+			}
+		});
+
+		client.configMaps()
+			.resource(new ConfigMapBuilder().withNewMetadata()
+				.withName("watched")
+				.withNamespace("default")
+				.endMetadata()
+				.build())
+			.create();
+
+		assertThat(latch.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+		watch.close();
+	}
+
+	@Test
 	void detailProjectsKindNameAndLabels() {
 		client.configMaps()
 			.resource(new ConfigMapBuilder().withNewMetadata()

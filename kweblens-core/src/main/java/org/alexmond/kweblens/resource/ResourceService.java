@@ -6,9 +6,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import java.util.function.BiConsumer;
+
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.Watch;
+import io.fabric8.kubernetes.client.Watcher;
+import io.fabric8.kubernetes.client.WatcherException;
 import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 import io.fabric8.kubernetes.client.utils.Serialization;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +59,35 @@ public class ResourceService {
 			return op.inAnyNamespace().list().getItems();
 		}
 		return op.inNamespace(namespace).list().getItems();
+	}
+
+	/**
+	 * Watch a kind and deliver each change to {@code onEvent} as (action, row) —
+	 * {@code ADDED}, {@code MODIFIED}, or {@code DELETED} with the affected
+	 * {@link ResourceSummary}. The returned {@link Watch} must be closed to stop
+	 * watching.
+	 */
+	public Watch watch(String clusterId, ResourceDescriptor descriptor, String namespace,
+			BiConsumer<String, ResourceSummary> onEvent) {
+		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
+		Watcher<GenericKubernetesResource> watcher = new Watcher<>() {
+			@Override
+			public void eventReceived(Action action, GenericKubernetesResource resource) {
+				onEvent.accept(action.name(), toSummary(descriptor.kind(), resource));
+			}
+
+			@Override
+			public void onClose(WatcherException cause) {
+				// The web layer completes the SSE emitter via its own close hooks.
+			}
+		};
+		if (!descriptor.namespaced()) {
+			return op.watch(watcher);
+		}
+		if (namespace == null || namespace.isBlank()) {
+			return op.inAnyNamespace().watch(watcher);
+		}
+		return op.inNamespace(namespace).watch(watcher);
 	}
 
 	/**
