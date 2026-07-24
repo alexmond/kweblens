@@ -135,6 +135,28 @@ class ResourceServiceTest {
 	}
 
 	@Test
+	void watchRawDeliversFullObjects() throws InterruptedException {
+		ResourceService service = serviceFor("mock");
+		java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+		io.fabric8.kubernetes.client.Watch watch = service.watchRaw("mock", CONFIG_MAPS, "default", (type, obj) -> {
+			if ("ADDED".equals(type) && "raw-watched".equals(obj.getMetadata().getName())) {
+				latch.countDown();
+			}
+		});
+
+		client.configMaps()
+			.resource(new ConfigMapBuilder().withNewMetadata()
+				.withName("raw-watched")
+				.withNamespace("default")
+				.endMetadata()
+				.build())
+			.create();
+
+		assertThat(latch.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+		watch.close();
+	}
+
+	@Test
 	void deleteRemovesTheResource() {
 		client.configMaps()
 			.resource(new ConfigMapBuilder().withNewMetadata()

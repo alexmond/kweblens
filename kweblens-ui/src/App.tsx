@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { ApiError, api } from './api';
 import { auth } from './auth';
-import type { NavCategory, NavItem, ResourceRow } from './types';
+import { age, columnsFor } from './columns';
+import type { KubeObject, NavCategory, NavItem } from './types';
 
 function initials(id: string): string {
   return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
 }
 
-function rowKey(r: ResourceRow): string {
-  return (r.namespace ?? '') + '/' + r.name;
-}
+const objName = (o: KubeObject): string => o.metadata?.name ?? '';
+const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
+const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
 export function App() {
   const [clusters, setClusters] = useState<{ id: string; name: string }[]>([]);
@@ -19,15 +20,14 @@ export function App() {
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [namespace, setNamespace] = useState<string | null>(null);
   const [selected, setSelected] = useState<NavItem | null>(null);
-  const [rows, setRows] = useState<ResourceRow[]>([]);
+  const [objects, setObjects] = useState<KubeObject[]>([]);
   const [loading, setLoading] = useState(false);
   const [live, setLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ resourceId: string; row: ResourceRow } | null>(null);
+  const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject } | null>(null);
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
 
-  // Load the cluster list once.
   useEffect(() => {
     api
       .clusters()
@@ -38,7 +38,6 @@ export function App() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  // On cluster change: load its Navigator + namespaces, reset the view.
   useEffect(() => {
     if (!cluster) {
       return;
@@ -47,7 +46,7 @@ export function App() {
     setNamespaces([]);
     setNamespace(null);
     setSelected(null);
-    setRows([]);
+    setObjects([]);
     setError(null);
     api.nav(cluster).then(setNav).catch((e) => setError(String(e)));
     api
@@ -56,8 +55,7 @@ export function App() {
       .catch(() => setNamespaces([]));
   }, [cluster]);
 
-  // Fetch the selected kind whenever the kind or the namespace filter changes. The
-  // namespace filter only applies to namespaced kinds; cluster-scoped kinds ignore it.
+  // Fetch the selected kind's raw objects on kind/namespace change.
   useEffect(() => {
     if (!cluster || !selected) {
       return;
@@ -68,16 +66,16 @@ export function App() {
     setLoading(true);
     setError(null);
     api
-      .resources(cluster, selected.id, ns)
+      .objects(cluster, selected.id, ns)
       .then((r) => {
         if (!cancelled) {
-          setRows(r);
+          setObjects(r);
         }
       })
       .catch((e) => {
         if (!cancelled) {
           setError(String(e));
-          setRows([]);
+          setObjects([]);
         }
       })
       .finally(() => {
@@ -90,43 +88,38 @@ export function App() {
     };
   }, [cluster, selected, namespace]);
 
-  // Live updates: stream ADDED/MODIFIED/DELETED over SSE and patch the table in place,
-  // scoped to the same cluster/kind/namespace as the current view.
+  // Live object stream: patch the table in place.
   useEffect(() => {
     if (!cluster || !selected) {
       return;
     }
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
     const url =
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(selected.id)}/watch` +
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(selected.id)}/objects/watch` +
       (ns ? `?namespace=${encodeURIComponent(ns)}` : '');
     const es = new EventSource(url);
-
     const upsert = (e: MessageEvent) => {
-      const row = JSON.parse(e.data) as ResourceRow;
-      setRows((prev) => {
-        const key = rowKey(row);
-        const idx = prev.findIndex((r) => rowKey(r) === key);
+      const obj = JSON.parse(e.data) as KubeObject;
+      setObjects((prev) => {
+        const key = objKey(obj);
+        const idx = prev.findIndex((o) => objKey(o) === key);
         if (idx === -1) {
-          return [...prev, row];
+          return [...prev, obj];
         }
         const next = prev.slice();
-        next[idx] = row;
+        next[idx] = obj;
         return next;
       });
     };
     const remove = (e: MessageEvent) => {
-      const row = JSON.parse(e.data) as ResourceRow;
-      setRows((prev) => prev.filter((r) => rowKey(r) !== rowKey(row)));
+      const obj = JSON.parse(e.data) as KubeObject;
+      setObjects((prev) => prev.filter((o) => objKey(o) !== objKey(obj)));
     };
-
     es.addEventListener('ADDED', upsert as EventListener);
     es.addEventListener('MODIFIED', upsert as EventListener);
     es.addEventListener('DELETED', remove as EventListener);
     es.onopen = () => setLive(true);
-    // EventSource reconnects on its own; just reflect that we are not currently streaming.
     es.onerror = () => setLive(false);
-
     return () => {
       setLive(false);
       es.close();
@@ -193,7 +186,7 @@ export function App() {
             <>
               <div className="content-head">
                 <h1>{selected.label}</h1>
-                <span className="count">{rows.length} items</span>
+                <span className="count">{objects.length} items</span>
                 {live && (
                   <span className="live" title="Live-updating (SSE watch)">
                     <span className="dot" /> live
@@ -217,10 +210,12 @@ export function App() {
                 )}
               </div>
               <ResourceTable
-                rows={rows}
+                objects={objects}
+                resourceId={selected.id}
+                namespaced={selected.namespaced}
                 loading={loading}
-                selectedName={detail?.row.name ?? null}
-                onOpen={(row) => setDetail({ resourceId: selected.id, row })}
+                selectedKey={detail ? objKey(detail.obj) : null}
+                onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
               />
             </>
           )}
@@ -230,7 +225,7 @@ export function App() {
           <Detail
             cluster={cluster}
             resourceId={detail.resourceId}
-            row={detail.row}
+            obj={detail.obj}
             authed={authUser !== null}
             onRequireAuth={() => setShowLogin(true)}
             onAuthExpired={() => {
@@ -256,54 +251,6 @@ export function App() {
   );
 }
 
-function LoginModal(props: { onCancel: () => void; onSubmit: (user: string, pass: string) => void }) {
-  const { onCancel, onSubmit } = props;
-  const [user, setUser] = useState('admin');
-  const [pass, setPass] = useState('');
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
-
-  return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <form
-        className="modal"
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSubmit(user, pass);
-        }}
-      >
-        <h2>Sign in</h2>
-        <p className="modal-note">Credentials are kept in memory for this tab only and sent over HTTP Basic.</p>
-        <label>
-          <span>Username</span>
-          <input value={user} onChange={(e) => setUser(e.target.value)} autoFocus />
-        </label>
-        <label>
-          <span>Password</span>
-          <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
-        </label>
-        <div className="modal-actions">
-          <button type="button" className="btn" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="submit" className="btn primary">
-            Sign in
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 function NavTree(props: {
   categories: NavCategory[];
   selected: string | null;
@@ -312,7 +259,6 @@ function NavTree(props: {
   const { categories, selected, onSelect } = props;
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  // Auto-expand the group holding the current selection.
   useEffect(() => {
     const holder = categories.find((c) => c.items.some((i) => i.id === selected));
     if (holder) {
@@ -363,43 +309,46 @@ function NavTree(props: {
 }
 
 function ResourceTable(props: {
-  rows: ResourceRow[];
+  objects: KubeObject[];
+  resourceId: string;
+  namespaced: boolean;
   loading: boolean;
-  selectedName: string | null;
-  onOpen: (row: ResourceRow) => void;
+  selectedKey: string | null;
+  onOpen: (obj: KubeObject) => void;
 }) {
-  const { rows, loading, selectedName, onOpen } = props;
+  const { objects, resourceId, namespaced, loading, selectedKey, onOpen } = props;
   if (loading) {
     return <div className="empty">Loading…</div>;
   }
-  if (rows.length === 0) {
+  if (objects.length === 0) {
     return <div className="empty">No resources.</div>;
   }
-  const namespaced = rows.some((r) => r.namespace);
-  const sorted = [...rows].sort(
-    (a, b) => (a.namespace ?? '').localeCompare(b.namespace ?? '') || a.name.localeCompare(b.name),
+  const cols = columnsFor(resourceId);
+  const showNs = namespaced && objects.some((o) => objNs(o));
+  const sorted = [...objects].sort(
+    (a, b) => (objNs(a) ?? '').localeCompare(objNs(b) ?? '') || objName(a).localeCompare(objName(b)),
   );
   return (
     <table className="grid clickable">
       <thead>
         <tr>
-          {namespaced && <th>Namespace</th>}
           <th>Name</th>
-          <th>Status</th>
+          {showNs && <th>Namespace</th>}
+          {cols.map((c) => (
+            <th key={c.key}>{c.header}</th>
+          ))}
           <th>Age</th>
         </tr>
       </thead>
       <tbody>
-        {sorted.map((r) => (
-          <tr
-            key={rowKey(r)}
-            className={r.name === selectedName ? 'row-active' : ''}
-            onClick={() => onOpen(r)}
-          >
-            {namespaced && <td>{r.namespace}</td>}
-            <td className="name">{r.name}</td>
-            <td>{r.status ?? '—'}</td>
-            <td>{r.age}</td>
+        {sorted.map((o) => (
+          <tr key={objKey(o)} className={objKey(o) === selectedKey ? 'row-active' : ''} onClick={() => onOpen(o)}>
+            <td className="name">{objName(o)}</td>
+            {showNs && <td>{objNs(o) ?? '—'}</td>}
+            {cols.map((c) => (
+              <td key={c.key}>{c.render(o)}</td>
+            ))}
+            <td>{age(o.metadata?.creationTimestamp)}</td>
           </tr>
         ))}
       </tbody>
@@ -413,13 +362,13 @@ const RESTARTABLE = ['Deployment', 'StatefulSet', 'DaemonSet'];
 function Detail(props: {
   cluster: string;
   resourceId: string;
-  row: ResourceRow;
+  obj: KubeObject;
   authed: boolean;
   onRequireAuth: () => void;
   onAuthExpired: () => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, row, authed, onRequireAuth, onAuthExpired, onClose } = props;
+  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onClose } = props;
   const [tab, setTab] = useState<'overview' | 'yaml'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
@@ -429,13 +378,57 @@ function Detail(props: {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState(false);
 
-  const isNode = row.kind === 'Node';
-  const ns = row.namespace ?? '';
+  const kind = obj.kind ?? '';
+  const name = objName(obj);
+  const ns = objNs(obj) ?? '';
+  const isNode = kind === 'Node';
+  const status = (obj.status as Record<string, unknown>) ?? {};
 
-  const act = async (
-    fn: () => Promise<{ result: string }>,
-    opts?: { confirm?: string; closeOnDone?: boolean },
-  ) => {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (tab !== 'yaml' || yaml !== null || yamlError !== null) {
+      return;
+    }
+    let cancelled = false;
+    api
+      .yaml(cluster, resourceId, name, ns || undefined)
+      .then((t) => {
+        if (!cancelled) {
+          setYaml(t);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setYamlError(String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, yaml, yamlError, cluster, resourceId, name, ns]);
+
+  const copy = () => {
+    if (yaml) {
+      navigator.clipboard?.writeText(yaml).then(
+        () => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        },
+        () => undefined,
+      );
+    }
+  };
+
+  const act = async (fn: () => Promise<{ result: string }>, opts?: { confirm?: string; closeOnDone?: boolean }) => {
     if (opts?.confirm && !window.confirm(opts.confirm)) {
       return;
     }
@@ -461,58 +454,12 @@ function Detail(props: {
     }
   };
 
-  // Close on Escape.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  // Lazily fetch YAML the first time the YAML tab is opened.
-  useEffect(() => {
-    if (tab !== 'yaml' || yaml !== null || yamlError !== null) {
-      return;
-    }
-    let cancelled = false;
-    api
-      .yaml(cluster, resourceId, row.name, row.namespace ?? undefined)
-      .then((t) => {
-        if (!cancelled) {
-          setYaml(t);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setYamlError(String(e));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, yaml, yamlError, cluster, resourceId, row.name, row.namespace]);
-
-  const copy = () => {
-    if (yaml) {
-      navigator.clipboard?.writeText(yaml).then(
-        () => {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1200);
-        },
-        () => undefined,
-      );
-    }
-  };
-
   return (
-    <div className="drawer" role="dialog" aria-label={`${row.kind} ${row.name}`}>
+    <div className="drawer" role="dialog" aria-label={`${kind} ${name}`}>
       <div className="drawer-head">
         <div className="drawer-title">
-          <span className="drawer-kind">{row.kind}</span>
-          <span className="drawer-name">{row.name}</span>
+          <span className="drawer-kind">{kind}</span>
+          <span className="drawer-name">{name}</span>
         </div>
         <button className="drawer-close" title="Close (Esc)" onClick={onClose}>
           ×
@@ -530,19 +477,23 @@ function Detail(props: {
         {tab === 'overview' && (
           <dl className="kv">
             <dt>Kind</dt>
-            <dd>{row.kind}</dd>
-            {row.namespace && (
+            <dd>{kind}</dd>
+            {ns && (
               <>
                 <dt>Namespace</dt>
-                <dd>{row.namespace}</dd>
+                <dd>{ns}</dd>
               </>
             )}
             <dt>Name</dt>
-            <dd>{row.name}</dd>
-            <dt>Status</dt>
-            <dd>{row.status ?? '—'}</dd>
+            <dd>{name}</dd>
+            {typeof status.phase === 'string' && (
+              <>
+                <dt>Status</dt>
+                <dd>{status.phase as string}</dd>
+              </>
+            )}
             <dt>Age</dt>
-            <dd>{row.age}</dd>
+            <dd>{age(obj.metadata?.creationTimestamp)}</dd>
           </dl>
         )}
         {tab === 'yaml' && (
@@ -565,7 +516,7 @@ function Detail(props: {
             Sign in to run actions
           </button>
         )}
-        {authed && SCALABLE.includes(row.kind) && (
+        {authed && SCALABLE.includes(kind) && (
           <span className="act">
             <input
               type="number"
@@ -575,49 +526,37 @@ function Detail(props: {
               disabled={busy}
               onChange={(e) => setReplicas(Math.max(0, Number.parseInt(e.target.value || '0', 10)))}
             />
-            <button
-              className="btn"
-              disabled={busy}
-              onClick={() => act(() => api.scale(cluster, resourceId, ns, row.name, replicas))}
-            >
+            <button className="btn" disabled={busy} onClick={() => act(() => api.scale(cluster, resourceId, ns, name, replicas))}>
               Scale
             </button>
           </span>
         )}
-        {authed && RESTARTABLE.includes(row.kind) && (
+        {authed && RESTARTABLE.includes(kind) && (
           <button
             className="btn"
             disabled={busy}
-            onClick={() =>
-              act(() => api.restart(cluster, resourceId, ns, row.name), {
-                confirm: `Rolling-restart ${row.name}?`,
-              })
-            }
+            onClick={() => act(() => api.restart(cluster, resourceId, ns, name), { confirm: `Rolling-restart ${name}?` })}
           >
             Restart
           </button>
         )}
         {authed && isNode && (
           <>
-            <button
-              className="btn"
-              disabled={busy}
-              onClick={() => act(() => api.cordon(cluster, row.name), { confirm: `Cordon ${row.name}?` })}
-            >
+            <button className="btn" disabled={busy} onClick={() => act(() => api.cordon(cluster, name), { confirm: `Cordon ${name}?` })}>
               Cordon
             </button>
-            <button className="btn" disabled={busy} onClick={() => act(() => api.uncordon(cluster, row.name))}>
+            <button className="btn" disabled={busy} onClick={() => act(() => api.uncordon(cluster, name))}>
               Uncordon
             </button>
           </>
         )}
-        {authed && !isNode && row.namespace && (
+        {authed && !isNode && ns && (
           <button
             className="btn danger"
             disabled={busy}
             onClick={() =>
-              act(() => api.del(cluster, resourceId, ns, row.name), {
-                confirm: `Delete ${row.kind} ${row.name}? This cannot be undone.`,
+              act(() => api.del(cluster, resourceId, ns, name), {
+                confirm: `Delete ${kind} ${name}? This cannot be undone.`,
                 closeOnDone: true,
               })
             }
@@ -627,6 +566,54 @@ function Detail(props: {
         )}
         {actionMsg && <span className={'act-msg' + (actionErr ? ' err' : '')}>{actionMsg}</span>}
       </div>
+    </div>
+  );
+}
+
+function LoginModal(props: { onCancel: () => void; onSubmit: (user: string, pass: string) => void }) {
+  const { onCancel, onSubmit } = props;
+  const [user, setUser] = useState('admin');
+  const [pass, setPass] = useState('');
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <form
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit(user, pass);
+        }}
+      >
+        <h2>Sign in</h2>
+        <p className="modal-note">Credentials are kept in memory for this tab only and sent over HTTP Basic.</p>
+        <label>
+          <span>Username</span>
+          <input value={user} onChange={(e) => setUser(e.target.value)} autoFocus />
+        </label>
+        <label>
+          <span>Password</span>
+          <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
+        </label>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="btn primary">
+            Sign in
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

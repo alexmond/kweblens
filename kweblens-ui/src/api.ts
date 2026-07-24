@@ -1,5 +1,5 @@
 import { auth } from './auth';
-import type { ClusterInfo, NavCategory, ResourceRow } from './types';
+import type { ClusterInfo, KubeObject, NavCategory, ResourceRow } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -47,6 +47,11 @@ export const api = {
   nav: (cluster: string) => getJson<NavCategory[]>(`/api/v1/clusters/${cluster}/nav`),
   namespaces: (cluster: string) =>
     getJson<ResourceRow[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/namespaces`),
+  objects: (cluster: string, resourceId: string, namespace?: string) =>
+    getJson<KubeObject[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/objects` +
+        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+    ),
   resources: (cluster: string, resourceId: string, namespace?: string) =>
     getJson<ResourceRow[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}` +

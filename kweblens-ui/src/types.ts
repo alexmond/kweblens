@@ -26,3 +26,19 @@ export interface ResourceRow {
   status: string | null;
   age: string;
 }
+
+// A raw Kubernetes object (as returned by the cluster), used to render kind-specific columns.
+export interface KubeObject {
+  apiVersion?: string;
+  kind?: string;
+  metadata?: {
+    name?: string;
+    namespace?: string;
+    creationTimestamp?: string;
+    labels?: Record<string, string>;
+    ownerReferences?: { kind: string; name: string }[];
+  };
+  spec?: Record<string, unknown>;
+  status?: Record<string, unknown>;
+  [k: string]: unknown;
+}
