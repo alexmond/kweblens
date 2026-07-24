@@ -9,6 +9,7 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
+import io.fabric8.kubernetes.client.utils.Serialization;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -44,14 +45,7 @@ public class ResourceService {
 	 * etc.) map differently.
 	 */
 	public List<GenericKubernetesResource> listRaw(String clusterId, ResourceDescriptor descriptor, String namespace) {
-		KubernetesClient client = clusters.require(clusterId);
-		ResourceDefinitionContext ctx = new ResourceDefinitionContext.Builder().withGroup(descriptor.group())
-			.withVersion(descriptor.version())
-			.withKind(descriptor.kind())
-			.withPlural(descriptor.plural())
-			.withNamespaced(descriptor.namespaced())
-			.build();
-		var op = client.genericKubernetesResources(ctx);
+		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
 		if (!descriptor.namespaced()) {
 			return op.list().getItems();
 		}
@@ -59,6 +53,36 @@ public class ResourceService {
 			return op.inAnyNamespace().list().getItems();
 		}
 		return op.inNamespace(namespace).list().getItems();
+	}
+
+	/**
+	 * The YAML of a single resource, or null if it does not exist.
+	 */
+	public String getYaml(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
+		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
+		GenericKubernetesResource resource = descriptor.namespaced() ? op.inNamespace(namespace).withName(name).get()
+				: op.withName(name).get();
+		return (resource != null) ? Serialization.asYaml(resource) : null;
+	}
+
+	/**
+	 * Apply a YAML manifest (server-side apply). The manifest is self-describing, so no
+	 * descriptor is needed. Returns a summary of the applied resource.
+	 */
+	public ResourceSummary apply(String clusterId, String yaml) {
+		KubernetesClient client = clusters.require(clusterId);
+		HasMetadata parsed = Serialization.unmarshal(yaml);
+		HasMetadata applied = client.resource(parsed).serverSideApply();
+		return new ResourceSummary(applied.getKind(), namespace(applied), name(applied), null, "-");
+	}
+
+	private ResourceDefinitionContext contextFor(ResourceDescriptor descriptor) {
+		return new ResourceDefinitionContext.Builder().withGroup(descriptor.group())
+			.withVersion(descriptor.version())
+			.withKind(descriptor.kind())
+			.withPlural(descriptor.plural())
+			.withNamespaced(descriptor.namespaced())
+			.build();
 	}
 
 	/** List every namespace in the cluster. */

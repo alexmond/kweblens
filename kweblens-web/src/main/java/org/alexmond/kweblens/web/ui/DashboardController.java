@@ -6,6 +6,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
@@ -13,8 +14,10 @@ import org.alexmond.kweblens.event.EventService;
 import org.alexmond.kweblens.metric.MetricService;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
+import org.alexmond.kweblens.resource.ResourceSummary;
 import org.alexmond.kweblens.web.helm.HelmService;
 import org.alexmond.kweblens.web.nav.NavCatalog;
+import org.alexmond.kweblens.web.security.AuditService;
 
 /**
  * Server-rendered Kubernetes dashboard. The cluster index lists connected clusters;
@@ -34,6 +37,8 @@ public class DashboardController {
 	private final MetricService metrics;
 
 	private final HelmService helm;
+
+	private final AuditService audit;
 
 	private final NavCatalog navCatalog;
 
@@ -95,6 +100,29 @@ public class DashboardController {
 		model.addAttribute("pod", pod);
 		model.addAttribute("container", container);
 		return "logs";
+	}
+
+	@GetMapping("/clusters/{clusterId}/yaml")
+	public String yaml(@PathVariable String clusterId, @RequestParam String resource,
+			@RequestParam(required = false) String namespace, @RequestParam String name, Model model) {
+		ResourceDescriptor descriptor = navCatalog.find(resource)
+			.orElseThrow(() -> new UnknownResourceException(resource));
+		shell(model, clusterId, resource);
+		model.addAttribute("resource", resource);
+		model.addAttribute("namespace", namespace);
+		model.addAttribute("name", name);
+		model.addAttribute("descriptor", descriptor);
+		model.addAttribute("yaml", resources.getYaml(clusterId, descriptor, namespace, name));
+		return "yaml";
+	}
+
+	@PostMapping("/clusters/{clusterId}/apply")
+	public String apply(@PathVariable String clusterId, @RequestParam String manifest, @RequestParam String resource,
+			@RequestParam(required = false) String namespace) {
+		ResourceSummary applied = resources.apply(clusterId, manifest);
+		audit.record(clusterId, "apply", applied.kind() + "/" + applied.namespace() + "/" + applied.name());
+		String query = (namespace != null && !namespace.isBlank()) ? "?namespace=" + namespace : "";
+		return "redirect:/clusters/" + clusterId + "/r/" + resource + query;
 	}
 
 	/** Populate the model attributes the in-cluster shell (left nav) needs. */

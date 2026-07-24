@@ -1,9 +1,11 @@
 package org.alexmond.kweblens.resource;
 
+import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
@@ -14,6 +16,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ResourceServiceTest {
 
 	static KubernetesClient client;
+
+	static KubernetesMockServer server;
+
+	private static final ResourceDescriptor CONFIG_MAPS = ResourceDescriptor.coreNamespaced("configmaps", "Config Maps",
+			"ConfigMap", "configmaps");
 
 	private ResourceService serviceFor(String clusterId) {
 		ClusterRegistry registry = new ClusterRegistry();
@@ -55,6 +62,51 @@ class ResourceServiceTest {
 			assertThat(row.namespace()).isEqualTo("web");
 			assertThat(row.name()).isEqualTo("nginx");
 		});
+	}
+
+	@Test
+	void getYamlReturnsTheResourceYaml() {
+		client.configMaps()
+			.resource(new ConfigMapBuilder().withNewMetadata()
+				.withName("cm1")
+				.withNamespace("default")
+				.endMetadata()
+				.addToData("key", "value")
+				.build())
+			.create();
+
+		assertThat(serviceFor("mock").getYaml("mock", CONFIG_MAPS, "default", "cm1")).contains("cm1")
+			.contains("ConfigMap");
+	}
+
+	@Test
+	void getYamlIsNullForMissingResource() {
+		assertThat(serviceFor("mock").getYaml("mock", CONFIG_MAPS, "default", "absent")).isNull();
+	}
+
+	@Test
+	void applyServerSideAppliesTheManifest() {
+		// The crud mock doesn't implement server-side apply; stub the apply PATCH.
+		server.expect()
+			.patch()
+			.withPath("/api/v1/namespaces/default/configmaps/my-config?fieldManager=fabric8")
+			.andReturn(200, "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\","
+					+ "\"metadata\":{\"name\":\"my-config\",\"namespace\":\"default\"},\"data\":{\"key\":\"value\"}}")
+			.always();
+		String yaml = """
+				apiVersion: v1
+				kind: ConfigMap
+				metadata:
+				  name: my-config
+				  namespace: default
+				data:
+				  key: value
+				""";
+
+		ResourceSummary applied = serviceFor("mock").apply("mock", yaml);
+
+		assertThat(applied.name()).isEqualTo("my-config");
+		assertThat(applied.kind()).isEqualTo("ConfigMap");
 	}
 
 }
