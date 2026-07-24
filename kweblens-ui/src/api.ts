@@ -1,5 +1,5 @@
 import { auth } from './auth';
-import type { ClusterInfo, EventSummary, KubeObject, NavCategory, ResourceRow } from './types';
+import type { ClusterInfo, EventSummary, KubeObject, NavCategory, PrinterColumn, ResourceRow } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -51,6 +51,10 @@ export const api = {
     getJson<KubeObject[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/objects` +
         (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+    ),
+  printerColumns: (cluster: string, resourceId: string) =>
+    getJson<PrinterColumn[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/columns`,
     ),
   objectEvents: (cluster: string, kind: string, name: string, namespace?: string) => {
     const p = new URLSearchParams({ kind, name });

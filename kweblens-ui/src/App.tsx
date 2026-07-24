@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { ApiError, api } from './api';
 import { auth } from './auth';
-import { age, columnsFor } from './columns';
+import type { ColumnDef } from './columns';
+import { age, columnsFor, printerColumnDefs } from './columns';
 import type { EventSummary, KubeObject, NavCategory, NavItem } from './types';
 
 function initials(id: string): string {
@@ -25,6 +26,7 @@ export function App() {
   const [live, setLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject } | null>(null);
+  const [cols, setCols] = useState<ColumnDef[]>([]);
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
 
@@ -87,6 +89,31 @@ export function App() {
       cancelled = true;
     };
   }, [cluster, selected, namespace]);
+
+  // Columns for the selected kind: built-in registry, or the CRD's printer columns for
+  // custom kinds (their id is "group.plural"), falling back to Name/Namespace/Age.
+  useEffect(() => {
+    if (!cluster || !selected) {
+      setCols([]);
+      return;
+    }
+    if (selected.id.includes('.')) {
+      let cancelled = false;
+      api
+        .printerColumns(cluster, selected.id)
+        .then((pc) => {
+          if (!cancelled) {
+            setCols(pc.length ? printerColumnDefs(pc) : []);
+          }
+        })
+        .catch(() => setCols([]));
+      return () => {
+        cancelled = true;
+      };
+    }
+    setCols(columnsFor(selected.id));
+    return undefined;
+  }, [cluster, selected]);
 
   // Live object stream: patch the table in place.
   useEffect(() => {
@@ -211,7 +238,7 @@ export function App() {
               </div>
               <ResourceTable
                 objects={objects}
-                resourceId={selected.id}
+                columns={cols}
                 namespaced={selected.namespaced}
                 loading={loading}
                 selectedKey={detail ? objKey(detail.obj) : null}
@@ -310,21 +337,22 @@ function NavTree(props: {
 
 function ResourceTable(props: {
   objects: KubeObject[];
-  resourceId: string;
+  columns: ColumnDef[];
   namespaced: boolean;
   loading: boolean;
   selectedKey: string | null;
   onOpen: (obj: KubeObject) => void;
 }) {
-  const { objects, resourceId, namespaced, loading, selectedKey, onOpen } = props;
+  const { objects, columns: cols, namespaced, loading, selectedKey, onOpen } = props;
   if (loading) {
     return <div className="empty">Loading…</div>;
   }
   if (objects.length === 0) {
     return <div className="empty">No resources.</div>;
   }
-  const cols = columnsFor(resourceId);
   const showNs = namespaced && objects.some((o) => objNs(o));
+  // Some CRD printer columns already include an Age column; don't render ours twice.
+  const showAge = !cols.some((c) => c.header.toLowerCase() === 'age');
   const sorted = [...objects].sort(
     (a, b) => (objNs(a) ?? '').localeCompare(objNs(b) ?? '') || objName(a).localeCompare(objName(b)),
   );
@@ -337,7 +365,7 @@ function ResourceTable(props: {
           {cols.map((c) => (
             <th key={c.key}>{c.header}</th>
           ))}
-          <th>Age</th>
+          {showAge && <th>Age</th>}
         </tr>
       </thead>
       <tbody>
@@ -348,7 +376,7 @@ function ResourceTable(props: {
             {cols.map((c) => (
               <td key={c.key}>{c.render(o)}</td>
             ))}
-            <td>{age(o.metadata?.creationTimestamp)}</td>
+            {showAge && <td>{age(o.metadata?.creationTimestamp)}</td>}
           </tr>
         ))}
       </tbody>

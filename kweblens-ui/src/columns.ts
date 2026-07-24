@@ -1,4 +1,4 @@
-import type { KubeObject } from './types';
+import type { KubeObject, PrinterColumn } from './types';
 
 // A kind-specific column: the "middle" columns between Name/Namespace and Age
 // (those three are rendered by the table framework). render() returns display text.
@@ -200,4 +200,60 @@ export const COLUMNS: Record<string, ColumnDef[]> = {
 
 export function columnsFor(resourceId: string): ColumnDef[] {
   return COLUMNS[resourceId] ?? [];
+}
+
+function getDotted(o: unknown, path: string): unknown {
+  if (!path) {
+    return o;
+  }
+  let cur: unknown = o;
+  for (const part of path.split('.')) {
+    if (cur === null || typeof cur !== 'object') {
+      return undefined;
+    }
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return cur;
+}
+
+// Resolve a jsonPath into an object. Supports simple dotted paths (".status.phase") and the
+// very common single equality filter (e.g. ".status.conditions[?(@.type == \"Ready\")].status");
+// other complex JSONPath yields undefined.
+function resolvePath(o: KubeObject, jsonPath: string): unknown {
+  const p = (jsonPath || '').replace(/^\./, '');
+  if (!p) {
+    return undefined;
+  }
+  const m = p.match(/^(.*?)\[\?\(@\.([\w.]+)\s*==\s*["']([^"']+)["']\)\]\.?(.*)$/);
+  if (m) {
+    const [, prefix, field, val, rest] = m;
+    const arr = getDotted(o, prefix);
+    if (!Array.isArray(arr)) {
+      return undefined;
+    }
+    const item = arr.find((e) => getDotted(e, field) === val);
+    return item === undefined ? undefined : getDotted(item, rest);
+  }
+  return getDotted(o, p);
+}
+
+// Build ColumnDefs from a CRD's additionalPrinterColumns.
+export function printerColumnDefs(cols: PrinterColumn[]): ColumnDef[] {
+  return cols.map((c) => ({
+    key: c.jsonPath || c.name,
+    header: c.name,
+    render: (o: KubeObject) => {
+      const v = resolvePath(o, c.jsonPath);
+      if (v === undefined || v === null) {
+        return '—';
+      }
+      if (c.type === 'date') {
+        return age(String(v));
+      }
+      if (typeof v === 'boolean') {
+        return v ? 'True' : 'False';
+      }
+      return String(v);
+    },
+  }));
 }

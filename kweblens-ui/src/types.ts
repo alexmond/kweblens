@@ -52,3 +52,10 @@ export interface EventSummary {
   message: string;
   age: string;
 }
+
+// A CRD-declared additional printer column.
+export interface PrinterColumn {
+  name: string;
+  jsonPath: string;
+  type: string;
+}

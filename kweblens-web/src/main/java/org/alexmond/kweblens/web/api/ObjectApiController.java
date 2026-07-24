@@ -1,6 +1,7 @@
 package org.alexmond.kweblens.web.api;
 
 import java.io.IOException;
+import java.util.List;
 
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.utils.Serialization;
@@ -14,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import org.alexmond.kweblens.resource.CrdService;
+import org.alexmond.kweblens.resource.PrinterColumn;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
@@ -33,6 +36,18 @@ public class ObjectApiController {
 	private final ResourceService resources;
 
 	private final ClusterNavService clusterNav;
+
+	private final CrdService crdService;
+
+	/**
+	 * The CRD-declared printer columns for a kind (empty for built-in kinds). Lets the UI
+	 * render a custom resource's own columns instead of the generic projection.
+	 */
+	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/columns",
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	public List<PrinterColumn> columns(@PathVariable String clusterId, @PathVariable String resourceId) {
+		return crdService.printerColumns(clusterId, resourceId);
+	}
 
 	/**
 	 * The full objects of a kind as a JSON array (namespaced kinds honour the filter).
