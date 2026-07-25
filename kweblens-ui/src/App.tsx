@@ -124,6 +124,7 @@ export function App() {
   const [forward, setForward] = useState<{ kind: string; namespace: string; name: string; ports: number[] } | null>(
     null,
   );
+  const [helmTarget, setHelmTarget] = useState<{ namespace: string; name: string } | null>(null);
 
   useEffect(() => {
     api
@@ -343,6 +344,13 @@ export function App() {
     setSelected({ id: 'portforward:list', label: 'Port Forwards', kind: '', namespaced: false });
   };
 
+  // From a resource's "Managed By: Helm" link → open the owning release's Resources view.
+  const navigateToHelmRelease = (namespace: string, name: string) => {
+    setDetail(null);
+    setSelected({ id: 'helm:home', label: 'Helm', kind: '', namespaced: false });
+    setHelmTarget({ namespace, name });
+  };
+
   const toggleFavorite = (id: string) =>
     setFavorites((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
@@ -480,6 +488,8 @@ export function App() {
               cluster={cluster}
               authed={!!authUser}
               onNavigate={navigateToKind}
+              openResources={helmTarget}
+              onResourcesConsumed={() => setHelmTarget(null)}
               onRequireAuth={() => setShowLogin(true)}
               onAuthExpired={() => {
                 auth.clear();
@@ -585,6 +595,7 @@ export function App() {
             obj={detail.obj}
             authed={authUser !== null}
             onNavigate={navigateToKind}
+            onHelmRelease={navigateToHelmRelease}
             onTerminal={(namespace, pod) => setTerminal({ namespace, pod })}
             onForward={(kind, namespace, name, ports) => setForward({ kind, namespace, name, ports })}
             onRequireAuth={() => setShowLogin(true)}
@@ -1086,11 +1097,12 @@ function Detail(props: {
   onRequireAuth: () => void;
   onAuthExpired: () => void;
   onNavigate: (kind: string, ns?: string) => void;
+  onHelmRelease: (namespace: string, name: string) => void;
   onTerminal: (namespace: string, pod: string) => void;
   onForward: (kind: string, namespace: string, name: string, ports: number[]) => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onTerminal, onForward, onClose } =
+  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onHelmRelease, onTerminal, onForward, onClose } =
     props;
   const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
@@ -1252,7 +1264,7 @@ function Detail(props: {
         )}
       </div>
       <div className="drawer-body">
-        {tab === 'overview' && <Overview obj={obj} onNavigate={onNavigate} />}
+        {tab === 'overview' && <Overview obj={obj} onNavigate={onNavigate} onHelmRelease={onHelmRelease} />}
         {tab === 'events' && <EventsPane events={events} error={eventsError} />}
         {tab === 'metrics' && (
           <div className="charts vertical">
@@ -1377,14 +1389,21 @@ function Detail(props: {
   );
 }
 
-function Overview(props: { obj: KubeObject; onNavigate: (kind: string, ns?: string) => void }) {
-  const { obj, onNavigate } = props;
+function Overview(props: {
+  obj: KubeObject;
+  onNavigate: (kind: string, ns?: string) => void;
+  onHelmRelease: (namespace: string, name: string) => void;
+}) {
+  const { obj, onNavigate, onHelmRelease } = props;
   const md = obj.metadata ?? {};
   const spec = (obj.spec as Record<string, unknown>) ?? {};
   const status = (obj.status as Record<string, unknown>) ?? {};
   const labels = md.labels ?? {};
   const annotations = md.annotations ?? {};
   const owners = md.ownerReferences ?? [];
+  // Helm stamps managed objects with these; surface the owning release.
+  const helmRelease = annotations['meta.helm.sh/release-name'];
+  const helmReleaseNs = annotations['meta.helm.sh/release-namespace'] ?? md.namespace ?? '';
   const conditions = (status.conditions as Record<string, unknown>[]) ?? [];
   const containers = (spec.containers as Record<string, unknown>[]) ?? [];
   const containerStatuses = (status.containerStatuses as Record<string, unknown>[]) ?? [];
@@ -1421,6 +1440,22 @@ function Overview(props: { obj: KubeObject; onNavigate: (kind: string, ns?: stri
           {age(md.creationTimestamp)}
           {md.creationTimestamp ? ` · ${md.creationTimestamp}` : ''}
         </dd>
+        {helmRelease && (
+          <>
+            <dt>Managed By</dt>
+            <dd>
+              <span className="helm-badge">Helm</span>{' '}
+              <button
+                className="cell-link"
+                title="Open this release's resources"
+                onClick={() => onHelmRelease(helmReleaseNs, helmRelease)}
+              >
+                {helmRelease}
+                {helmReleaseNs ? ` (${helmReleaseNs})` : ''}
+              </button>
+            </dd>
+          </>
+        )}
         {owners.length > 0 && (
           <>
             <dt>Controlled By</dt>
@@ -1881,16 +1916,27 @@ function HelmView(props: {
   cluster: string;
   authed: boolean;
   onNavigate: (kind: string, ns?: string) => void;
+  openResources?: { namespace: string; name: string } | null;
+  onResourcesConsumed?: () => void;
   onRequireAuth: () => void;
   onAuthExpired: () => void;
 }) {
-  const { cluster, authed, onNavigate, onRequireAuth, onAuthExpired } = props;
+  const { cluster, authed, onNavigate, openResources, onResourcesConsumed, onRequireAuth, onAuthExpired } = props;
   const [tab, setTab] = useState<'charts' | 'releases'>('releases');
   const [action, setAction] = useState<HelmAction | null>(null);
   const [resourcesFor, setResourcesFor] = useState<{ namespace: string; name: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const onAction = (a: HelmAction) => (authed ? setAction(a) : onRequireAuth());
+
+  // Deep-linked from a resource's "Managed By: Helm" — open that release's resources.
+  useEffect(() => {
+    if (openResources) {
+      setTab('releases');
+      setResourcesFor(openResources);
+      onResourcesConsumed?.();
+    }
+  }, [openResources, onResourcesConsumed]);
 
   return (
     <div className="overview">
