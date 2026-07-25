@@ -444,12 +444,14 @@ body {
   width: 220px;
 }
 
-.grid th.sortable {
+.grid th.sortable,
+.mini th.sortable {
   cursor: pointer;
   user-select: none;
 }
 
-.grid th.sortable:hover {
+.grid th.sortable:hover,
+.mini th.sortable:hover {
   color: var(--text);
 }
 
