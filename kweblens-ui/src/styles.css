@@ -1117,6 +1117,16 @@ body {
   color: #b3261e;
 }
 
+.helm-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e6f0fb;
+  color: #0a6cbd;
+}
+
 .grid td.muted {
   color: var(--muted);
   max-width: 520px;
