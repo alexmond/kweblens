@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, api } from './api';
 import { auth } from './auth';
@@ -80,6 +80,7 @@ export function App() {
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [terminal, setTerminal] = useState<{ namespace: string; pod: string } | null>(null);
 
   useEffect(() => {
     api
@@ -522,6 +523,7 @@ export function App() {
             obj={detail.obj}
             authed={authUser !== null}
             onNavigate={navigateToKind}
+            onTerminal={(namespace, pod) => setTerminal({ namespace, pod })}
             onRequireAuth={() => setShowLogin(true)}
             onAuthExpired={() => {
               auth.clear();
@@ -535,10 +537,17 @@ export function App() {
       {showLogin && (
         <LoginModal
           onCancel={() => setShowLogin(false)}
-          onSubmit={(user, pass) => {
+          onSubmit={async (user, pass) => {
             auth.set(user, pass);
-            setAuthUser(user);
-            setShowLogin(false);
+            try {
+              await api.verifySession();
+              setAuthUser(user);
+              setShowLogin(false);
+              return true;
+            } catch {
+              auth.clear();
+              return false;
+            }
           }}
         />
       )}
@@ -555,6 +564,83 @@ export function App() {
           }}
         />
       )}
+
+      {cluster && terminal && (
+        <TerminalDock
+          cluster={cluster}
+          namespace={terminal.namespace}
+          pod={terminal.pod}
+          onClose={() => setTerminal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TerminalDock(props: { cluster: string; namespace: string; pod: string; onClose: () => void }) {
+  const { cluster, namespace, pod, onClose } = props;
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cleanup = () => undefined as void;
+    let cancelled = false;
+    const enc = encodeURIComponent;
+    (async () => {
+      const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
+      if (cancelled || !ref.current) {
+        return;
+      }
+      const term = new Terminal({ fontSize: 13, cursorBlink: true, theme: { background: '#0f172a' } });
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      term.open(ref.current);
+      fit.fit();
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const url = `${proto}://${window.location.host}/ws/exec?cluster=${enc(cluster)}&namespace=${enc(namespace)}&pod=${enc(pod)}`;
+      const ws = new WebSocket(url);
+      ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          term.write(e.data);
+        }
+      };
+      ws.onclose = () => term.write('\r\n\x1b[90m[session closed]\x1b[0m\r\n');
+      ws.onerror = () => term.write('\r\n\x1b[31m[connection error]\x1b[0m\r\n');
+      term.onData((d) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(d);
+        }
+      });
+      const onResize = () => {
+        try {
+          fit.fit();
+        } catch {
+          // terminal not ready to fit yet
+        }
+      };
+      window.addEventListener('resize', onResize);
+      cleanup = () => {
+        window.removeEventListener('resize', onResize);
+        ws.close();
+        term.dispose();
+      };
+    })();
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [cluster, namespace, pod]);
+
+  return (
+    <div className="term-dock">
+      <div className="term-head">
+        <span className="term-title">
+          <i className="term-dot" /> {namespace}/{pod}
+        </span>
+        <button className="term-close" onClick={onClose} title="Close terminal">
+          ×
+        </button>
+      </div>
+      <div className="term-body" ref={ref} />
     </div>
   );
 }
@@ -867,9 +953,10 @@ function Detail(props: {
   onRequireAuth: () => void;
   onAuthExpired: () => void;
   onNavigate: (kind: string, ns?: string) => void;
+  onTerminal: (namespace: string, pod: string) => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onClose } = props;
+  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onTerminal, onClose } = props;
   const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
@@ -1113,6 +1200,11 @@ function Detail(props: {
             onClick={() => act(() => api.restart(cluster, resourceId, ns, name), { confirm: `Rolling-restart ${name}?` })}
           >
             Restart
+          </button>
+        )}
+        {authed && kind === 'Pod' && ns && (
+          <button className="btn" onClick={() => onTerminal(ns, name)}>
+            Terminal
           </button>
         )}
         {authed && isNode && (
@@ -1636,10 +1728,12 @@ function ClusterOverview(props: { cluster: string; name: string; masterUrl?: str
   );
 }
 
-function LoginModal(props: { onCancel: () => void; onSubmit: (user: string, pass: string) => void }) {
+function LoginModal(props: { onCancel: () => void; onSubmit: (user: string, pass: string) => Promise<boolean> }) {
   const { onCancel, onSubmit } = props;
   const [user, setUser] = useState('admin');
   const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1658,11 +1752,19 @@ function LoginModal(props: { onCancel: () => void; onSubmit: (user: string, pass
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          onSubmit(user, pass);
+          setBusy(true);
+          setFailed(false);
+          onSubmit(user, pass).then((ok) => {
+            setBusy(false);
+            if (!ok) {
+              setFailed(true);
+            }
+          });
         }}
       >
         <h2>Sign in</h2>
         <p className="modal-note">Credentials are kept in memory for this tab only and sent over HTTP Basic.</p>
+        {failed && <div className="error">Invalid credentials.</div>}
         <label>
           <span>Username</span>
           <input value={user} onChange={(e) => setUser(e.target.value)} autoFocus />
@@ -1672,11 +1774,11 @@ function LoginModal(props: { onCancel: () => void; onSubmit: (user: string, pass
           <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
         </label>
         <div className="modal-actions">
-          <button type="button" className="btn" onClick={onCancel}>
+          <button type="button" className="btn" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
-          <button type="submit" className="btn primary">
-            Sign in
+          <button type="submit" className="btn primary" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </div>
       </form>

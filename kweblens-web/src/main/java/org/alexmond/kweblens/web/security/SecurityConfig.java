@@ -18,6 +18,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.context.DelegatingSecurityContextRepository;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
@@ -56,6 +60,14 @@ public class SecurityConfig {
 
 	@Bean
 	public SecurityFilterChain filterChain(HttpSecurity http, SecurityProperties properties) throws Exception {
+		// Persist the authenticated context to the HttpSession as well as the request so
+		// the
+		// SPA's one-shot Basic login (POST /api/v1/auth/session) establishes a JSESSIONID
+		// the
+		// same-origin exec WebSocket can ride — the browser cannot attach Basic to a WS
+		// handshake. Stateless Basic on every other API call keeps working unchanged.
+		SecurityContextRepository contextRepository = new DelegatingSecurityContextRepository(
+				new RequestAttributeSecurityContextRepository(), new HttpSessionSecurityContextRepository());
 		http.authorizeHttpRequests((auth) -> {
 			auth.requestMatchers("/actuator/health/**", "/actuator/info", "/login", "/error", "/css/**", "/webjars/**",
 					"/ui", "/ui/**")
@@ -68,8 +80,9 @@ public class SecurityConfig {
 			}
 			auth.anyRequest().authenticated();
 		})
+			.securityContext((sc) -> sc.securityContextRepository(contextRepository))
 			.formLogin(Customizer.withDefaults())
-			.httpBasic(Customizer.withDefaults())
+			.httpBasic((basic) -> basic.securityContextRepository(contextRepository))
 			.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**"))
 			// Materialise the CSRF token before view rendering commits the response.
 			.addFilterAfter(new CsrfTokenEagerFilter(), CsrfFilter.class)

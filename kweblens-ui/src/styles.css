@@ -1011,6 +1011,65 @@ body {
   padding: 4px 10px;
 }
 
+/* Dockable terminal */
+.term-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 300px;
+  background: #0f172a;
+  border-top: 2px solid var(--accent);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.term-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: #111827;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.term-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.term-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3fb950;
+}
+
+.term-close {
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.term-close:hover {
+  color: #fff;
+}
+
+.term-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  overflow: hidden;
+}
+
 .btn.danger {
   color: #b3261e;
   border-color: #e6b4b0;
