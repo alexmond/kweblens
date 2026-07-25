@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
-import { age, columnsFor, printerColumnDefs, statusTone } from './columns';
+import { age, columnsFor, printerColumnDefs, readyTone, statusTone } from './columns';
 import type {
   ClusterInfo,
   EventSummary,
@@ -1239,8 +1239,12 @@ function ResourceTable(props: {
               ))}
             {cols.map((c) => {
               const cell = c.render(o);
-              const colour = c.header === 'Status' && typeof cell === 'string';
-              return <td key={c.key}>{colour ? <StatusBadge text={cell as string} /> : cell}</td>;
+              const text = typeof cell === 'string' ? cell : null;
+              const tone =
+                text === null ? '' : c.header === 'Status' ? statusTone(text) : c.header === 'Ready' ? readyTone(text) : '';
+              return (
+                <td key={c.key}>{tone ? <span className={'status-pill status-' + tone}>{text}</span> : cell}</td>
+              );
             })}
             {showAge && <td>{age(o.metadata?.creationTimestamp)}</td>}
           </tr>

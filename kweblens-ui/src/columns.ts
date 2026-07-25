@@ -90,6 +90,24 @@ export function statusTone(value: string): StatusTone {
   return '';
 }
 
+// Colour a "ready/total" readiness value: all ready → green, none → red, partial → amber,
+// scaled-to-zero (0/0) and non-ratio values → neutral (no pill).
+export function readyTone(value: string): StatusTone {
+  const m = /^(\d+)\s*\/\s*(\d+)$/.exec(value.trim());
+  if (!m) {
+    return '';
+  }
+  const ready = Number(m[1]);
+  const total = Number(m[2]);
+  if (total === 0) {
+    return '';
+  }
+  if (ready >= total) {
+    return 'ok';
+  }
+  return ready === 0 ? 'err' : 'warn';
+}
+
 export function age(iso: string | undefined): string {
   if (!iso) {
     return '—';
