@@ -26,20 +26,35 @@ public class ClusterNavService {
 
 	private static final String CRD_ICON = "bi-puzzle";
 
+	private static final String CUSTOM_RESOURCES = "Custom Resources";
+
 	private final NavCatalog navCatalog;
 
 	private final CrdService crdService;
 
-	/** Static categories followed by one category per CRD API group (alphabetical). */
+	/**
+	 * The static categories, with the cluster's CRDs nested under <b>Custom Resources</b>
+	 * as one collapsible sub-group per API group (alphabetical), each holding its kinds.
+	 */
 	public List<NavCategory> categories(String clusterId) {
-		List<NavCategory> categories = new ArrayList<>(navCatalog.categories());
 		Map<String, List<ResourceDescriptor>> byGroup = crdService.customResourceDescriptors(clusterId)
 			.stream()
 			.collect(Collectors.groupingBy(ResourceDescriptor::group, TreeMap::new, Collectors.toList()));
+		List<NavCategory> groups = new ArrayList<>();
 		byGroup.forEach((group, items) -> {
 			items.sort(Comparator.comparing(ResourceDescriptor::label));
-			categories.add(new NavCategory(group, CRD_ICON, items));
+			groups.add(new NavCategory(group, CRD_ICON, items));
 		});
+
+		List<NavCategory> categories = new ArrayList<>();
+		for (NavCategory category : navCatalog.categories()) {
+			if (category.label().equals(CUSTOM_RESOURCES)) {
+				categories.add(new NavCategory(category.label(), category.icon(), category.items(), groups));
+			}
+			else {
+				categories.add(category);
+			}
+		}
 		return categories;
 	}
 

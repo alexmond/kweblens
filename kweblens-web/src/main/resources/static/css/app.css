@@ -232,6 +232,18 @@ code {
 	padding-left: 1.2rem;
 }
 
+/* Nested CRD API-group sub-groups under Custom Resources: indented, domain-name labels
+   (not upper-cased like top-level categories). */
+.kw-tree-subgroup {
+	margin-left: 0.9rem;
+}
+
+.kw-tree-subgroup > summary {
+	text-transform: none;
+	letter-spacing: 0;
+	font-weight: 600;
+}
+
 .kw-tree-leaf {
 	display: flex;
 	align-items: center;
@@ -251,4 +263,11 @@ code {
 	background: color-mix(in srgb, var(--kw-accent) 16%, transparent);
 	color: var(--kw-accent);
 	font-weight: 600;
+}
+
+/* Single-kind categories flattened to a top-level leaf: match the category header row. */
+.kw-tree-toplevel {
+	gap: 0.35rem;
+	padding: 0.25rem 0.4rem;
+	font-size: 0.85rem;
 }

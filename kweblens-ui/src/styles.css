@@ -307,6 +307,20 @@ body {
   border-left: 1px solid var(--border);
 }
 
+/* Nested sub-groups (Custom Resources → one per CRD API group): indented, and their
+   API-group headers are domain names, so not upper-cased like the top-level categories. */
+.group.subgroup {
+  margin-left: 16px;
+}
+
+.group.subgroup > summary {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+}
+
 .leaf {
   display: flex;
   align-items: center;
@@ -328,6 +342,13 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Single-item categories rendered as top-level leaves (Nodes, Namespaces, Events):
+   sit at the category level (no indent guide, no chevron). */
+.top-leaf > .leaf {
+  padding: 5px 8px;
+  font-weight: 500;
 }
 
 /* Favorites: star toggle + pinned section */
