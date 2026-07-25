@@ -3,6 +3,7 @@ import type {
   ClusterInfo,
   EventSummary,
   HelmChart,
+  HelmMutationResult,
   HelmRelease,
   KubeObject,
   MetricSeries,
@@ -116,6 +117,41 @@ export const api = {
     getJson<HelmChart[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/charts` +
         (query ? `?query=${encodeURIComponent(query)}` : ''),
+    ),
+  helmInstall: (
+    cluster: string,
+    body: {
+      namespace: string;
+      releaseName: string;
+      repository: string;
+      chart: string;
+      version: string;
+      valuesYaml?: string;
+      dryRun: boolean;
+      createNamespace?: boolean;
+    },
+  ) =>
+    postBody<HelmMutationResult>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases`,
+      JSON.stringify(body),
+      'application/json',
+    ),
+  helmUpgrade: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    body: { repository: string; chart: string; version: string; valuesYaml?: string; dryRun: boolean },
+  ) =>
+    postBody<HelmMutationResult>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/upgrade`,
+      JSON.stringify(body),
+      'application/json',
+    ),
+  helmRollback: (cluster: string, namespace: string, name: string, body: { revision: number; dryRun: boolean }) =>
+    postBody<HelmMutationResult>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/rollback`,
+      JSON.stringify(body),
+      'application/json',
     ),
   helmReleases: (cluster: string, namespace?: string) =>
     getJson<HelmRelease[]>(

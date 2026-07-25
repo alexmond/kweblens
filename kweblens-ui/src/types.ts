@@ -110,3 +110,12 @@ export interface HelmChart {
   description: string | null;
   repository: string;
 }
+
+export interface HelmMutationResult {
+  dryRun: boolean;
+  name: string;
+  namespace: string;
+  revision: number;
+  status: string | null;
+  manifest: string | null;
+}

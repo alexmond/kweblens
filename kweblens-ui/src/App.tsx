@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, api } from './api';
@@ -9,6 +9,7 @@ import type {
   ClusterInfo,
   EventSummary,
   HelmChart,
+  HelmMutationResult,
   HelmRelease,
   KubeObject,
   MetricSeries,
@@ -465,7 +466,17 @@ export function App() {
             />
           )}
           {cluster && selected?.id === 'overview:workloads' && <WorkloadsOverview cluster={cluster} />}
-          {cluster && selected?.id?.startsWith('helm:') && <HelmView cluster={cluster} />}
+          {cluster && selected?.id?.startsWith('helm:') && (
+            <HelmView
+              cluster={cluster}
+              authed={!!authUser}
+              onRequireAuth={() => setShowLogin(true)}
+              onAuthExpired={() => {
+                auth.clear();
+                setAuthUser(null);
+              }}
+            />
+          )}
           {cluster && selected?.id === 'portforward:list' && (
             <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={() => setShowLogin(true)} />
           )}
@@ -1750,9 +1761,24 @@ function ForwardModal(props: {
   );
 }
 
-function HelmView(props: { cluster: string }) {
-  const { cluster } = props;
+type HelmAction =
+  | { mode: 'install'; repository: string; chart: string; version: string }
+  | { mode: 'upgrade'; namespace: string; name: string; chart: string; chartVersion: string }
+  | { mode: 'rollback'; namespace: string; name: string; revision: number };
+
+function HelmView(props: {
+  cluster: string;
+  authed: boolean;
+  onRequireAuth: () => void;
+  onAuthExpired: () => void;
+}) {
+  const { cluster, authed, onRequireAuth, onAuthExpired } = props;
   const [tab, setTab] = useState<'charts' | 'releases'>('releases');
+  const [action, setAction] = useState<HelmAction | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const onAction = (a: HelmAction) => (authed ? setAction(a) : onRequireAuth());
+
   return (
     <div className="overview">
       <div className="content-head">
@@ -1766,13 +1792,30 @@ function HelmView(props: { cluster: string }) {
           Releases
         </button>
       </div>
-      {tab === 'charts' ? <HelmCharts cluster={cluster} /> : <HelmReleases cluster={cluster} />}
+      {tab === 'charts' ? (
+        <HelmCharts cluster={cluster} authed={authed} onAction={onAction} />
+      ) : (
+        <HelmReleases cluster={cluster} authed={authed} onAction={onAction} refreshKey={refreshKey} />
+      )}
+      {action && (
+        <HelmActionModal
+          cluster={cluster}
+          action={action}
+          onClose={() => setAction(null)}
+          onApplied={() => {
+            setAction(null);
+            setTab('releases');
+            setRefreshKey((k) => k + 1);
+          }}
+          onAuthExpired={onAuthExpired}
+        />
+      )}
     </div>
   );
 }
 
-function HelmCharts(props: { cluster: string }) {
-  const { cluster } = props;
+function HelmCharts(props: { cluster: string; authed: boolean; onAction: (a: HelmAction) => void }) {
+  const { cluster, authed, onAction } = props;
   const [charts, setCharts] = useState<HelmChart[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -1822,6 +1865,7 @@ function HelmCharts(props: { cluster: string }) {
               <th>Version</th>
               <th>App Version</th>
               <th>Repository</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -1832,6 +1876,18 @@ function HelmCharts(props: { cluster: string }) {
                 <td>{c.version}</td>
                 <td>{c.appVersion ?? '—'}</td>
                 <td>{c.repository}</td>
+                <td>
+                  {authed && (
+                    <button
+                      className="btn"
+                      onClick={() =>
+                        onAction({ mode: 'install', repository: c.repository, chart: c.name, version: c.version })
+                      }
+                    >
+                      Install
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1841,8 +1897,13 @@ function HelmCharts(props: { cluster: string }) {
   );
 }
 
-function HelmReleases(props: { cluster: string }) {
-  const { cluster } = props;
+function HelmReleases(props: {
+  cluster: string;
+  authed: boolean;
+  onAction: (a: HelmAction) => void;
+  refreshKey: number;
+}) {
+  const { cluster, authed, onAction, refreshKey } = props;
   const [releases, setReleases] = useState<HelmRelease[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -1857,7 +1918,7 @@ function HelmReleases(props: { cluster: string }) {
     return () => {
       cancelled = true;
     };
-  }, [cluster]);
+  }, [cluster, refreshKey]);
 
   return (
     <>
@@ -1881,6 +1942,7 @@ function HelmReleases(props: { cluster: string }) {
               <th>App Version</th>
               <th>Status</th>
               <th>Updated</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -1894,12 +1956,180 @@ function HelmReleases(props: { cluster: string }) {
                 <td>{r.appVersion}</td>
                 <td>{r.status}</td>
                 <td>{r.updated ? age(r.updated) : '—'}</td>
+                <td className="row-actions">
+                  {authed && (
+                    <>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          onAction({
+                            mode: 'upgrade',
+                            namespace: r.namespace,
+                            name: r.name,
+                            chart: r.chart,
+                            chartVersion: r.chartVersion,
+                          })
+                        }
+                      >
+                        Upgrade
+                      </button>
+                      <button
+                        className="btn"
+                        disabled={r.revision <= 1}
+                        onClick={() =>
+                          onAction({
+                            mode: 'rollback',
+                            namespace: r.namespace,
+                            name: r.name,
+                            revision: r.revision - 1,
+                          })
+                        }
+                      >
+                        Rollback
+                      </button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
     </>
+  );
+}
+
+function HelmActionModal(props: {
+  cluster: string;
+  action: HelmAction;
+  onClose: () => void;
+  onApplied: () => void;
+  onAuthExpired: () => void;
+}) {
+  const { cluster, action, onClose, onApplied, onAuthExpired } = props;
+  const [releaseName, setReleaseName] = useState(action.mode === 'install' ? action.chart : '');
+  const [namespace, setNamespace] = useState('default');
+  const [repository, setRepository] = useState(action.mode === 'install' ? action.repository : '');
+  const [chart, setChart] = useState(action.mode === 'upgrade' || action.mode === 'install' ? action.chart : '');
+  const [version, setVersion] = useState(
+    action.mode === 'install' ? action.version : action.mode === 'upgrade' ? action.chartVersion : '',
+  );
+  const [valuesYaml, setValuesYaml] = useState('');
+  const [revision, setRevision] = useState(action.mode === 'rollback' ? action.revision : 1);
+  const [createNamespace, setCreateNamespace] = useState(false);
+  const [preview, setPreview] = useState<HelmMutationResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const title = action.mode === 'install' ? 'Install chart' : action.mode === 'upgrade' ? 'Upgrade release' : 'Rollback release';
+
+  const run = (dryRun: boolean) => {
+    setBusy(true);
+    setError(null);
+    let p: Promise<HelmMutationResult>;
+    if (action.mode === 'install') {
+      p = api.helmInstall(cluster, { namespace, releaseName, repository, chart, version, valuesYaml, dryRun, createNamespace });
+    } else if (action.mode === 'upgrade') {
+      p = api.helmUpgrade(cluster, action.namespace, action.name, { repository, chart, version, valuesYaml, dryRun });
+    } else {
+      p = api.helmRollback(cluster, action.namespace, action.name, { revision, dryRun });
+    }
+    p.then((res) => (dryRun ? setPreview(res) : onApplied()))
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) {
+          onAuthExpired();
+        }
+        setError(String(err));
+      })
+      .finally(() => setBusy(false));
+  };
+
+  const field = (label: string, node: ReactNode) => (
+    <label>
+      <span>{label}</span>
+      {node}
+    </label>
+  );
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="modal wide" onClick={(e) => e.stopPropagation()} onSubmit={(e) => e.preventDefault()}>
+        <h2>{title}</h2>
+        <p className="modal-note">Preview a dry-run first; Apply is enabled once the render succeeds.</p>
+        {error && <div className="error">{error}</div>}
+
+        {action.mode === 'install' && (
+          <>
+            {field('Chart', <input value={`${repository}/${chart}`} readOnly />)}
+            {field('Version', <input value={version} onChange={(e) => setVersion(e.target.value)} />)}
+            {field('Release name', <input value={releaseName} onChange={(e) => setReleaseName(e.target.value)} />)}
+            {field('Namespace', <input value={namespace} onChange={(e) => setNamespace(e.target.value)} />)}
+            <label className="check">
+              <input type="checkbox" checked={createNamespace} onChange={(e) => setCreateNamespace(e.target.checked)} />
+              <span>Create namespace if missing</span>
+            </label>
+          </>
+        )}
+        {action.mode === 'upgrade' && (
+          <>
+            {field('Release', <input value={`${action.namespace}/${action.name}`} readOnly />)}
+            {field('Repository', <input value={repository} placeholder="repo name" onChange={(e) => setRepository(e.target.value)} />)}
+            {field('Chart', <input value={chart} onChange={(e) => setChart(e.target.value)} />)}
+            {field('Version', <input value={version} onChange={(e) => setVersion(e.target.value)} />)}
+          </>
+        )}
+        {action.mode === 'rollback' && (
+          <>
+            {field('Release', <input value={`${action.namespace}/${action.name}`} readOnly />)}
+            {field(
+              'Roll back to revision',
+              <input
+                type="number"
+                min={1}
+                value={revision}
+                onChange={(e) => setRevision(Math.max(1, Number.parseInt(e.target.value || '1', 10)))}
+              />,
+            )}
+          </>
+        )}
+        {action.mode !== 'rollback' &&
+          field(
+            'Values (YAML, optional)',
+            <textarea
+              className="values"
+              rows={5}
+              value={valuesYaml}
+              placeholder="key: value"
+              onChange={(e) => setValuesYaml(e.target.value)}
+            />,
+          )}
+
+        {preview && (
+          <div className="helm-preview">
+            <div className="preview-head">Rendered manifest (dry-run) — {preview.manifest ? '' : 'no manifest returned'}</div>
+            {preview.manifest && <pre>{preview.manifest}</pre>}
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="btn" onClick={() => run(true)} disabled={busy}>
+            {busy ? 'Rendering…' : 'Preview (dry-run)'}
+          </button>
+          <button type="button" className="btn primary" onClick={() => run(false)} disabled={busy || !preview}>
+            {action.mode === 'install' ? 'Install' : action.mode === 'upgrade' ? 'Upgrade' : 'Rollback'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
