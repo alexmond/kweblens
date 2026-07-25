@@ -323,9 +323,56 @@ body {
 }
 
 .leaf-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Favorites: star toggle + pinned section */
+.fav-star {
+  margin-left: 6px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.leaf:hover .fav-star {
+  opacity: 0.55;
+}
+
+.fav-star:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.fav-star.on {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.fav-section {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fav-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  padding: 5px 8px;
+}
+
+.fav-section ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 8px;
 }
 
 .leaf:hover {

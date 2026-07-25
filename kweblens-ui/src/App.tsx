@@ -26,6 +26,22 @@ const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 // Synthetic nav items are client-only views (dashboards, Helm) rather than resource kinds.
 const isSynthetic = (id: string): boolean => id.startsWith('overview:') || id.startsWith('helm:');
 
+// Favorites are pinned nav-item ids, persisted per cluster.
+function loadFavorites(cluster: string): string[] {
+  try {
+    return JSON.parse(localStorage.getItem('kw-fav-' + cluster) ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+}
+function saveFavorites(cluster: string, favorites: string[]): void {
+  try {
+    localStorage.setItem('kw-fav-' + cluster, JSON.stringify(favorites));
+  } catch {
+    // storage unavailable — favorites just won't persist
+  }
+}
+
 // Inject a "Overview" dashboard item at the top of the Workloads category, and a Helm
 // section (client-only views, not resource kinds).
 function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
@@ -47,6 +63,7 @@ export function App() {
   const [cluster, setCluster] = useState<string | null>(null);
   const [nav, setNav] = useState<NavCategory[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [favorites, setFavorites] = useState<string[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [namespace, setNamespace] = useState<string | null>(null);
   const [selected, setSelected] = useState<NavItem | null>(null);
@@ -80,6 +97,7 @@ export function App() {
     }
     setNav([]);
     setCounts({});
+    setFavorites(loadFavorites(cluster));
     setNamespaces([]);
     setNamespace(null);
     setSelected(null);
@@ -276,6 +294,15 @@ export function App() {
     }
   };
 
+  const toggleFavorite = (id: string) =>
+    setFavorites((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      if (cluster) {
+        saveFavorites(cluster, next);
+      }
+      return next;
+    });
+
   const toggleCol = (key: string) =>
     setHiddenCols((prev) => {
       const next = new Set(prev);
@@ -377,7 +404,14 @@ export function App() {
         <aside className="nav">
           <div className="nav-title">{activeCluster?.name ?? cluster ?? '—'}</div>
           {cluster && (
-            <NavTree categories={nav} counts={counts} selected={selected?.id ?? null} onSelect={setSelected} />
+            <NavTree
+              categories={nav}
+              counts={counts}
+              favorites={favorites}
+              selected={selected?.id ?? null}
+              onSelect={setSelected}
+              onToggleFavorite={toggleFavorite}
+            />
           )}
         </aside>
 
@@ -593,14 +627,46 @@ function categoryBadge(cat: NavCategory, counts: Record<string, number>): string
   return String(cat.items.length);
 }
 
+function NavLeaf(props: {
+  item: NavItem;
+  selected: string | null;
+  count?: number;
+  favorited: boolean;
+  onSelect: (item: NavItem) => void;
+  onToggleFavorite: (id: string) => void;
+}) {
+  const { item, selected, count, favorited, onSelect, onToggleFavorite } = props;
+  return (
+    <button className={'leaf' + (item.id === selected ? ' active' : '')} onClick={() => onSelect(item)}>
+      <span className="leaf-label">{item.label}</span>
+      {count !== undefined && <span className="nav-badge">{count}</span>}
+      <span
+        className={'fav-star' + (favorited ? ' on' : '')}
+        title={favorited ? 'Unpin' : 'Pin to Favorites'}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleFavorite(item.id);
+        }}
+      >
+        {favorited ? '★' : '☆'}
+      </span>
+    </button>
+  );
+}
+
 function NavTree(props: {
   categories: NavCategory[];
   counts: Record<string, number>;
+  favorites: string[];
   selected: string | null;
   onSelect: (item: NavItem) => void;
+  onToggleFavorite: (id: string) => void;
 }) {
-  const { categories, counts, selected, onSelect } = props;
+  const { categories, counts, favorites, selected, onSelect, onToggleFavorite } = props;
   const [open, setOpen] = useState<Set<string>>(new Set());
+
+  const allItems = categories.flatMap((c) => c.items);
+  const favItems = favorites.map((id) => allItems.find((i) => i.id === id)).filter((i): i is NavItem => Boolean(i));
 
   useEffect(() => {
     const holder = categories.find((c) => c.items.some((i) => i.id === selected));
@@ -622,6 +688,25 @@ function NavTree(props: {
 
   return (
     <div className="tree">
+      {favItems.length > 0 && (
+        <div className="fav-section">
+          <div className="fav-header">★ Favorites</div>
+          <ul>
+            {favItems.map((it) => (
+              <li key={it.id}>
+                <NavLeaf
+                  item={it}
+                  selected={selected}
+                  count={counts[it.id]}
+                  favorited
+                  onSelect={onSelect}
+                  onToggleFavorite={onToggleFavorite}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {categories.map((cat) => {
         const holdsSelected = cat.items.some((i) => i.id === selected);
         return (
@@ -639,10 +724,14 @@ function NavTree(props: {
             <ul>
               {cat.items.map((it) => (
                 <li key={it.id}>
-                  <button className={'leaf' + (it.id === selected ? ' active' : '')} onClick={() => onSelect(it)}>
-                    <span className="leaf-label">{it.label}</span>
-                    {counts[it.id] !== undefined && <span className="nav-badge">{counts[it.id]}</span>}
-                  </button>
+                  <NavLeaf
+                    item={it}
+                    selected={selected}
+                    count={counts[it.id]}
+                    favorited={favorites.includes(it.id)}
+                    onSelect={onSelect}
+                    onToggleFavorite={onToggleFavorite}
+                  />
                 </li>
               ))}
             </ul>
