@@ -11,6 +11,7 @@ import type {
   HelmChart,
   HelmMutationResult,
   HelmRelease,
+  HelmResourceRef,
   KubeObject,
   MetricSeries,
   NavCategory,
@@ -475,6 +476,7 @@ export function App() {
             <HelmView
               cluster={cluster}
               authed={!!authUser}
+              onNavigate={navigateToKind}
               onRequireAuth={() => setShowLogin(true)}
               onAuthExpired={() => {
                 auth.clear();
@@ -1875,12 +1877,14 @@ type HelmAction =
 function HelmView(props: {
   cluster: string;
   authed: boolean;
+  onNavigate: (kind: string, ns?: string) => void;
   onRequireAuth: () => void;
   onAuthExpired: () => void;
 }) {
-  const { cluster, authed, onRequireAuth, onAuthExpired } = props;
+  const { cluster, authed, onNavigate, onRequireAuth, onAuthExpired } = props;
   const [tab, setTab] = useState<'charts' | 'releases'>('releases');
   const [action, setAction] = useState<HelmAction | null>(null);
+  const [resourcesFor, setResourcesFor] = useState<{ namespace: string; name: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const onAction = (a: HelmAction) => (authed ? setAction(a) : onRequireAuth());
@@ -1901,7 +1905,13 @@ function HelmView(props: {
       {tab === 'charts' ? (
         <HelmCharts cluster={cluster} authed={authed} onAction={onAction} />
       ) : (
-        <HelmReleases cluster={cluster} authed={authed} onAction={onAction} refreshKey={refreshKey} />
+        <HelmReleases
+          cluster={cluster}
+          authed={authed}
+          onAction={onAction}
+          onResources={(namespace, name) => setResourcesFor({ namespace, name })}
+          refreshKey={refreshKey}
+        />
       )}
       {action && (
         <HelmActionModal
@@ -1914,6 +1924,18 @@ function HelmView(props: {
             setRefreshKey((k) => k + 1);
           }}
           onAuthExpired={onAuthExpired}
+        />
+      )}
+      {resourcesFor && (
+        <HelmResourcesModal
+          cluster={cluster}
+          namespace={resourcesFor.namespace}
+          name={resourcesFor.name}
+          onClose={() => setResourcesFor(null)}
+          onOpen={(kind, ns) => {
+            setResourcesFor(null);
+            onNavigate(kind, ns);
+          }}
         />
       )}
     </div>
@@ -2012,9 +2034,10 @@ function HelmReleases(props: {
   cluster: string;
   authed: boolean;
   onAction: (a: HelmAction) => void;
+  onResources: (namespace: string, name: string) => void;
   refreshKey: number;
 }) {
-  const { cluster, authed, onAction, refreshKey } = props;
+  const { cluster, authed, onAction, onResources, refreshKey } = props;
   const [releases, setReleases] = useState<HelmRelease[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -2078,6 +2101,9 @@ function HelmReleases(props: {
                 <td>{r.status}</td>
                 <td>{r.updated ? age(r.updated) : '—'}</td>
                 <td className="row-actions">
+                  <button className="btn" onClick={() => onResources(r.namespace, r.name)}>
+                    Resources
+                  </button>
                   {authed && (
                     <>
                       <button
@@ -2117,6 +2143,87 @@ function HelmReleases(props: {
         </table>
       )}
     </>
+  );
+}
+
+function HelmResourcesModal(props: {
+  cluster: string;
+  namespace: string;
+  name: string;
+  onClose: () => void;
+  onOpen: (kind: string, namespace: string) => void;
+}) {
+  const { cluster, namespace, name, onClose, onOpen } = props;
+  const [resources, setResources] = useState<HelmResourceRef[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .helmReleaseResources(cluster, namespace, name)
+      .then((r) => !cancelled && setResources(r))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, namespace, name]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const { sorted, sort, clickHeader } = useTableSort(
+    resources ?? [],
+    'kind',
+    (r, k) => (r[k as keyof HelmResourceRef] as string) ?? '',
+  );
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <h2>Resources</h2>
+        <p className="modal-note">
+          Objects managed by release <strong>{name}</strong> in <strong>{namespace}</strong> (from its manifest). Click
+          a name to open it.
+        </p>
+        {error && <div className="error">{error}</div>}
+        {resources === null ? (
+          <div className="empty">Loading…</div>
+        ) : resources.length === 0 ? (
+          <div className="empty">No resources in this release's manifest.</div>
+        ) : (
+          <table className="grid">
+            <thead>
+              <tr>
+                <SortTh label="Kind" colKey="kind" sort={sort} onClick={clickHeader} />
+                <SortTh label="Namespace" colKey="namespace" sort={sort} onClick={clickHeader} />
+                <SortTh label="Name" colKey="name" sort={sort} onClick={clickHeader} />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.kind + '/' + r.namespace + '/' + r.name}>
+                  <td>{r.kind}</td>
+                  <td>{r.namespace}</td>
+                  <td className="name">
+                    <button className="cell-link" onClick={() => onOpen(r.kind, r.namespace)}>
+                      {r.name}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

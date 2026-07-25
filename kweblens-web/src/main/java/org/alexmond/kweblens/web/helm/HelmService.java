@@ -7,6 +7,7 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,9 @@ import org.alexmond.jhelm.kube.service.internal.KubeClient;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.yaml.snakeyaml.LoaderOptions;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 
@@ -54,6 +58,9 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 @Service
 @RequiredArgsConstructor
 public class HelmService {
+
+	/** Rendered manifests can be large; lift SnakeYAML's default 3 MB code-point cap. */
+	private static final int MAX_MANIFEST_CODE_POINTS = 32 * 1024 * 1024;
 
 	private final ClusterRegistry clusters;
 
@@ -139,6 +146,44 @@ public class HelmService {
 			.stream()
 			.map(this::toSummary)
 			.toList();
+	}
+
+	/**
+	 * The Kubernetes objects a release manages, parsed from its rendered manifest — links
+	 * a release to the actual resources it created.
+	 */
+	public List<HelmResourceRef> resources(String clusterId, String namespace, String name) {
+		Release release = new StatusAction(kubeService(clusterId)).status(name, namespace)
+			.orElseThrow(() -> new HelmException("No release '" + name + "' in namespace " + namespace));
+		return parseManifest(release.getManifest(), namespace);
+	}
+
+	@SuppressWarnings("unchecked")
+	static List<HelmResourceRef> parseManifest(String manifest, String releaseNamespace) {
+		List<HelmResourceRef> refs = new ArrayList<>();
+		if (!StringUtils.hasText(manifest)) {
+			return refs;
+		}
+		LoaderOptions options = new LoaderOptions();
+		options.setCodePointLimit(MAX_MANIFEST_CODE_POINTS);
+		for (Object doc : new Yaml(new SafeConstructor(options)).loadAll(manifest)) {
+			if (!(doc instanceof Map<?, ?> map) || map.get("kind") == null) {
+				continue;
+			}
+			Map<String, Object> meta = (map.get("metadata") instanceof Map<?, ?> m) ? (Map<String, Object>) m
+					: Map.of();
+			String objName = str(meta.get("name"));
+			if (!StringUtils.hasText(objName)) {
+				continue;
+			}
+			String ns = StringUtils.hasText(str(meta.get("namespace"))) ? str(meta.get("namespace")) : releaseNamespace;
+			refs.add(new HelmResourceRef(str(map.get("apiVersion")), str(map.get("kind")), ns, objName));
+		}
+		return refs;
+	}
+
+	private static String str(Object value) {
+		return (value != null) ? value.toString() : null;
 	}
 
 	private KubeService kubeService(String clusterId) {

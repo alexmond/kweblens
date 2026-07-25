@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.alexmond.kweblens.web.helm.HelmChartService;
 import org.alexmond.kweblens.web.helm.HelmChartSummary;
 import org.alexmond.kweblens.web.helm.HelmReleaseSummary;
+import org.alexmond.kweblens.web.helm.HelmResourceRef;
 import org.alexmond.kweblens.web.helm.HelmService;
 
 /**
@@ -52,6 +53,12 @@ public class HelmApiController {
 	public List<HelmReleaseSummary> history(@PathVariable String clusterId, @PathVariable String namespace,
 			@PathVariable String name) {
 		return helm.history(clusterId, namespace, name);
+	}
+
+	@GetMapping("/releases/{namespace}/{name}/resources")
+	public List<HelmResourceRef> resources(@PathVariable String clusterId, @PathVariable String namespace,
+			@PathVariable String name) {
+		return helm.resources(clusterId, namespace, name);
 	}
 
 }
