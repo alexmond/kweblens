@@ -195,7 +195,8 @@ export function App() {
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [terminal, setTerminal] = useState<{ namespace: string; pod: string } | null>(null);
+  const [terminal, setTerminal] = useState<{ namespace: string; pod: string; containers: string[] } | null>(null);
+  const [logs, setLogs] = useState<{ namespace: string; pod: string; containers: string[] } | null>(null);
   const [forward, setForward] = useState<{ kind: string; namespace: string; name: string; ports: number[] } | null>(
     null,
   );
@@ -751,7 +752,14 @@ export function App() {
             authed={authUser !== null}
             onNavigate={navigateToKind}
             onHelmRelease={navigateToHelmRelease}
-            onTerminal={(namespace, pod) => setTerminal({ namespace, pod })}
+            onTerminal={(namespace, pod, containers) => {
+              setLogs(null);
+              setTerminal({ namespace, pod, containers });
+            }}
+            onLogs={(namespace, pod, containers) => {
+              setTerminal(null);
+              setLogs({ namespace, pod, containers });
+            }}
             onForward={(kind, namespace, name, ports) => setForward({ kind, namespace, name, ports })}
             onRequireAuth={() => setShowLogin(true)}
             onAuthExpired={() => {
@@ -799,7 +807,18 @@ export function App() {
           cluster={cluster}
           namespace={terminal.namespace}
           pod={terminal.pod}
+          containers={terminal.containers}
           onClose={() => setTerminal(null)}
+        />
+      )}
+
+      {cluster && logs && (
+        <LogsDock
+          cluster={cluster}
+          namespace={logs.namespace}
+          pod={logs.pod}
+          containers={logs.containers}
+          onClose={() => setLogs(null)}
         />
       )}
 
@@ -825,9 +844,16 @@ export function App() {
   );
 }
 
-function TerminalDock(props: { cluster: string; namespace: string; pod: string; onClose: () => void }) {
-  const { cluster, namespace, pod, onClose } = props;
+function TerminalDock(props: {
+  cluster: string;
+  namespace: string;
+  pod: string;
+  containers: string[];
+  onClose: () => void;
+}) {
+  const { cluster, namespace, pod, containers, onClose } = props;
   const ref = useRef<HTMLDivElement>(null);
+  const [container, setContainer] = useState(containers[0] ?? '');
 
   useEffect(() => {
     let cleanup = () => undefined as void;
@@ -844,7 +870,7 @@ function TerminalDock(props: { cluster: string; namespace: string; pod: string; 
       term.open(ref.current);
       fit.fit();
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const url = `${proto}://${window.location.host}/ws/exec?cluster=${enc(cluster)}&namespace=${enc(namespace)}&pod=${enc(pod)}`;
+      const url = `${proto}://${window.location.host}/ws/exec?cluster=${enc(cluster)}&namespace=${enc(namespace)}&pod=${enc(pod)}&container=${enc(container)}`;
       const ws = new WebSocket(url);
       ws.onmessage = (e) => {
         if (typeof e.data === 'string') {
@@ -876,19 +902,105 @@ function TerminalDock(props: { cluster: string; namespace: string; pod: string; 
       cancelled = true;
       cleanup();
     };
-  }, [cluster, namespace, pod]);
+  }, [cluster, namespace, pod, container]);
 
   return (
     <div className="term-dock">
       <div className="term-head">
         <span className="term-title">
           <i className="term-dot" /> {namespace}/{pod}
+          {containers.length > 1 && (
+            <select className="dock-select" value={container} onChange={(e) => setContainer(e.target.value)}>
+              {containers.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          )}
         </span>
         <button className="term-close" onClick={onClose} title="Close terminal">
           ×
         </button>
       </div>
       <div className="term-body" ref={ref} />
+    </div>
+  );
+}
+
+function LogsDock(props: {
+  cluster: string;
+  namespace: string;
+  pod: string;
+  containers: string[];
+  onClose: () => void;
+}) {
+  const { cluster, namespace, pod, containers, onClose } = props;
+  const [container, setContainer] = useState(containers[0] ?? '');
+  const [lines, setLines] = useState<string[]>([]);
+  const [wrap, setWrap] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLines([]);
+    const enc = encodeURIComponent;
+    const base = `/api/v1/clusters/${enc(cluster)}/pods/${enc(namespace)}/${enc(pod)}/log`;
+    const cq = container ? `container=${enc(container)}&` : '';
+    // Tail snapshot, then follow via SSE.
+    fetch(`${base}?${cq}tailLines=500`)
+      .then((r) => r.text())
+      .then((t) => {
+        if (!cancelled) {
+          setLines(t ? t.replace(/\n$/, '').split('\n') : []);
+        }
+      })
+      .catch(() => undefined);
+    const es = new EventSource(`${base}/stream?${cq}`);
+    es.onmessage = (e) => !cancelled && setLines((prev) => [...prev, e.data].slice(-5000));
+    return () => {
+      cancelled = true;
+      es.close();
+    };
+  }, [cluster, namespace, pod, container]);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [lines]);
+
+  return (
+    <div className="term-dock">
+      <div className="term-head">
+        <span className="term-title">
+          <i className="term-dot" /> logs · {namespace}/{pod}
+          {containers.length > 1 && (
+            <select className="dock-select" value={container} onChange={(e) => setContainer(e.target.value)}>
+              {containers.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          )}
+          <label className="dock-toggle">
+            <input type="checkbox" checked={wrap} onChange={(e) => setWrap(e.target.checked)} /> wrap
+          </label>
+        </span>
+        <button className="term-close" onClick={onClose} title="Close logs">
+          ×
+        </button>
+      </div>
+      <div className={'term-body log-body' + (wrap ? ' wrap' : '')} ref={bodyRef}>
+        {lines.length === 0 ? <div className="log-line dim">(no output yet)</div> : null}
+        {lines.map((l, i) => (
+          <div className="log-line" key={i}>
+            {l}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1266,11 +1378,12 @@ function Detail(props: {
   onAuthExpired: () => void;
   onNavigate: (kind: string, ns?: string) => void;
   onHelmRelease: (namespace: string, name: string) => void;
-  onTerminal: (namespace: string, pod: string) => void;
+  onTerminal: (namespace: string, pod: string, containers: string[]) => void;
+  onLogs: (namespace: string, pod: string, containers: string[]) => void;
   onForward: (kind: string, namespace: string, name: string, ports: number[]) => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onHelmRelease, onTerminal, onForward, onClose } =
+  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onHelmRelease, onTerminal, onLogs, onForward, onClose } =
     props;
   const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
@@ -1289,6 +1402,9 @@ function Detail(props: {
   const name = objName(obj);
   const ns = objNs(obj) ?? '';
   const isNode = kind === 'Node';
+  const podContainers = ((obj.spec as Record<string, unknown>)?.containers as { name?: string }[] | undefined ?? [])
+    .map((c) => c.name ?? '')
+    .filter(Boolean);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1517,8 +1633,13 @@ function Detail(props: {
             Restart
           </button>
         )}
+        {kind === 'Pod' && ns && (
+          <button className="btn" onClick={() => onLogs(ns, name, podContainers)}>
+            Logs
+          </button>
+        )}
         {authed && kind === 'Pod' && ns && (
-          <button className="btn" onClick={() => onTerminal(ns, name)}>
+          <button className="btn" onClick={() => onTerminal(ns, name, podContainers)}>
             Terminal
           </button>
         )}

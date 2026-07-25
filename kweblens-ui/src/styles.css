@@ -1093,6 +1093,49 @@ body {
   overflow: hidden;
 }
 
+.dock-select {
+  margin-left: 8px;
+  font-size: 12px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.dock-toggle {
+  margin-left: 10px;
+  font-size: 11px;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+
+/* Log viewer body (dock) */
+.log-body {
+  overflow: auto;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #e2e8f0;
+  padding: 6px 10px;
+}
+
+.log-body .log-line {
+  white-space: pre;
+}
+
+.log-body.wrap .log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-body .log-line.dim {
+  color: #64748b;
+}
+
 /* Port-forward status pills */
 .pf-status {
   display: inline-block;
