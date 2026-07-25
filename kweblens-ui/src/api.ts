@@ -8,6 +8,7 @@ import type {
   HelmResourceRef,
   KubeObject,
   MetricSeries,
+  NodeDiskUsage,
   NavCategory,
   PortForward,
   PrinterColumn,
@@ -109,6 +110,8 @@ export const api = {
   },
   nodeMetrics: (cluster: string) =>
     getJson<UsageSummary[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/nodes`),
+  nodeDisk: (cluster: string) =>
+    getJson<NodeDiskUsage[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/nodes/disk`),
   podMetrics: (cluster: string, namespace?: string) =>
     getJson<UsageSummary[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/pods` +
