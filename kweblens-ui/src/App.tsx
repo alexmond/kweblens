@@ -79,6 +79,9 @@ function saveFavorites(cluster: string, favorites: string[]): void {
 // section (client-only views, not resource kinds).
 function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
   const withOverview = cats.map((c) => {
+    if (c.label === 'Cluster') {
+      return { ...c, items: [{ id: 'overview:cluster', label: 'Overview', kind: '', namespaced: false }, ...c.items] };
+    }
     if (c.label === 'Workloads') {
       return { ...c, items: [{ id: 'overview:workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] };
     }
@@ -463,7 +466,7 @@ export function App() {
 
         <main className="content">
           {error && <div className="error">{error}</div>}
-          {!selected && !error && cluster && (
+          {(!selected || selected.id === 'overview:cluster') && !error && cluster && (
             <ClusterOverview
               cluster={cluster}
               name={activeCluster?.name ?? cluster}

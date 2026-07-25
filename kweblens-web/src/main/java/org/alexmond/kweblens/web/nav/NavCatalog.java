@@ -29,7 +29,9 @@ public class NavCatalog {
 
 	private final List<NavCategory> categories = List.of(
 			new NavCategory("Cluster", "bi-diagram-3",
-					List.of(ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes"))),
+					List.of(ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes"),
+							ResourceDescriptor.coreCluster("namespaces", "Namespaces", "Namespace", "namespaces"),
+							ResourceDescriptor.coreNamespaced("events", "Events", "Event", "events"))),
 			new NavCategory("Workloads", "bi-box-seam", List.of(
 					ResourceDescriptor.coreNamespaced("pods", "Pods", "Pod", "pods"),
 					ResourceDescriptor.namespaced("deployments", "Deployments", "Deployment", APPS, "v1",
@@ -84,10 +86,6 @@ public class NavCatalog {
 									"PersistentVolume", "persistentvolumes"),
 							ResourceDescriptor.cluster("storageclasses", "Storage Classes", "StorageClass",
 									"storage.k8s.io", "v1", "storageclasses"))),
-			new NavCategory("Namespaces", "bi-collection",
-					List.of(ResourceDescriptor.coreCluster("namespaces", "Namespaces", "Namespace", "namespaces"))),
-			new NavCategory("Events", "bi-clock-history",
-					List.of(ResourceDescriptor.coreNamespaced("events", "Events", "Event", "events"))),
 			new NavCategory("Access Control", "bi-shield-lock",
 					List.of(ResourceDescriptor.coreNamespaced("serviceaccounts", "Service Accounts", "ServiceAccount",
 							"serviceaccounts"),
