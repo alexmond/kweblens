@@ -5,6 +5,7 @@ import type {
   HelmChart,
   HelmMutationResult,
   HelmRelease,
+  HelmResourceRef,
   KubeObject,
   MetricSeries,
   NavCategory,
@@ -152,6 +153,10 @@ export const api = {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/rollback`,
       JSON.stringify(body),
       'application/json',
+    ),
+  helmReleaseResources: (cluster: string, namespace: string, name: string) =>
+    getJson<HelmResourceRef[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/resources`,
     ),
   helmReleases: (cluster: string, namespace?: string) =>
     getJson<HelmRelease[]>(

@@ -113,6 +113,13 @@ export interface HelmChart {
   repository: string;
 }
 
+export interface HelmResourceRef {
+  apiVersion: string;
+  kind: string;
+  namespace: string;
+  name: string;
+}
+
 export interface HelmMutationResult {
   dryRun: boolean;
   name: string;
