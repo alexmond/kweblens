@@ -89,24 +89,29 @@ public class PrometheusMetricService {
 	}
 
 	/**
-	 * Per-node root-filesystem disk usage from node-exporter, mapped back to Kubernetes
-	 * node names via each node's InternalIP (node-exporter labels series by
-	 * {@code instance} {@code = <ip>:<port>}). Empty when no backend or no node-exporter
-	 * metrics are found.
+	 * Per-node disk usage aggregated across all real filesystems, from node-exporter,
+	 * mapped back to Kubernetes node names via each node's InternalIP (node-exporter
+	 * labels series by {@code instance} {@code = <ip>:<port>}). Empty when no backend or
+	 * no node-exporter metrics are found.
 	 */
 	public List<NodeDiskUsage> nodeDiskUsage(String clusterId) {
 		Optional<String> address = endpoint(clusterId);
 		if (address.isEmpty()) {
 			return List.of();
 		}
+		// Aggregate every real filesystem per node: exclude virtual/pseudo fstypes, and
+		// dedupe by device (max by device) so bind-mounts of the same device aren't
+		// counted
+		// twice, then sum by node.
+		String fs = "{fstype!~\"tmpfs|ramfs|overlay|squashfs|iso9660|devtmpfs|nsfs|fuse.*\"}";
 		Map<String, Double> total = instantByLabel(clusterId, address.get(),
-				"sum by (instance) (node_filesystem_size_bytes{mountpoint=\"/\"})", "instance");
+				"sum by (instance) (max by (instance, device) (node_filesystem_size_bytes" + fs + "))", "instance");
 		if (total.isEmpty()) {
 			return List.of();
 		}
 		Map<String, Double> used = instantByLabel(clusterId, address.get(),
-				"sum by (instance) (node_filesystem_size_bytes{mountpoint=\"/\"}"
-						+ " - node_filesystem_avail_bytes{mountpoint=\"/\"})",
+				"sum by (instance) (max by (instance, device) (node_filesystem_size_bytes" + fs
+						+ " - node_filesystem_avail_bytes" + fs + "))",
 				"instance");
 		Map<String, String> ipToNode = nodeInternalIps(clusterId);
 		List<NodeDiskUsage> out = new ArrayList<>();
