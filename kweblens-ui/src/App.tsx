@@ -762,6 +762,24 @@ export function App() {
     setSelected({ id: 'portforward:list', label: 'Port Forwards', kind: '', namespaced: false });
   };
 
+  // The pods a workload owns — matched by its spec.selector.matchLabels in its namespace.
+  const fetchWorkloadPods = async (obj: KubeObject): Promise<KubeObject[]> => {
+    if (!cluster) {
+      return [];
+    }
+    const sel = ((obj.spec as Record<string, unknown>)?.selector as { matchLabels?: Record<string, string> })
+      ?.matchLabels ?? {};
+    const keys = Object.keys(sel);
+    if (keys.length === 0) {
+      return [];
+    }
+    const pods = await api.objects(cluster, 'pods', objNs(obj) ?? undefined);
+    return pods.filter((p) => {
+      const labels = p.metadata?.labels ?? {};
+      return keys.every((k) => labels[k] === sel[k]);
+    });
+  };
+
   // Per-row kebab actions: open logs, jump to YAML edit, or delete / force-delete.
   const handleRowAction = (resourceId: string, action: RowAction, obj: KubeObject) => {
     const ns = objNs(obj) ?? '';
@@ -1049,6 +1067,11 @@ export function App() {
                 onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
                 authed={authUser !== null}
                 onRowAction={(action, obj) => handleRowAction(selected.id, action, obj)}
+                fetchChildren={
+                  ['deployments', 'statefulsets', 'daemonsets', 'replicasets'].includes(selected.id)
+                    ? fetchWorkloadPods
+                    : undefined
+                }
               />
             </>
           )}
@@ -1564,9 +1587,30 @@ function ResourceTable(props: {
   onNamespaceClick?: (ns: string) => void;
   authed: boolean;
   onRowAction: (action: RowAction, obj: KubeObject) => void;
+  fetchChildren?: (obj: KubeObject) => Promise<KubeObject[]>;
 }) {
-  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick, authed, onRowAction } =
+  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick, authed, onRowAction, fetchChildren } =
     props;
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [children, setChildren] = useState<Record<string, KubeObject[] | null>>({});
+  const toggleExpand = (o: KubeObject) => {
+    const k = objKey(o);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) {
+        next.delete(k);
+      } else {
+        next.add(k);
+        if (children[k] === undefined && fetchChildren) {
+          setChildren((c) => ({ ...c, [k]: null }));
+          fetchChildren(o)
+            .then((kids) => setChildren((c) => ({ ...c, [k]: kids })))
+            .catch(() => setChildren((c) => ({ ...c, [k]: [] })));
+        }
+      }
+      return next;
+    });
+  };
   const [sort, setSort] = useState<{ key: string; dir: number }>({ key: 'name', dir: 1 });
   if (loading) {
     return <div className="empty">Loading…</div>;
@@ -1614,6 +1658,28 @@ function ResourceTable(props: {
 
   const sortedKeys = sorted.map(objKey);
   const allSelected = sortedKeys.length > 0 && sortedKeys.every((k) => selection.has(k));
+  const totalCols = 1 + headerCols.length + 1;
+
+  const childPodRow = (p: KubeObject, parentKey: string) => {
+    const cs = ((p.status as Record<string, unknown>)?.containerStatuses as Record<string, unknown>[]) ?? [];
+    const restarts = cs.reduce((n, c) => n + Number(c.restartCount ?? 0), 0);
+    const phase = String((p.status as Record<string, unknown>)?.phase ?? '');
+    const node = String((p.spec as Record<string, unknown>)?.nodeName ?? '');
+    return (
+      <tr key={parentKey + '>' + objKey(p)} className="child-row" onClick={() => onOpen(p)}>
+        <td colSpan={totalCols}>
+          <div className="child-pod">
+            <span className="child-name">↳ {objName(p)}</span>
+            <ContainerSquares obj={p} />
+            {phase && <StatusBadge text={phase} />}
+            <span className="dim">↻ {restarts}</span>
+            {node && <span className="dim">{node}</span>}
+            <span className="dim">{age(p.metadata?.creationTimestamp)}</span>
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <table className="grid clickable">
@@ -1632,9 +1698,12 @@ function ResourceTable(props: {
         </tr>
       </thead>
       <tbody>
-        {sorted.map((o) => (
+        {sorted.flatMap((o) => {
+          const rowKey = objKey(o);
+          const isExpanded = expanded.has(rowKey);
+          const rows = [
           <tr
-            key={objKey(o)}
+            key={rowKey}
             className={
               (objKey(o) === selectedKey ? 'row-active' : '') + (selection.has(objKey(o)) ? ' row-checked' : '')
             }
@@ -1647,7 +1716,21 @@ function ResourceTable(props: {
                 onChange={() => onToggleRow(objKey(o))}
               />
             </td>
-            <td className="name">{objName(o)}</td>
+            <td className="name">
+              {fetchChildren && (
+                <button
+                  className="tree-toggle"
+                  title={isExpanded ? 'Collapse' : 'Show pods'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleExpand(o);
+                  }}
+                >
+                  {isExpanded ? '▾' : '▸'}
+                </button>
+              )}
+              {objName(o)}
+            </td>
             {showNs &&
               (onNamespaceClick && objNs(o) ? (
                 <td>
@@ -1677,8 +1760,32 @@ function ResourceTable(props: {
             <td className="rowmenu-cell" onClick={(e) => e.stopPropagation()}>
               <RowMenu authed={authed} isPod={(o.kind ?? '') === 'Pod'} onAction={(a) => onRowAction(a, o)} />
             </td>
-          </tr>
-        ))}
+          </tr>,
+          ];
+          if (isExpanded) {
+            const kids = children[rowKey];
+            if (kids === null || kids === undefined) {
+              rows.push(
+                <tr key={rowKey + '>loading'} className="child-row">
+                  <td colSpan={totalCols} className="child-msg">
+                    Loading pods…
+                  </td>
+                </tr>,
+              );
+            } else if (kids.length === 0) {
+              rows.push(
+                <tr key={rowKey + '>empty'} className="child-row">
+                  <td colSpan={totalCols} className="child-msg">
+                    No pods.
+                  </td>
+                </tr>,
+              );
+            } else {
+              kids.forEach((p) => rows.push(childPodRow(p, rowKey)));
+            }
+          }
+          return rows;
+        })}
       </tbody>
     </table>
   );
