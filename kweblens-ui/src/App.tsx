@@ -4,7 +4,7 @@ import { ApiError, api } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
 import { age, columnsFor, printerColumnDefs } from './columns';
-import type { ClusterInfo, EventSummary, HelmRelease, KubeObject, NavCategory, NavItem } from './types';
+import type { ClusterInfo, EventSummary, HelmRelease, KubeObject, NavCategory, NavItem, UsageSummary } from './types';
 
 function initials(id: string): string {
   return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
@@ -46,6 +46,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject } | null>(null);
   const [cols, setCols] = useState<ColumnDef[]>([]);
+  const [usage, setUsage] = useState<Record<string, UsageSummary>>({});
   const [query, setQuery] = useState('');
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
@@ -140,6 +141,41 @@ export function App() {
     return undefined;
   }, [cluster, selected]);
 
+  // In-list metrics-server usage for Pods/Nodes; refreshed every 15s.
+  useEffect(() => {
+    if (!cluster || !selected || (selected.id !== 'pods' && selected.id !== 'nodes')) {
+      setUsage({});
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      const p =
+        selected.id === 'nodes'
+          ? api.nodeMetrics(cluster)
+          : api.podMetrics(cluster, selected.namespaced ? namespace ?? undefined : undefined);
+      p.then((list) => {
+        if (cancelled) {
+          return;
+        }
+        const map: Record<string, UsageSummary> = {};
+        list.forEach((u) => {
+          map[(u.namespace ?? '') + '/' + u.name] = u;
+        });
+        setUsage(map);
+      }).catch(() => {
+        if (!cancelled) {
+          setUsage({});
+        }
+      });
+    };
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [cluster, selected, namespace]);
+
   // Live object stream: patch the table in place.
   useEffect(() => {
     if (!cluster || !selected || isSynthetic(selected.id)) {
@@ -192,6 +228,18 @@ export function App() {
         (o.kind ?? '').toLowerCase().includes(q),
     );
   }, [objects, query]);
+
+  // For Pods/Nodes, append live CPU/Memory columns backed by metrics-server usage.
+  const tableCols = useMemo<ColumnDef[]>(() => {
+    if (selected && (selected.id === 'pods' || selected.id === 'nodes')) {
+      return [
+        ...cols,
+        { key: 'm-cpu', header: 'CPU', render: (o) => usage[objKey(o)]?.cpu ?? '—' },
+        { key: 'm-mem', header: 'Memory', render: (o) => usage[objKey(o)]?.memory ?? '—' },
+      ];
+    }
+    return cols;
+  }, [cols, usage, selected]);
 
   return (
     <div className="app">
@@ -294,7 +342,7 @@ export function App() {
               </div>
               <ResourceTable
                 objects={filtered}
-                columns={cols}
+                columns={tableCols}
                 namespaced={selected.namespaced}
                 loading={loading}
                 selectedKey={detail ? objKey(detail.obj) : null}

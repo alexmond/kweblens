@@ -7,6 +7,7 @@ import type {
   NavCategory,
   PrinterColumn,
   ResourceRow,
+  UsageSummary,
 } from './types';
 
 export class ApiError extends Error {
@@ -67,6 +68,13 @@ export const api = {
   events: (cluster: string, namespace?: string) =>
     getJson<EventSummary[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/events` +
+        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+    ),
+  nodeMetrics: (cluster: string) =>
+    getJson<UsageSummary[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/nodes`),
+  podMetrics: (cluster: string, namespace?: string) =>
+    getJson<UsageSummary[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/pods` +
         (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
     ),
   helmReleases: (cluster: string, namespace?: string) =>
