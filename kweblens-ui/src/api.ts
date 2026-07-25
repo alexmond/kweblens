@@ -36,6 +36,18 @@ async function postJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postBody<T>(url: string, body: string, contentType: string): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { ...auth.header(), Accept: 'application/json', 'Content-Type': contentType },
+    body,
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) {
@@ -121,6 +133,8 @@ export const api = {
     ),
 
   // --- Mutating actions (HTTP Basic auth required) ---
+  apply: (cluster: string, manifest: string) =>
+    postBody<ResourceRow>(`/api/v1/clusters/${encodeURIComponent(cluster)}/apply`, manifest, 'application/yaml'),
   del: (cluster: string, resourceId: string, namespace: string, name: string) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'delete')),
   scale: (cluster: string, resourceId: string, namespace: string, name: string, replicas: number) =>

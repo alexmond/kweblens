@@ -668,6 +668,38 @@ body {
   background: rgba(10, 122, 194, 0.1);
 }
 
+.grid tr.row-checked td {
+  background: rgba(10, 122, 194, 0.06);
+}
+
+.grid th.chk,
+.grid td.chk {
+  width: 34px;
+  text-align: center;
+  padding-right: 0;
+}
+
+.grid td.chk input,
+.grid th.chk input {
+  cursor: pointer;
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: rgba(10, 122, 194, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.bulk-bar .btn.danger {
+  margin-left: 0;
+}
+
 /* Detail drawer */
 .drawer {
   position: fixed;
@@ -902,6 +934,34 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 13px;
+}
+
+.yaml-edit {
+  width: 100%;
+  min-height: 300px;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  resize: vertical;
+  color: var(--text);
+  background: #f6f8fa;
+}
+
+.yaml-edit.tall {
+  min-height: 340px;
+}
+
+.modal.wide {
+  width: 660px;
+}
+
+.create-btn {
+  font-size: 12px;
+  padding: 4px 10px;
 }
 
 .btn.danger {
