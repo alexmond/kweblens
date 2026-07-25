@@ -109,6 +109,87 @@ function parseMemBytes(q: string | undefined): number {
 
 const gib = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1) + 'Gi';
 
+// Remove the noisy metadata.managedFields block from a manifest (text-level, so it works
+// without a YAML parser). Drops the `managedFields:` key and its whole nested/sequence body.
+function stripManagedFields(yaml: string): string {
+  const lines = yaml.split('\n');
+  const out: string[] = [];
+  let blockIndent = -1;
+  for (const line of lines) {
+    if (blockIndent >= 0) {
+      const indent = line.search(/\S/);
+      const isSeqItem = indent === blockIndent && line[indent] === '-';
+      if (indent === -1 || indent > blockIndent || isSeqItem) {
+        continue;
+      }
+      blockIndent = -1;
+    }
+    const m = /^(\s*)managedFields:\s*$/.exec(line);
+    if (m) {
+      blockIndent = m[1].length;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+// Split one YAML line into coloured tokens (indent · list-dash · key · value/comment).
+function yamlTokens(line: string): ReactNode[] {
+  const m = /^(\s*)(-\s+)?(?:([\w.\-/]+)(:))?(\s*)(.*)$/.exec(line);
+  if (!m) {
+    return [line];
+  }
+  const [, indent, dash, key, colon, gap, rest] = m;
+  const nodes: ReactNode[] = [indent];
+  if (dash) {
+    nodes.push(
+      <span className="yk-dash" key="d">
+        {dash}
+      </span>,
+    );
+  }
+  if (key) {
+    nodes.push(
+      <span className="yk-key" key="k">
+        {key}
+      </span>,
+      colon,
+    );
+  }
+  nodes.push(gap);
+  if (rest) {
+    const t = rest.trim();
+    let cls = 'yk-str';
+    if (t.startsWith('#')) {
+      cls = 'yk-comment';
+    } else if (/^-?\d+(\.\d+)?$/.test(t)) {
+      cls = 'yk-num';
+    } else if (/^(true|false|null|~)$/i.test(t) || t === '|' || t === '>') {
+      cls = 'yk-bool';
+    }
+    nodes.push(
+      <span className={cls} key="v">
+        {rest}
+      </span>,
+    );
+  }
+  return nodes;
+}
+
+function YamlView(props: { text: string }) {
+  return (
+    <pre className="yaml">
+      {props.text.split('\n').map((line, i) => (
+        <span key={i}>
+          {yamlTokens(line)}
+          {'\n'}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
 // A status/phase value coloured green/amber/red by health; plain text when unrecognised.
 function StatusBadge(props: { text: string }) {
   const { text } = props;
@@ -1388,6 +1469,7 @@ function Detail(props: {
   const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
+  const [hideManaged, setHideManaged] = useState(true);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -1460,9 +1542,10 @@ function Detail(props: {
     };
   }, [tab, events, eventsError, cluster, kind, name, ns]);
 
+  const displayYaml = yaml === null ? null : hideManaged ? stripManagedFields(yaml) : yaml;
   const copy = () => {
-    if (yaml) {
-      navigator.clipboard?.writeText(yaml).then(
+    if (displayYaml) {
+      navigator.clipboard?.writeText(displayYaml).then(
         () => {
           setCopied(true);
           window.setTimeout(() => setCopied(false), 1200);
@@ -1569,13 +1652,18 @@ function Detail(props: {
                       className="btn"
                       disabled={!yaml}
                       onClick={() => {
-                        setDraft(yaml ?? '');
+                        setDraft(displayYaml ?? '');
                         setEditing(true);
                       }}
                     >
                       Edit
                     </button>
                   )}
+                  <label className="yaml-toggle" title="Hide the verbose metadata.managedFields block">
+                    <input type="checkbox" checked={hideManaged} onChange={(e) => setHideManaged(e.target.checked)} />
+                    <span className="switch" />
+                    Hide Managed Fields
+                  </label>
                 </>
               ) : (
                 <>
@@ -1590,7 +1678,7 @@ function Detail(props: {
             </div>
             {yamlError && <div className="error">{yamlError}</div>}
             {!yamlError && yaml === null && <div className="empty">Loading…</div>}
-            {yaml !== null && !editing && <pre className="yaml">{yaml}</pre>}
+            {displayYaml !== null && !editing && <YamlView text={displayYaml} />}
             {editing && (
               <textarea
                 className="yaml-edit"
