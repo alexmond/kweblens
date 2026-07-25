@@ -1242,6 +1242,42 @@ body {
   color: #0a6cbd;
 }
 
+/* per-container status squares (Pods · Freelens-style) */
+.csquares {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.csq {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  box-sizing: border-box;
+  display: inline-block;
+}
+
+.csq-ok {
+  background: #22a352;
+}
+
+.csq-warn {
+  background: #e0a800;
+}
+
+.csq-err {
+  background: #d64545;
+}
+
+.csq-done {
+  background: #94a3b8;
+}
+
+.csq-wait {
+  background: #fff;
+  border: 1px solid #c3ccd2;
+}
+
 /* status pills — green/amber/red by component health */
 .status-pill {
   display: inline-block;
