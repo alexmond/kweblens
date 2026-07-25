@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import org.alexmond.kweblens.resource.ResourceDescriptor;
@@ -33,12 +34,17 @@ public class CountApiController {
 	private final ResourceService resources;
 
 	@GetMapping("/counts")
-	public Map<String, Integer> counts(@PathVariable String clusterId) {
+	public Map<String, Integer> counts(@PathVariable String clusterId,
+			@RequestParam(required = false) String namespace) {
 		Map<String, Integer> counts = new LinkedHashMap<>();
 		for (NavCategory category : navCatalog.categories()) {
 			for (ResourceDescriptor descriptor : category.items()) {
 				try {
-					counts.put(descriptor.id(), resources.listRaw(clusterId, descriptor, null).size());
+					// Namespaced kinds count within the selected namespace;
+					// cluster-scoped
+					// kinds ignore it (listRaw does this), so the badge stays
+					// cluster-wide.
+					counts.put(descriptor.id(), resources.listRaw(clusterId, descriptor, namespace).size());
 				}
 				catch (RuntimeException ex) {
 					log.debug("Count skipped for '{}': {}", descriptor.id(), ex.getMessage());
