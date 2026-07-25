@@ -1,3 +1,4 @@
+import type { FormEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, api } from './api';
@@ -12,6 +13,7 @@ import type {
   MetricSeries,
   NavCategory,
   NavItem,
+  PortForward,
   UsageSummary,
 } from './types';
 
@@ -23,8 +25,31 @@ const objName = (o: KubeObject): string => o.metadata?.name ?? '';
 const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
+// Ports worth suggesting when starting a forward: a Pod's containerPorts, a Service's ports.
+function objectPorts(kind: string, o: KubeObject): number[] {
+  const spec = (o.spec as Record<string, unknown>) ?? {};
+  const ports = new Set<number>();
+  if (kind === 'Service') {
+    for (const p of (spec.ports as { port?: number }[]) ?? []) {
+      if (typeof p.port === 'number') {
+        ports.add(p.port);
+      }
+    }
+  } else {
+    for (const c of (spec.containers as { ports?: { containerPort?: number }[] }[]) ?? []) {
+      for (const p of c.ports ?? []) {
+        if (typeof p.containerPort === 'number') {
+          ports.add(p.containerPort);
+        }
+      }
+    }
+  }
+  return [...ports];
+}
+
 // Synthetic nav items are client-only views (dashboards, Helm) rather than resource kinds.
-const isSynthetic = (id: string): boolean => id.startsWith('overview:') || id.startsWith('helm:');
+const isSynthetic = (id: string): boolean =>
+  id.startsWith('overview:') || id.startsWith('helm:') || id.startsWith('portforward:');
 
 // Favorites are pinned nav-item ids, persisted per cluster.
 function loadFavorites(cluster: string): string[] {
@@ -45,11 +70,15 @@ function saveFavorites(cluster: string, favorites: string[]): void {
 // Inject a "Overview" dashboard item at the top of the Workloads category, and a Helm
 // section (client-only views, not resource kinds).
 function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
-  const withOverview = cats.map((c) =>
-    c.label === 'Workloads'
-      ? { ...c, items: [{ id: 'overview:workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] }
-      : c,
-  );
+  const withOverview = cats.map((c) => {
+    if (c.label === 'Workloads') {
+      return { ...c, items: [{ id: 'overview:workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] };
+    }
+    if (c.label === 'Network') {
+      return { ...c, items: [...c.items, { id: 'portforward:list', label: 'Port Forwards', kind: '', namespaced: false }] };
+    }
+    return c;
+  });
   const helm: NavCategory = {
     label: 'Helm',
     icon: 'bi-hexagon',
@@ -81,6 +110,9 @@ export function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [terminal, setTerminal] = useState<{ namespace: string; pod: string } | null>(null);
+  const [forward, setForward] = useState<{ kind: string; namespace: string; name: string; ports: number[] } | null>(
+    null,
+  );
 
   useEffect(() => {
     api
@@ -295,6 +327,11 @@ export function App() {
     }
   };
 
+  const navigateToPortForwards = () => {
+    setDetail(null);
+    setSelected({ id: 'portforward:list', label: 'Port Forwards', kind: '', namespaced: false });
+  };
+
   const toggleFavorite = (id: string) =>
     setFavorites((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
@@ -428,6 +465,9 @@ export function App() {
           )}
           {cluster && selected?.id === 'overview:workloads' && <WorkloadsOverview cluster={cluster} />}
           {cluster && selected?.id === 'helm:releases' && <HelmReleases cluster={cluster} />}
+          {cluster && selected?.id === 'portforward:list' && (
+            <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={() => setShowLogin(true)} />
+          )}
           {selected && !isSynthetic(selected.id) && (
             <>
               <div className="content-head">
@@ -524,6 +564,7 @@ export function App() {
             authed={authUser !== null}
             onNavigate={navigateToKind}
             onTerminal={(namespace, pod) => setTerminal({ namespace, pod })}
+            onForward={(kind, namespace, name, ports) => setForward({ kind, namespace, name, ports })}
             onRequireAuth={() => setShowLogin(true)}
             onAuthExpired={() => {
               auth.clear();
@@ -571,6 +612,25 @@ export function App() {
           namespace={terminal.namespace}
           pod={terminal.pod}
           onClose={() => setTerminal(null)}
+        />
+      )}
+
+      {cluster && forward && (
+        <ForwardModal
+          cluster={cluster}
+          kind={forward.kind}
+          namespace={forward.namespace}
+          name={forward.name}
+          ports={forward.ports}
+          onClose={() => setForward(null)}
+          onStarted={() => {
+            setForward(null);
+            navigateToPortForwards();
+          }}
+          onAuthExpired={() => {
+            auth.clear();
+            setAuthUser(null);
+          }}
         />
       )}
     </div>
@@ -954,9 +1014,11 @@ function Detail(props: {
   onAuthExpired: () => void;
   onNavigate: (kind: string, ns?: string) => void;
   onTerminal: (namespace: string, pod: string) => void;
+  onForward: (kind: string, namespace: string, name: string, ports: number[]) => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onTerminal, onClose } = props;
+  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onTerminal, onForward, onClose } =
+    props;
   const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
@@ -1205,6 +1267,11 @@ function Detail(props: {
         {authed && kind === 'Pod' && ns && (
           <button className="btn" onClick={() => onTerminal(ns, name)}>
             Terminal
+          </button>
+        )}
+        {authed && (kind === 'Pod' || kind === 'Service') && ns && (
+          <button className="btn" onClick={() => onForward(kind, ns, name, objectPorts(kind, obj))}>
+            Forward
           </button>
         )}
         {authed && isNode && (
@@ -1483,6 +1550,201 @@ function MetricChart(props: { cluster: string; target: string; namespace?: strin
     <div className="chart">
       <div className="chart-title">{label}</div>
       <Sparkline series={series} />
+    </div>
+  );
+}
+
+function PortForwards(props: { cluster: string; authed: boolean; onRequireAuth: () => void }) {
+  const { cluster, authed, onRequireAuth } = props;
+  const [forwards, setForwards] = useState<PortForward[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const refresh = () =>
+    api
+      .portForwards(cluster)
+      .then((f) => setForwards(f))
+      .catch((e) => setError(String(e)));
+
+  // Poll so status (Active/Closed/Failed) stays current as connections come and go.
+  useEffect(() => {
+    let cancelled = false;
+    setForwards(null);
+    setError(null);
+    const tick = () => {
+      if (cancelled) {
+        return;
+      }
+      api
+        .portForwards(cluster)
+        .then((f) => !cancelled && setForwards(f))
+        .catch((e) => !cancelled && setError(String(e)));
+    };
+    tick();
+    const timer = window.setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [cluster]);
+
+  const stop = (id: string) => {
+    if (!authed) {
+      onRequireAuth();
+      return;
+    }
+    setBusy(id);
+    api
+      .stopPortForward(cluster, id)
+      .then(() => refresh())
+      .catch((e) => setError(String(e)))
+      .finally(() => setBusy(null));
+  };
+
+  return (
+    <div className="overview">
+      <div className="content-head">
+        <h1>Port Forwards</h1>
+        <span className="count">{forwards ? `${forwards.length} items` : ''}</span>
+      </div>
+      <p className="modal-note">
+        Forwards bind on the kweblens host. Reach a forward at <code>host:localPort</code> (loopback unless configured
+        otherwise). Start one from a Pod or Service detail.
+      </p>
+      {error && <div className="error">{error}</div>}
+      {forwards === null ? (
+        <div className="empty">Loading…</div>
+      ) : forwards.length === 0 ? (
+        <div className="empty">No active forwards.</div>
+      ) : (
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Namespace</th>
+              <th>Kind</th>
+              <th>Pod Port</th>
+              <th>Local Port</th>
+              <th>Protocol</th>
+              <th>Status</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {forwards.map((f) => (
+              <tr key={f.id}>
+                <td className="name">{f.name}</td>
+                <td>{f.namespace}</td>
+                <td>{f.kind}</td>
+                <td>{f.remotePort}</td>
+                <td title={`${f.address}:${f.localPort}`}>{f.localPort}</td>
+                <td>{f.protocol}</td>
+                <td>
+                  <span className={'pf-status pf-' + f.status.toLowerCase()}>{f.status}</span>
+                </td>
+                <td>
+                  <button className="btn" disabled={busy === f.id} onClick={() => stop(f.id)}>
+                    Stop
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function ForwardModal(props: {
+  cluster: string;
+  kind: string;
+  namespace: string;
+  name: string;
+  ports: number[];
+  onClose: () => void;
+  onStarted: () => void;
+  onAuthExpired: () => void;
+}) {
+  const { cluster, kind, namespace, name, ports, onClose, onStarted, onAuthExpired } = props;
+  const [remotePort, setRemotePort] = useState(ports[0] ? String(ports[0]) : '');
+  const [localPort, setLocalPort] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const remote = Number.parseInt(remotePort, 10);
+    if (!Number.isFinite(remote) || remote <= 0) {
+      setError('Enter a valid pod port.');
+      return;
+    }
+    const local = localPort.trim() ? Number.parseInt(localPort, 10) : undefined;
+    setBusy(true);
+    setError(null);
+    api
+      .startPortForward(cluster, { kind, namespace, name, remotePort: remote, localPort: local })
+      .then(() => onStarted())
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) {
+          onAuthExpired();
+        }
+        setError(String(err));
+        setBusy(false);
+      });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h2>Forward {kind}</h2>
+        <p className="modal-note">
+          {namespace}/{name} — binds a local port on the kweblens host to a port on this {kind.toLowerCase()}.
+        </p>
+        {error && <div className="error">{error}</div>}
+        <label>
+          <span>Pod port</span>
+          {ports.length > 0 ? (
+            <select value={remotePort} onChange={(e) => setRemotePort(e.target.value)}>
+              {ports.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="number"
+              min={1}
+              value={remotePort}
+              onChange={(e) => setRemotePort(e.target.value)}
+              autoFocus
+            />
+          )}
+        </label>
+        <label>
+          <span>Local port (blank = auto)</span>
+          <input type="number" min={0} value={localPort} onChange={(e) => setLocalPort(e.target.value)} />
+        </label>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="btn primary" disabled={busy}>
+            {busy ? 'Starting…' : 'Start forward'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

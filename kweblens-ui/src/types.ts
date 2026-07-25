@@ -79,6 +79,19 @@ export interface MetricSeries {
   points: MetricPoint[];
 }
 
+export interface PortForward {
+  id: string;
+  clusterId: string;
+  namespace: string;
+  kind: string;
+  name: string;
+  remotePort: number;
+  localPort: number;
+  address: string;
+  protocol: string;
+  status: string;
+}
+
 export interface HelmRelease {
   name: string;
   namespace: string;

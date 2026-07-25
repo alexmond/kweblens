@@ -1070,6 +1070,30 @@ body {
   overflow: hidden;
 }
 
+/* Port-forward status pills */
+.pf-status {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pf-active {
+  background: #e6f4ea;
+  color: #1a7f37;
+}
+
+.pf-closed {
+  background: #eceff1;
+  color: #555;
+}
+
+.pf-failed {
+  background: #fdecea;
+  color: #b3261e;
+}
+
 .btn.danger {
   color: #b3261e;
   border-color: #e6b4b0;
