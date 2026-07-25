@@ -1127,6 +1127,31 @@ body {
   color: #0a6cbd;
 }
 
+/* status pills — green/amber/red by component health */
+.status-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.status-ok {
+  background: #e6f4ea;
+  color: #1a7f37;
+}
+
+.status-warn {
+  background: #fff4e0;
+  color: #a35b00;
+}
+
+.status-err {
+  background: #fdecea;
+  color: #b3261e;
+}
+
 /* used/total usage bar (Nodes CPU/Memory) */
 .ubar {
   display: flex;
