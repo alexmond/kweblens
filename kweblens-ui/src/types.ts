@@ -17,6 +17,8 @@ export interface NavCategory {
   label: string;
   icon: string;
   items: NavItem[];
+  // Nested collapsible groups (Custom Resources nests one per CRD API group).
+  subgroups?: NavCategory[];
 }
 
 export interface ResourceRow {

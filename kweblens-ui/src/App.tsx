@@ -53,6 +53,11 @@ function objectPorts(kind: string, o: KubeObject): number[] {
 const isSynthetic = (id: string): boolean =>
   id.startsWith('overview:') || id.startsWith('helm:') || id.startsWith('portforward:');
 
+// All nav items across categories and their nested sub-groups (Custom Resources).
+function allNavItems(categories: NavCategory[]): NavItem[] {
+  return categories.flatMap((c) => [...c.items, ...(c.subgroups ?? []).flatMap((g) => g.items)]);
+}
+
 // Favorites are pinned nav-item ids, persisted per cluster.
 function loadFavorites(cluster: string): string[] {
   try {
@@ -316,7 +321,7 @@ export function App() {
   // Map a Kubernetes kind to its nav item, so cross-links (owner refs) can navigate.
   const kindNav = useMemo(() => {
     const map = new Map<string, NavItem>();
-    nav.forEach((c) => c.items.forEach((i) => i.kind && map.set(i.kind, i)));
+    allNavItems(nav).forEach((i) => i.kind && map.set(i.kind, i));
     return map;
   }, [nav]);
 
@@ -781,8 +786,10 @@ function categoryBadge(cat: NavCategory, counts: Record<string, number>): string
   if (known.length > 0) {
     return String(known.reduce((sum, i) => sum + counts[i.id], 0));
   }
-  // No live counts (e.g. a CRD group) — show how many kinds it holds.
-  return String(cat.items.length);
+  // No live counts (e.g. a CRD group) — show how many kinds it holds, including nested
+  // sub-groups (Custom Resources counts every custom kind across its API groups).
+  const nested = (cat.subgroups ?? []).reduce((sum, g) => sum + g.items.length, 0);
+  return String(cat.items.length + nested);
 }
 
 function NavLeaf(props: {
@@ -823,13 +830,32 @@ function NavTree(props: {
   const { categories, counts, favorites, selected, onSelect, onToggleFavorite } = props;
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  const allItems = categories.flatMap((c) => c.items);
+  const allItems = allNavItems(categories);
   const favItems = favorites.map((id) => allItems.find((i) => i.id === id)).filter((i): i is NavItem => Boolean(i));
 
+  // Open the category (and, for a nested custom-resource kind, its API-group sub-group)
+  // that holds the current selection.
   useEffect(() => {
-    const holder = categories.find((c) => c.items.some((i) => i.id === selected));
-    if (holder) {
-      setOpen((prev) => (prev.has(holder.label) ? prev : new Set(prev).add(holder.label)));
+    const labelsToOpen: string[] = [];
+    categories.forEach((c) => {
+      const directHit = c.items.some((i) => i.id === selected);
+      const group = (c.subgroups ?? []).find((g) => g.items.some((i) => i.id === selected));
+      if (directHit || group) {
+        labelsToOpen.push(c.label);
+      }
+      if (group) {
+        labelsToOpen.push(group.label);
+      }
+    });
+    if (labelsToOpen.length > 0) {
+      setOpen((prev) => {
+        if (labelsToOpen.every((l) => prev.has(l))) {
+          return prev;
+        }
+        const next = new Set(prev);
+        labelsToOpen.forEach((l) => next.add(l));
+        return next;
+      });
     }
   }, [categories, selected]);
 
@@ -866,38 +892,68 @@ function NavTree(props: {
         </div>
       )}
       {categories.map((cat) => {
-        const holdsSelected = cat.items.some((i) => i.id === selected);
-        return (
-          <details
-            key={cat.label}
-            className={'group' + (holdsSelected ? ' holds-selected' : '')}
-            open={open.has(cat.label)}
-            onToggle={(e) => toggle(cat.label, (e.currentTarget as HTMLDetailsElement).open)}
-          >
-            <summary>
-              <span className="chev">▸</span>
-              <span className="cat-label">{cat.label}</span>
-              <span className="nav-badge">{categoryBadge(cat, counts)}</span>
-            </summary>
-            <ul>
-              {cat.items.map((it) => (
-                <li key={it.id}>
-                  <NavLeaf
-                    item={it}
-                    selected={selected}
-                    count={counts[it.id]}
-                    favorited={favorites.includes(it.id)}
-                    onSelect={onSelect}
-                    onToggleFavorite={onToggleFavorite}
-                  />
-                </li>
-              ))}
-            </ul>
-          </details>
-        );
+        // A category with a single kind and no sub-groups (Cluster→Nodes, Namespaces,
+        // Events) is redundant as a collapsible group — render it as a top-level leaf.
+        if (cat.items.length === 1 && (cat.subgroups?.length ?? 0) === 0) {
+          const it = cat.items[0];
+          return (
+            <div className="top-leaf" key={cat.label}>
+              <NavLeaf
+                item={it}
+                selected={selected}
+                count={counts[it.id]}
+                favorited={favorites.includes(it.id)}
+                onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
+              />
+            </div>
+          );
+        }
+        return renderGroup(cat, false);
       })}
     </div>
   );
+
+  function renderLeaves(items: NavItem[]) {
+    return (
+      <ul>
+        {items.map((it) => (
+          <li key={it.id}>
+            <NavLeaf
+              item={it}
+              selected={selected}
+              count={counts[it.id]}
+              favorited={favorites.includes(it.id)}
+              onSelect={onSelect}
+              onToggleFavorite={onToggleFavorite}
+            />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  function renderGroup(cat: NavCategory, nested: boolean) {
+    const subgroups = cat.subgroups ?? [];
+    const holdsSelected =
+      cat.items.some((i) => i.id === selected) || subgroups.some((g) => g.items.some((i) => i.id === selected));
+    return (
+      <details
+        key={cat.label}
+        className={'group' + (nested ? ' subgroup' : '') + (holdsSelected ? ' holds-selected' : '')}
+        open={open.has(cat.label)}
+        onToggle={(e) => toggle(cat.label, (e.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary>
+          <span className="chev">▸</span>
+          <span className="cat-label">{cat.label}</span>
+          <span className="nav-badge">{categoryBadge(cat, counts)}</span>
+        </summary>
+        {cat.items.length > 0 && renderLeaves(cat.items)}
+        {subgroups.map((g) => renderGroup(g, true))}
+      </details>
+    );
+  }
 }
 
 function ResourceTable(props: {

@@ -43,7 +43,19 @@
 
         <!-- Resource categories: each is a collapsible tree node, opened when it holds the selection -->
         <div class="kw-tree">
-            <details th:each="cat : ${categories}" class="kw-tree-group"
+            <div th:each="cat : ${categories}"
+                 th:with="single=${cat.items().size() == 1 and #lists.isEmpty(cat.subgroups())}">
+            <!-- A single-kind category (Cluster→Nodes, Namespaces, Events) is a plain top-level leaf, no drop-arrow -->
+            <a th:if="${single}" class="kw-tree-leaf kw-tree-toplevel"
+               th:with="only=${cat.items()[0]}"
+               th:classappend="${only.id() == selectedId} ? 'active' : ''"
+               th:href="${only.id() == 'events'}
+                        ? @{/clusters/{c}/events(c=${clusterId})}
+                        : @{/clusters/{c}/r/{id}(c=${clusterId},id=${only.id()})}">
+                <i class="bi" th:classappend="${cat.icon()}"></i>
+                <span th:text="${only.label()}">Kind</span>
+            </a>
+            <details th:unless="${single}" class="kw-tree-group"
                      th:with="active=${#lists.contains(cat.items().![id()], selectedId)}"
                      th:attr="open=${active} ? 'open' : null">
                 <summary>
@@ -61,7 +73,26 @@
                            th:text="${item.label()}">Kind</a>
                     </li>
                 </ul>
+                <!-- Nested sub-groups: Custom Resources nests one collapsible group per CRD API group -->
+                <details th:each="grp : ${cat.subgroups()}" class="kw-tree-group kw-tree-subgroup"
+                         th:with="grpActive=${#lists.contains(grp.items().![id()], selectedId)}"
+                         th:attr="open=${grpActive} ? 'open' : null">
+                    <summary>
+                        <i class="bi bi-chevron-right kw-chevron"></i>
+                        <i class="bi" th:classappend="${grp.icon()}"></i>
+                        <span th:text="${grp.label()}">Group</span>
+                    </summary>
+                    <ul class="kw-tree-children">
+                        <li th:each="item : ${grp.items()}">
+                            <a class="kw-tree-leaf"
+                               th:classappend="${item.id() == selectedId} ? 'active' : ''"
+                               th:href="@{/clusters/{c}/r/{id}(c=${clusterId},id=${item.id()})}"
+                               th:text="${item.label()}">Kind</a>
+                        </li>
+                    </ul>
+                </details>
             </details>
+            </div>
         </div>
     </aside>
 </div>
