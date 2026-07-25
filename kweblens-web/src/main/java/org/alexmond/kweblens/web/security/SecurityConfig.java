@@ -82,7 +82,13 @@ public class SecurityConfig {
 		})
 			.securityContext((sc) -> sc.securityContextRepository(contextRepository))
 			.formLogin(Customizer.withDefaults())
-			.httpBasic((basic) -> basic.securityContextRepository(contextRepository))
+			// Answer failed Basic auth with a bare 401 (no WWW-Authenticate) so the
+			// browser
+			// does not hijack the SPA's sign-in fetch with its native Basic prompt; the
+			// SPA
+			// then shows its own "Invalid credentials" instead of freezing.
+			.httpBasic((basic) -> basic.securityContextRepository(contextRepository)
+				.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
 			.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**"))
 			// Materialise the CSRF token before view rendering commits the response.
 			.addFilterAfter(new CsrfTokenEagerFilter(), CsrfFilter.class)
