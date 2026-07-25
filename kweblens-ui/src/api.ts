@@ -65,6 +65,8 @@ async function getText(url: string): Promise<string> {
 }
 
 export const api = {
+  // Validates HTTP Basic creds and establishes the session cookie the exec WebSocket rides.
+  verifySession: () => postJson<{ user: string }>('/api/v1/auth/session'),
   clusters: () => getJson<ClusterInfo[]>('/api/v1/clusters'),
   nav: (cluster: string) => getJson<NavCategory[]>(`/api/v1/clusters/${cluster}/nav`),
   counts: (cluster: string) => getJson<Record<string, number>>(`/api/v1/clusters/${encodeURIComponent(cluster)}/counts`),
