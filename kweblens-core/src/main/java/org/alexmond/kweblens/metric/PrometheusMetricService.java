@@ -4,8 +4,10 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -84,6 +86,92 @@ public class PrometheusMetricService {
 			log.warn("Prometheus query failed on cluster '{}': {}", clusterId, ex.getMessage());
 			return MetricSeries.unavailable();
 		}
+	}
+
+	/**
+	 * Per-node root-filesystem disk usage from node-exporter, mapped back to Kubernetes
+	 * node names via each node's InternalIP (node-exporter labels series by
+	 * {@code instance} {@code = <ip>:<port>}). Empty when no backend or no node-exporter
+	 * metrics are found.
+	 */
+	public List<NodeDiskUsage> nodeDiskUsage(String clusterId) {
+		Optional<String> address = endpoint(clusterId);
+		if (address.isEmpty()) {
+			return List.of();
+		}
+		Map<String, Double> total = instantByLabel(clusterId, address.get(),
+				"sum by (instance) (node_filesystem_size_bytes{mountpoint=\"/\"})", "instance");
+		if (total.isEmpty()) {
+			return List.of();
+		}
+		Map<String, Double> used = instantByLabel(clusterId, address.get(),
+				"sum by (instance) (node_filesystem_size_bytes{mountpoint=\"/\"}"
+						+ " - node_filesystem_avail_bytes{mountpoint=\"/\"})",
+				"instance");
+		Map<String, String> ipToNode = nodeInternalIps(clusterId);
+		List<NodeDiskUsage> out = new ArrayList<>();
+		total.forEach((instance, totalBytes) -> {
+			String ip = instance.contains(":") ? instance.substring(0, instance.indexOf(':')) : instance;
+			String node = ipToNode.get(ip);
+			if (node != null) {
+				out.add(new NodeDiskUsage(node, Math.round(used.getOrDefault(instance, 0.0)), Math.round(totalBytes)));
+			}
+		});
+		return out;
+	}
+
+	private Map<String, Double> instantByLabel(String clusterId, String address, String promql, String label) {
+		try {
+			String body = clusters.require(clusterId).raw(proxyBase(address) + "/api/v1/query?query=" + enc(promql));
+			return parseInstant(body, label);
+		}
+		catch (RuntimeException ex) {
+			log.warn("Prometheus instant query failed on cluster '{}': {}", clusterId, ex.getMessage());
+			return Map.of();
+		}
+	}
+
+	/**
+	 * Parse an instant-query response into a map of {@code metric[label]} → sample value.
+	 */
+	Map<String, Double> parseInstant(String body, String label) {
+		Map<String, Double> out = new HashMap<>();
+		if (body == null || body.isBlank()) {
+			return out;
+		}
+		try {
+			for (JsonNode series : mapper.readTree(body).path("data").path("result")) {
+				String key = series.path("metric").path(label).asText(null);
+				JsonNode value = series.path("value");
+				if (key != null && value.isArray() && value.size() == 2) {
+					out.put(key, value.get(1).asDouble());
+				}
+			}
+		}
+		catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+			log.debug("Unparseable Prometheus instant response: {}", ex.getMessage());
+		}
+		return out;
+	}
+
+	Map<String, String> nodeInternalIps(String clusterId) {
+		Map<String, String> map = new HashMap<>();
+		try {
+			clusters.require(clusterId).nodes().list().getItems().forEach((node) -> {
+				if (node.getStatus() != null && node.getStatus().getAddresses() != null) {
+					node.getStatus()
+						.getAddresses()
+						.stream()
+						.filter((a) -> "InternalIP".equals(a.getType()))
+						.findFirst()
+						.ifPresent((a) -> map.put(a.getAddress(), node.getMetadata().getName()));
+				}
+			});
+		}
+		catch (RuntimeException ex) {
+			log.warn("Node IP lookup failed on cluster '{}': {}", clusterId, ex.getMessage());
+		}
+		return map;
 	}
 
 	MetricSeries parse(String body, String unit) {

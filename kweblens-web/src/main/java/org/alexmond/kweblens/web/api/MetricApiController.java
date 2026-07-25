@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import org.alexmond.kweblens.metric.MetricSeries;
 import org.alexmond.kweblens.metric.MetricService;
+import org.alexmond.kweblens.metric.NodeDiskUsage;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
 import org.alexmond.kweblens.metric.UsageSummary;
 
@@ -38,6 +39,14 @@ public class MetricApiController {
 	@GetMapping("/pods")
 	public List<UsageSummary> pods(@PathVariable String clusterId, @RequestParam(required = false) String namespace) {
 		return metrics.podUsage(clusterId, namespace);
+	}
+
+	/**
+	 * Per-node root-filesystem disk usage from Prometheus/node-exporter (empty if none).
+	 */
+	@GetMapping("/nodes/disk")
+	public List<NodeDiskUsage> nodeDisk(@PathVariable String clusterId) {
+		return prometheus.nodeDiskUsage(clusterId);
 	}
 
 	/**

@@ -16,6 +16,7 @@ import type {
   MetricSeries,
   NavCategory,
   NavItem,
+  NodeDiskUsage,
   PortForward,
   UsageSummary,
 } from './types';
@@ -177,6 +178,7 @@ export function App() {
   const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject } | null>(null);
   const [cols, setCols] = useState<ColumnDef[]>([]);
   const [usage, setUsage] = useState<Record<string, UsageSummary>>({});
+  const [nodeDisk, setNodeDisk] = useState<Record<string, NodeDiskUsage>>({});
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -288,6 +290,7 @@ export function App() {
   useEffect(() => {
     if (!cluster || !selected || (selected.id !== 'pods' && selected.id !== 'nodes')) {
       setUsage({});
+      setNodeDisk({});
       return;
     }
     let cancelled = false;
@@ -310,6 +313,22 @@ export function App() {
           setUsage({});
         }
       });
+      // Disk (Prometheus/node-exporter) is node-only and lives on a separate endpoint.
+      if (selected.id === 'nodes') {
+        api
+          .nodeDisk(cluster)
+          .then((list) => {
+            if (cancelled) {
+              return;
+            }
+            const dmap: Record<string, NodeDiskUsage> = {};
+            list.forEach((d) => {
+              dmap[d.node] = d;
+            });
+            setNodeDisk(dmap);
+          })
+          .catch(() => !cancelled && setNodeDisk({}));
+      }
     };
     load();
     const timer = window.setInterval(load, 15000);
@@ -417,6 +436,24 @@ export function App() {
             );
           },
         },
+        {
+          key: 'm-disk',
+          header: 'Disk',
+          sortText: (o) => String(nodeDisk[objName(o)]?.usedBytes ?? 0),
+          render: (o) => {
+            const d = nodeDisk[objName(o)];
+            if (!d) {
+              return '—';
+            }
+            return (
+              <UsageBar
+                fraction={d.totalBytes ? d.usedBytes / d.totalBytes : 0}
+                color="#e08a1e"
+                text={`${gib(d.usedBytes)} / ${gib(d.totalBytes)}`}
+              />
+            );
+          },
+        },
       ];
     }
     if (selected?.id === 'pods') {
@@ -427,7 +464,7 @@ export function App() {
       ];
     }
     return cols;
-  }, [cols, usage, selected]);
+  }, [cols, usage, nodeDisk, selected]);
 
   const visibleCols = useMemo(() => tableCols.filter((c) => !hiddenCols.has(c.key)), [tableCols, hiddenCols]);
 

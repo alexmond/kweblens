@@ -70,6 +70,12 @@ export interface UsageSummary {
   memory: string;
 }
 
+export interface NodeDiskUsage {
+  node: string;
+  usedBytes: number;
+  totalBytes: number;
+}
+
 export interface MetricPoint {
   t: number;
   v: number;
