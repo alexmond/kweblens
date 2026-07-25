@@ -58,9 +58,11 @@ export function App() {
   const [cols, setCols] = useState<ColumnDef[]>([]);
   const [usage, setUsage] = useState<Record<string, UsageSummary>>({});
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
+  const [selection, setSelection] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
     api
@@ -105,6 +107,7 @@ export function App() {
     setDetail(null);
     setQuery('');
     setHiddenCols(new Set());
+    setSelection(new Set());
     setLoading(true);
     setError(null);
     api
@@ -284,6 +287,47 @@ export function App() {
       return next;
     });
 
+  const toggleRow = (key: string) =>
+    setSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+
+  const toggleAll = (keys: string[]) =>
+    setSelection((prev) => (prev.size >= keys.length && keys.length > 0 ? new Set() : new Set(keys)));
+
+  const bulkDelete = async () => {
+    if (!cluster || !selected || selection.size === 0) {
+      return;
+    }
+    if (!authUser) {
+      setShowLogin(true);
+      return;
+    }
+    if (!window.confirm(`Delete ${selection.size} ${selected.label}? This cannot be undone.`)) {
+      return;
+    }
+    const targets = objects.filter((o) => selection.has(objKey(o)) && objNs(o));
+    for (const o of targets) {
+      try {
+        await api.del(cluster, selected.id, objNs(o) as string, objName(o));
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          auth.clear();
+          setAuthUser(null);
+          setShowLogin(true);
+          break;
+        }
+      }
+    }
+    setSelection(new Set());
+  };
+
   return (
     <div className="app">
       <header className="brandbar">
@@ -369,6 +413,12 @@ export function App() {
                   onChange={(e) => setQuery(e.target.value)}
                 />
                 <div className="spacer" />
+                <button
+                  className="btn create-btn"
+                  onClick={() => (authUser ? setShowCreate(true) : setShowLogin(true))}
+                >
+                  + Create
+                </button>
                 {selected.namespaced ? (
                   <label className="ns-select">
                     <span>Namespace</span>
@@ -404,12 +454,26 @@ export function App() {
                   </details>
                 )}
               </div>
+              {selection.size > 0 && (
+                <div className="bulk-bar">
+                  <span>{selection.size} selected</span>
+                  <button className="btn danger" onClick={bulkDelete}>
+                    Delete
+                  </button>
+                  <button className="btn" onClick={() => setSelection(new Set())}>
+                    Clear
+                  </button>
+                </div>
+              )}
               <ResourceTable
                 objects={filtered}
                 columns={visibleCols}
                 namespaced={selected.namespaced}
                 loading={loading}
                 selectedKey={detail ? objKey(detail.obj) : null}
+                selection={selection}
+                onToggleRow={toggleRow}
+                onToggleAll={toggleAll}
                 onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
                 onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
               />
@@ -444,6 +508,78 @@ export function App() {
           }}
         />
       )}
+
+      {showCreate && cluster && (
+        <CreateModal
+          cluster={cluster}
+          onClose={() => setShowCreate(false)}
+          onAuthExpired={() => {
+            auth.clear();
+            setAuthUser(null);
+            setShowCreate(false);
+            setShowLogin(true);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateModal(props: { cluster: string; onClose: () => void; onAuthExpired: () => void }) {
+  const { cluster, onClose, onAuthExpired } = props;
+  const [draft, setDraft] = useState(
+    'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: example\n  namespace: default\ndata:\n  key: value\n',
+  );
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const apply = async () => {
+    setBusy(true);
+    setMsg(null);
+    setErr(false);
+    try {
+      const r = await api.apply(cluster, draft);
+      setMsg(`created ${r.kind}/${r.name}`);
+      window.setTimeout(onClose, 700);
+    } catch (e) {
+      setErr(true);
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        onAuthExpired();
+      } else {
+        setMsg(String(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <h2>Create from YAML</h2>
+        <p className="modal-note">Server-side apply — paste or edit a manifest, then Apply.</p>
+        <textarea className="yaml-edit tall" value={draft} spellCheck={false} onChange={(e) => setDraft(e.target.value)} />
+        {msg && <div className={'act-msg' + (err ? ' err' : '')}>{msg}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="btn primary" onClick={apply} disabled={busy}>
+            Apply
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -523,10 +659,14 @@ function ResourceTable(props: {
   namespaced: boolean;
   loading: boolean;
   selectedKey: string | null;
+  selection: Set<string>;
+  onToggleRow: (key: string) => void;
+  onToggleAll: (keys: string[]) => void;
   onOpen: (obj: KubeObject) => void;
   onNamespaceClick?: (ns: string) => void;
 }) {
-  const { objects, columns: cols, namespaced, loading, selectedKey, onOpen, onNamespaceClick } = props;
+  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick } =
+    props;
   const [sort, setSort] = useState<{ key: string; dir: number }>({ key: 'name', dir: 1 });
   if (loading) {
     return <div className="empty">Loading…</div>;
@@ -565,10 +705,16 @@ function ResourceTable(props: {
   const clickHeader = (key: string) =>
     setSort((prev) => (prev.key === key ? { key, dir: -prev.dir } : { key, dir: 1 }));
 
+  const sortedKeys = sorted.map(objKey);
+  const allSelected = sortedKeys.length > 0 && sortedKeys.every((k) => selection.has(k));
+
   return (
     <table className="grid clickable">
       <thead>
         <tr>
+          <th className="chk">
+            <input type="checkbox" checked={allSelected} onChange={() => onToggleAll(sortedKeys)} />
+          </th>
           {headerCols.map((h) => (
             <th key={h.key} className="sortable" onClick={() => clickHeader(h.key)}>
               {h.header}
@@ -579,7 +725,20 @@ function ResourceTable(props: {
       </thead>
       <tbody>
         {sorted.map((o) => (
-          <tr key={objKey(o)} className={objKey(o) === selectedKey ? 'row-active' : ''} onClick={() => onOpen(o)}>
+          <tr
+            key={objKey(o)}
+            className={
+              (objKey(o) === selectedKey ? 'row-active' : '') + (selection.has(objKey(o)) ? ' row-checked' : '')
+            }
+            onClick={() => onOpen(o)}
+          >
+            <td className="chk" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                checked={selection.has(objKey(o))}
+                onChange={() => onToggleRow(objKey(o))}
+              />
+            </td>
             <td className="name">{objName(o)}</td>
             {showNs &&
               (onNamespaceClick && objNs(o) ? (
@@ -626,6 +785,8 @@ function Detail(props: {
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   const [events, setEvents] = useState<EventSummary[] | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [replicas, setReplicas] = useState(1);
@@ -704,6 +865,28 @@ function Detail(props: {
     }
   };
 
+  const applyYaml = async () => {
+    setBusy(true);
+    setActionMsg(null);
+    setActionErr(false);
+    try {
+      const r = await api.apply(cluster, draft);
+      setYaml(draft);
+      setEditing(false);
+      setActionMsg(`applied ${r.kind}/${r.name}`);
+    } catch (e) {
+      setActionErr(true);
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        onAuthExpired();
+        setActionMsg('Authentication failed — sign in again.');
+      } else {
+        setActionMsg(String(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const act = async (fn: () => Promise<{ result: string }>, opts?: { confirm?: string; closeOnDone?: boolean }) => {
     if (opts?.confirm && !window.confirm(opts.confirm)) {
       return;
@@ -769,13 +952,46 @@ function Detail(props: {
         {tab === 'yaml' && (
           <div className="yaml-pane">
             <div className="yaml-toolbar">
-              <button className="btn" onClick={copy} disabled={!yaml}>
-                {copied ? 'Copied' : 'Copy'}
-              </button>
+              {!editing ? (
+                <>
+                  <button className="btn" onClick={copy} disabled={!yaml}>
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                  {authed && (
+                    <button
+                      className="btn"
+                      disabled={!yaml}
+                      onClick={() => {
+                        setDraft(yaml ?? '');
+                        setEditing(true);
+                      }}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button className="btn primary" disabled={busy} onClick={applyYaml}>
+                    Apply
+                  </button>
+                  <button className="btn" disabled={busy} onClick={() => setEditing(false)}>
+                    Cancel
+                  </button>
+                </>
+              )}
             </div>
             {yamlError && <div className="error">{yamlError}</div>}
             {!yamlError && yaml === null && <div className="empty">Loading…</div>}
-            {yaml !== null && <pre className="yaml">{yaml}</pre>}
+            {yaml !== null && !editing && <pre className="yaml">{yaml}</pre>}
+            {editing && (
+              <textarea
+                className="yaml-edit"
+                value={draft}
+                spellCheck={false}
+                onChange={(e) => setDraft(e.target.value)}
+              />
+            )}
           </div>
         )}
       </div>

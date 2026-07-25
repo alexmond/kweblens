@@ -10,6 +10,7 @@ import java.util.function.BiConsumer;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
@@ -155,7 +156,20 @@ public class ResourceService {
 	public ResourceSummary apply(String clusterId, String yaml) {
 		KubernetesClient client = clusters.require(clusterId);
 		HasMetadata parsed = Serialization.unmarshal(yaml);
-		HasMetadata applied = client.resource(parsed).serverSideApply();
+		// Strip server-managed metadata so editing a fetched manifest (which carries
+		// managedFields/resourceVersion/etc.) applies cleanly; force conflicts so
+		// re-applying
+		// a field owned by another manager wins (kubectl apply --server-side
+		// --force-conflicts).
+		ObjectMeta meta = parsed.getMetadata();
+		if (meta != null) {
+			meta.setManagedFields(null);
+			meta.setResourceVersion(null);
+			meta.setUid(null);
+			meta.setCreationTimestamp(null);
+			meta.setGeneration(null);
+		}
+		HasMetadata applied = client.resource(parsed).forceConflicts().serverSideApply();
 		return new ResourceSummary(applied.getKind(), namespace(applied), name(applied), null, "-");
 	}
 

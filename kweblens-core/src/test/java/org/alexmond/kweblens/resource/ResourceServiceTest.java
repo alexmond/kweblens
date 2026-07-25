@@ -90,7 +90,7 @@ class ResourceServiceTest {
 		// The crud mock doesn't implement server-side apply; stub the apply PATCH.
 		server.expect()
 			.patch()
-			.withPath("/api/v1/namespaces/default/configmaps/my-config?fieldManager=fabric8")
+			.withPath("/api/v1/namespaces/default/configmaps/my-config?fieldManager=fabric8&force=true")
 			.andReturn(200, "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\","
 					+ "\"metadata\":{\"name\":\"my-config\",\"namespace\":\"default\"},\"data\":{\"key\":\"value\"}}")
 			.always();
