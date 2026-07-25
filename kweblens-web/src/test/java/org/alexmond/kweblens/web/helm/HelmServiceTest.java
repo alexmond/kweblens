@@ -24,7 +24,7 @@ class HelmServiceTest {
 	private HelmService serviceFor(String clusterId) {
 		ClusterRegistry registry = new ClusterRegistry();
 		registry.register(clusterId, clusterId, client);
-		return new HelmService(registry);
+		return new HelmService(registry, new HelmChartResolver(new HelmProperties()));
 	}
 
 	@Test

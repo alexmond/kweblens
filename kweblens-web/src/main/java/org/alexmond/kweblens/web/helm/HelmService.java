@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -20,11 +21,18 @@ import io.kubernetes.client.util.credentials.ClientCertificateAuthentication;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.alexmond.jhelm.core.action.HistoryAction;
+import org.alexmond.jhelm.core.action.InstallAction;
+import org.alexmond.jhelm.core.action.InstallOptions;
 import org.alexmond.jhelm.core.action.ListAction;
+import org.alexmond.jhelm.core.action.RollbackAction;
+import org.alexmond.jhelm.core.action.RollbackOptions;
 import org.alexmond.jhelm.core.action.StatusAction;
+import org.alexmond.jhelm.core.action.UpgradeAction;
+import org.alexmond.jhelm.core.action.UpgradeOptions;
 import org.alexmond.jhelm.core.model.Chart;
 import org.alexmond.jhelm.core.model.ChartMetadata;
 import org.alexmond.jhelm.core.model.Release;
+import org.alexmond.jhelm.core.service.Engine;
 import org.alexmond.jhelm.core.service.KubeService;
 import org.alexmond.jhelm.kube.service.internal.HelmKubeService;
 import org.alexmond.jhelm.kube.service.internal.KubeClient;
@@ -48,6 +56,67 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 public class HelmService {
 
 	private final ClusterRegistry clusters;
+
+	private final HelmChartResolver chartResolver;
+
+	/**
+	 * Install a chart as a new release. When {@code dryRun} is true nothing is persisted
+	 * and the returned result carries the rendered manifest for preview; otherwise the
+	 * release is created and the result describes it.
+	 */
+	public HelmMutationResult install(String clusterId, String namespace, String releaseName, String repository,
+			String chart, String version, Map<String, Object> values, boolean dryRun, boolean createNamespace) {
+		Chart chartModel = chartResolver.resolve(repository, chart, version);
+		InstallAction action = new InstallAction(new Engine(), kubeService(clusterId));
+		Release release = action.install(InstallOptions.builder()
+			.chart(chartModel)
+			.releaseName(releaseName)
+			.namespace(namespace)
+			.values((values != null) ? values : Map.of())
+			.dryRun(dryRun)
+			.createNamespace(createNamespace)
+			.description(dryRun ? "kweblens dry-run" : "Installed via kweblens")
+			.build());
+		return toMutationResult(dryRun, release);
+	}
+
+	/**
+	 * Upgrade an existing release to a (possibly new) chart version. Dry-run previews
+	 * only.
+	 */
+	public HelmMutationResult upgrade(String clusterId, String namespace, String releaseName, String repository,
+			String chart, String version, Map<String, Object> values, boolean dryRun) {
+		Release current = new StatusAction(kubeService(clusterId)).status(releaseName, namespace)
+			.orElseThrow(() -> new HelmException("No release '" + releaseName + "' in namespace " + namespace));
+		Chart chartModel = chartResolver.resolve(repository, chart, version);
+		Release release = new UpgradeAction(new Engine(), kubeService(clusterId)).upgrade(UpgradeOptions.builder()
+			.currentRelease(current)
+			.newChart(chartModel)
+			.values((values != null) ? values : Map.of())
+			.dryRun(dryRun)
+			.description(dryRun ? "kweblens dry-run" : "Upgraded via kweblens")
+			.build());
+		return toMutationResult(dryRun, release);
+	}
+
+	/** Roll a release back to an earlier revision. Dry-run previews only. */
+	public HelmMutationResult rollback(String clusterId, String namespace, String releaseName, int revision,
+			boolean dryRun) {
+		Release release = new RollbackAction(kubeService(clusterId)).rollback(RollbackOptions.builder()
+			.releaseName(releaseName)
+			.namespace(namespace)
+			.revision(revision)
+			.dryRun(dryRun)
+			.build());
+		return toMutationResult(dryRun, release);
+	}
+
+	private HelmMutationResult toMutationResult(boolean dryRun, Release release) {
+		String status = (release.getInfo() != null && release.getInfo().getStatus() != null)
+				? release.getInfo().getStatus().name() : null;
+		return new HelmMutationResult(dryRun, release.getName(), release.getNamespace(), release.getVersion(), status,
+				release.getManifest());
+	}
 
 	/**
 	 * List releases in a namespace, or across all namespaces when {@code namespace} is

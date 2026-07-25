@@ -1102,6 +1102,55 @@ body {
   white-space: nowrap;
 }
 
+.row-actions {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.modal.wide {
+  width: min(760px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.modal .values {
+  width: 100%;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+
+.modal label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.helm-preview {
+  margin-top: 10px;
+  border: 1px solid var(--border, #d6dde2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.helm-preview .preview-head {
+  padding: 4px 8px;
+  background: #f2f5f7;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.helm-preview pre {
+  margin: 0;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.4;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
 .btn.danger {
   color: #b3261e;
   border-color: #e6b4b0;
