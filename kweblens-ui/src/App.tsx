@@ -374,6 +374,9 @@ export function App() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [namespace, setNamespace] = useState<string | null>(null);
+  const [helmReleaseList, setHelmReleaseList] = useState<HelmRelease[]>([]);
+  const [helmRelease, setHelmRelease] = useState<{ namespace: string; name: string } | null>(null);
+  const [helmScope, setHelmScope] = useState<Set<string> | null>(null);
   const [selected, setSelected] = useState<NavItem | null>(null);
   const [objects, setObjects] = useState<KubeObject[]>([]);
   const [loading, setLoading] = useState(false);
@@ -415,6 +418,7 @@ export function App() {
     setFavorites(loadFavorites(cluster));
     setNamespaces([]);
     setNamespace(null);
+    setHelmRelease(null);
     setSelected(null);
     setObjects([]);
     setError(null);
@@ -422,12 +426,61 @@ export function App() {
       .nav(cluster)
       .then((cats) => setNav(withSyntheticNav(cats)))
       .catch((e) => setError(String(e)));
-    api.counts(cluster).then(setCounts).catch(() => setCounts({}));
     api
       .namespaces(cluster)
       .then((ns) => setNamespaces(ns.map((r) => r.name).sort()))
       .catch(() => setNamespaces([]));
+    api
+      .helmReleases(cluster)
+      .then(setHelmReleaseList)
+      .catch(() => setHelmReleaseList([]));
   }, [cluster]);
+
+  // Resolve the selected Helm release to the set of objects it manages (kind/name), for
+  // scoping lists and counts.
+  useEffect(() => {
+    if (!cluster || !helmRelease) {
+      setHelmScope(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .helmReleaseResources(cluster, helmRelease.namespace, helmRelease.name)
+      .then((refs) => !cancelled && setHelmScope(new Set(refs.map((r) => `${r.kind}/${r.name}`))))
+      .catch(() => !cancelled && setHelmScope(new Set()));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, helmRelease]);
+
+  // Count badges track the active scope: a Helm release → counts from its manifest;
+  // otherwise the (namespace-aware) server counts.
+  useEffect(() => {
+    if (!cluster) {
+      return;
+    }
+    if (helmScope) {
+      const kindToId = new Map<string, string>();
+      allNavItems(nav).forEach((i) => i.kind && kindToId.set(i.kind, i.id));
+      const c: Record<string, number> = {};
+      helmScope.forEach((key) => {
+        const id = kindToId.get(key.split('/')[0]);
+        if (id) {
+          c[id] = (c[id] ?? 0) + 1;
+        }
+      });
+      setCounts(c);
+      return;
+    }
+    let cancelled = false;
+    api
+      .counts(cluster, namespace ?? undefined)
+      .then((c) => !cancelled && setCounts(c))
+      .catch(() => !cancelled && setCounts({}));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, namespace, helmScope, nav]);
 
   // Fetch the selected kind's raw objects on kind/namespace change.
   useEffect(() => {
@@ -585,16 +638,17 @@ export function App() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const scoped = helmScope ? objects.filter((o) => helmScope.has(`${o.kind ?? ''}/${objName(o)}`)) : objects;
     if (!q) {
-      return objects;
+      return scoped;
     }
-    return objects.filter(
+    return scoped.filter(
       (o) =>
         objName(o).toLowerCase().includes(q) ||
         (objNs(o) ?? '').toLowerCase().includes(q) ||
         (o.kind ?? '').toLowerCase().includes(q),
     );
-  }, [objects, query]);
+  }, [objects, query, helmScope]);
 
   // For Pods/Nodes, append live CPU/Memory columns backed by metrics-server usage. Nodes
   // show used/allocatable with a proportional bar; Pods show the raw usage value.
@@ -806,6 +860,43 @@ export function App() {
           <span className="logo">◆</span> kweblens
           <span className="tag">web Kubernetes IDE · SPA</span>
         </div>
+        {cluster && (
+          <div className="bar-filters">
+            <label className="bar-filter">
+              <span>Namespace</span>
+              <select value={namespace ?? ''} onChange={(e) => setNamespace(e.target.value || null)}>
+                <option value="">All namespaces</option>
+                {namespaces.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="bar-filter">
+              <span>Helm</span>
+              <select
+                value={helmRelease ? `${helmRelease.namespace}/${helmRelease.name}` : ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) {
+                    setHelmRelease(null);
+                  } else {
+                    const slash = v.indexOf('/');
+                    setHelmRelease({ namespace: v.slice(0, slash), name: v.slice(slash + 1) });
+                  }
+                }}
+              >
+                <option value="">All releases</option>
+                {helmReleaseList.map((r) => (
+                  <option key={`${r.namespace}/${r.name}`} value={`${r.namespace}/${r.name}`}>
+                    {r.name} · {r.namespace}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         <div className="bar-right">
           {authUser ? (
             <span className="authbox">
@@ -913,21 +1004,7 @@ export function App() {
                 >
                   + Create
                 </button>
-                {selected.namespaced ? (
-                  <label className="ns-select">
-                    <span>Namespace</span>
-                    <select value={namespace ?? ''} onChange={(e) => setNamespace(e.target.value || null)}>
-                      <option value="">All namespaces</option>
-                      {namespaces.map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <span className="ns-note">Cluster-scoped</span>
-                )}
+                {!selected.namespaced && <span className="ns-note">Cluster-scoped</span>}
                 {tableCols.length > 0 && (
                   <details className="cols-menu">
                     <summary>Columns ▾</summary>

@@ -74,7 +74,11 @@ export const api = {
   verifySession: () => postJson<{ user: string }>('/api/v1/auth/session'),
   clusters: () => getJson<ClusterInfo[]>('/api/v1/clusters'),
   nav: (cluster: string) => getJson<NavCategory[]>(`/api/v1/clusters/${cluster}/nav`),
-  counts: (cluster: string) => getJson<Record<string, number>>(`/api/v1/clusters/${encodeURIComponent(cluster)}/counts`),
+  counts: (cluster: string, namespace?: string) =>
+    getJson<Record<string, number>>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/counts` +
+        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+    ),
   namespaces: (cluster: string) =>
     getJson<ResourceRow[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/namespaces`),
   objects: (cluster: string, resourceId: string, namespace?: string) =>
