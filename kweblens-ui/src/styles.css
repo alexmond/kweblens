@@ -981,6 +981,78 @@ body {
   white-space: pre;
 }
 
+/* YAML syntax colours (GitHub-light palette) */
+.yaml .yk-key {
+  color: #0550ae;
+}
+
+.yaml .yk-str {
+  color: #0a3069;
+}
+
+.yaml .yk-num {
+  color: #0b7285;
+}
+
+.yaml .yk-bool {
+  color: #cf222e;
+}
+
+.yaml .yk-comment {
+  color: #6e7781;
+  font-style: italic;
+}
+
+.yaml .yk-dash {
+  color: #6e7781;
+}
+
+/* "Hide Managed Fields" pill toggle */
+.yaml-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.yaml-toggle input {
+  display: none;
+}
+
+.yaml-toggle .switch {
+  width: 30px;
+  height: 16px;
+  border-radius: 8px;
+  background: #cbd5e1;
+  position: relative;
+  transition: background 0.15s;
+  flex: none;
+}
+
+.yaml-toggle .switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.yaml-toggle input:checked + .switch {
+  background: #475569;
+}
+
+.yaml-toggle input:checked + .switch::after {
+  transform: translateX(14px);
+}
+
 /* Drawer actions footer */
 .drawer-actions {
   display: flex;
