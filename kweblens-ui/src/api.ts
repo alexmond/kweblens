@@ -1,5 +1,13 @@
 import { auth } from './auth';
-import type { ClusterInfo, EventSummary, KubeObject, NavCategory, PrinterColumn, ResourceRow } from './types';
+import type {
+  ClusterInfo,
+  EventSummary,
+  HelmRelease,
+  KubeObject,
+  NavCategory,
+  PrinterColumn,
+  ResourceRow,
+} from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -55,6 +63,16 @@ export const api = {
   printerColumns: (cluster: string, resourceId: string) =>
     getJson<PrinterColumn[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/columns`,
+    ),
+  events: (cluster: string, namespace?: string) =>
+    getJson<EventSummary[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/events` +
+        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+    ),
+  helmReleases: (cluster: string, namespace?: string) =>
+    getJson<HelmRelease[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases` +
+        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
     ),
   objectEvents: (cluster: string, kind: string, name: string, namespace?: string) => {
     const p = new URLSearchParams({ kind, name });

@@ -4,7 +4,7 @@ import { ApiError, api } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
 import { age, columnsFor, printerColumnDefs } from './columns';
-import type { EventSummary, KubeObject, NavCategory, NavItem } from './types';
+import type { ClusterInfo, EventSummary, HelmRelease, KubeObject, NavCategory, NavItem } from './types';
 
 function initials(id: string): string {
   return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
@@ -14,8 +14,27 @@ const objName = (o: KubeObject): string => o.metadata?.name ?? '';
 const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
+// Synthetic nav items are client-only views (dashboards, Helm) rather than resource kinds.
+const isSynthetic = (id: string): boolean => id.startsWith('overview:') || id.startsWith('helm:');
+
+// Inject a "Overview" dashboard item at the top of the Workloads category, and a Helm
+// section (client-only views, not resource kinds).
+function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
+  const withOverview = cats.map((c) =>
+    c.label === 'Workloads'
+      ? { ...c, items: [{ id: 'overview:workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] }
+      : c,
+  );
+  const helm: NavCategory = {
+    label: 'Helm',
+    icon: 'bi-hexagon',
+    items: [{ id: 'helm:releases', label: 'Releases', kind: '', namespaced: false }],
+  };
+  return [...withOverview, helm];
+}
+
 export function App() {
-  const [clusters, setClusters] = useState<{ id: string; name: string }[]>([]);
+  const [clusters, setClusters] = useState<ClusterInfo[]>([]);
   const [cluster, setCluster] = useState<string | null>(null);
   const [nav, setNav] = useState<NavCategory[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
@@ -51,7 +70,10 @@ export function App() {
     setSelected(null);
     setObjects([]);
     setError(null);
-    api.nav(cluster).then(setNav).catch((e) => setError(String(e)));
+    api
+      .nav(cluster)
+      .then((cats) => setNav(withSyntheticNav(cats)))
+      .catch((e) => setError(String(e)));
     api
       .namespaces(cluster)
       .then((ns) => setNamespaces(ns.map((r) => r.name).sort()))
@@ -60,7 +82,8 @@ export function App() {
 
   // Fetch the selected kind's raw objects on kind/namespace change.
   useEffect(() => {
-    if (!cluster || !selected) {
+    if (!cluster || !selected || isSynthetic(selected.id)) {
+      setObjects([]);
       return;
     }
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
@@ -95,7 +118,7 @@ export function App() {
   // Columns for the selected kind: built-in registry, or the CRD's printer columns for
   // custom kinds (their id is "group.plural"), falling back to Name/Namespace/Age.
   useEffect(() => {
-    if (!cluster || !selected) {
+    if (!cluster || !selected || isSynthetic(selected.id)) {
       setCols([]);
       return;
     }
@@ -119,7 +142,7 @@ export function App() {
 
   // Live object stream: patch the table in place.
   useEffect(() => {
-    if (!cluster || !selected) {
+    if (!cluster || !selected || isSynthetic(selected.id)) {
       return;
     }
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
@@ -223,8 +246,17 @@ export function App() {
 
         <main className="content">
           {error && <div className="error">{error}</div>}
-          {!selected && !error && <div className="empty">Pick a resource kind from the Navigator.</div>}
-          {selected && (
+          {!selected && !error && cluster && (
+            <ClusterOverview
+              cluster={cluster}
+              name={activeCluster?.name ?? cluster}
+              masterUrl={activeCluster?.masterUrl}
+              namespaceCount={namespaces.length}
+            />
+          )}
+          {cluster && selected?.id === 'overview:workloads' && <WorkloadsOverview cluster={cluster} />}
+          {cluster && selected?.id === 'helm:releases' && <HelmReleases cluster={cluster} />}
+          {selected && !isSynthetic(selected.id) && (
             <>
               <div className="content-head">
                 <h1>{selected.label}</h1>
@@ -820,6 +852,243 @@ function EventsPane(props: { events: EventSummary[] | null; error: string | null
         ))}
       </tbody>
     </table>
+  );
+}
+
+function HelmReleases(props: { cluster: string }) {
+  const { cluster } = props;
+  const [releases, setReleases] = useState<HelmRelease[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReleases(null);
+    setError(null);
+    api
+      .helmReleases(cluster)
+      .then((r) => !cancelled && setReleases(r))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
+
+  return (
+    <div className="overview">
+      <div className="content-head">
+        <h1>Helm Releases</h1>
+        <span className="count">{releases ? `${releases.length} items` : ''}</span>
+      </div>
+      {error && <div className="error">{error}</div>}
+      {releases === null ? (
+        <div className="empty">Loading…</div>
+      ) : releases.length === 0 ? (
+        <div className="empty">No releases.</div>
+      ) : (
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Namespace</th>
+              <th>Chart</th>
+              <th>Rev</th>
+              <th>App Version</th>
+              <th>Status</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {releases.map((r) => (
+              <tr key={r.namespace + '/' + r.name}>
+                <td className="name">{r.name}</td>
+                <td>{r.namespace}</td>
+                <td>{r.chart}</td>
+                <td>{r.revision}</td>
+                <td>{r.appVersion}</td>
+                <td>{r.status}</td>
+                <td>{r.updated ? age(r.updated) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+const WORKLOAD_KINDS = [
+  { id: 'pods', label: 'Pods' },
+  { id: 'deployments', label: 'Deployments' },
+  { id: 'statefulsets', label: 'Stateful Sets' },
+  { id: 'daemonsets', label: 'Daemon Sets' },
+  { id: 'replicasets', label: 'Replica Sets' },
+  { id: 'jobs', label: 'Jobs' },
+  { id: 'cronjobs', label: 'Cron Jobs' },
+];
+
+function isHealthy(kindId: string, o: KubeObject): boolean {
+  const s = (o.status as Record<string, unknown>) ?? {};
+  const sp = (o.spec as Record<string, unknown>) ?? {};
+  const n = (v: unknown) => (typeof v === 'number' ? v : 0);
+  switch (kindId) {
+    case 'pods':
+      return s.phase === 'Running' || s.phase === 'Succeeded';
+    case 'deployments':
+    case 'statefulsets':
+    case 'replicasets':
+      // Scaled-to-zero counts as healthy (intentionally scaled down, not failing).
+      return n(s.readyReplicas) === n(sp.replicas);
+    case 'daemonsets':
+      return n(s.numberReady) === n(s.desiredNumberScheduled);
+    case 'jobs':
+      return n(s.succeeded) > 0;
+    default:
+      return true;
+  }
+}
+
+function WorkloadsOverview(props: { cluster: string }) {
+  const { cluster } = props;
+  const [counts, setCounts] = useState<Record<string, { total: number; ready: number }>>({});
+  const [events, setEvents] = useState<EventSummary[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCounts({});
+    setEvents(null);
+    WORKLOAD_KINDS.forEach((k) => {
+      api
+        .objects(cluster, k.id)
+        .then((objs) => {
+          if (cancelled) {
+            return;
+          }
+          setCounts((prev) => ({
+            ...prev,
+            [k.id]: { total: objs.length, ready: objs.filter((o) => isHealthy(k.id, o)).length },
+          }));
+        })
+        .catch(() => undefined);
+    });
+    api
+      .events(cluster)
+      .then((e) => !cancelled && setEvents(e))
+      .catch(() => !cancelled && setEvents([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
+
+  return (
+    <div className="overview">
+      <h1 className="ov-title">Workloads</h1>
+      <div className="ov-cards">
+        {WORKLOAD_KINDS.map((k) => {
+          const c = counts[k.id];
+          const unhealthy = c ? c.total - c.ready : 0;
+          return (
+            <div className={'ov-card' + (unhealthy > 0 ? ' danger' : '')} key={k.id}>
+              <div className="ov-num">{c ? c.total : '…'}</div>
+              <div className="ov-lbl">
+                {k.label}
+                {c ? ` · ${c.ready} ready` : ''}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <section className="ov-sec">
+        <h3>Recent Events</h3>
+        <EventsPane events={events ? events.slice(0, 25) : null} error={null} />
+      </section>
+    </div>
+  );
+}
+
+function ClusterOverview(props: { cluster: string; name: string; masterUrl?: string; namespaceCount: number }) {
+  const { cluster, name, masterUrl, namespaceCount } = props;
+  const [nodes, setNodes] = useState<KubeObject[] | null>(null);
+  const [warnings, setWarnings] = useState<EventSummary[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setNodes(null);
+    setWarnings(null);
+    setErr(null);
+    api
+      .objects(cluster, 'nodes')
+      .then((n) => !cancelled && setNodes(n))
+      .catch((e) => !cancelled && setErr(String(e)));
+    api
+      .events(cluster)
+      .then((ev) => !cancelled && setWarnings(ev.filter((x) => x.type === 'Warning')))
+      .catch(() => !cancelled && setWarnings([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
+
+  const nodeReady = (o: KubeObject): boolean => {
+    const conds = ((o.status as Record<string, unknown>)?.conditions as Record<string, unknown>[]) ?? [];
+    const r = conds.find((c) => c.type === 'Ready');
+    return r ? r.status === 'True' : false;
+  };
+  const readyNodes = (nodes ?? []).filter(nodeReady).length;
+
+  return (
+    <div className="overview">
+      <h1 className="ov-title">{name}</h1>
+      <div className="ov-cards">
+        <div className="ov-card">
+          <div className="ov-num">{nodes ? nodes.length : '…'}</div>
+          <div className="ov-lbl">Nodes{nodes ? ` · ${readyNodes} ready` : ''}</div>
+        </div>
+        <div className="ov-card">
+          <div className="ov-num">{namespaceCount}</div>
+          <div className="ov-lbl">Namespaces</div>
+        </div>
+        <div className={'ov-card' + (warnings && warnings.length > 0 ? ' danger' : '')}>
+          <div className="ov-num">{warnings ? warnings.length : '…'}</div>
+          <div className="ov-lbl">Warnings</div>
+        </div>
+      </div>
+      {masterUrl && (
+        <div className="ov-api">
+          API server: <span className="mono">{masterUrl}</span>
+        </div>
+      )}
+      {err && <div className="error">{err}</div>}
+      <section className="ov-sec">
+        <h3>Warnings</h3>
+        {warnings === null ? (
+          <div className="empty">Loading…</div>
+        ) : warnings.length === 0 ? (
+          <div className="empty">No warnings.</div>
+        ) : (
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Reason</th>
+                <th>Object</th>
+                <th>Message</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {warnings.slice(0, 30).map((w, i) => (
+                <tr key={i} className="warn">
+                  <td>{w.reason}</td>
+                  <td>{w.object}</td>
+                  <td>{w.message}</td>
+                  <td>{w.age}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
   );
 }
 

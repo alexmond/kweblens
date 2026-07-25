@@ -59,3 +59,13 @@ export interface PrinterColumn {
   jsonPath: string;
   type: string;
 }
+
+export interface HelmRelease {
+  name: string;
+  namespace: string;
+  revision: number;
+  status: string;
+  chart: string;
+  appVersion: string;
+  updated: string | null;
+}

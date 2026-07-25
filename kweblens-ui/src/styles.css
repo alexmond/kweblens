@@ -450,6 +450,48 @@ body {
   padding: 20px 4px;
 }
 
+/* Cluster overview landing */
+.ov-title {
+  font-size: 20px;
+  margin: 0 0 14px;
+}
+
+.ov-cards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ov-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  min-width: 130px;
+}
+
+.ov-card.danger {
+  border-color: #f0c9c5;
+  background: #fdf4f3;
+}
+
+.ov-num {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.ov-lbl {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.ov-api {
+  margin: 14px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .error {
   color: #b3261e;
   background: #fde7e6;
