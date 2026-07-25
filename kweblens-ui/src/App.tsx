@@ -1566,6 +1566,33 @@ function MetricChart(props: { cluster: string; target: string; namespace?: strin
   );
 }
 
+// Reusable column-sorting for the simple record tables (mirrors ResourceTable's UX).
+type SortState = { key: string; dir: number };
+
+function useTableSort<T>(rows: T[], initialKey: string, value: (row: T, key: string) => string | number) {
+  const [sort, setSort] = useState<SortState>({ key: initialKey, dir: 1 });
+  const sorted = [...rows].sort((a, b) => {
+    const va = value(a, sort.key);
+    const vb = value(b, sort.key);
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * sort.dir;
+    }
+    return String(va).localeCompare(String(vb), undefined, { numeric: true }) * sort.dir;
+  });
+  const clickHeader = (key: string) => setSort((prev) => (prev.key === key ? { key, dir: -prev.dir } : { key, dir: 1 }));
+  return { sorted, sort, clickHeader };
+}
+
+function SortTh(props: { label: string; colKey: string; sort: SortState; onClick: (key: string) => void }) {
+  const { label, colKey, sort, onClick } = props;
+  return (
+    <th className="sortable" onClick={() => onClick(colKey)}>
+      {label}
+      {sort.key === colKey && <span className="sort-ind">{sort.dir === 1 ? ' ▲' : ' ▼'}</span>}
+    </th>
+  );
+}
+
 function PortForwards(props: { cluster: string; authed: boolean; onRequireAuth: () => void }) {
   const { cluster, authed, onRequireAuth } = props;
   const [forwards, setForwards] = useState<PortForward[] | null>(null);
@@ -1613,6 +1640,16 @@ function PortForwards(props: { cluster: string; authed: boolean; onRequireAuth: 
       .finally(() => setBusy(null));
   };
 
+  const { sorted, sort, clickHeader } = useTableSort(forwards ?? [], 'name', (f, k) => {
+    if (k === 'remotePort') {
+      return f.remotePort;
+    }
+    if (k === 'localPort') {
+      return f.localPort;
+    }
+    return (f[k as keyof PortForward] as string) ?? '';
+  });
+
   return (
     <div className="overview">
       <div className="content-head">
@@ -1632,18 +1669,18 @@ function PortForwards(props: { cluster: string; authed: boolean; onRequireAuth: 
         <table className="grid">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Namespace</th>
-              <th>Kind</th>
-              <th>Pod Port</th>
-              <th>Local Port</th>
-              <th>Protocol</th>
-              <th>Status</th>
+              <SortTh label="Name" colKey="name" sort={sort} onClick={clickHeader} />
+              <SortTh label="Namespace" colKey="namespace" sort={sort} onClick={clickHeader} />
+              <SortTh label="Kind" colKey="kind" sort={sort} onClick={clickHeader} />
+              <SortTh label="Pod Port" colKey="remotePort" sort={sort} onClick={clickHeader} />
+              <SortTh label="Local Port" colKey="localPort" sort={sort} onClick={clickHeader} />
+              <SortTh label="Protocol" colKey="protocol" sort={sort} onClick={clickHeader} />
+              <SortTh label="Status" colKey="status" sort={sort} onClick={clickHeader} />
               <th />
             </tr>
           </thead>
           <tbody>
-            {forwards.map((f) => (
+            {sorted.map((f) => (
               <tr key={f.id}>
                 <td className="name">{f.name}</td>
                 <td>{f.namespace}</td>
@@ -1837,6 +1874,11 @@ function HelmCharts(props: { cluster: string; authed: boolean; onAction: (a: Hel
   const filtered = (charts ?? []).filter(
     (c) => !q || c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q),
   );
+  const { sorted, sort, clickHeader } = useTableSort(
+    filtered,
+    'name',
+    (c, k) => (c[k as keyof HelmChart] as string) ?? '',
+  );
 
   return (
     <>
@@ -1860,16 +1902,16 @@ function HelmCharts(props: { cluster: string; authed: boolean; onAction: (a: Hel
         <table className="grid">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Description</th>
-              <th>Version</th>
-              <th>App Version</th>
-              <th>Repository</th>
+              <SortTh label="Name" colKey="name" sort={sort} onClick={clickHeader} />
+              <SortTh label="Description" colKey="description" sort={sort} onClick={clickHeader} />
+              <SortTh label="Version" colKey="version" sort={sort} onClick={clickHeader} />
+              <SortTh label="App Version" colKey="appVersion" sort={sort} onClick={clickHeader} />
+              <SortTh label="Repository" colKey="repository" sort={sort} onClick={clickHeader} />
               <th />
             </tr>
           </thead>
           <tbody>
-            {filtered.map((c) => (
+            {sorted.map((c) => (
               <tr key={c.repository + '/' + c.name}>
                 <td className="name">{c.name}</td>
                 <td className="muted">{c.description ?? '—'}</td>
@@ -1920,6 +1962,16 @@ function HelmReleases(props: {
     };
   }, [cluster, refreshKey]);
 
+  const { sorted, sort, clickHeader } = useTableSort(releases ?? [], 'name', (r, k) => {
+    if (k === 'revision') {
+      return r.revision;
+    }
+    if (k === 'updated') {
+      return Date.parse(r.updated ?? '') || 0;
+    }
+    return (r[k as keyof HelmRelease] as string) ?? '';
+  });
+
   return (
     <>
       <div className="content-head">
@@ -1934,19 +1986,19 @@ function HelmReleases(props: {
         <table className="grid">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Namespace</th>
-              <th>Chart</th>
-              <th>Revision</th>
-              <th>Version</th>
-              <th>App Version</th>
-              <th>Status</th>
-              <th>Updated</th>
+              <SortTh label="Name" colKey="name" sort={sort} onClick={clickHeader} />
+              <SortTh label="Namespace" colKey="namespace" sort={sort} onClick={clickHeader} />
+              <SortTh label="Chart" colKey="chart" sort={sort} onClick={clickHeader} />
+              <SortTh label="Revision" colKey="revision" sort={sort} onClick={clickHeader} />
+              <SortTh label="Version" colKey="chartVersion" sort={sort} onClick={clickHeader} />
+              <SortTh label="App Version" colKey="appVersion" sort={sort} onClick={clickHeader} />
+              <SortTh label="Status" colKey="status" sort={sort} onClick={clickHeader} />
+              <SortTh label="Updated" colKey="updated" sort={sort} onClick={clickHeader} />
               <th />
             </tr>
           </thead>
           <tbody>
-            {releases.map((r) => (
+            {sorted.map((r) => (
               <tr key={r.namespace + '/' + r.name}>
                 <td className="name">{r.name}</td>
                 <td>{r.namespace}</td>
