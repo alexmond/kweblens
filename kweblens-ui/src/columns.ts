@@ -21,6 +21,75 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
 const str = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
 const dash = (s: string): string => (s === '' ? '—' : s);
 
+// Classify a status/phase string into a health tone for colouring. Unknown → '' (no pill).
+export type StatusTone = 'ok' | 'warn' | 'err' | '';
+
+const STATUS_ERR = [
+  'failed',
+  'error',
+  'crashloop',
+  'imagepull',
+  'errimage',
+  'evicted',
+  'unschedulable',
+  'backoff',
+  'oomkill',
+  'notready',
+  'lost',
+  'unavailable',
+  'outofsync',
+  'invalid',
+  'denied',
+];
+const STATUS_WARN = [
+  'pending',
+  'creating',
+  'terminating',
+  'progressing',
+  'provisioning',
+  'updating',
+  'waiting',
+  'released',
+  'unknown',
+  'degraded',
+  'paused',
+  'notbound',
+  'init',
+];
+const STATUS_OK = [
+  'running',
+  'ready',
+  'active',
+  'bound',
+  'succeeded',
+  'complete',
+  'available',
+  'healthy',
+  'deployed',
+  'established',
+  'synced',
+  'normal',
+  'valid',
+  'ok',
+];
+
+export function statusTone(value: string): StatusTone {
+  const t = value.trim().toLowerCase();
+  if (!t || t === '—') {
+    return '';
+  }
+  if (STATUS_ERR.some((k) => t.includes(k))) {
+    return 'err';
+  }
+  if (STATUS_WARN.some((k) => t.includes(k))) {
+    return 'warn';
+  }
+  if (STATUS_OK.some((k) => t.includes(k))) {
+    return 'ok';
+  }
+  return '';
+}
+
 export function age(iso: string | undefined): string {
   if (!iso) {
     return '—';

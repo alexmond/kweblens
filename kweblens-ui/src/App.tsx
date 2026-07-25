@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
-import { age, columnsFor, printerColumnDefs } from './columns';
+import { age, columnsFor, printerColumnDefs, statusTone } from './columns';
 import type {
   ClusterInfo,
   EventSummary,
@@ -108,6 +108,16 @@ function parseMemBytes(q: string | undefined): number {
 }
 
 const gib = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1) + 'Gi';
+
+// A status/phase value coloured green/amber/red by health; plain text when unrecognised.
+function StatusBadge(props: { text: string }) {
+  const { text } = props;
+  const tone = statusTone(text);
+  if (!tone) {
+    return <>{text}</>;
+  }
+  return <span className={'status-pill status-' + tone}>{text}</span>;
+}
 
 // A used/total value with a proportional fill bar (vCenter/Freelens style).
 function UsageBar(props: { fraction: number; color: string; text: string }) {
@@ -1227,9 +1237,11 @@ function ResourceTable(props: {
               ) : (
                 <td>{objNs(o) ?? '—'}</td>
               ))}
-            {cols.map((c) => (
-              <td key={c.key}>{c.render(o)}</td>
-            ))}
+            {cols.map((c) => {
+              const cell = c.render(o);
+              const colour = c.header === 'Status' && typeof cell === 'string';
+              return <td key={c.key}>{colour ? <StatusBadge text={cell as string} /> : cell}</td>;
+            })}
             {showAge && <td>{age(o.metadata?.creationTimestamp)}</td>}
           </tr>
         ))}
@@ -2299,7 +2311,9 @@ function HelmReleases(props: {
                 <td>{r.revision}</td>
                 <td>{r.chartVersion}</td>
                 <td>{r.appVersion}</td>
-                <td>{r.status}</td>
+                <td>
+                  <StatusBadge text={r.status} />
+                </td>
                 <td>{r.updated ? age(r.updated) : '—'}</td>
                 <td className="row-actions">
                   <button className="btn" onClick={() => onResources(r.namespace, r.name)}>
