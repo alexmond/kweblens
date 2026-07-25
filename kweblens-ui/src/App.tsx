@@ -59,6 +59,69 @@ function allNavItems(categories: NavCategory[]): NavItem[] {
   return categories.flatMap((c) => [...c.items, ...(c.subgroups ?? []).flatMap((g) => g.items)]);
 }
 
+// Parse a Kubernetes CPU quantity (e.g. "245m", "2", "500n") to cores.
+function parseCpuCores(q: string | undefined): number {
+  if (!q) {
+    return 0;
+  }
+  const n = Number.parseFloat(q);
+  if (Number.isNaN(n)) {
+    return 0;
+  }
+  if (q.endsWith('m')) {
+    return n / 1000;
+  }
+  if (q.endsWith('u')) {
+    return n / 1e6;
+  }
+  if (q.endsWith('n')) {
+    return n / 1e9;
+  }
+  return n;
+}
+
+const MEM_UNITS: Record<string, number> = {
+  '': 1,
+  Ki: 1024,
+  Mi: 1024 ** 2,
+  Gi: 1024 ** 3,
+  Ti: 1024 ** 4,
+  Pi: 1024 ** 5,
+  k: 1e3,
+  K: 1e3,
+  M: 1e6,
+  G: 1e9,
+  T: 1e12,
+};
+
+// Parse a Kubernetes memory quantity (e.g. "4637Mi", "4046264Ki", "4Gi") to bytes.
+function parseMemBytes(q: string | undefined): number {
+  if (!q) {
+    return 0;
+  }
+  const m = /^([0-9.]+)\s*([A-Za-z]*)$/.exec(q.trim());
+  if (!m) {
+    return 0;
+  }
+  return Number.parseFloat(m[1]) * (MEM_UNITS[m[2]] ?? 1);
+}
+
+const gib = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1) + 'Gi';
+
+// A used/total value with a proportional fill bar (vCenter/Freelens style).
+function UsageBar(props: { fraction: number; color: string; text: string }) {
+  const { fraction, color, text } = props;
+  const pct = Math.max(0, Math.min(100, fraction * 100));
+  return (
+    <div className="ubar" title={`${Math.round(pct)}%`}>
+      <div className="ubar-track">
+        <div className="ubar-fill" style={{ width: pct + '%', background: color }} />
+      </div>
+      <div className="ubar-text">{text}</div>
+    </div>
+  );
+}
+
 // Favorites are pinned nav-item ids, persisted per cluster.
 function loadFavorites(cluster: string): string[] {
   try {
@@ -309,9 +372,54 @@ export function App() {
     );
   }, [objects, query]);
 
-  // For Pods/Nodes, append live CPU/Memory columns backed by metrics-server usage.
+  // For Pods/Nodes, append live CPU/Memory columns backed by metrics-server usage. Nodes
+  // show used/allocatable with a proportional bar; Pods show the raw usage value.
   const tableCols = useMemo<ColumnDef[]>(() => {
-    if (selected && (selected.id === 'pods' || selected.id === 'nodes')) {
+    if (selected?.id === 'nodes') {
+      const alloc = (o: KubeObject) => ((o.status as Record<string, unknown>)?.allocatable as Record<string, string>) ?? {};
+      return [
+        ...cols,
+        {
+          key: 'm-cpu',
+          header: 'CPU',
+          sortText: (o) => String(parseCpuCores(usage[objKey(o)]?.cpu)),
+          render: (o) => {
+            const used = parseCpuCores(usage[objKey(o)]?.cpu);
+            const total = parseCpuCores(alloc(o).cpu);
+            if (!usage[objKey(o)]) {
+              return '—';
+            }
+            return (
+              <UsageBar
+                fraction={total ? used / total : 0}
+                color="#2e9e8f"
+                text={`${used.toFixed(2)} / ${total.toFixed(2)}`}
+              />
+            );
+          },
+        },
+        {
+          key: 'm-mem',
+          header: 'Memory',
+          sortText: (o) => String(parseMemBytes(usage[objKey(o)]?.memory)),
+          render: (o) => {
+            const used = parseMemBytes(usage[objKey(o)]?.memory);
+            const total = parseMemBytes(alloc(o).memory);
+            if (!usage[objKey(o)]) {
+              return '—';
+            }
+            return (
+              <UsageBar
+                fraction={total ? used / total : 0}
+                color="#c026a8"
+                text={`${gib(used)} / ${gib(total)}`}
+              />
+            );
+          },
+        },
+      ];
+    }
+    if (selected?.id === 'pods') {
       return [
         ...cols,
         { key: 'm-cpu', header: 'CPU', render: (o) => usage[objKey(o)]?.cpu ?? '—' },
@@ -1011,7 +1119,14 @@ function ResourceTable(props: {
       return objNs(o) ?? '';
     }
     const c = cols.find((x) => x.key === key);
-    return c ? c.render(o) : '';
+    if (!c) {
+      return '';
+    }
+    if (c.sortText) {
+      return c.sortText(o);
+    }
+    const rendered = c.render(o);
+    return typeof rendered === 'string' ? rendered : '';
   };
   const sorted = [...objects].sort((a, b) => {
     if (sort.key === 'age') {
