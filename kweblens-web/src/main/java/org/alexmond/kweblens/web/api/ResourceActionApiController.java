@@ -33,11 +33,12 @@ public class ResourceActionApiController {
 
 	@PostMapping("/delete")
 	public Map<String, String> delete(@PathVariable String clusterId, @PathVariable String resourceId,
-			@PathVariable String namespace, @PathVariable String name) {
+			@PathVariable String namespace, @PathVariable String name,
+			@RequestParam(defaultValue = "false") boolean force) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		resources.delete(clusterId, descriptor, namespace, name);
-		audit.record(clusterId, "delete", descriptor.kind() + "/" + namespace + "/" + name);
-		return Map.of("result", "deleted " + descriptor.kind() + " " + name);
+		resources.delete(clusterId, descriptor, namespace, name, force);
+		audit.record(clusterId, force ? "force-delete" : "delete", descriptor.kind() + "/" + namespace + "/" + name);
+		return Map.of("result", (force ? "force-deleted " : "deleted ") + descriptor.kind() + " " + name);
 	}
 
 	@PostMapping("/scale")

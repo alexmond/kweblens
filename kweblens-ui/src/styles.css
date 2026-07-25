@@ -1242,6 +1242,72 @@ body {
   color: #0a6cbd;
 }
 
+/* per-row kebab actions menu */
+.rowmenu-cell {
+  width: 30px;
+  text-align: right;
+}
+
+.rowmenu {
+  position: relative;
+  display: inline-block;
+}
+
+.kebab {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.kebab:hover {
+  background: #eef2f5;
+  color: var(--text);
+}
+
+.menu {
+  position: absolute;
+  right: 4px;
+  top: 100%;
+  z-index: 60;
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.menu-item:hover {
+  background: #f0f4f7;
+}
+
+.menu-item.danger {
+  color: #b3261e;
+}
+
+.menu-item.danger:hover {
+  background: #fdecea;
+}
+
 /* per-container status squares (Pods · Freelens-style) */
 .csquares {
   display: inline-flex;
