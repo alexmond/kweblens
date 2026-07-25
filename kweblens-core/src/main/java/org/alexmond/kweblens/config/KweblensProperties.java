@@ -29,6 +29,9 @@ public class KweblensProperties {
 	 */
 	private List<Cluster> clusters = new ArrayList<>();
 
+	/** Port-forwarding behaviour. */
+	private PortForward portForward = new PortForward();
+
 	@Data
 	public static class Cluster {
 
@@ -45,6 +48,18 @@ public class KweblensProperties {
 		 * kubeconfig context to select within that file; defaults to its current-context.
 		 */
 		private String context;
+
+	}
+
+	@Data
+	public static class PortForward {
+
+		/**
+		 * Address the forwarded local ports bind to on the kweblens host. Blank (the
+		 * default) binds loopback only, so forwards are not exposed on the network; set
+		 * to {@code 0.0.0.0} only behind auth on a trusted host.
+		 */
+		private String bindAddress = "";
 
 	}
 

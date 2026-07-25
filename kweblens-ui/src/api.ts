@@ -6,6 +6,7 @@ import type {
   KubeObject,
   MetricSeries,
   NavCategory,
+  PortForward,
   PrinterColumn,
   ResourceRow,
   UsageSummary,
@@ -143,6 +144,21 @@ export const api = {
     postJson<ActionResult>(`${actionUrl(cluster, resourceId, namespace, name, 'scale')}?replicas=${replicas}`),
   restart: (cluster: string, resourceId: string, namespace: string, name: string) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'restart')),
+  portForwards: (cluster: string) =>
+    getJson<PortForward[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/port-forwards`),
+  startPortForward: (
+    cluster: string,
+    body: { kind: string; namespace: string; name: string; remotePort: number; localPort?: number },
+  ) =>
+    postBody<PortForward>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/port-forwards`,
+      JSON.stringify(body),
+      'application/json',
+    ),
+  stopPortForward: (cluster: string, id: string) =>
+    postJson<ActionResult>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/port-forwards/${encodeURIComponent(id)}/stop`,
+    ),
   cordon: (cluster: string, name: string) =>
     postJson<ActionResult>(`/api/v1/clusters/${encodeURIComponent(cluster)}/nodes/${encodeURIComponent(name)}/cordon`),
   uncordon: (cluster: string, name: string) =>
