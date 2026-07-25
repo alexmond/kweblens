@@ -243,7 +243,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px;
+  padding: 5px 8px;
   border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
@@ -260,8 +260,15 @@ body {
   background: #f0f4f7;
 }
 
+/* Active category (holds the selection): accent header + left bar (vCenter/Freelens) */
+.group.holds-selected > summary {
+  color: var(--accent);
+  background: rgba(10, 122, 194, 0.08);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 .chev {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   transition: transform 0.15s ease;
 }
@@ -270,14 +277,40 @@ body {
   transform: rotate(90deg);
 }
 
+.group.holds-selected > summary .chev {
+  color: var(--accent);
+}
+
+/* Count badge (vCenter-style), right-aligned */
+.nav-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  background: #e9edf0;
+  border-radius: 9px;
+  padding: 0 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.leaf.active .nav-badge {
+  background: rgba(10, 122, 194, 0.18);
+  color: var(--accent);
+}
+
+/* Nested items with an indentation guide */
 .group ul {
   list-style: none;
-  margin: 2px 0 6px;
-  padding-left: 18px;
+  margin: 1px 0 4px 11px;
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
 }
 
 .leaf {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   text-align: left;
   border: 0;
@@ -289,14 +322,22 @@ body {
   cursor: pointer;
 }
 
+.leaf-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .leaf:hover {
   background: #f0f4f7;
 }
 
+/* Full-width selection bar (vCenter-style) */
 .leaf.active {
   background: rgba(10, 122, 194, 0.14);
   color: var(--accent);
   font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* Content */

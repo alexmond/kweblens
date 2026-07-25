@@ -46,6 +46,7 @@ export function App() {
   const [clusters, setClusters] = useState<ClusterInfo[]>([]);
   const [cluster, setCluster] = useState<string | null>(null);
   const [nav, setNav] = useState<NavCategory[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [namespace, setNamespace] = useState<string | null>(null);
   const [selected, setSelected] = useState<NavItem | null>(null);
@@ -76,6 +77,7 @@ export function App() {
       return;
     }
     setNav([]);
+    setCounts({});
     setNamespaces([]);
     setNamespace(null);
     setSelected(null);
@@ -85,6 +87,7 @@ export function App() {
       .nav(cluster)
       .then((cats) => setNav(withSyntheticNav(cats)))
       .catch((e) => setError(String(e)));
+    api.counts(cluster).then(setCounts).catch(() => setCounts({}));
     api
       .namespaces(cluster)
       .then((ns) => setNamespaces(ns.map((r) => r.name).sort()))
@@ -329,7 +332,9 @@ export function App() {
 
         <aside className="nav">
           <div className="nav-title">{activeCluster?.name ?? cluster ?? '—'}</div>
-          {cluster && <NavTree categories={nav} selected={selected?.id ?? null} onSelect={setSelected} />}
+          {cluster && (
+            <NavTree categories={nav} counts={counts} selected={selected?.id ?? null} onSelect={setSelected} />
+          )}
         </aside>
 
         <main className="content">
@@ -443,12 +448,22 @@ export function App() {
   );
 }
 
+function categoryBadge(cat: NavCategory, counts: Record<string, number>): string {
+  const known = cat.items.filter((i) => counts[i.id] !== undefined);
+  if (known.length > 0) {
+    return String(known.reduce((sum, i) => sum + counts[i.id], 0));
+  }
+  // No live counts (e.g. a CRD group) — show how many kinds it holds.
+  return String(cat.items.length);
+}
+
 function NavTree(props: {
   categories: NavCategory[];
+  counts: Record<string, number>;
   selected: string | null;
   onSelect: (item: NavItem) => void;
 }) {
-  const { categories, selected, onSelect } = props;
+  const { categories, counts, selected, onSelect } = props;
   const [open, setOpen] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -471,31 +486,33 @@ function NavTree(props: {
 
   return (
     <div className="tree">
-      {categories.map((cat) => (
-        <details
-          key={cat.label}
-          className="group"
-          open={open.has(cat.label)}
-          onToggle={(e) => toggle(cat.label, (e.currentTarget as HTMLDetailsElement).open)}
-        >
-          <summary>
-            <span className="chev">▶</span>
-            <span className="cat-label">{cat.label}</span>
-          </summary>
-          <ul>
-            {cat.items.map((it) => (
-              <li key={it.id}>
-                <button
-                  className={'leaf' + (it.id === selected ? ' active' : '')}
-                  onClick={() => onSelect(it)}
-                >
-                  {it.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ))}
+      {categories.map((cat) => {
+        const holdsSelected = cat.items.some((i) => i.id === selected);
+        return (
+          <details
+            key={cat.label}
+            className={'group' + (holdsSelected ? ' holds-selected' : '')}
+            open={open.has(cat.label)}
+            onToggle={(e) => toggle(cat.label, (e.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary>
+              <span className="chev">▸</span>
+              <span className="cat-label">{cat.label}</span>
+              <span className="nav-badge">{categoryBadge(cat, counts)}</span>
+            </summary>
+            <ul>
+              {cat.items.map((it) => (
+                <li key={it.id}>
+                  <button className={'leaf' + (it.id === selected ? ' active' : '')} onClick={() => onSelect(it)}>
+                    <span className="leaf-label">{it.label}</span>
+                    {counts[it.id] !== undefined && <span className="nav-badge">{counts[it.id]}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        );
+      })}
     </div>
   );
 }
