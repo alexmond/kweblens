@@ -237,6 +237,72 @@ function ContainerSquares(props: { obj: KubeObject }) {
   );
 }
 
+function containerNames(o: KubeObject): string[] {
+  return (((o.spec as Record<string, unknown>)?.containers as { name?: string }[]) ?? [])
+    .map((c) => c.name ?? '')
+    .filter(Boolean);
+}
+
+type RowAction = 'logs' | 'edit' | 'delete' | 'forceDelete';
+
+// Per-row kebab (⋮) actions menu (Freelens-style): Logs (pods) / Edit / Delete / Force Delete.
+function RowMenu(props: { authed: boolean; isPod: boolean; onAction: (a: RowAction) => void }) {
+  const { authed, isPod, onAction } = props;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  if (!isPod && !authed) {
+    return null;
+  }
+  const item = (label: string, action: RowAction, danger?: boolean) => (
+    <button
+      className={'menu-item' + (danger ? ' danger' : '')}
+      onClick={(e) => {
+        e.stopPropagation();
+        setOpen(false);
+        onAction(action);
+      }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="rowmenu" ref={ref} onClick={(e) => e.stopPropagation()}>
+      <button
+        className="kebab"
+        title="Actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        ⋮
+      </button>
+      {open && (
+        <div className="menu">
+          {isPod && item('Logs', 'logs')}
+          {authed && item('Edit', 'edit')}
+          {authed && item('Delete', 'delete', true)}
+          {authed && item('Force Delete', 'forceDelete', true)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // A status/phase value coloured green/amber/red by health; plain text when unrecognised.
 function StatusBadge(props: { text: string }) {
   const { text } = props;
@@ -313,7 +379,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [live, setLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject } | null>(null);
+  const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject; edit?: boolean } | null>(null);
   const [cols, setCols] = useState<ColumnDef[]>([]);
   const [usage, setUsage] = useState<Record<string, UsageSummary>>({});
   const [nodeDisk, setNodeDisk] = useState<Record<string, NodeDiskUsage>>({});
@@ -642,6 +708,29 @@ export function App() {
     setSelected({ id: 'portforward:list', label: 'Port Forwards', kind: '', namespaced: false });
   };
 
+  // Per-row kebab actions: open logs, jump to YAML edit, or delete / force-delete.
+  const handleRowAction = (resourceId: string, action: RowAction, obj: KubeObject) => {
+    const ns = objNs(obj) ?? '';
+    const nm = objName(obj);
+    if (action === 'logs') {
+      setTerminal(null);
+      setLogs({ namespace: ns, pod: nm, containers: containerNames(obj) });
+      return;
+    }
+    if (action === 'edit') {
+      setDetail({ resourceId, obj, edit: true });
+      return;
+    }
+    const force = action === 'forceDelete';
+    if (!cluster || !window.confirm(`${force ? 'Force delete' : 'Delete'} ${obj.kind} ${nm}? This cannot be undone.`)) {
+      return;
+    }
+    api.del(cluster, resourceId, ns, nm, force).then(
+      () => setObjects((prev) => prev.filter((o) => objKey(o) !== objKey(obj))),
+      (e) => setError(String(e)),
+    );
+  };
+
   // From a resource's "Managed By: Helm" link → open the owning release's Resources view.
   const navigateToHelmRelease = (namespace: string, name: string) => {
     setDetail(null);
@@ -881,6 +970,8 @@ export function App() {
                 onToggleAll={toggleAll}
                 onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
                 onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
+                authed={authUser !== null}
+                onRowAction={(action, obj) => handleRowAction(selected.id, action, obj)}
               />
             </>
           )}
@@ -889,8 +980,10 @@ export function App() {
         {cluster && detail && (
           <Detail
             cluster={cluster}
+            key={detail.resourceId + '/' + objKey(detail.obj)}
             resourceId={detail.resourceId}
             obj={detail.obj}
+            initialEdit={detail.edit ?? false}
             authed={authUser !== null}
             onNavigate={navigateToKind}
             onHelmRelease={navigateToHelmRelease}
@@ -1392,8 +1485,10 @@ function ResourceTable(props: {
   onToggleAll: (keys: string[]) => void;
   onOpen: (obj: KubeObject) => void;
   onNamespaceClick?: (ns: string) => void;
+  authed: boolean;
+  onRowAction: (action: RowAction, obj: KubeObject) => void;
 }) {
-  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick } =
+  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick, authed, onRowAction } =
     props;
   const [sort, setSort] = useState<{ key: string; dir: number }>({ key: 'name', dir: 1 });
   if (loading) {
@@ -1456,6 +1551,7 @@ function ResourceTable(props: {
               {sort.key === h.key && <span className="sort-ind">{sort.dir === 1 ? ' ▲' : ' ▼'}</span>}
             </th>
           ))}
+          <th className="rowmenu-cell" />
         </tr>
       </thead>
       <tbody>
@@ -1501,6 +1597,9 @@ function ResourceTable(props: {
               );
             })}
             {showAge && <td>{age(o.metadata?.creationTimestamp)}</td>}
+            <td className="rowmenu-cell" onClick={(e) => e.stopPropagation()}>
+              <RowMenu authed={authed} isPod={(o.kind ?? '') === 'Pod'} onAction={(a) => onRowAction(a, o)} />
+            </td>
           </tr>
         ))}
       </tbody>
@@ -1515,6 +1614,7 @@ function Detail(props: {
   cluster: string;
   resourceId: string;
   obj: KubeObject;
+  initialEdit: boolean;
   authed: boolean;
   onRequireAuth: () => void;
   onAuthExpired: () => void;
@@ -1525,9 +1625,9 @@ function Detail(props: {
   onForward: (kind: string, namespace: string, name: string, ports: number[]) => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onHelmRelease, onTerminal, onLogs, onForward, onClose } =
+  const { cluster, resourceId, obj, initialEdit, authed, onRequireAuth, onAuthExpired, onNavigate, onHelmRelease, onTerminal, onLogs, onForward, onClose } =
     props;
-  const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
+  const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>(initialEdit ? 'yaml' : 'overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
   const [hideManaged, setHideManaged] = useState(true);
@@ -1580,6 +1680,16 @@ function Detail(props: {
       cancelled = true;
     };
   }, [tab, yaml, yamlError, cluster, resourceId, name, ns]);
+
+  // Opened via the row "Edit" action → drop straight into YAML edit once it loads.
+  const autoEditDone = useRef(false);
+  useEffect(() => {
+    if (initialEdit && !autoEditDone.current && yaml !== null && !yamlError) {
+      autoEditDone.current = true;
+      setDraft(hideManaged ? stripManagedFields(yaml) : yaml);
+      setEditing(true);
+    }
+  }, [initialEdit, yaml, yamlError, hideManaged]);
 
   useEffect(() => {
     if (tab !== 'events' || events !== null || eventsError !== null) {

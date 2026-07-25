@@ -188,8 +188,8 @@ export const api = {
   // --- Mutating actions (HTTP Basic auth required) ---
   apply: (cluster: string, manifest: string) =>
     postBody<ResourceRow>(`/api/v1/clusters/${encodeURIComponent(cluster)}/apply`, manifest, 'application/yaml'),
-  del: (cluster: string, resourceId: string, namespace: string, name: string) =>
-    postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'delete')),
+  del: (cluster: string, resourceId: string, namespace: string, name: string, force = false) =>
+    postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'delete') + (force ? '?force=true' : '')),
   scale: (cluster: string, resourceId: string, namespace: string, name: string, replicas: number) =>
     postJson<ActionResult>(`${actionUrl(cluster, resourceId, namespace, name, 'scale')}?replicas=${replicas}`),
   restart: (cluster: string, resourceId: string, namespace: string, name: string) =>

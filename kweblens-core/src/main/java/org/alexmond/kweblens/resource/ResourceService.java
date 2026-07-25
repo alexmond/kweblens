@@ -175,7 +175,21 @@ public class ResourceService {
 
 	/** Delete a single resource. */
 	public void delete(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
-		resource(clusterId, descriptor, namespace, name).delete();
+		delete(clusterId, descriptor, namespace, name, false);
+	}
+
+	/**
+	 * Delete a single resource; when {@code force} is true, delete immediately with a
+	 * zero grace period (skips graceful termination — use for stuck resources).
+	 */
+	public void delete(String clusterId, ResourceDescriptor descriptor, String namespace, String name, boolean force) {
+		Resource<GenericKubernetesResource> resource = resource(clusterId, descriptor, namespace, name);
+		if (force) {
+			resource.cascading(true).withGracePeriod(0L).delete();
+		}
+		else {
+			resource.delete();
+		}
 	}
 
 	/** Set a workload's replica count (Deployments, StatefulSets, ReplicaSets). */
