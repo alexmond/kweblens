@@ -400,6 +400,71 @@ body {
   border-radius: 10px;
 }
 
+/* Column-visibility menu (JS-free <details> dropdown) */
+.cols-menu {
+  position: relative;
+}
+
+.cols-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.cols-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cols-menu > ul {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 60;
+  min-width: 12rem;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.col-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.col-toggle:hover {
+  background: var(--bg);
+}
+
+/* Clickable table cell cross-links (namespace, owner, …) */
+.cell-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.cell-link:hover {
+  text-decoration: underline;
+}
+
 .count {
   font-size: 12px;
   color: var(--muted);

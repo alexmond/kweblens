@@ -56,6 +56,7 @@ export function App() {
   const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject } | null>(null);
   const [cols, setCols] = useState<ColumnDef[]>([]);
   const [usage, setUsage] = useState<Record<string, UsageSummary>>({});
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
@@ -100,6 +101,7 @@ export function App() {
     let cancelled = false;
     setDetail(null);
     setQuery('');
+    setHiddenCols(new Set());
     setLoading(true);
     setError(null);
     api
@@ -250,6 +252,35 @@ export function App() {
     return cols;
   }, [cols, usage, selected]);
 
+  const visibleCols = useMemo(() => tableCols.filter((c) => !hiddenCols.has(c.key)), [tableCols, hiddenCols]);
+
+  // Map a Kubernetes kind to its nav item, so cross-links (owner refs) can navigate.
+  const kindNav = useMemo(() => {
+    const map = new Map<string, NavItem>();
+    nav.forEach((c) => c.items.forEach((i) => i.kind && map.set(i.kind, i)));
+    return map;
+  }, [nav]);
+
+  const navigateToKind = (kind: string, ns?: string) => {
+    const item = kindNav.get(kind);
+    if (item) {
+      setDetail(null);
+      setSelected(item);
+      setNamespace(item.namespaced && ns ? ns : null);
+    }
+  };
+
+  const toggleCol = (key: string) =>
+    setHiddenCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+
   return (
     <div className="app">
       <header className="brandbar">
@@ -348,14 +379,34 @@ export function App() {
                 ) : (
                   <span className="ns-note">Cluster-scoped</span>
                 )}
+                {tableCols.length > 0 && (
+                  <details className="cols-menu">
+                    <summary>Columns ▾</summary>
+                    <ul>
+                      {tableCols.map((c) => (
+                        <li key={c.key}>
+                          <label className="col-toggle">
+                            <input
+                              type="checkbox"
+                              checked={!hiddenCols.has(c.key)}
+                              onChange={() => toggleCol(c.key)}
+                            />
+                            {c.header}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
               <ResourceTable
                 objects={filtered}
-                columns={tableCols}
+                columns={visibleCols}
                 namespaced={selected.namespaced}
                 loading={loading}
                 selectedKey={detail ? objKey(detail.obj) : null}
                 onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
+                onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
               />
             </>
           )}
@@ -367,6 +418,7 @@ export function App() {
             resourceId={detail.resourceId}
             obj={detail.obj}
             authed={authUser !== null}
+            onNavigate={navigateToKind}
             onRequireAuth={() => setShowLogin(true)}
             onAuthExpired={() => {
               auth.clear();
@@ -455,8 +507,9 @@ function ResourceTable(props: {
   loading: boolean;
   selectedKey: string | null;
   onOpen: (obj: KubeObject) => void;
+  onNamespaceClick?: (ns: string) => void;
 }) {
-  const { objects, columns: cols, namespaced, loading, selectedKey, onOpen } = props;
+  const { objects, columns: cols, namespaced, loading, selectedKey, onOpen, onNamespaceClick } = props;
   const [sort, setSort] = useState<{ key: string; dir: number }>({ key: 'name', dir: 1 });
   if (loading) {
     return <div className="empty">Loading…</div>;
@@ -511,7 +564,22 @@ function ResourceTable(props: {
         {sorted.map((o) => (
           <tr key={objKey(o)} className={objKey(o) === selectedKey ? 'row-active' : ''} onClick={() => onOpen(o)}>
             <td className="name">{objName(o)}</td>
-            {showNs && <td>{objNs(o) ?? '—'}</td>}
+            {showNs &&
+              (onNamespaceClick && objNs(o) ? (
+                <td>
+                  <button
+                    className="cell-link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNamespaceClick(objNs(o) as string);
+                    }}
+                  >
+                    {objNs(o)}
+                  </button>
+                </td>
+              ) : (
+                <td>{objNs(o) ?? '—'}</td>
+              ))}
             {cols.map((c) => (
               <td key={c.key}>{c.render(o)}</td>
             ))}
@@ -533,9 +601,10 @@ function Detail(props: {
   authed: boolean;
   onRequireAuth: () => void;
   onAuthExpired: () => void;
+  onNavigate: (kind: string, ns?: string) => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onClose } = props;
+  const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onNavigate, onClose } = props;
   const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
@@ -672,7 +741,7 @@ function Detail(props: {
         )}
       </div>
       <div className="drawer-body">
-        {tab === 'overview' && <Overview obj={obj} />}
+        {tab === 'overview' && <Overview obj={obj} onNavigate={onNavigate} />}
         {tab === 'events' && <EventsPane events={events} error={eventsError} />}
         {tab === 'metrics' && (
           <div className="charts vertical">
@@ -754,8 +823,8 @@ function Detail(props: {
   );
 }
 
-function Overview(props: { obj: KubeObject }) {
-  const { obj } = props;
+function Overview(props: { obj: KubeObject; onNavigate: (kind: string, ns?: string) => void }) {
+  const { obj, onNavigate } = props;
   const md = obj.metadata ?? {};
   const spec = (obj.spec as Record<string, unknown>) ?? {};
   const status = (obj.status as Record<string, unknown>) ?? {};
@@ -801,7 +870,16 @@ function Overview(props: { obj: KubeObject }) {
         {owners.length > 0 && (
           <>
             <dt>Controlled By</dt>
-            <dd>{owners.map((o) => `${o.kind}/${o.name}`).join(', ')}</dd>
+            <dd>
+              {owners.map((o, i) => (
+                <span key={o.kind + '/' + o.name}>
+                  {i > 0 ? ', ' : ''}
+                  <button className="cell-link" onClick={() => onNavigate(o.kind, md.namespace)}>
+                    {o.kind}/{o.name}
+                  </button>
+                </span>
+              ))}
+            </dd>
           </>
         )}
       </dl>
