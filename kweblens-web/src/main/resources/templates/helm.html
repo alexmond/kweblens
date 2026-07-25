@@ -29,6 +29,7 @@
                     <th>Revision</th>
                     <th>Status</th>
                     <th>Chart</th>
+                    <th>Version</th>
                     <th>App version</th>
                     <th>Updated</th>
                 </tr>
@@ -44,11 +45,12 @@
                               th:text="${r.status()} ?: '—'">DEPLOYED</span>
                     </td>
                     <td th:text="${r.chart()} ?: '—'">chart</td>
+                    <td th:text="${r.chartVersion()} ?: '—'">version</td>
                     <td th:text="${r.appVersion()} ?: '—'">app</td>
                     <td class="small text-muted" th:text="${r.updated()} ?: '—'">updated</td>
                 </tr>
                 <tr th:if="${#lists.isEmpty(releases)}">
-                    <td colspan="7" class="text-muted">No Helm releases.</td>
+                    <td colspan="8" class="text-muted">No Helm releases.</td>
                 </tr>
                 </tbody>
             </table>

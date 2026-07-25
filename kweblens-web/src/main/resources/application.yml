@@ -63,6 +63,13 @@ kweblens:
   # AND an Anthropic API key is configured.
   ai:
     enabled: ${KWEBLENS_AI_ENABLED:false}
+  # Helm chart repositories for the charts browser. Override via kweblens.helm.repositories[*].
+  helm:
+    repositories:
+      - name: prometheus-community
+        url: https://prometheus-community.github.io/helm-charts
+      - name: ingress-nginx
+        url: https://kubernetes.github.io/ingress-nginx
 
 management:
   endpoints:
