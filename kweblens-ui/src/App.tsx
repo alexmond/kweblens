@@ -1461,6 +1461,9 @@ function Overview(props: { obj: KubeObject; onNavigate: (kind: string, ns?: stri
 
 function EventsPane(props: { events: EventSummary[] | null; error: string | null }) {
   const { events, error } = props;
+  const { sorted, sort, clickHeader } = useTableSort(events ?? [], 'age', (e, k) =>
+    k === 'age' ? ageToSeconds(e.age) : (e[k as keyof EventSummary] as string) ?? '',
+  );
   if (error) {
     return <div className="error">{error}</div>;
   }
@@ -1474,14 +1477,14 @@ function EventsPane(props: { events: EventSummary[] | null; error: string | null
     <table className="mini">
       <thead>
         <tr>
-          <th>Type</th>
-          <th>Reason</th>
-          <th>Message</th>
-          <th>Age</th>
+          <SortTh label="Type" colKey="type" sort={sort} onClick={clickHeader} />
+          <SortTh label="Reason" colKey="reason" sort={sort} onClick={clickHeader} />
+          <SortTh label="Message" colKey="message" sort={sort} onClick={clickHeader} />
+          <SortTh label="Age" colKey="age" sort={sort} onClick={clickHeader} />
         </tr>
       </thead>
       <tbody>
-        {events.map((e, i) => (
+        {sorted.map((e, i) => (
           <tr key={i} className={e.type === 'Warning' ? 'warn' : ''}>
             <td>{e.type}</td>
             <td>{e.reason}</td>
@@ -1564,6 +1567,16 @@ function MetricChart(props: { cluster: string; target: string; namespace?: strin
       <Sparkline series={series} />
     </div>
   );
+}
+
+// Parse a compact age string (e.g. "45s", "5m", "2h", "18d") to seconds, for chronological sorting.
+function ageToSeconds(age: string): number {
+  const m = /^(\d+)([smhd])$/.exec(age.trim());
+  if (!m) {
+    return 0;
+  }
+  const mult: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  return Number(m[1]) * (mult[m[2]] ?? 1);
 }
 
 // Reusable column-sorting for the simple record tables (mirrors ResourceTable's UX).
@@ -2304,6 +2317,9 @@ function ClusterOverview(props: { cluster: string; name: string; masterUrl?: str
     return r ? r.status === 'True' : false;
   };
   const readyNodes = (nodes ?? []).filter(nodeReady).length;
+  const warnSort = useTableSort(warnings ?? [], 'age', (w, k) =>
+    k === 'age' ? ageToSeconds(w.age) : (w[k as keyof EventSummary] as string) ?? '',
+  );
 
   return (
     <div className="overview">
@@ -2342,14 +2358,14 @@ function ClusterOverview(props: { cluster: string; name: string; masterUrl?: str
           <table className="mini">
             <thead>
               <tr>
-                <th>Reason</th>
-                <th>Object</th>
-                <th>Message</th>
-                <th>Age</th>
+                <SortTh label="Reason" colKey="reason" sort={warnSort.sort} onClick={warnSort.clickHeader} />
+                <SortTh label="Object" colKey="object" sort={warnSort.sort} onClick={warnSort.clickHeader} />
+                <SortTh label="Message" colKey="message" sort={warnSort.sort} onClick={warnSort.clickHeader} />
+                <SortTh label="Age" colKey="age" sort={warnSort.sort} onClick={warnSort.clickHeader} />
               </tr>
             </thead>
             <tbody>
-              {warnings.slice(0, 30).map((w, i) => (
+              {warnSort.sorted.slice(0, 30).map((w, i) => (
                 <tr key={i} className="warn">
                   <td>{w.reason}</td>
                   <td>{w.object}</td>
