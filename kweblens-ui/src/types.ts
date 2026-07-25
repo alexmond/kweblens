@@ -98,6 +98,15 @@ export interface HelmRelease {
   revision: number;
   status: string;
   chart: string;
+  chartVersion: string;
   appVersion: string;
   updated: string | null;
+}
+
+export interface HelmChart {
+  name: string;
+  version: string;
+  appVersion: string | null;
+  description: string | null;
+  repository: string;
 }

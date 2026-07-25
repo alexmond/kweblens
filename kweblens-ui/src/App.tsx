@@ -8,6 +8,7 @@ import { age, columnsFor, printerColumnDefs } from './columns';
 import type {
   ClusterInfo,
   EventSummary,
+  HelmChart,
   HelmRelease,
   KubeObject,
   MetricSeries,
@@ -82,7 +83,7 @@ function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
   const helm: NavCategory = {
     label: 'Helm',
     icon: 'bi-hexagon',
-    items: [{ id: 'helm:releases', label: 'Releases', kind: '', namespaced: false }],
+    items: [{ id: 'helm:home', label: 'Helm', kind: '', namespaced: false }],
   };
   return [...withOverview, helm];
 }
@@ -464,7 +465,7 @@ export function App() {
             />
           )}
           {cluster && selected?.id === 'overview:workloads' && <WorkloadsOverview cluster={cluster} />}
-          {cluster && selected?.id === 'helm:releases' && <HelmReleases cluster={cluster} />}
+          {cluster && selected?.id?.startsWith('helm:') && <HelmView cluster={cluster} />}
           {cluster && selected?.id === 'portforward:list' && (
             <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={() => setShowLogin(true)} />
           )}
@@ -1749,6 +1750,97 @@ function ForwardModal(props: {
   );
 }
 
+function HelmView(props: { cluster: string }) {
+  const { cluster } = props;
+  const [tab, setTab] = useState<'charts' | 'releases'>('releases');
+  return (
+    <div className="overview">
+      <div className="content-head">
+        <h1>Helm</h1>
+      </div>
+      <div className="tabs">
+        <button className={'tab' + (tab === 'charts' ? ' active' : '')} onClick={() => setTab('charts')}>
+          Charts
+        </button>
+        <button className={'tab' + (tab === 'releases' ? ' active' : '')} onClick={() => setTab('releases')}>
+          Releases
+        </button>
+      </div>
+      {tab === 'charts' ? <HelmCharts cluster={cluster} /> : <HelmReleases cluster={cluster} />}
+    </div>
+  );
+}
+
+function HelmCharts(props: { cluster: string }) {
+  const { cluster } = props;
+  const [charts, setCharts] = useState<HelmChart[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setCharts(null);
+    setError(null);
+    api
+      .helmCharts(cluster)
+      .then((c) => !cancelled && setCharts(c))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = (charts ?? []).filter(
+    (c) => !q || c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q),
+  );
+
+  return (
+    <>
+      <div className="content-head">
+        <span className="count">{charts ? `${filtered.length} charts` : ''}</span>
+        <div className="spacer" />
+        <input
+          className="search"
+          type="search"
+          placeholder="Search charts…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      {error && <div className="error">{error}</div>}
+      {charts === null ? (
+        <div className="empty">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="empty">No charts. Configure repositories under kweblens.helm.repositories.</div>
+      ) : (
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Description</th>
+              <th>Version</th>
+              <th>App Version</th>
+              <th>Repository</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((c) => (
+              <tr key={c.repository + '/' + c.name}>
+                <td className="name">{c.name}</td>
+                <td className="muted">{c.description ?? '—'}</td>
+                <td>{c.version}</td>
+                <td>{c.appVersion ?? '—'}</td>
+                <td>{c.repository}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
 function HelmReleases(props: { cluster: string }) {
   const { cluster } = props;
   const [releases, setReleases] = useState<HelmRelease[] | null>(null);
@@ -1768,10 +1860,9 @@ function HelmReleases(props: { cluster: string }) {
   }, [cluster]);
 
   return (
-    <div className="overview">
+    <>
       <div className="content-head">
-        <h1>Helm Releases</h1>
-        <span className="count">{releases ? `${releases.length} items` : ''}</span>
+        <span className="count">{releases ? `${releases.length} releases` : ''}</span>
       </div>
       {error && <div className="error">{error}</div>}
       {releases === null ? (
@@ -1785,7 +1876,8 @@ function HelmReleases(props: { cluster: string }) {
               <th>Name</th>
               <th>Namespace</th>
               <th>Chart</th>
-              <th>Rev</th>
+              <th>Revision</th>
+              <th>Version</th>
               <th>App Version</th>
               <th>Status</th>
               <th>Updated</th>
@@ -1798,6 +1890,7 @@ function HelmReleases(props: { cluster: string }) {
                 <td>{r.namespace}</td>
                 <td>{r.chart}</td>
                 <td>{r.revision}</td>
+                <td>{r.chartVersion}</td>
                 <td>{r.appVersion}</td>
                 <td>{r.status}</td>
                 <td>{r.updated ? age(r.updated) : '—'}</td>
@@ -1806,7 +1899,7 @@ function HelmReleases(props: { cluster: string }) {
           </tbody>
         </table>
       )}
-    </div>
+    </>
   );
 }
 

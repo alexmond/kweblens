@@ -1094,6 +1094,14 @@ body {
   color: #b3261e;
 }
 
+.grid td.muted {
+  color: var(--muted);
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .btn.danger {
   color: #b3261e;
   border-color: #e6b4b0;

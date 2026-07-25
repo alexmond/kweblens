@@ -11,12 +11,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.alexmond.kweblens.web.helm.HelmChartService;
+import org.alexmond.kweblens.web.helm.HelmChartSummary;
 import org.alexmond.kweblens.web.helm.HelmReleaseSummary;
 import org.alexmond.kweblens.web.helm.HelmService;
 
 /**
- * Read-only JSON API over Helm releases (via jhelm). Lists releases, and returns the
- * status + revision history of a single release.
+ * Read-only JSON API over Helm (via jhelm). Lists releases (per cluster) and their
+ * status/history, plus the charts browser over the configured chart repositories.
  */
 @RestController
 @RequestMapping("/api/v1/clusters/{clusterId}/helm")
@@ -24,6 +26,13 @@ import org.alexmond.kweblens.web.helm.HelmService;
 public class HelmApiController {
 
 	private final HelmService helm;
+
+	private final HelmChartService chartService;
+
+	@GetMapping("/charts")
+	public List<HelmChartSummary> charts(@PathVariable String clusterId, @RequestParam(required = false) String query) {
+		return chartService.listCharts(query);
+	}
 
 	@GetMapping("/releases")
 	public List<HelmReleaseSummary> releases(@PathVariable String clusterId,

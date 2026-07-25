@@ -2,6 +2,7 @@ import { auth } from './auth';
 import type {
   ClusterInfo,
   EventSummary,
+  HelmChart,
   HelmRelease,
   KubeObject,
   MetricSeries,
@@ -110,6 +111,11 @@ export const api = {
     getJson<UsageSummary[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/pods` +
         (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+    ),
+  helmCharts: (cluster: string, query?: string) =>
+    getJson<HelmChart[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/charts` +
+        (query ? `?query=${encodeURIComponent(query)}` : ''),
     ),
   helmReleases: (cluster: string, namespace?: string) =>
     getJson<HelmRelease[]>(

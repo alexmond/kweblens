@@ -201,16 +201,17 @@ public class HelmService {
 		String updated = (release.getInfo() != null && release.getInfo().getLastDeployed() != null)
 				? release.getInfo().getLastDeployed().toString() : null;
 		String chart = null;
+		String chartVersion = null;
 		String appVersion = null;
 		Chart chartModel = release.getChart();
 		if (chartModel != null && chartModel.getMetadata() != null) {
 			ChartMetadata metadata = chartModel.getMetadata();
-			chart = ((metadata.getName() != null) ? metadata.getName() : "")
-					+ ((metadata.getVersion() != null) ? "-" + metadata.getVersion() : "");
+			chart = metadata.getName();
+			chartVersion = metadata.getVersion();
 			appVersion = metadata.getAppVersion();
 		}
 		return new HelmReleaseSummary(release.getName(), release.getNamespace(), release.getVersion(), status, chart,
-				appVersion, updated);
+				chartVersion, appVersion, updated);
 	}
 
 }
