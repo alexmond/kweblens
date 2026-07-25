@@ -492,6 +492,56 @@ body {
   color: var(--muted);
 }
 
+/* Metrics charts (inline SVG sparklines) */
+.charts {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+
+.charts.vertical {
+  flex-direction: column;
+}
+
+.chart {
+  flex: 1;
+  min-width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.chart-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.spark-svg {
+  width: 100%;
+  height: 120px;
+  display: block;
+}
+
+.spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.spark-area {
+  fill: rgba(10, 122, 194, 0.12);
+  stroke: none;
+}
+
+.spark-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
 .error {
   color: #b3261e;
   background: #fde7e6;

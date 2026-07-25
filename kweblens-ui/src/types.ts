@@ -60,6 +60,25 @@ export interface PrinterColumn {
   type: string;
 }
 
+// metrics-server usage for a node or pod (cpu in millicores, memory in mebibytes).
+export interface UsageSummary {
+  name: string;
+  namespace: string | null;
+  cpu: string;
+  memory: string;
+}
+
+export interface MetricPoint {
+  t: number;
+  v: number;
+}
+
+export interface MetricSeries {
+  available: boolean;
+  unit: string;
+  points: MetricPoint[];
+}
+
 export interface HelmRelease {
   name: string;
   namespace: string;
