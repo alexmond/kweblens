@@ -68,6 +68,17 @@ export interface UsageSummary {
   memory: string;
 }
 
+export interface MetricPoint {
+  t: number;
+  v: number;
+}
+
+export interface MetricSeries {
+  available: boolean;
+  unit: string;
+  points: MetricPoint[];
+}
+
 export interface HelmRelease {
   name: string;
   namespace: string;

@@ -4,7 +4,16 @@ import { ApiError, api } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
 import { age, columnsFor, printerColumnDefs } from './columns';
-import type { ClusterInfo, EventSummary, HelmRelease, KubeObject, NavCategory, NavItem, UsageSummary } from './types';
+import type {
+  ClusterInfo,
+  EventSummary,
+  HelmRelease,
+  KubeObject,
+  MetricSeries,
+  NavCategory,
+  NavItem,
+  UsageSummary,
+} from './types';
 
 function initials(id: string): string {
   return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
@@ -527,7 +536,7 @@ function Detail(props: {
   onClose: () => void;
 }) {
   const { cluster, resourceId, obj, authed, onRequireAuth, onAuthExpired, onClose } = props;
-  const [tab, setTab] = useState<'overview' | 'yaml' | 'events'>('overview');
+  const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>('overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -656,10 +665,21 @@ function Detail(props: {
         <button className={'tab' + (tab === 'events' ? ' active' : '')} onClick={() => setTab('events')}>
           Events
         </button>
+        {kind === 'Pod' && (
+          <button className={'tab' + (tab === 'metrics' ? ' active' : '')} onClick={() => setTab('metrics')}>
+            Metrics
+          </button>
+        )}
       </div>
       <div className="drawer-body">
         {tab === 'overview' && <Overview obj={obj} />}
         {tab === 'events' && <EventsPane events={events} error={eventsError} />}
+        {tab === 'metrics' && (
+          <div className="charts vertical">
+            <MetricChart cluster={cluster} target="pod-cpu" namespace={ns} name={name} label="CPU (cores)" />
+            <MetricChart cluster={cluster} target="pod-mem" namespace={ns} name={name} label="Memory" />
+          </div>
+        )}
         {tab === 'yaml' && (
           <div className="yaml-pane">
             <div className="yaml-toolbar">
@@ -903,6 +923,78 @@ function EventsPane(props: { events: EventSummary[] | null; error: string | null
   );
 }
 
+function fmtValue(unit: string, v: number): string {
+  if (unit === 'bytes') {
+    return Math.round(v / 1048576) + 'Mi';
+  }
+  if (unit === 'cores') {
+    return v < 1 ? Math.round(v * 1000) + 'm' : v.toFixed(2);
+  }
+  return String(Math.round(v));
+}
+
+function Sparkline(props: { series: MetricSeries | null }) {
+  const { series } = props;
+  if (series === null) {
+    return <div className="empty">Loading…</div>;
+  }
+  if (!series.available) {
+    return <div className="empty">Graphs need a Prometheus / VictoriaMetrics backend.</div>;
+  }
+  if (series.points.length === 0) {
+    return <div className="empty">No data.</div>;
+  }
+  const width = 600;
+  const height = 120;
+  const pad = 6;
+  const vals = series.points.map((p) => p.v);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = max - min || 1;
+  const t0 = series.points[0].t;
+  const tspan = series.points[series.points.length - 1].t - t0 || 1;
+  const x = (t: number) => pad + ((t - t0) / tspan) * (width - 2 * pad);
+  const y = (v: number) => height - pad - ((v - min) / span) * (height - 2 * pad);
+  const line = series.points.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ');
+  const area =
+    `M${x(t0).toFixed(1)} ${(height - pad).toFixed(1)} ` +
+    series.points.map((p) => 'L' + x(p.t).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ') +
+    ` L${x(series.points[series.points.length - 1].t).toFixed(1)} ${(height - pad).toFixed(1)} Z`;
+  return (
+    <div className="spark">
+      <svg className="spark-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        <path className="spark-area" d={area} />
+        <path className="spark-line" d={line} />
+      </svg>
+      <div className="spark-meta">
+        now {fmtValue(series.unit, vals[vals.length - 1])} · peak {fmtValue(series.unit, max)}
+      </div>
+    </div>
+  );
+}
+
+function MetricChart(props: { cluster: string; target: string; namespace?: string; name?: string; label: string }) {
+  const { cluster, target, namespace, name, label } = props;
+  const [series, setSeries] = useState<MetricSeries | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSeries(null);
+    api
+      .metricGraph(cluster, target, { namespace, name, minutes: 60 })
+      .then((s) => !cancelled && setSeries(s))
+      .catch(() => !cancelled && setSeries({ available: false, unit: '', points: [] }));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, target, namespace, name]);
+  return (
+    <div className="chart">
+      <div className="chart-title">{label}</div>
+      <Sparkline series={series} />
+    </div>
+  );
+}
+
 function HelmReleases(props: { cluster: string }) {
   const { cluster } = props;
   const [releases, setReleases] = useState<HelmRelease[] | null>(null);
@@ -1107,6 +1199,10 @@ function ClusterOverview(props: { cluster: string; name: string; masterUrl?: str
         </div>
       )}
       {err && <div className="error">{err}</div>}
+      <div className="charts">
+        <MetricChart cluster={cluster} target="cluster-cpu" label="Cluster CPU (cores)" />
+        <MetricChart cluster={cluster} target="cluster-mem" label="Cluster Memory" />
+      </div>
       <section className="ov-sec">
         <h3>Warnings</h3>
         {warnings === null ? (

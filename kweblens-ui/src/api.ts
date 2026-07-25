@@ -4,6 +4,7 @@ import type {
   EventSummary,
   HelmRelease,
   KubeObject,
+  MetricSeries,
   NavCategory,
   PrinterColumn,
   ResourceRow,
@@ -70,6 +71,23 @@ export const api = {
       `/api/v1/clusters/${encodeURIComponent(cluster)}/events` +
         (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
     ),
+  metricGraph: (
+    cluster: string,
+    target: string,
+    opts?: { namespace?: string; name?: string; minutes?: number },
+  ) => {
+    const p = new URLSearchParams({ target });
+    if (opts?.namespace) {
+      p.set('namespace', opts.namespace);
+    }
+    if (opts?.name) {
+      p.set('name', opts.name);
+    }
+    if (opts?.minutes) {
+      p.set('minutes', String(opts.minutes));
+    }
+    return getJson<MetricSeries>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/graph?${p.toString()}`);
+  },
   nodeMetrics: (cluster: string) =>
     getJson<UsageSummary[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/nodes`),
   podMetrics: (cluster: string, namespace?: string) =>
