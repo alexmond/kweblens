@@ -1167,35 +1167,114 @@ body {
 }
 
 /* Dockable terminal */
-.term-dock {
+/* Dockable bottom panel: resize handle + session tabs + the active session body. */
+.dock-panel {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   height: 300px;
   background: #0f172a;
-  border-top: 2px solid var(--accent);
   z-index: 70;
   display: flex;
   flex-direction: column;
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.25);
 }
 
-.term-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 10px;
-  background: #111827;
-  color: #cbd5e1;
-  font-size: 12px;
+.dock-resize {
+  height: 6px;
+  cursor: row-resize;
+  background: var(--accent);
+  flex: 0 0 auto;
 }
 
-.term-title {
+.dock-resize:hover {
+  background: #2f81f7;
+}
+
+body.row-resizing {
+  cursor: row-resize;
+  user-select: none;
+}
+
+.dock-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  background: #111827;
+  padding: 0 4px;
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+
+.dock-tab {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #94a3b8;
   font-family: ui-monospace, Menlo, monospace;
+  cursor: pointer;
+  border-top: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.dock-tab:hover {
+  color: #cbd5e1;
+}
+
+.dock-tab.active {
+  color: #e2e8f0;
+  background: #0f172a;
+  border-top-color: var(--accent);
+}
+
+.dock-tab-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-tab-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.dock-tab-close:hover {
+  color: #fff;
+}
+
+.dock-bodies {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.dock-slot {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.dock-session {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+
+.dock-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: #111827;
+  flex: 0 0 auto;
 }
 
 .term-dot {
@@ -1203,19 +1282,11 @@ body {
   height: 8px;
   border-radius: 50%;
   background: #3fb950;
+  flex: 0 0 auto;
 }
 
-.term-close {
-  border: 0;
-  background: transparent;
-  color: #cbd5e1;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.term-close:hover {
-  color: #fff;
+.term-dot.logs {
+  background: #d29922;
 }
 
 .term-body {
