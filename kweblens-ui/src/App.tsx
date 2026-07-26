@@ -3086,7 +3086,15 @@ function ForwardModal(props: {
 
 type HelmAction =
   | { mode: 'install'; repository: string; chart: string; version: string }
-  | { mode: 'upgrade'; namespace: string; name: string; chart: string; chartVersion: string }
+  | {
+      mode: 'upgrade';
+      namespace: string;
+      name: string;
+      chart: string;
+      chartVersion: string;
+      repository?: string;
+      version?: string;
+    }
   | { mode: 'rollback'; namespace: string; name: string; revision: number };
 
 function HelmView(props: {
@@ -3307,6 +3315,7 @@ function HelmReleases(props: {
               <SortTh label="Name" colKey="name" sort={sort} onClick={clickHeader} />
               <SortTh label="Namespace" colKey="namespace" sort={sort} onClick={clickHeader} />
               <SortTh label="Chart" colKey="chart" sort={sort} onClick={clickHeader} />
+              <SortTh label="Source" colKey="managedByKweblens" sort={sort} onClick={clickHeader} />
               <SortTh label="Revision" colKey="revision" sort={sort} onClick={clickHeader} />
               <SortTh label="Version" colKey="chartVersion" sort={sort} onClick={clickHeader} />
               <SortTh label="App Version" colKey="appVersion" sort={sort} onClick={clickHeader} />
@@ -3321,8 +3330,22 @@ function HelmReleases(props: {
                 <td className="name">{r.name}</td>
                 <td>{r.namespace}</td>
                 <td>{r.chart}</td>
+                <td>
+                  {r.managedByKweblens ? (
+                    <span className="chip">kweblens</span>
+                  ) : (
+                    <span className="chip subtle">external</span>
+                  )}
+                </td>
                 <td>{r.revision}</td>
-                <td>{r.chartVersion}</td>
+                <td>
+                  {r.chartVersion}
+                  {r.updateAvailable && (
+                    <span className="chip update-chip" title={`Latest ${r.latestVersion} in ${r.latestRepository}`}>
+                      ↑ {r.latestVersion}
+                    </span>
+                  )}
+                </td>
                 <td>{r.appVersion}</td>
                 <td>
                   <StatusBadge text={r.status} />
@@ -3332,6 +3355,25 @@ function HelmReleases(props: {
                   <button className="btn" onClick={() => onResources(r.namespace, r.name)}>
                     Resources
                   </button>
+                  {authed && r.updateAvailable && (
+                    <button
+                      className="btn primary"
+                      title={`Upgrade to ${r.latestVersion}`}
+                      onClick={() =>
+                        onAction({
+                          mode: 'upgrade',
+                          namespace: r.namespace,
+                          name: r.name,
+                          chart: r.chart,
+                          chartVersion: r.chartVersion,
+                          repository: r.latestRepository ?? undefined,
+                          version: r.latestVersion ?? undefined,
+                        })
+                      }
+                    >
+                      Update
+                    </button>
+                  )}
                   {authed && (
                     <>
                       <button
@@ -3465,10 +3507,16 @@ function HelmActionModal(props: {
   const { cluster, action, onClose, onApplied, onAuthExpired } = props;
   const [releaseName, setReleaseName] = useState(action.mode === 'install' ? action.chart : '');
   const [namespace, setNamespace] = useState('default');
-  const [repository, setRepository] = useState(action.mode === 'install' ? action.repository : '');
+  const [repository, setRepository] = useState(
+    action.mode === 'install' ? action.repository : action.mode === 'upgrade' ? (action.repository ?? '') : '',
+  );
   const [chart, setChart] = useState(action.mode === 'upgrade' || action.mode === 'install' ? action.chart : '');
   const [version, setVersion] = useState(
-    action.mode === 'install' ? action.version : action.mode === 'upgrade' ? action.chartVersion : '',
+    action.mode === 'install'
+      ? action.version
+      : action.mode === 'upgrade'
+        ? (action.version ?? action.chartVersion)
+        : '',
   );
   const [valuesYaml, setValuesYaml] = useState('');
   const [revision, setRevision] = useState(action.mode === 'rollback' ? action.revision : 1);

@@ -1579,3 +1579,11 @@ body {
 .act-msg.err {
   color: #b3261e;
 }
+
+/* Helm "update available" chip on a release's version cell. */
+.update-chip {
+  margin-left: 6px;
+  background: #fff3cd;
+  color: #7a5b00;
+  font-weight: 600;
+}

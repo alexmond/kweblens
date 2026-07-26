@@ -62,9 +62,19 @@ public class HelmService {
 	/** Rendered manifests can be large; lift SnakeYAML's default 3 MB code-point cap. */
 	private static final int MAX_MANIFEST_CODE_POINTS = 32 * 1024 * 1024;
 
+	/**
+	 * Release label stamped on installs/upgrades kweblens performs, so the UI can tell
+	 * them apart from releases created externally (helm CLI, another tool).
+	 */
+	static final String MANAGED_BY_LABEL = "kweblens.alexmond.org/managed-by";
+
+	static final String MANAGED_BY_VALUE = "kweblens";
+
 	private final ClusterRegistry clusters;
 
 	private final HelmChartResolver chartResolver;
+
+	private final org.alexmond.jhelm.core.service.RepoManager repoManager;
 
 	/**
 	 * Install a chart as a new release. When {@code dryRun} is true nothing is persisted
@@ -82,6 +92,7 @@ public class HelmService {
 			.values((values != null) ? values : Map.of())
 			.dryRun(dryRun)
 			.createNamespace(createNamespace)
+			.labels(Map.of(MANAGED_BY_LABEL, MANAGED_BY_VALUE))
 			.description(dryRun ? "kweblens dry-run" : "Installed via kweblens")
 			.build());
 		return toMutationResult(dryRun, release);
@@ -101,6 +112,7 @@ public class HelmService {
 			.newChart(chartModel)
 			.values((values != null) ? values : Map.of())
 			.dryRun(dryRun)
+			.labels(Map.of(MANAGED_BY_LABEL, MANAGED_BY_VALUE))
 			.description(dryRun ? "kweblens dry-run" : "Upgraded via kweblens")
 			.build());
 		return toMutationResult(dryRun, release);
@@ -132,12 +144,17 @@ public class HelmService {
 	public List<HelmReleaseSummary> listReleases(String clusterId, String namespace) {
 		ListAction list = new ListAction(kubeService(clusterId));
 		List<Release> releases = StringUtils.hasText(namespace) ? list.list(namespace) : list.listAll();
-		return releases.stream().map(this::toSummary).toList();
+		// Memoise the latest-version lookup so each distinct chart is resolved once per
+		// list.
+		Map<String, Optional<Latest>> memo = new java.util.HashMap<>();
+		return releases.stream().map(this::toSummary).map((summary) -> withUpdate(summary, memo)).toList();
 	}
 
 	/** The latest revision of a named release. */
 	public Optional<HelmReleaseSummary> status(String clusterId, String namespace, String name) {
-		return new StatusAction(kubeService(clusterId)).status(name, namespace).map(this::toSummary);
+		return new StatusAction(kubeService(clusterId)).status(name, namespace)
+			.map(this::toSummary)
+			.map((summary) -> withUpdate(summary, new java.util.HashMap<>()));
 	}
 
 	/** The revision history of a named release. */
@@ -324,8 +341,129 @@ public class HelmService {
 			chartVersion = metadata.getVersion();
 			appVersion = metadata.getAppVersion();
 		}
+		Map<String, String> labels = release.getLabels();
+		boolean managed = labels != null && MANAGED_BY_VALUE.equals(labels.get(MANAGED_BY_LABEL));
 		return new HelmReleaseSummary(release.getName(), release.getNamespace(), release.getVersion(), status, chart,
-				chartVersion, appVersion, updated);
+				chartVersion, appVersion, updated, managed, null, null, false);
+	}
+
+	/**
+	 * Enrich a summary with the newest chart version available across the configured
+	 * repositories, and whether it is newer than the installed one. The {@code memo}
+	 * caches per-chart lookups so a list of releases resolves each distinct chart just
+	 * once.
+	 */
+	private HelmReleaseSummary withUpdate(HelmReleaseSummary summary, Map<String, Optional<Latest>> memo) {
+		if (!StringUtils.hasText(summary.chart())) {
+			return summary;
+		}
+		Optional<Latest> latest = memo.computeIfAbsent(summary.chart(), this::findLatest);
+		if (latest.isEmpty()) {
+			return summary;
+		}
+		Latest best = latest.get();
+		boolean available = StringUtils.hasText(summary.chartVersion())
+				&& compareVersions(best.version(), summary.chartVersion()) > 0;
+		return new HelmReleaseSummary(summary.name(), summary.namespace(), summary.revision(), summary.status(),
+				summary.chart(), summary.chartVersion(), summary.appVersion(), summary.updated(),
+				summary.managedByKweblens(), best.version(), best.repository(), available);
+	}
+
+	/** The newest version of {@code chartName} across all configured repositories. */
+	private Optional<Latest> findLatest(String chartName) {
+		Latest best = null;
+		try {
+			for (org.alexmond.jhelm.core.model.RepositoryConfig.Repository repo : repoManager.loadConfig()
+				.getRepositories()) {
+				List<org.alexmond.jhelm.core.service.RepoManager.ChartVersion> versions;
+				try {
+					versions = repoManager.getChartVersions(repo.getName(), chartName);
+				}
+				catch (IOException | RuntimeException ex) {
+					continue;
+				}
+				if (versions == null || versions.isEmpty()) {
+					continue;
+				}
+				// getChartVersions returns newest-first, so element 0 is this repo's
+				// latest.
+				String candidate = versions.get(0).getChartVersion();
+				if (StringUtils.hasText(candidate)
+						&& (best == null || compareVersions(candidate, best.version()) > 0)) {
+					best = new Latest(repo.getName(), candidate);
+				}
+			}
+		}
+		catch (IOException ex) {
+			log.warn("Could not read repositories to find latest of '{}': {}", chartName, ex.getMessage());
+		}
+		return Optional.ofNullable(best);
+	}
+
+	/**
+	 * Compare two chart versions, newest-wins. A lenient SemVer: leading {@code v} is
+	 * ignored, dotted numeric segments compare numerically, and a build/pre-release
+	 * suffix (anything after {@code -} or {@code +}) makes a version older than the same
+	 * core without one. Falls back to lexical comparison for non-numeric segments.
+	 */
+	static int compareVersions(String a, String b) {
+		if (a == null || b == null) {
+			return ((a != null) ? 1 : 0) - ((b != null) ? 1 : 0);
+		}
+		String[] aParts = splitVersion(a);
+		String[] bParts = splitVersion(b);
+		int coreCmp = compareCore(aParts[0], bParts[0]);
+		if (coreCmp != 0) {
+			return coreCmp;
+		}
+		// Equal cores: no pre-release outranks a pre-release; otherwise compare suffixes.
+		boolean aPre = !aParts[1].isEmpty();
+		boolean bPre = !bParts[1].isEmpty();
+		if (aPre != bPre) {
+			return aPre ? -1 : 1;
+		}
+		return aParts[1].compareTo(bParts[1]);
+	}
+
+	private static String[] splitVersion(String v) {
+		String s = v.trim();
+		if (s.startsWith("v") || s.startsWith("V")) {
+			s = s.substring(1);
+		}
+		int cut = s.length();
+		for (int i = 0; i < s.length(); i++) {
+			char c = s.charAt(i);
+			if (c == '-' || c == '+') {
+				cut = i;
+				break;
+			}
+		}
+		return new String[] { s.substring(0, cut), (cut < s.length()) ? s.substring(cut + 1) : "" };
+	}
+
+	private static int compareCore(String a, String b) {
+		String[] as = a.split("\\.");
+		String[] bs = b.split("\\.");
+		int n = Math.max(as.length, bs.length);
+		for (int i = 0; i < n; i++) {
+			String ap = (i < as.length) ? as[i] : "0";
+			String bp = (i < bs.length) ? bs[i] : "0";
+			int cmp;
+			if (ap.matches("\\d+") && bp.matches("\\d+")) {
+				cmp = Long.compare(Long.parseLong(ap), Long.parseLong(bp));
+			}
+			else {
+				cmp = ap.compareTo(bp);
+			}
+			if (cmp != 0) {
+				return cmp;
+			}
+		}
+		return 0;
+	}
+
+	/** A chart's newest version and the repo it was found in. */
+	private record Latest(String repository, String version) {
 	}
 
 }
