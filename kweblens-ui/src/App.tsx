@@ -1793,6 +1793,7 @@ function ResourceTable(props: {
 
 const SCALABLE = ['Deployment', 'StatefulSet', 'ReplicaSet'];
 const RESTARTABLE = ['Deployment', 'StatefulSet', 'DaemonSet'];
+const ROLLBACKABLE = ['Deployment', 'StatefulSet'];
 
 function Detail(props: {
   cluster: string;
@@ -2076,6 +2077,19 @@ function Detail(props: {
             onClick={() => act(() => api.restart(cluster, resourceId, ns, name), { confirm: `Rolling-restart ${name}?` })}
           >
             Restart
+          </button>
+        )}
+        {authed && ROLLBACKABLE.includes(kind) && (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() =>
+              act(() => api.rollback(cluster, resourceId, ns, name), {
+                confirm: `Roll ${kind} ${name} back to its previous revision?`,
+              })
+            }
+          >
+            Rollback
           </button>
         )}
         {kind === 'Pod' && ns && (

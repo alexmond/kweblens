@@ -202,6 +202,8 @@ export const api = {
     postJson<ActionResult>(`${actionUrl(cluster, resourceId, namespace, name, 'suspend')}?suspend=${suspend}`),
   trigger: (cluster: string, resourceId: string, namespace: string, name: string) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'trigger')),
+  rollback: (cluster: string, resourceId: string, namespace: string, name: string) =>
+    postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'rollback')),
   drain: (cluster: string, name: string) =>
     postJson<ActionResult>(`/api/v1/clusters/${encodeURIComponent(cluster)}/nodes/${encodeURIComponent(name)}/drain`),
   portForwards: (cluster: string) =>

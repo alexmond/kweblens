@@ -217,7 +217,18 @@ Delete, Force-Delete, Edit-YAML.
 
 **Build order:** (1) collapsible accordions + kind sections (Pod/Node/Service/Secret) —
 **done**; (2) Drain, CronJob Trigger + Suspend/Resume, Job Suspend/Resume — **done**;
-(3) Rollback, Attach — pending.
+(3) Rollback — **done**; Attach — pending.
+
+**Shipped (3a) Rollback:** `ResourceService.rollback` uses fabric8's `rolling().undo()`
+to revert a **Deployment** or **StatefulSet** to its previous revision (kubectl rollout
+undo). Route `POST …/{ns}/{name}/rollback`; SPA drawer **Rollback** button (gated to
+Deployment/StatefulSet), auth-gated + audited. Note: DaemonSet is excluded — fabric8's
+typed `daemonSets()` returns a plain `Resource` without `rolling()`; revision-specific
+rollback (a chosen revision, not just previous) also remains a future enhancement.
+
+**Pending (3b) Attach:** `Execable.attach()` exists and would reuse the exec WebSocket +
+TerminalDock plumbing (`.attach()` instead of `.exec("sh")`, no command). Lower priority —
+exec/Terminal already covers interactive container access.
 
 **Shipped (1):** Overview sections are now collapsible `Accordion`s with count badges.
 Header KV gained kind-specific rows (Pod: Node/Pod IP/Host IP/QoS; Service: Type/Cluster IP;

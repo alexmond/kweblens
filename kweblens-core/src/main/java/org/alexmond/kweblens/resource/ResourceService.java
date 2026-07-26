@@ -209,6 +209,20 @@ public class ResourceService {
 	}
 
 	/**
+	 * Roll a Deployment or StatefulSet back to its previous revision (equivalent to
+	 * {@code kubectl rollout undo}). fabric8 resolves the prior ReplicaSet/revision and
+	 * patches the template — it fails if there is no rollout history.
+	 */
+	public void rollback(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
+		KubernetesClient client = clusters.require(clusterId);
+		switch (descriptor.kind()) {
+			case "Deployment" -> client.apps().deployments().inNamespace(namespace).withName(name).rolling().undo();
+			case "StatefulSet" -> client.apps().statefulSets().inNamespace(namespace).withName(name).rolling().undo();
+			default -> throw new IllegalArgumentException("Rollback is not supported for " + descriptor.kind());
+		}
+	}
+
+	/**
 	 * Cordon ({@code unschedulable=true}) or uncordon a node — mark it (un)schedulable,
 	 * the safe half of a drain.
 	 */
