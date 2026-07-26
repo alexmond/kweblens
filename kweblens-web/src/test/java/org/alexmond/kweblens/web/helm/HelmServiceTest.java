@@ -29,7 +29,7 @@ class HelmServiceTest {
 		// The resolver isn't exercised by these tests; a throwaway repo store is enough.
 		RepoManager repoManager = new RepoManager(
 				System.getProperty("java.io.tmpdir") + "/kweblens-test-helm/repositories.yaml");
-		return new HelmService(registry, new HelmChartResolver(repoManager, new ChartLoader()));
+		return new HelmService(registry, new HelmChartResolver(repoManager, new ChartLoader()), repoManager);
 	}
 
 	@Test

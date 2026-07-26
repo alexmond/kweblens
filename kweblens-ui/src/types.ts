@@ -109,6 +109,13 @@ export interface HelmRelease {
   chartVersion: string;
   appVersion: string;
   updated: string | null;
+  /** Installed/upgraded through kweblens (stamped release label) vs created externally. */
+  managedByKweblens: boolean;
+  /** Newest chart version found across the configured repos, or null. */
+  latestVersion: string | null;
+  latestRepository: string | null;
+  /** latestVersion is newer than the installed chartVersion. */
+  updateAvailable: boolean;
 }
 
 export interface HelmChart {
