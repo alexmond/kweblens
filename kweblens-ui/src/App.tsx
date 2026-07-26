@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, api } from './api';
 import { auth } from './auth';
@@ -2156,12 +2156,79 @@ function Detail(props: {
   );
 }
 
+/** Collapsible Overview section — a Freelens-style accordion. */
+function Accordion(props: { title: string; count?: number; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(props.defaultOpen ?? true);
+  return (
+    <section className="ov-sec acc">
+      <h3 className="acc-head" onClick={() => setOpen((o) => !o)}>
+        <span className={'acc-caret' + (open ? ' open' : '')}>▸</span>
+        {props.title}
+        {props.count !== undefined && <span className="acc-count">{props.count}</span>}
+      </h3>
+      {open && <div className="acc-body">{props.children}</div>}
+    </section>
+  );
+}
+
+/** Secret data table — base64 values are masked until per-key Reveal decodes them. */
+function SecretData(props: { data: Record<string, string> }) {
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const decode = (v: string) => {
+    try {
+      return atob(v);
+    } catch {
+      return '‹binary›';
+    }
+  };
+  return (
+    <table className="mini">
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Value</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {Object.keys(props.data).map((k) => {
+          const shown = revealed[k];
+          return (
+            <tr key={k}>
+              <td className="mono">{k}</td>
+              <td className="mono">{shown ? decode(props.data[k]) : '••••••••'}</td>
+              <td>
+                <button className="linkbtn" onClick={() => setRevealed((r) => ({ ...r, [k]: !r[k] }))}>
+                  {shown ? 'Hide' : 'Reveal'}
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function chipsOf(map: Record<string, string>) {
+  return (
+    <div className="chips">
+      {Object.entries(map).map(([k, v]) => (
+        <span className="chip" key={k}>
+          {k}={v}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function Overview(props: {
   obj: KubeObject;
   onNavigate: (kind: string, ns?: string) => void;
   onHelmRelease: (namespace: string, name: string) => void;
 }) {
   const { obj, onNavigate, onHelmRelease } = props;
+  const kind = obj.kind ?? '';
   const md = obj.metadata ?? {};
   const spec = (obj.spec as Record<string, unknown>) ?? {};
   const status = (obj.status as Record<string, unknown>) ?? {};
@@ -2174,13 +2241,49 @@ function Overview(props: {
   const conditions = (status.conditions as Record<string, unknown>[]) ?? [];
   const containers = (spec.containers as Record<string, unknown>[]) ?? [];
   const containerStatuses = (status.containerStatuses as Record<string, unknown>[]) ?? [];
-  const restartsFor = (n: string) => {
-    const cs = containerStatuses.find((c) => c.name === n);
-    return cs ? Number(cs.restartCount ?? 0) : 0;
-  };
-  const readyFor = (n: string) => {
-    const cs = containerStatuses.find((c) => c.name === n);
-    return cs ? Boolean(cs.ready) : false;
+  const statusFor = (n: string) => containerStatuses.find((c) => c.name === n);
+  const restartsFor = (n: string) => Number(statusFor(n)?.restartCount ?? 0);
+  const readyFor = (n: string) => Boolean(statusFor(n)?.ready);
+
+  // Kind-specific projections.
+  const nodeName = spec.nodeName as string | undefined;
+  const podIP = status.podIP as string | undefined;
+  const hostIP = status.hostIP as string | undefined;
+  const qos = status.qosClass as string | undefined;
+  const svcType = spec.type as string | undefined;
+  const clusterIP = spec.clusterIP as string | undefined;
+  const nodeInfo = status.nodeInfo as Record<string, string> | undefined;
+  const addresses = (status.addresses as { type: string; address: string }[] | undefined) ?? [];
+  const internalIP = addresses.find((a) => a.type === 'InternalIP')?.address;
+  const capacity = status.capacity as Record<string, string> | undefined;
+  const allocatable = status.allocatable as Record<string, string> | undefined;
+  const taints = (spec.taints as Record<string, unknown>[] | undefined) ?? [];
+  const tolerations = (spec.tolerations as Record<string, unknown>[] | undefined) ?? [];
+  const nodeSelector = (spec.nodeSelector as Record<string, string> | undefined) ?? {};
+  const volumes = (spec.volumes as Record<string, unknown>[] | undefined) ?? [];
+  const servicePorts = (spec.ports as Record<string, unknown>[] | undefined) ?? [];
+  // Service uses a flat selector; workloads nest it under matchLabels.
+  const rawSelector = spec.selector as Record<string, unknown> | undefined;
+  const selector = ((rawSelector?.matchLabels as Record<string, string> | undefined) ??
+    (rawSelector as Record<string, string> | undefined) ??
+    {}) as Record<string, string>;
+  const selectorEntries = Object.entries(selector).filter(([, v]) => typeof v === 'string');
+  const configData = (kind === 'ConfigMap' ? (obj.data as Record<string, string> | undefined) : undefined) ?? {};
+  const secretData = (kind === 'Secret' ? (obj.data as Record<string, string> | undefined) : undefined) ?? {};
+  const secretType = obj.type as string | undefined;
+  const ingressRules = (spec.rules as Record<string, unknown>[] | undefined) ?? [];
+  const ingressTls = (spec.tls as Record<string, unknown>[] | undefined) ?? [];
+
+  const containerPorts = (c: Record<string, unknown>) =>
+    ((c.ports as Record<string, unknown>[] | undefined) ?? [])
+      .map((p) => `${p.containerPort}${p.protocol && p.protocol !== 'TCP' ? '/' + p.protocol : ''}`)
+      .join(', ');
+  const containerResources = (c: Record<string, unknown>) => {
+    const req = (c.resources as Record<string, unknown> | undefined)?.requests as Record<string, string> | undefined;
+    if (!req) {
+      return '—';
+    }
+    return [req.cpu && `cpu ${req.cpu}`, req.memory && `mem ${req.memory}`].filter(Boolean).join(', ') || '—';
   };
 
   return (
@@ -2200,6 +2303,64 @@ function Overview(props: {
           <>
             <dt>Status</dt>
             <dd>{status.phase as string}</dd>
+          </>
+        )}
+        {nodeName && (
+          <>
+            <dt>Node</dt>
+            <dd>
+              <button className="cell-link" onClick={() => onNavigate('Node')}>
+                {nodeName}
+              </button>
+            </dd>
+          </>
+        )}
+        {podIP && (
+          <>
+            <dt>Pod IP</dt>
+            <dd className="mono">{podIP}</dd>
+          </>
+        )}
+        {hostIP && (
+          <>
+            <dt>Host IP</dt>
+            <dd className="mono">{hostIP}</dd>
+          </>
+        )}
+        {qos && (
+          <>
+            <dt>QoS Class</dt>
+            <dd>{qos}</dd>
+          </>
+        )}
+        {svcType && (
+          <>
+            <dt>Type</dt>
+            <dd>{svcType}</dd>
+          </>
+        )}
+        {clusterIP && (
+          <>
+            <dt>Cluster IP</dt>
+            <dd className="mono">{clusterIP}</dd>
+          </>
+        )}
+        {internalIP && (
+          <>
+            <dt>Internal IP</dt>
+            <dd className="mono">{internalIP}</dd>
+          </>
+        )}
+        {nodeInfo?.kubeletVersion && (
+          <>
+            <dt>Kubelet</dt>
+            <dd>{nodeInfo.kubeletVersion}</dd>
+          </>
+        )}
+        {secretType && (
+          <>
+            <dt>Secret Type</dt>
+            <dd className="mono">{secretType}</dd>
           </>
         )}
         <dt>Created</dt>
@@ -2241,8 +2402,7 @@ function Overview(props: {
       </dl>
 
       {Object.keys(labels).length > 0 && (
-        <section className="ov-sec">
-          <h3>Labels</h3>
+        <Accordion title="Labels" count={Object.keys(labels).length} defaultOpen={false}>
           <div className="chips">
             {Object.entries(labels).map(([k, v]) => (
               <span className="chip" key={k}>
@@ -2250,12 +2410,11 @@ function Overview(props: {
               </span>
             ))}
           </div>
-        </section>
+        </Accordion>
       )}
 
       {Object.keys(annotations).length > 0 && (
-        <section className="ov-sec">
-          <h3>Annotations</h3>
+        <Accordion title="Annotations" count={Object.keys(annotations).length} defaultOpen={false}>
           <div className="chips">
             {Object.entries(annotations).map(([k, v]) => (
               <span className="chip subtle" key={k} title={`${k}=${v}`}>
@@ -2263,17 +2422,18 @@ function Overview(props: {
               </span>
             ))}
           </div>
-        </section>
+        </Accordion>
       )}
 
       {containers.length > 0 && (
-        <section className="ov-sec">
-          <h3>Containers</h3>
+        <Accordion title="Containers" count={containers.length}>
           <table className="mini">
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Image</th>
+                <th>Ports</th>
+                <th>Requests</th>
                 <th>Ready</th>
                 <th>Restarts</th>
               </tr>
@@ -2285,6 +2445,8 @@ function Overview(props: {
                   <tr key={cn}>
                     <td>{cn}</td>
                     <td className="mono">{String(c.image ?? '')}</td>
+                    <td>{containerPorts(c) || '—'}</td>
+                    <td>{containerResources(c)}</td>
                     <td>{readyFor(cn) ? 'Yes' : 'No'}</td>
                     <td>{restartsFor(cn)}</td>
                   </tr>
@@ -2292,12 +2454,246 @@ function Overview(props: {
               })}
             </tbody>
           </table>
-        </section>
+        </Accordion>
+      )}
+
+      {servicePorts.length > 0 && (
+        <Accordion title="Ports" count={servicePorts.length}>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Port</th>
+                <th>Target</th>
+                <th>Protocol</th>
+                <th>Node Port</th>
+              </tr>
+            </thead>
+            <tbody>
+              {servicePorts.map((p, i) => (
+                <tr key={String(p.name ?? i)}>
+                  <td>{String(p.name ?? '—')}</td>
+                  <td>{String(p.port ?? '')}</td>
+                  <td>{String(p.targetPort ?? '')}</td>
+                  <td>{String(p.protocol ?? 'TCP')}</td>
+                  <td>{String(p.nodePort ?? '—')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Accordion>
+      )}
+
+      {selectorEntries.length > 0 && (
+        <Accordion title="Selector" count={selectorEntries.length}>
+          {chipsOf(Object.fromEntries(selectorEntries))}
+        </Accordion>
+      )}
+
+      {ingressRules.length > 0 && (
+        <Accordion title="Rules" count={ingressRules.length}>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Host</th>
+                <th>Path</th>
+                <th>Backend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ingressRules.flatMap((r, ri) => {
+                const host = String(r.host ?? '*');
+                const paths = ((r.http as Record<string, unknown>)?.paths as Record<string, unknown>[] | undefined) ?? [];
+                if (paths.length === 0) {
+                  return [
+                    <tr key={ri}>
+                      <td>{host}</td>
+                      <td>—</td>
+                      <td>—</td>
+                    </tr>,
+                  ];
+                }
+                return paths.map((p, pi) => {
+                  const svc = (p.backend as Record<string, unknown>)?.service as Record<string, unknown> | undefined;
+                  const port = (svc?.port as Record<string, unknown> | undefined)?.number;
+                  return (
+                    <tr key={ri + '-' + pi}>
+                      <td>{host}</td>
+                      <td className="mono">{String(p.path ?? '/')}</td>
+                      <td className="mono">
+                        {svc ? `${svc.name}${port ? ':' + port : ''}` : '—'}
+                      </td>
+                    </tr>
+                  );
+                });
+              })}
+            </tbody>
+          </table>
+          {ingressTls.length > 0 && (
+            <div className="chips" style={{ marginTop: 8 }}>
+              {ingressTls.flatMap((t, i) =>
+                ((t.hosts as string[] | undefined) ?? []).map((h) => (
+                  <span className="chip" key={i + h}>
+                    TLS: {h}
+                  </span>
+                )),
+              )}
+            </div>
+          )}
+        </Accordion>
+      )}
+
+      {Object.keys(configData).length > 0 && (
+        <Accordion title="Data" count={Object.keys(configData).length}>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(configData).map(([k, v]) => (
+                <tr key={k}>
+                  <td className="mono">{k}</td>
+                  <td className="mono">{v.length > 200 ? v.slice(0, 200) + '…' : v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Accordion>
+      )}
+
+      {Object.keys(secretData).length > 0 && (
+        <Accordion title="Data" count={Object.keys(secretData).length}>
+          <SecretData data={secretData} />
+        </Accordion>
+      )}
+
+      {Object.keys(nodeSelector).length > 0 && (
+        <Accordion title="Node Selector" count={Object.keys(nodeSelector).length} defaultOpen={false}>
+          {chipsOf(nodeSelector)}
+        </Accordion>
+      )}
+
+      {tolerations.length > 0 && (
+        <Accordion title="Tolerations" count={tolerations.length} defaultOpen={false}>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Operator</th>
+                <th>Value</th>
+                <th>Effect</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tolerations.map((t, i) => (
+                <tr key={String(t.key ?? i)}>
+                  <td className="mono">{String(t.key ?? '*')}</td>
+                  <td>{String(t.operator ?? '')}</td>
+                  <td>{String(t.value ?? '—')}</td>
+                  <td>{String(t.effect ?? 'All')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Accordion>
+      )}
+
+      {volumes.length > 0 && (
+        <Accordion title="Volumes" count={volumes.length} defaultOpen={false}>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              {volumes.map((v, i) => {
+                const type = Object.keys(v).find((key) => key !== 'name') ?? '—';
+                return (
+                  <tr key={String(v.name ?? i)}>
+                    <td>{String(v.name ?? '')}</td>
+                    <td className="mono">{type}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Accordion>
+      )}
+
+      {taints.length > 0 && (
+        <Accordion title="Taints" count={taints.length}>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Value</th>
+                <th>Effect</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taints.map((t, i) => (
+                <tr key={String(t.key ?? i)}>
+                  <td className="mono">{String(t.key ?? '')}</td>
+                  <td>{String(t.value ?? '—')}</td>
+                  <td>{String(t.effect ?? '')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Accordion>
+      )}
+
+      {nodeInfo && (
+        <Accordion title="Node Info" defaultOpen={false}>
+          <dl className="kv">
+            {[
+              ['OS Image', nodeInfo.osImage],
+              ['Architecture', nodeInfo.architecture],
+              ['Kernel', nodeInfo.kernelVersion],
+              ['Container Runtime', nodeInfo.containerRuntimeVersion],
+              ['Kube-Proxy', nodeInfo.kubeProxyVersion],
+            ]
+              .filter(([, v]) => v)
+              .map(([k, v]) => (
+                <Fragment key={k}>
+                  <dt>{k}</dt>
+                  <dd>{v}</dd>
+                </Fragment>
+              ))}
+          </dl>
+        </Accordion>
+      )}
+
+      {(capacity || allocatable) && (
+        <Accordion title="Capacity" defaultOpen={false}>
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Resource</th>
+                <th>Capacity</th>
+                <th>Allocatable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from(new Set([...Object.keys(capacity ?? {}), ...Object.keys(allocatable ?? {})])).map((r) => (
+                <tr key={r}>
+                  <td className="mono">{r}</td>
+                  <td>{capacity?.[r] ?? '—'}</td>
+                  <td>{allocatable?.[r] ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Accordion>
       )}
 
       {conditions.length > 0 && (
-        <section className="ov-sec">
-          <h3>Conditions</h3>
+        <Accordion title="Conditions" count={conditions.length}>
           <table className="mini">
             <thead>
               <tr>
@@ -2316,7 +2712,7 @@ function Overview(props: {
               ))}
             </tbody>
           </table>
-        </section>
+        </Accordion>
       )}
     </div>
   );

@@ -215,5 +215,17 @@ Scale, Restart, Logs, Terminal, Forward, Cordon/Uncordon, Delete, Force Delete, 
 Already covered: Scale, Restart, Logs, Exec/Terminal, Port-forward, Cordon/Uncordon,
 Delete, Force-Delete, Edit-YAML.
 
-**Build order:** (1) collapsible accordions + kind sections (Pod/Node/Service/Secret);
-(2) Drain, CronJob Trigger + Suspend/Resume, Job Suspend/Resume; (3) Rollback, Attach.
+**Build order:** (1) collapsible accordions + kind sections (Pod/Node/Service/Secret) —
+**done**; (2) Drain, CronJob Trigger + Suspend/Resume, Job Suspend/Resume — **done**;
+(3) Rollback, Attach — pending.
+
+**Shipped (1):** Overview sections are now collapsible `Accordion`s with count badges.
+Header KV gained kind-specific rows (Pod: Node/Pod IP/Host IP/QoS; Service: Type/Cluster IP;
+Node: Internal IP/Kubelet; Secret: Type). New per-kind sections: Containers (now with
+Ports + resource requests), Service Ports, Selector, Ingress Rules + TLS, ConfigMap Data,
+Secret Data (masked, per-key Reveal/decode), Pod Node Selector/Tolerations/Volumes, Node
+Info/Capacity+Allocatable/Taints, Conditions.
+
+**Shipped (2):** `ResourceService.setSuspended` / `triggerCronJob` / `drainNode`; web routes
+`POST …/{ns}/{name}/suspend|trigger` and `…/nodes/{name}/drain`; SPA drawer buttons
+(CronJob Trigger + Suspend/Resume, Job Suspend/Resume, Node Drain), all auth-gated + audited.

@@ -922,6 +922,37 @@ body {
   margin: 0 0 6px;
 }
 
+.acc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.acc-head:hover {
+  color: var(--fg);
+}
+
+.acc-caret {
+  display: inline-block;
+  transition: transform 0.12s ease;
+  font-size: 9px;
+}
+
+.acc-caret.open {
+  transform: rotate(90deg);
+}
+
+.acc-count {
+  background: #eef1f4;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
