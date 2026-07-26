@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kweblens.fullname" . }}
+  labels:
+    {{- include "kweblens.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kweblens.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kweblens.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "kweblens.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: kweblens
+          image: {{ include "kweblens.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.springProfiles | quote }}
+            - name: KWEBLENS_LOAD_KUBECONFIG
+              value: {{ .Values.clusterScope.local | quote }}
+            - name: KWEBLENS_SECURITY_OPEN_MODE
+              value: {{ .Values.auth.openMode | quote }}
+            {{- range $i, $c := .Values.clusterScope.external }}
+            - name: KWEBLENS_CLUSTERS_{{ $i }}_ID
+              value: {{ required "each clusterScope.external entry needs an id" $c.id | quote }}
+            - name: KWEBLENS_CLUSTERS_{{ $i }}_NAME
+              value: {{ default $c.id $c.name | quote }}
+            {{- if $c.context }}
+            - name: KWEBLENS_CLUSTERS_{{ $i }}_CONTEXT
+              value: {{ $c.context | quote }}
+            {{- end }}
+            - name: KWEBLENS_CLUSTERS_{{ $i }}_KUBECONFIG
+              value: /kubeconfigs/kubeconfig
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.auth.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.auth.existingSecret }}
+          {{- end }}
+          {{- if .Values.clusterScope.kubeconfigSecret }}
+          volumeMounts:
+            - name: kubeconfigs
+              mountPath: /kubeconfigs
+              readOnly: true
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.clusterScope.kubeconfigSecret }}
+      volumes:
+        - name: kubeconfigs
+          secret:
+            secretName: {{ .Values.clusterScope.kubeconfigSecret }}
+            items:
+              - key: kubeconfig
+                path: kubeconfig
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

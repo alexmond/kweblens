@@ -1,0 +1,33 @@
+kweblens {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Monitoring scope:
+{{- if .Values.clusterScope.local }}
+  • Local (hosting) cluster: ON — via ServiceAccount "{{ include "kweblens.serviceAccountName" . }}" ({{ .Values.rbac.role }} RBAC).
+{{- else }}
+  • Local (hosting) cluster: OFF.
+{{- end }}
+{{- if .Values.clusterScope.external }}
+  • External clusters: {{ range $i, $c := .Values.clusterScope.external }}{{ if $i }}, {{ end }}{{ $c.id }}{{ end }} (from Secret "{{ .Values.clusterScope.kubeconfigSecret }}").
+{{- else }}
+  • External clusters: none.
+{{- end }}
+
+{{- if not .Values.auth.existingSecret }}
+
+⚠  No auth.existingSecret set. kweblens is running in OPEN mode with a generated admin
+   password (see the pod log). Create a Secret with admin creds and set auth.existingSecret:
+
+     kubectl -n {{ .Release.Namespace }} create secret generic {{ include "kweblens.fullname" . }}-auth \
+       --from-literal=KWEBLENS_SECURITY_ADMIN_USERNAME=admin \
+       --from-literal=KWEBLENS_SECURITY_ADMIN_PASSWORD='<strong-password>'
+{{- end }}
+
+Reach it:
+{{- if .Values.ingress.enabled }}
+  https://{{ .Values.ingress.host }}/
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kweblens.fullname" . }} 8080:{{ .Values.service.port }}
+  then open http://localhost:8080/ui
+{{- end }}
+
+Health:  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "kweblens.fullname" . }}

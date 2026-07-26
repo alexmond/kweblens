@@ -1,0 +1,98 @@
+# Default values for the kweblens chart.
+# These are deliberately NEUTRAL / placeholder — real registry, ingress host, and
+# secrets come from a private deploy overlay (see docs/deployment.md). Nothing here
+# names a specific environment.
+
+replicaCount: 1
+
+image:
+  # Overlay sets a real registry, e.g. registry.example.com/kweblens
+  repository: kweblens
+  # Defaults to Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# e.g. [{ name: regcred }] — the pull secret must already exist in the namespace.
+imagePullSecrets: []
+
+# --- Which clusters this instance monitors --------------------------------------
+# local:  register the HOSTING cluster via the pod ServiceAccount (in-cluster config).
+#         Set false to monitor only external clusters.
+# external: list of external clusters read from a mounted kubeconfig Secret. Each entry
+#         becomes a kweblens.clusters[*]; `context` selects a context in the kubeconfig.
+# kubeconfigSecret: name of a Secret with a single key `kubeconfig` (the file), mounted
+#         read-only at /kubeconfigs/kubeconfig. Required when `external` is non-empty.
+clusterScope:
+  local: true
+  external: []
+  #  - id: prod
+  #    name: Production
+  #    context: prod-context
+  kubeconfigSecret: ""
+
+# --- RBAC (only relevant when clusterScope.local is true) ------------------------
+# role: "viewer" = read-only (get/list/watch); "editor" = adds create/update/patch/delete
+#       so the mutating drawer actions (scale/restart/rollback/delete/drain/exec/helm)
+#       work against the hosting cluster. Editor deliberately excludes escalate/bind/
+#       impersonate to prevent RBAC privilege escalation.
+rbac:
+  create: true
+  role: viewer
+
+serviceAccount:
+  create: true
+  # Defaults to the release fullname when empty.
+  name: ""
+
+# --- App auth --------------------------------------------------------------------
+# kweblens SecurityConfig is OPEN by default. A real deployment MUST supply an admin
+# login and should sit behind an external gate. `existingSecret` is a Secret providing
+# KWEBLENS_SECURITY_ADMIN_USERNAME and KWEBLENS_SECURITY_ADMIN_PASSWORD (create it out
+# of band — never commit the values). It may also carry ANTHROPIC_API_KEY.
+auth:
+  existingSecret: ""
+  # false = require the admin login for mutating actions (recommended for real deploys).
+  openMode: true
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: traefik
+  # REQUIRED when enabled — no lab default is baked in.
+  host: ""
+  tls: true
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+# Spring profile(s) activated in the pod.
+springProfiles: "prod"
+
+# Extra environment variables (list of {name, value}).
+extraEnv: []
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Pod/container security context — non-root, matches the buildpack image uid.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1002
+  runAsGroup: 1001
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]

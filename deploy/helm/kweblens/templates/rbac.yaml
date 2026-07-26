@@ -1,0 +1,41 @@
+{{- if and .Values.rbac.create .Values.clusterScope.local -}}
+{{- $editor := eq .Values.rbac.role "editor" -}}
+# ClusterRole so kweblens can introspect the hosting cluster. `viewer` is read-only;
+# `editor` adds the write verbs the mutating drawer actions need. Editor intentionally
+# omits escalate/bind/impersonate so it can't be used to grant itself more.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kweblens.fullname" . }}
+  labels:
+    {{- include "kweblens.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    {{- if $editor }}
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    {{- else }}
+    verbs: ["get", "list", "watch"]
+    {{- end }}
+  # Metrics via the API-server service proxy (Prometheus/metrics-server) and pod logs.
+  - apiGroups: [""]
+    resources: ["services/proxy", "nodes/proxy", "pods/log"]
+    verbs: ["get"]
+  - nonResourceURLs: ["/metrics", "/healthz", "/version"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kweblens.fullname" . }}
+  labels:
+    {{- include "kweblens.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kweblens.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kweblens.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end -}}
