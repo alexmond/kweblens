@@ -75,6 +75,12 @@ public class SecurityConfig {
 			// Pod exec is privileged: the WebSocket handshake always requires auth, even
 			// in open-mode.
 			auth.requestMatchers("/ws/**").authenticated();
+			// Helm values — a release's stored config and the saved values-file library —
+			// commonly carry plaintext secrets and are returned raw (unlike the masked
+			// Secret drawer), so they always require auth, even in open-mode.
+			auth.requestMatchers(HttpMethod.GET, "/api/v1/helm/values", "/api/v1/helm/values/**",
+					"/api/v1/clusters/*/helm/releases/*/*/values")
+				.authenticated();
 			if (properties.isOpenMode()) {
 				auth.requestMatchers(HttpMethod.GET, "/**").permitAll();
 			}

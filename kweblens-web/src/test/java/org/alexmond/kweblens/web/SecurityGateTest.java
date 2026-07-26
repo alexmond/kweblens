@@ -56,4 +56,20 @@ class SecurityGateTest {
 		mvc.perform(get("/ws/exec")).andExpect(status().isUnauthorized());
 	}
 
+	@Test
+	void helmValuesRequireAuthEvenInOpenMode() throws Exception {
+		// Helm values commonly carry plaintext secrets, so these GETs must not be public
+		// even though open-mode permits reads elsewhere.
+		mvc.perform(get("/api/v1/helm/values")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/v1/helm/values/anything")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/v1/clusters/default/helm/releases/ns/name/values")).andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void helmReposRemainPublicInOpenMode() throws Exception {
+		// Repo names/URLs aren't secret — the repos list stays a public read in
+		// open-mode.
+		mvc.perform(get("/api/v1/helm/repos")).andExpect(status().isOk());
+	}
+
 }
