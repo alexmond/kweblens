@@ -177,3 +177,43 @@ lists, and everything downstream (detail, cross-links) builds on the same per-ki
 - **47–57 Per-group pages** (acme.cert-manager.io, autoscaling.k8s.io, cert-manager.io, externaldns.k8s.io, gateway.networking.k8s.io, helm.cattle.io, hub.traefik.io, k3s.cattle.io, metallb.io, operator.victoriametrics.com, traefik.io) — Freelens renders each kind's **CRD-declared `additionalPrinterColumns`** (operator-specific columns, e.g. Certificate readiness, Gateway address/programmed, HTTPRoute hostnames, MetalLB pools, VictoriaMetrics status) on top of Name/Namespace/Age. kweblens **PARTIAL** — the dynamic per-group nav categories and kind lists match Freelens's structure, but every custom resource opens the same generic **Kind/Namespace/Name/Status/Age** table with **no `additionalPrinterColumns`**, and there's no Definitions anchor/filter.
 
 **Batch E gaps:** no CRD **Definitions** page (Group/Version/Short Names/Scope); no CRD **`additionalPrinterColumns`** (the whole value of an operator's CR list); no per-CRD metadata (served version maturity, short names, scope); no Definitions anchor + "All groups" filter in the CR nav section.
+
+## F. Resource detail drawer — accordions & actions (audit 2026-07)
+
+Most of A–E (per-kind list columns, overviews, Helm, port-forward, terminal, list UX) has
+since shipped. This section audits the **detail drawer** itself — Freelens's collapsible
+accordion sections and per-kind actions vs kweblens today.
+
+**kweblens detail drawer today:** tabs Overview · YAML · Events · Metrics. Overview =
+Kind/Namespace/Name/Status/Created, Managed By (Helm), Controlled By, Labels, Annotations,
+Containers (name/image/ready/restarts), Conditions — all flat (not collapsible). Actions:
+Scale, Restart, Logs, Terminal, Forward, Cordon/Uncordon, Delete, Force Delete, Edit-YAML.
+
+### F.1 Accordion behaviour
+- **Freelens:** one scroll of **collapsible** sections; kweblens's Overview sections are flat.
+- **Missing kind-specific sections:**
+  - **Pod** — Init Containers; per-container detail (image, command/args, ports, env,
+    resource requests/limits, liveness/readiness probes, volume mounts, state); Pod IP /
+    Host IP / QoS class; Tolerations; Node Selector; Affinities; Volumes.
+  - **Node** — Info (OS, kernel, container runtime, kubelet version); Capacity/Allocatable;
+    Taints; Addresses; Pods scheduled here.
+  - **Deployment/StatefulSet/ReplicaSet** — Selector, Strategy, replica breakdown.
+  - **Service** — Selector, Ports, Endpoints (backing pods).
+  - **Secret** — per-key reveal/decode (only base64-in-YAML today).
+  - **ConfigMap** — Data keys; **Ingress** — Rules.
+
+### F.2 Missing actions
+| Action | Kinds | Backend |
+|---|---|---|
+| Drain | Node | yes (cordon + evict) |
+| Trigger (run now) | CronJob | yes (Job from template) |
+| Suspend / Resume | CronJob, Job | yes (patch spec.suspend) |
+| Rollback (revision) | Deployment/STS | yes |
+| Attach | Pod | yes (WS, like exec) |
+| Reveal/decode | Secret | no (client-side) |
+
+Already covered: Scale, Restart, Logs, Exec/Terminal, Port-forward, Cordon/Uncordon,
+Delete, Force-Delete, Edit-YAML.
+
+**Build order:** (1) collapsible accordions + kind sections (Pod/Node/Service/Secret);
+(2) Drain, CronJob Trigger + Suspend/Resume, Job Suspend/Resume; (3) Rollback, Attach.

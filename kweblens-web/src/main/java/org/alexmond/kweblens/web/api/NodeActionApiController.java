@@ -39,4 +39,11 @@ public class NodeActionApiController {
 		return Map.of("result", "uncordoned " + name);
 	}
 
+	@PostMapping("/drain")
+	public Map<String, String> drain(@PathVariable String clusterId, @PathVariable String name) {
+		resources.drainNode(clusterId, name);
+		audit.record(clusterId, "drain", "Node/" + name);
+		return Map.of("result", "drained " + name);
+	}
+
 }

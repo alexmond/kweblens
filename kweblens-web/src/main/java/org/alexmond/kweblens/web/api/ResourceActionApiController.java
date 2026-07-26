@@ -59,6 +59,24 @@ public class ResourceActionApiController {
 		return Map.of("result", "restarted " + name);
 	}
 
+	@PostMapping("/suspend")
+	public Map<String, String> suspend(@PathVariable String clusterId, @PathVariable String resourceId,
+			@PathVariable String namespace, @PathVariable String name,
+			@RequestParam(defaultValue = "true") boolean suspend) {
+		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
+		resources.setSuspended(clusterId, descriptor, namespace, name, suspend);
+		audit.record(clusterId, suspend ? "suspend" : "resume", descriptor.kind() + "/" + namespace + "/" + name);
+		return Map.of("result", (suspend ? "suspended " : "resumed ") + name);
+	}
+
+	@PostMapping("/trigger")
+	public Map<String, String> trigger(@PathVariable String clusterId, @PathVariable String resourceId,
+			@PathVariable String namespace, @PathVariable String name) {
+		resources.triggerCronJob(clusterId, namespace, name);
+		audit.record(clusterId, "trigger", "CronJob/" + namespace + "/" + name);
+		return Map.of("result", "triggered " + name);
+	}
+
 	private ResourceDescriptor descriptor(String clusterId, String resourceId) {
 		return clusterNav.find(clusterId, resourceId).orElseThrow(() -> new UnknownResourceException(resourceId));
 	}
