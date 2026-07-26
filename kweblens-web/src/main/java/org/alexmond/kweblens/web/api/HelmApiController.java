@@ -61,4 +61,12 @@ public class HelmApiController {
 		return helm.resources(clusterId, namespace, name);
 	}
 
+	/**
+	 * The values a release was installed/upgraded with (Helm's stored config), as YAML.
+	 */
+	@GetMapping(value = "/releases/{namespace}/{name}/values", produces = "application/yaml")
+	public String values(@PathVariable String clusterId, @PathVariable String namespace, @PathVariable String name) {
+		return helm.releaseValues(clusterId, namespace, name);
+	}
+
 }

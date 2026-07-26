@@ -175,6 +175,23 @@ public class HelmService {
 		return parseManifest(release.getManifest(), namespace);
 	}
 
+	/**
+	 * The values a release was installed/upgraded with, as YAML (Helm's stored config).
+	 */
+	public String releaseValues(String clusterId, String namespace, String name) {
+		Release release = new StatusAction(kubeService(clusterId)).status(name, namespace)
+			.orElseThrow(() -> new HelmException("No release '" + name + "' in namespace " + namespace));
+		Release.MapConfig config = release.getConfig();
+		Map<String, Object> values = (config != null && config.jsonValue() != null) ? config.jsonValue() : Map.of();
+		if (values.isEmpty()) {
+			return "";
+		}
+		org.yaml.snakeyaml.DumperOptions options = new org.yaml.snakeyaml.DumperOptions();
+		options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK);
+		options.setPrettyFlow(true);
+		return new Yaml(options).dump(values);
+	}
+
 	@SuppressWarnings("unchecked")
 	static List<HelmResourceRef> parseManifest(String manifest, String releaseNamespace) {
 		List<HelmResourceRef> refs = new ArrayList<>();

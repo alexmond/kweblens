@@ -1599,3 +1599,22 @@ body {
   flex: 1;
   min-width: 240px;
 }
+
+/* Helm values-library toolbar in the install/upgrade modal. */
+.values-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.values-toolbar .tb-spacer {
+  flex: 1;
+}
+.values-toolbar .save-name {
+  width: 120px;
+}
+.values-msg {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}

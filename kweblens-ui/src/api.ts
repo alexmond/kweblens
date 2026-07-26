@@ -71,6 +71,17 @@ async function deleteReq(url: string): Promise<void> {
   }
 }
 
+async function putText(url: string, body: string): Promise<void> {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { ...auth.header(), 'Content-Type': 'application/yaml' },
+    body,
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) {
@@ -188,6 +199,15 @@ export const api = {
   helmAddRepo: (name: string, url: string) =>
     postNoContent('/api/v1/helm/repos', JSON.stringify({ name, url }), 'application/json'),
   helmRemoveRepo: (name: string) => deleteReq(`/api/v1/helm/repos/${encodeURIComponent(name)}`),
+  // --- Reusable values-file library (cluster-agnostic) + a release's stored values ---
+  helmValuesList: () => getJson<string[]>('/api/v1/helm/values'),
+  helmValuesGet: (name: string) => getText(`/api/v1/helm/values/${encodeURIComponent(name)}`),
+  helmValuesSave: (name: string, yaml: string) => putText(`/api/v1/helm/values/${encodeURIComponent(name)}`, yaml),
+  helmValuesDelete: (name: string) => deleteReq(`/api/v1/helm/values/${encodeURIComponent(name)}`),
+  helmReleaseValues: (cluster: string, namespace: string, name: string) =>
+    getText(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/values`,
+    ),
   helmReleases: (cluster: string, namespace?: string) =>
     getJson<HelmRelease[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases` +
