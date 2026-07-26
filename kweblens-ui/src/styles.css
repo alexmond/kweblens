@@ -1587,3 +1587,15 @@ body {
   color: #7a5b00;
   font-weight: 600;
 }
+
+/* Helm repositories admin — add-repo form. */
+.repo-add {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 14px;
+  align-items: center;
+}
+.repo-add .repo-url {
+  flex: 1;
+  min-width: 240px;
+}

@@ -100,6 +100,7 @@ kubectl -n kweblens create secret generic kweblens-auth \
 | `rbac.role` | `viewer` or `editor` |
 | `auth.existingSecret` / `auth.openMode` | Admin creds Secret / open-mode toggle |
 | `ingress.enabled` / `ingress.host` | Traefik ingress (host required when enabled) |
+| `persistence.enabled` / `storageClass` / `size` | PVC for `KWEBLENS_HELM_HOME` (Helm repo list + index cache + saved values). RWO ⇒ forces `replicas: 1` + `Recreate`. |
 
 ## Lab / private overlay
 

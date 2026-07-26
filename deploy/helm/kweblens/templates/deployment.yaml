@@ -5,7 +5,12 @@ metadata:
   labels:
     {{- include "kweblens.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  # A single writer holds the RWO Helm-home volume; force 1 replica + Recreate when persistent.
+  replicas: {{ if .Values.persistence.enabled }}1{{ else }}{{ .Values.replicaCount }}{{ end }}
+  {{- if .Values.persistence.enabled }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "kweblens.selectorLabels" . | nindent 6 }}
@@ -46,6 +51,10 @@ spec:
               value: {{ .Values.clusterScope.local | quote }}
             - name: KWEBLENS_SECURITY_OPEN_MODE
               value: {{ .Values.auth.openMode | quote }}
+            {{- if .Values.persistence.enabled }}
+            - name: KWEBLENS_HELM_HOME
+              value: {{ .Values.persistence.mountPath | quote }}
+            {{- end }}
             {{- range $i, $c := .Values.clusterScope.external }}
             - name: KWEBLENS_CLUSTERS_{{ $i }}_ID
               value: {{ required "each clusterScope.external entry needs an id" $c.id | quote }}
@@ -66,11 +75,17 @@ spec:
             - secretRef:
                 name: {{ .Values.auth.existingSecret }}
           {{- end }}
-          {{- if .Values.clusterScope.kubeconfigSecret }}
+          {{- if or .Values.clusterScope.kubeconfigSecret .Values.persistence.enabled }}
           volumeMounts:
+            {{- if .Values.clusterScope.kubeconfigSecret }}
             - name: kubeconfigs
               mountPath: /kubeconfigs
               readOnly: true
+            {{- end }}
+            {{- if .Values.persistence.enabled }}
+            - name: helm-home
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
           {{- end }}
           livenessProbe:
             httpGet:
@@ -87,14 +102,21 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if .Values.clusterScope.kubeconfigSecret }}
+      {{- if or .Values.clusterScope.kubeconfigSecret .Values.persistence.enabled }}
       volumes:
+        {{- if .Values.clusterScope.kubeconfigSecret }}
         - name: kubeconfigs
           secret:
             secretName: {{ .Values.clusterScope.kubeconfigSecret }}
             items:
               - key: kubeconfig
                 path: kubeconfig
+        {{- end }}
+        {{- if .Values.persistence.enabled }}
+        - name: helm-home
+          persistentVolumeClaim:
+            claimName: {{ include "kweblens.fullname" . }}-helm
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
