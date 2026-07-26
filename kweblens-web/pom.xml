@@ -46,6 +46,18 @@
             <artifactId>jhelm-kube</artifactId>
             <version>${jhelm.version}</version>
         </dependency>
+        <!-- jhelm's own REST layer (dogfood). We re-enable JhelmCoreAutoConfiguration but keep
+             JhelmKubeAutoConfiguration excluded, so only the CLUSTER-AGNOSTIC jhelm beans exist
+             (RepoManager, ChartLoader, Show/Template/Create/SearchHub actions). jhelm-rest's
+             controllers are individually @ConditionalOnBean: Repo/Chart/Hub/Dependency register
+             (repos, chart versions/values, Artifact Hub), while its single-cluster ReleaseController
+             stays dormant (no KubeService bean → no ListAction/InstallAction). Multi-cluster release
+             ops stay on kweblens's own per-cluster HelmService. -->
+        <dependency>
+            <groupId>org.alexmond</groupId>
+            <artifactId>jhelm-rest-starter</artifactId>
+            <version>${jhelm.version}</version>
+        </dependency>
         <!-- Credential providers (client-cert / token) to authenticate Helm's official ApiClient
              the same way the cluster's kubeconfig does — jhelm-kube only pulls client-java-api. The
              io.kubernetes.client.util.credentials.* classes live in the main client-java artifact. -->
