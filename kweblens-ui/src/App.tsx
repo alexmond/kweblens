@@ -392,8 +392,24 @@ export function App() {
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [terminal, setTerminal] = useState<{ namespace: string; pod: string; containers: string[] } | null>(null);
-  const [logs, setLogs] = useState<{ namespace: string; pod: string; containers: string[] } | null>(null);
+  const [dockSessions, setDockSessions] = useState<DockSession[]>([]);
+  const [activeSession, setActiveSession] = useState<string | null>(null);
+  const dockSeq = useRef(0);
+
+  const openDock = (kind: 'terminal' | 'logs', namespace: string, pod: string, containers: string[]) => {
+    dockSeq.current += 1;
+    const id = `${kind}:${namespace}/${pod}#${dockSeq.current}`;
+    setDockSessions((prev) => [...prev, { id, kind, namespace, pod, containers }]);
+    setActiveSession(id);
+  };
+
+  const closeDock = (id: string) => {
+    setDockSessions((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      setActiveSession((cur) => (cur === id ? (next[next.length - 1]?.id ?? null) : cur));
+      return next;
+    });
+  };
   const [forward, setForward] = useState<{ kind: string; namespace: string; name: string; ports: number[] } | null>(
     null,
   );
@@ -785,8 +801,7 @@ export function App() {
     const ns = objNs(obj) ?? '';
     const nm = objName(obj);
     if (action === 'logs') {
-      setTerminal(null);
-      setLogs({ namespace: ns, pod: nm, containers: containerNames(obj) });
+      openDock('logs', ns, nm, containerNames(obj));
       return;
     }
     if (action === 'edit') {
@@ -1087,14 +1102,8 @@ export function App() {
             authed={authUser !== null}
             onNavigate={navigateToKind}
             onHelmRelease={navigateToHelmRelease}
-            onTerminal={(namespace, pod, containers) => {
-              setLogs(null);
-              setTerminal({ namespace, pod, containers });
-            }}
-            onLogs={(namespace, pod, containers) => {
-              setTerminal(null);
-              setLogs({ namespace, pod, containers });
-            }}
+            onTerminal={(namespace, pod, containers) => openDock('terminal', namespace, pod, containers)}
+            onLogs={(namespace, pod, containers) => openDock('logs', namespace, pod, containers)}
             onForward={(kind, namespace, name, ports) => setForward({ kind, namespace, name, ports })}
             onRequireAuth={() => setShowLogin(true)}
             onAuthExpired={() => {
@@ -1137,23 +1146,13 @@ export function App() {
         />
       )}
 
-      {cluster && terminal && (
-        <TerminalDock
+      {cluster && dockSessions.length > 0 && (
+        <DockPanel
           cluster={cluster}
-          namespace={terminal.namespace}
-          pod={terminal.pod}
-          containers={terminal.containers}
-          onClose={() => setTerminal(null)}
-        />
-      )}
-
-      {cluster && logs && (
-        <LogsDock
-          cluster={cluster}
-          namespace={logs.namespace}
-          pod={logs.pod}
-          containers={logs.containers}
-          onClose={() => setLogs(null)}
+          sessions={dockSessions}
+          active={activeSession}
+          onActivate={setActiveSession}
+          onClose={closeDock}
         />
       )}
 
@@ -1179,15 +1178,108 @@ export function App() {
   );
 }
 
-function TerminalDock(props: {
-  cluster: string;
+/** One open dock session — an exec terminal or a log follow, shown as a tab. */
+type DockSession = {
+  id: string;
+  kind: 'terminal' | 'logs';
   namespace: string;
   pod: string;
   containers: string[];
-  onClose: () => void;
+};
+
+/**
+ * A dockable bottom panel holding many terminal + log sessions at once, one tab each.
+ * All sessions stay mounted (their WebSocket/SSE keep streaming) while hidden, so
+ * switching tabs never drops a shell or log follow. The top edge is a drag handle that
+ * resizes the whole panel.
+ */
+function DockPanel(props: {
+  cluster: string;
+  sessions: DockSession[];
+  active: string | null;
+  onActivate: (id: string) => void;
+  onClose: (id: string) => void;
 }) {
-  const { cluster, namespace, pod, containers, onClose } = props;
+  const { cluster, sessions, active, onActivate, onClose } = props;
+  const [height, setHeight] = useState(300);
+  const draggingRef = useRef(false);
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      if (!draggingRef.current) {
+        return;
+      }
+      const h = window.innerHeight - e.clientY;
+      setHeight(Math.min(Math.max(h, 120), window.innerHeight - 80));
+    };
+    const up = () => {
+      draggingRef.current = false;
+      document.body.classList.remove('row-resizing');
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, []);
+
+  const activeId = sessions.some((s) => s.id === active) ? active : (sessions[sessions.length - 1]?.id ?? null);
+
+  return (
+    <div className="dock-panel" style={{ height }}>
+      <div
+        className="dock-resize"
+        title="Drag to resize"
+        onPointerDown={() => {
+          draggingRef.current = true;
+          document.body.classList.add('row-resizing');
+        }}
+      />
+      <div className="dock-tabs">
+        {sessions.map((s) => (
+          <div
+            key={s.id}
+            className={'dock-tab' + (s.id === activeId ? ' active' : '')}
+            onClick={() => onActivate(s.id)}
+          >
+            <i className={'term-dot ' + s.kind} />
+            <span className="dock-tab-label">
+              {s.kind === 'logs' ? 'logs' : 'sh'} · {s.namespace}/{s.pod}
+            </span>
+            <button
+              className="dock-tab-close"
+              title="Close"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(s.id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="dock-bodies">
+        {sessions.map((s) => (
+          <div key={s.id} className="dock-slot" style={{ display: s.id === activeId ? 'flex' : 'none' }}>
+            {s.kind === 'terminal' ? (
+              <TerminalSession cluster={cluster} session={s} active={s.id === activeId} height={height} />
+            ) : (
+              <LogsSession cluster={cluster} session={s} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TerminalSession(props: { cluster: string; session: DockSession; active: boolean; height: number }) {
+  const { cluster, session, active, height } = props;
+  const { namespace, pod, containers } = session;
   const ref = useRef<HTMLDivElement>(null);
+  const fitRef = useRef<{ fit: () => void } | null>(null);
   const [container, setContainer] = useState(containers[0] ?? '');
 
   useEffect(() => {
@@ -1204,6 +1296,7 @@ function TerminalDock(props: {
       term.loadAddon(fit);
       term.open(ref.current);
       fit.fit();
+      fitRef.current = fit;
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const url = `${proto}://${window.location.host}/ws/exec?cluster=${enc(cluster)}&namespace=${enc(namespace)}&pod=${enc(pod)}&container=${enc(container)}`;
       const ws = new WebSocket(url);
@@ -1229,6 +1322,7 @@ function TerminalDock(props: {
       window.addEventListener('resize', onResize);
       cleanup = () => {
         window.removeEventListener('resize', onResize);
+        fitRef.current = null;
         ws.close();
         term.dispose();
       };
@@ -1239,38 +1333,39 @@ function TerminalDock(props: {
     };
   }, [cluster, namespace, pod, container]);
 
+  // Refit when this tab becomes active or the dock is resized (xterm can't measure a
+  // hidden element).
+  useEffect(() => {
+    if (active && fitRef.current) {
+      try {
+        fitRef.current.fit();
+      } catch {
+        // not ready to fit yet
+      }
+    }
+  }, [active, height]);
+
   return (
-    <div className="term-dock">
-      <div className="term-head">
-        <span className="term-title">
-          <i className="term-dot" /> {namespace}/{pod}
-          {containers.length > 1 && (
-            <select className="dock-select" value={container} onChange={(e) => setContainer(e.target.value)}>
-              {containers.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          )}
-        </span>
-        <button className="term-close" onClick={onClose} title="Close terminal">
-          ×
-        </button>
-      </div>
+    <div className="dock-session">
+      {containers.length > 1 && (
+        <div className="dock-toolbar">
+          <select className="dock-select" value={container} onChange={(e) => setContainer(e.target.value)}>
+            {containers.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="term-body" ref={ref} />
     </div>
   );
 }
 
-function LogsDock(props: {
-  cluster: string;
-  namespace: string;
-  pod: string;
-  containers: string[];
-  onClose: () => void;
-}) {
-  const { cluster, namespace, pod, containers, onClose } = props;
+function LogsSession(props: { cluster: string; session: DockSession }) {
+  const { cluster, session } = props;
+  const { namespace, pod, containers } = session;
   const [container, setContainer] = useState(containers[0] ?? '');
   const [lines, setLines] = useState<string[]>([]);
   const [wrap, setWrap] = useState(false);
@@ -1307,26 +1402,20 @@ function LogsDock(props: {
   }, [lines]);
 
   return (
-    <div className="term-dock">
-      <div className="term-head">
-        <span className="term-title">
-          <i className="term-dot" /> logs · {namespace}/{pod}
-          {containers.length > 1 && (
-            <select className="dock-select" value={container} onChange={(e) => setContainer(e.target.value)}>
-              {containers.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          )}
-          <label className="dock-toggle">
-            <input type="checkbox" checked={wrap} onChange={(e) => setWrap(e.target.checked)} /> wrap
-          </label>
-        </span>
-        <button className="term-close" onClick={onClose} title="Close logs">
-          ×
-        </button>
+    <div className="dock-session">
+      <div className="dock-toolbar">
+        {containers.length > 1 && (
+          <select className="dock-select" value={container} onChange={(e) => setContainer(e.target.value)}>
+            {containers.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+        <label className="dock-toggle">
+          <input type="checkbox" checked={wrap} onChange={(e) => setWrap(e.target.checked)} /> wrap
+        </label>
       </div>
       <div className={'term-body log-body' + (wrap ? ' wrap' : '')} ref={bodyRef}>
         {lines.length === 0 ? <div className="log-line dim">(no output yet)</div> : null}
