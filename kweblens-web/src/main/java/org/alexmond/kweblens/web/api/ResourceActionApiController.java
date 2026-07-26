@@ -77,6 +77,15 @@ public class ResourceActionApiController {
 		return Map.of("result", "triggered " + name);
 	}
 
+	@PostMapping("/rollback")
+	public Map<String, String> rollback(@PathVariable String clusterId, @PathVariable String resourceId,
+			@PathVariable String namespace, @PathVariable String name) {
+		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
+		resources.rollback(clusterId, descriptor, namespace, name);
+		audit.record(clusterId, "rollback", descriptor.kind() + "/" + namespace + "/" + name);
+		return Map.of("result", "rolled back " + name + " to the previous revision");
+	}
+
 	private ResourceDescriptor descriptor(String clusterId, String resourceId) {
 		return clusterNav.find(clusterId, resourceId).orElseThrow(() -> new UnknownResourceException(resourceId));
 	}

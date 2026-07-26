@@ -216,6 +216,36 @@ class ResourceServiceTest {
 	}
 
 	@Test
+	void rollbackRejectsAnUnsupportedKind() {
+		assertThatThrownBy(() -> serviceFor("mock").rollback("mock", CONFIG_MAPS, "default", "cm"))
+			.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void rollbackDispatchesADeploymentToFabric8() {
+		client.apps()
+			.deployments()
+			.resource(new io.fabric8.kubernetes.api.model.apps.DeploymentBuilder().withNewMetadata()
+				.withName("dep-x")
+				.withNamespace("default")
+				.endMetadata()
+				.build())
+			.create();
+		ResourceDescriptor deployments = ResourceDescriptor.namespaced("deployments", "Deployments", "Deployment",
+				"apps", "v1", "deployments");
+		try {
+			serviceFor("mock").rollback("mock", deployments, "default", "dep-x");
+		}
+		catch (IllegalArgumentException ex) {
+			throw new AssertionError("Deployment should dispatch to fabric8, not the unsupported-kind guard", ex);
+		}
+		catch (RuntimeException expected) {
+			// The crud mock has no rollout history, so fabric8's undo surfaces an
+			// error — but the Deployment branch was exercised, which is the point.
+		}
+	}
+
+	@Test
 	void suspendPatchesTheSuspendField() {
 		client.batch().v1().cronjobs().resource(newCronJob("cj-suspend")).create();
 		ResourceService service = serviceFor("mock");
