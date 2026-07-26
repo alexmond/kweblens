@@ -217,6 +217,77 @@ public class ResourceService {
 		strategicPatch(clusterId, nodes, null, nodeName, "{\"spec\":{\"unschedulable\":" + unschedulable + "}}");
 	}
 
+	/** Suspend or resume a CronJob/Job by setting {@code spec.suspend}. */
+	public void setSuspended(String clusterId, ResourceDescriptor descriptor, String namespace, String name,
+			boolean suspend) {
+		strategicPatch(clusterId, descriptor, namespace, name, "{\"spec\":{\"suspend\":" + suspend + "}}");
+	}
+
+	/**
+	 * Trigger a CronJob now: create a Job from its {@code jobTemplate} (like
+	 * {@code kubectl create job --from=cronjob/x}), owned by the CronJob.
+	 */
+	public void triggerCronJob(String clusterId, String namespace, String name) {
+		KubernetesClient client = clusters.require(clusterId);
+		io.fabric8.kubernetes.api.model.batch.v1.CronJob cronJob = client.batch()
+			.v1()
+			.cronjobs()
+			.inNamespace(namespace)
+			.withName(name)
+			.get();
+		if (cronJob == null || cronJob.getSpec() == null || cronJob.getSpec().getJobTemplate() == null) {
+			throw new IllegalArgumentException("CronJob not found or has no jobTemplate: " + name);
+		}
+		var template = cronJob.getSpec().getJobTemplate();
+		var owner = new io.fabric8.kubernetes.api.model.OwnerReferenceBuilder().withApiVersion("batch/v1")
+			.withKind("CronJob")
+			.withName(cronJob.getMetadata().getName())
+			.withUid(cronJob.getMetadata().getUid())
+			.withController(true)
+			.withBlockOwnerDeletion(false)
+			.build();
+		var job = new io.fabric8.kubernetes.api.model.batch.v1.JobBuilder().withNewMetadata()
+			.withName(name + "-manual-" + Instant.now().getEpochSecond())
+			.withNamespace(namespace)
+			.addToAnnotations("cronjob.kubernetes.io/instantiate", "manual")
+			.withLabels((template.getMetadata() != null) ? template.getMetadata().getLabels() : null)
+			.withOwnerReferences(owner)
+			.endMetadata()
+			.withSpec(template.getSpec())
+			.build();
+		client.batch().v1().jobs().inNamespace(namespace).resource(job).create();
+	}
+
+	/**
+	 * Drain a node: cordon it, then evict its pods (skipping DaemonSet-managed and mirror
+	 * pods, as {@code kubectl drain} does). Best-effort — eviction failures are logged.
+	 */
+	public void drainNode(String clusterId, String nodeName) {
+		setUnschedulable(clusterId, nodeName, true);
+		KubernetesClient client = clusters.require(clusterId);
+		List<io.fabric8.kubernetes.api.model.Pod> pods = client.pods()
+			.inAnyNamespace()
+			.withField("spec.nodeName", nodeName)
+			.list()
+			.getItems();
+		for (io.fabric8.kubernetes.api.model.Pod pod : pods) {
+			ObjectMeta meta = pod.getMetadata();
+			boolean daemon = meta.getOwnerReferences() != null
+					&& meta.getOwnerReferences().stream().anyMatch((o) -> "DaemonSet".equals(o.getKind()));
+			boolean mirror = meta.getAnnotations() != null
+					&& meta.getAnnotations().containsKey("kubernetes.io/config.mirror");
+			if (daemon || mirror) {
+				continue;
+			}
+			try {
+				client.pods().inNamespace(meta.getNamespace()).withName(meta.getName()).evict();
+			}
+			catch (RuntimeException ex) {
+				log.warn("Eviction failed for {}/{}: {}", meta.getNamespace(), meta.getName(), ex.getMessage());
+			}
+		}
+	}
+
 	private void strategicPatch(String clusterId, ResourceDescriptor descriptor, String namespace, String name,
 			String patchJson) {
 		// JSON merge patch: recursively merges objects and sets leaf fields — correct for

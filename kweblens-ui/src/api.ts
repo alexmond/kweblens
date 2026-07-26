@@ -198,6 +198,12 @@ export const api = {
     postJson<ActionResult>(`${actionUrl(cluster, resourceId, namespace, name, 'scale')}?replicas=${replicas}`),
   restart: (cluster: string, resourceId: string, namespace: string, name: string) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'restart')),
+  suspend: (cluster: string, resourceId: string, namespace: string, name: string, suspend: boolean) =>
+    postJson<ActionResult>(`${actionUrl(cluster, resourceId, namespace, name, 'suspend')}?suspend=${suspend}`),
+  trigger: (cluster: string, resourceId: string, namespace: string, name: string) =>
+    postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'trigger')),
+  drain: (cluster: string, name: string) =>
+    postJson<ActionResult>(`/api/v1/clusters/${encodeURIComponent(cluster)}/nodes/${encodeURIComponent(name)}/drain`),
   portForwards: (cluster: string) =>
     getJson<PortForward[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/port-forwards`),
   startPortForward: (

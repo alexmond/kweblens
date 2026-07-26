@@ -4,6 +4,9 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.batch.v1.CronJob;
+import io.fabric8.kubernetes.api.model.batch.v1.CronJobBuilder;
+import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
@@ -12,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @EnableKubernetesMockClient(crud = true)
 class ResourceServiceTest {
@@ -22,6 +26,9 @@ class ResourceServiceTest {
 
 	private static final ResourceDescriptor CONFIG_MAPS = ResourceDescriptor.coreNamespaced("configmaps", "Config Maps",
 			"ConfigMap", "configmaps");
+
+	private static final ResourceDescriptor CRON_JOBS = ResourceDescriptor.namespaced("cronjobs", "Cron Jobs",
+			"CronJob", "batch", "v1", "cronjobs");
 
 	private ResourceService serviceFor(String clusterId) {
 		ClusterRegistry registry = new ClusterRegistry();
@@ -182,6 +189,91 @@ class ResourceServiceTest {
 
 		ResourceDescriptor nodes = ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes");
 		assertThat(service.getYaml("mock", nodes, null, "node-x")).contains("unschedulable: true");
+	}
+
+	private CronJob newCronJob(String name) {
+		return new CronJobBuilder().withNewMetadata()
+			.withName(name)
+			.withNamespace("default")
+			.endMetadata()
+			.withNewSpec()
+			.withSchedule("* * * * *")
+			.withNewJobTemplate()
+			.withNewSpec()
+			.withNewTemplate()
+			.withNewSpec()
+			.addNewContainer()
+			.withName("c")
+			.withImage("busybox")
+			.endContainer()
+			.withRestartPolicy("Never")
+			.endSpec()
+			.endTemplate()
+			.endSpec()
+			.endJobTemplate()
+			.endSpec()
+			.build();
+	}
+
+	@Test
+	void suspendPatchesTheSuspendField() {
+		client.batch().v1().cronjobs().resource(newCronJob("cj-suspend")).create();
+		ResourceService service = serviceFor("mock");
+
+		service.setSuspended("mock", CRON_JOBS, "default", "cj-suspend", true);
+
+		assertThat(service.getYaml("mock", CRON_JOBS, "default", "cj-suspend")).contains("suspend: true");
+	}
+
+	@Test
+	void triggerCronJobCreatesAnOwnedJob() {
+		client.batch().v1().cronjobs().resource(newCronJob("cj-trigger")).create();
+
+		serviceFor("mock").triggerCronJob("mock", "default", "cj-trigger");
+
+		var jobs = client.batch().v1().jobs().inNamespace("default").list().getItems();
+		assertThat(jobs).hasSize(1);
+		Job job = jobs.get(0);
+		assertThat(job.getMetadata().getName()).startsWith("cj-trigger-manual-");
+		assertThat(job.getMetadata().getOwnerReferences()).anySatisfy((o) -> {
+			assertThat(o.getKind()).isEqualTo("CronJob");
+			assertThat(o.getName()).isEqualTo("cj-trigger");
+		});
+	}
+
+	@Test
+	void triggerCronJobRejectsAMissingCronJob() {
+		assertThatThrownBy(() -> serviceFor("mock").triggerCronJob("mock", "default", "absent"))
+			.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void drainCordonsTheNodeAndSkipsDaemonSetPods() {
+		client.nodes()
+			.resource(new NodeBuilder().withNewMetadata().withName("node-drain").endMetadata().build())
+			.create();
+		client.pods()
+			.resource(new PodBuilder().withNewMetadata()
+				.withName("ds-pod")
+				.withNamespace("default")
+				.addNewOwnerReference()
+				.withKind("DaemonSet")
+				.withName("ds")
+				.endOwnerReference()
+				.endMetadata()
+				.withNewSpec()
+				.withNodeName("node-drain")
+				.endSpec()
+				.build())
+			.create();
+		ResourceService service = serviceFor("mock");
+
+		service.drainNode("mock", "node-drain");
+
+		ResourceDescriptor nodes = ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes");
+		assertThat(service.getYaml("mock", nodes, null, "node-drain")).contains("unschedulable: true");
+		// DaemonSet-owned pod is skipped, not evicted.
+		assertThat(client.pods().inNamespace("default").withName("ds-pod").get()).isNotNull();
 	}
 
 	@Test

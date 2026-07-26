@@ -1829,6 +1829,8 @@ function Detail(props: {
   const name = objName(obj);
   const ns = objNs(obj) ?? '';
   const isNode = kind === 'Node';
+  const suspendable = kind === 'CronJob' || kind === 'Job';
+  const suspended = Boolean((obj.spec as Record<string, unknown>)?.suspend);
   const podContainers = ((obj.spec as Record<string, unknown>)?.containers as { name?: string }[] | undefined ?? [])
     .map((c) => c.name ?? '')
     .filter(Boolean);
@@ -2099,7 +2101,40 @@ function Detail(props: {
             <button className="btn" disabled={busy} onClick={() => act(() => api.uncordon(cluster, name))}>
               Uncordon
             </button>
+            <button
+              className="btn danger"
+              disabled={busy}
+              onClick={() =>
+                act(() => api.drain(cluster, name), {
+                  confirm: `Drain ${name}? This cordons the node and evicts its pods (DaemonSet and mirror pods are kept).`,
+                })
+              }
+            >
+              Drain
+            </button>
           </>
+        )}
+        {authed && kind === 'CronJob' && ns && (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => act(() => api.trigger(cluster, resourceId, ns, name), { confirm: `Trigger a manual run of ${name}?` })}
+          >
+            Trigger
+          </button>
+        )}
+        {authed && suspendable && ns && (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() =>
+              act(() => api.suspend(cluster, resourceId, ns, name, !suspended), {
+                confirm: `${suspended ? 'Resume' : 'Suspend'} ${kind} ${name}?`,
+              })
+            }
+          >
+            {suspended ? 'Resume' : 'Suspend'}
+          </button>
         )}
         {authed && !isNode && ns && (
           <button
