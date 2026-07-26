@@ -2,12 +2,14 @@ spring:
   application:
     name: kweblens
 
-  # jhelm is used as a plain library (we build one KubeService per cluster from each cluster's
-  # client), so its ambient-kubeconfig auto-configuration must not run — it would try to reach a
-  # single default cluster at startup.
+  # We keep JhelmKubeAutoConfiguration excluded so jhelm builds NO ambient KubeService — kweblens
+  # builds one KubeService per cluster inside HelmService for multi-cluster release ops. But
+  # JhelmCoreAutoConfiguration IS enabled: without a KubeService bean it registers only the
+  # cluster-agnostic beans (RepoManager, ChartLoader, Show/Template/Create/SearchHub actions),
+  # which back jhelm-rest's Repo/Chart/Hub controllers (the dogfood). Its release actions are
+  # @ConditionalOnBean(KubeService.class) so they never register.
   autoconfigure:
     exclude:
-      - org.alexmond.jhelm.core.JhelmCoreAutoConfiguration
       - org.alexmond.jhelm.core.JhelmMetricsAutoConfiguration
       - org.alexmond.jhelm.kube.JhelmKubeAutoConfiguration
 
@@ -63,13 +65,33 @@ kweblens:
   # AND an Anthropic API key is configured.
   ai:
     enabled: ${KWEBLENS_AI_ENABLED:false}
-  # Helm chart repositories for the charts browser. Override via kweblens.helm.repositories[*].
+  # Helm chart repositories seeded on startup into the shared jhelm RepoManager (idempotent).
+  # After boot, repos are managed at runtime via jhelm-rest (/api/v1/helm/repos) and persisted
+  # to jhelm.core.config-path below.
   helm:
     repositories:
       - name: prometheus-community
         url: https://prometheus-community.github.io/helm-charts
       - name: ingress-nginx
         url: https://kubernetes.github.io/ingress-nginx
+
+# jhelm-rest dogfood: the cluster-agnostic Helm REST surface (repos, chart versions/values,
+# Artifact Hub) served under /api/v1/helm/*. See the autoconfigure note above.
+jhelm:
+  # Persist kweblens's OWN repository list + index cache under a writable data dir — NEVER the
+  # operator's ~/.config/helm. In-cluster this is a mounted PVC (KWEBLENS_HELM_HOME=/data/helm);
+  # locally it defaults under the user home. (JhelmCoreProperties' prefix is `jhelm`, so these
+  # sit directly here, not under jhelm.core.)
+  config-path: ${KWEBLENS_HELM_HOME:${user.home}/.kweblens/helm}/repositories.yaml
+  repository-cache-path: ${KWEBLENS_HELM_HOME:${user.home}/.kweblens/helm}/cache
+  rest:
+    # Namespaced under kweblens's API so it doesn't collide with /api/v1/clusters/*.
+    base-path: /api/v1/helm
+  security:
+    # kweblens's own SecurityConfig gates mutating (non-GET) /api/v1/helm/** behind the admin
+    # login, and its AccessModeInterceptor is neutralised (see JhelmRestIntegrationConfig), so
+    # FULL just means "don't 403 mutating ops at jhelm's layer".
+    mode: FULL
 
 management:
   endpoints:

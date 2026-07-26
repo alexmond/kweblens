@@ -2,6 +2,8 @@ package org.alexmond.kweblens.web.helm;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import org.alexmond.jhelm.core.service.ChartLoader;
+import org.alexmond.jhelm.core.service.RepoManager;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
@@ -24,7 +26,10 @@ class HelmServiceTest {
 	private HelmService serviceFor(String clusterId) {
 		ClusterRegistry registry = new ClusterRegistry();
 		registry.register(clusterId, clusterId, client);
-		return new HelmService(registry, new HelmChartResolver(new HelmProperties()));
+		// The resolver isn't exercised by these tests; a throwaway repo store is enough.
+		RepoManager repoManager = new RepoManager(
+				System.getProperty("java.io.tmpdir") + "/kweblens-test-helm/repositories.yaml");
+		return new HelmService(registry, new HelmChartResolver(repoManager, new ChartLoader()));
 	}
 
 	@Test
