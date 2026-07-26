@@ -24,6 +24,13 @@ public class HelmProperties {
 	/** How long a fetched repo index is cached before it is refetched. */
 	private long indexCacheSeconds = 300;
 
+	/**
+	 * Directory for the reusable values-file library (named {@code *.yaml} files the user
+	 * saves and reuses across installs/upgrades). Defaults under the persisted Helm home
+	 * so it survives restarts on a mounted volume.
+	 */
+	private String valuesPath;
+
 	@Data
 	public static class Repository {
 

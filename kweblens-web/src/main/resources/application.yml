@@ -69,6 +69,8 @@ kweblens:
   # After boot, repos are managed at runtime via jhelm-rest (/api/v1/helm/repos) and persisted
   # to jhelm.core.config-path below.
   helm:
+    # Reusable values-file library — persisted under the Helm home (PVC in-cluster).
+    values-path: ${KWEBLENS_HELM_HOME:${user.home}/.kweblens/helm}/values
     repositories:
       - name: prometheus-community
         url: https://prometheus-community.github.io/helm-charts

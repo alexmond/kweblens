@@ -3645,7 +3645,18 @@ function HelmActionModal(props: {
         : '',
   );
   const [valuesYaml, setValuesYaml] = useState('');
+  const [savedValues, setSavedValues] = useState<string[]>([]);
+  const [pickValues, setPickValues] = useState('');
+  const [saveName, setSaveName] = useState('');
+  const [valuesMsg, setValuesMsg] = useState<string | null>(null);
   const [revision, setRevision] = useState(action.mode === 'rollback' ? action.revision : 1);
+
+  useEffect(() => {
+    api
+      .helmValuesList()
+      .then(setSavedValues)
+      .catch(() => setSavedValues([]));
+  }, []);
   const [createNamespace, setCreateNamespace] = useState(false);
   const [preview, setPreview] = useState<HelmMutationResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -3731,13 +3742,83 @@ function HelmActionModal(props: {
         {action.mode !== 'rollback' &&
           field(
             'Values (YAML, optional)',
-            <textarea
-              className="values"
-              rows={5}
-              value={valuesYaml}
-              placeholder="key: value"
-              onChange={(e) => setValuesYaml(e.target.value)}
-            />,
+            <>
+              <div className="values-toolbar">
+                <select value={pickValues} onChange={(e) => setPickValues(e.target.value)}>
+                  <option value="">— saved values —</option>
+                  {savedValues.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!pickValues}
+                  onClick={() =>
+                    api
+                      .helmValuesGet(pickValues)
+                      .then((y) => {
+                        setValuesYaml(y);
+                        setValuesMsg(`loaded "${pickValues}"`);
+                      })
+                      .catch((e) => setValuesMsg(String(e)))
+                  }
+                >
+                  Load
+                </button>
+                {action.mode === 'upgrade' && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() =>
+                      api
+                        .helmReleaseValues(cluster, action.namespace, action.name)
+                        .then((y) => {
+                          setValuesYaml(y);
+                          setValuesMsg('loaded current release values');
+                        })
+                        .catch((e) => setValuesMsg(String(e)))
+                    }
+                  >
+                    Load current values
+                  </button>
+                )}
+                <span className="tb-spacer" />
+                <input
+                  className="save-name"
+                  placeholder="save as…"
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!saveName.trim()}
+                  onClick={() =>
+                    api
+                      .helmValuesSave(saveName.trim(), valuesYaml)
+                      .then(() => {
+                        setValuesMsg(`saved "${saveName.trim()}"`);
+                        setSaveName('');
+                        return api.helmValuesList().then(setSavedValues);
+                      })
+                      .catch((e) => setValuesMsg(String(e)))
+                  }
+                >
+                  Save
+                </button>
+              </div>
+              {valuesMsg && <div className="values-msg">{valuesMsg}</div>}
+              <textarea
+                className="values"
+                rows={5}
+                value={valuesYaml}
+                placeholder="key: value"
+                onChange={(e) => setValuesYaml(e.target.value)}
+              />
+            </>,
           )}
 
         {preview && (
