@@ -1,0 +1,33 @@
+# Run kweblens as a standalone container (laptop, a Docker host, docker-test, etc.),
+# monitoring one or more EXTERNAL clusters via a mounted kubeconfig. Build the image
+# first with the Spring Boot buildpacks profile:
+#
+#   ./mvnw -Pdocker -pl kweblens-web -am package -Ddocker.image.name=kweblens:local
+#
+# then, from this directory:  docker compose up
+#
+# Point KWEBLENS_KUBECONFIG at a kubeconfig on the host; it is mounted read-only and the
+# ambient-kubeconfig loader turns every context in it into a selectable cluster.
+services:
+  kweblens:
+    image: ${KWEBLENS_IMAGE:-kweblens:local}
+    ports:
+      - "${KWEBLENS_PORT:-8080}:8080"
+    environment:
+      # Load every context from the mounted kubeconfig as its own cluster.
+      KWEBLENS_LOAD_KUBECONFIG: "true"
+      KUBECONFIG: /kubeconfig
+      # Set a real admin login for anything beyond a throwaway local run.
+      KWEBLENS_SECURITY_ADMIN_USERNAME: ${KWEBLENS_ADMIN_USER:-admin}
+      KWEBLENS_SECURITY_ADMIN_PASSWORD: ${KWEBLENS_ADMIN_PASSWORD:-admin}
+      # Set false to require the admin login for mutating actions.
+      KWEBLENS_SECURITY_OPEN_MODE: ${KWEBLENS_OPEN_MODE:-true}
+    volumes:
+      - ${KWEBLENS_KUBECONFIG:-./kubeconfig}:/kubeconfig:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
