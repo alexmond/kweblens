@@ -3107,7 +3107,7 @@ function HelmView(props: {
   onAuthExpired: () => void;
 }) {
   const { cluster, authed, onNavigate, openResources, onResourcesConsumed, onRequireAuth, onAuthExpired } = props;
-  const [tab, setTab] = useState<'charts' | 'releases'>('releases');
+  const [tab, setTab] = useState<'charts' | 'releases' | 'repositories'>('releases');
   const [action, setAction] = useState<HelmAction | null>(null);
   const [resourcesFor, setResourcesFor] = useState<{ namespace: string; name: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -3135,9 +3135,14 @@ function HelmView(props: {
         <button className={'tab' + (tab === 'releases' ? ' active' : '')} onClick={() => setTab('releases')}>
           Releases
         </button>
+        <button className={'tab' + (tab === 'repositories' ? ' active' : '')} onClick={() => setTab('repositories')}>
+          Repositories
+        </button>
       </div>
       {tab === 'charts' ? (
         <HelmCharts cluster={cluster} authed={authed} onAction={onAction} />
+      ) : tab === 'repositories' ? (
+        <HelmRepos authed={authed} onRequireAuth={onRequireAuth} onAuthExpired={onAuthExpired} />
       ) : (
         <HelmReleases
           cluster={cluster}
@@ -3405,6 +3410,127 @@ function HelmReleases(props: {
                         Rollback
                       </button>
                     </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+function HelmRepos(props: { authed: boolean; onRequireAuth: () => void; onAuthExpired: () => void }) {
+  const { authed, onRequireAuth, onAuthExpired } = props;
+  const [repos, setRepos] = useState<{ name: string; url: string }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRepos(null);
+    setError(null);
+    api
+      .helmRepos()
+      .then((r) => !cancelled && setRepos(r))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  const fail = (e: unknown) => {
+    if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+      onAuthExpired();
+    }
+    setError(String(e));
+  };
+
+  const add = () => {
+    if (!authed) {
+      onRequireAuth();
+      return;
+    }
+    if (!name.trim() || !url.trim()) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    api
+      .helmAddRepo(name.trim(), url.trim())
+      .then(() => {
+        setName('');
+        setUrl('');
+        setRefreshKey((k) => k + 1);
+      })
+      .catch(fail)
+      .finally(() => setBusy(false));
+  };
+
+  const remove = (repo: string) => {
+    if (!authed) {
+      onRequireAuth();
+      return;
+    }
+    if (!window.confirm(`Remove repository ${repo}?`)) {
+      return;
+    }
+    setBusy(true);
+    api
+      .helmRemoveRepo(repo)
+      .then(() => setRefreshKey((k) => k + 1))
+      .catch(fail)
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <>
+      <div className="content-head">
+        <span className="count">{repos ? `${repos.length} repositories` : ''}</span>
+      </div>
+      {error && <div className="error">{error}</div>}
+      {authed && (
+        <div className="repo-add">
+          <input placeholder="name" value={name} disabled={busy} onChange={(e) => setName(e.target.value)} />
+          <input
+            placeholder="https://charts.example.com"
+            value={url}
+            disabled={busy}
+            className="repo-url"
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <button className="btn primary" disabled={busy || !name.trim() || !url.trim()} onClick={add}>
+            Add repository
+          </button>
+        </div>
+      )}
+      {repos === null ? (
+        <div className="empty">Loading…</div>
+      ) : repos.length === 0 ? (
+        <div className="empty">No repositories. Add one above.</div>
+      ) : (
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>URL</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {repos.map((r) => (
+              <tr key={r.name}>
+                <td className="name">{r.name}</td>
+                <td className="mono">{r.url}</td>
+                <td className="row-actions">
+                  {authed && (
+                    <button className="btn danger" disabled={busy} onClick={() => remove(r.name)}>
+                      Remove
+                    </button>
                   )}
                 </td>
               </tr>

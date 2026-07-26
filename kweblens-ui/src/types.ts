@@ -100,6 +100,12 @@ export interface PortForward {
   status: string;
 }
 
+/** A configured Helm chart repository (cluster-agnostic, managed via jhelm-rest). */
+export interface HelmRepo {
+  name: string;
+  url: string;
+}
+
 export interface HelmRelease {
   name: string;
   namespace: string;

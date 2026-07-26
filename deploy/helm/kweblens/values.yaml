@@ -54,6 +54,15 @@ auth:
   # false = require the admin login for mutating actions (recommended for real deploys).
   openMode: true
 
+# Persistent storage for the Helm repository list + index cache + saved values files
+# (KWEBLENS_HELM_HOME). Needed for runtime-provisioned repos and the values library to
+# survive restarts. RWO ⇒ replicas is forced to 1 with a Recreate strategy while enabled.
+persistence:
+  enabled: false
+  storageClass: ""
+  size: 1Gi
+  mountPath: /data/helm
+
 service:
   type: ClusterIP
   port: 8080

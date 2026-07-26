@@ -53,6 +53,24 @@ async function postBody<T>(url: string, body: string, contentType: string): Prom
   return (await res.json()) as T;
 }
 
+async function postNoContent(url: string, body?: string, contentType?: string): Promise<void> {
+  const headers: Record<string, string> = { ...auth.header() };
+  if (contentType) {
+    headers['Content-Type'] = contentType;
+  }
+  const res = await fetch(url, { method: 'POST', headers, body });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
+}
+
+async function deleteReq(url: string): Promise<void> {
+  const res = await fetch(url, { method: 'DELETE', headers: { ...auth.header() } });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) {
@@ -165,6 +183,11 @@ export const api = {
     getJson<HelmResourceRef[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/resources`,
     ),
+  // --- Helm repositories (cluster-agnostic, served by jhelm-rest) ---
+  helmRepos: () => getJson<{ name: string; url: string }[]>('/api/v1/helm/repos'),
+  helmAddRepo: (name: string, url: string) =>
+    postNoContent('/api/v1/helm/repos', JSON.stringify({ name, url }), 'application/json'),
+  helmRemoveRepo: (name: string) => deleteReq(`/api/v1/helm/repos/${encodeURIComponent(name)}`),
   helmReleases: (cluster: string, namespace?: string) =>
     getJson<HelmRelease[]>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases` +
