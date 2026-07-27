@@ -65,6 +65,14 @@ public class HelmActionApiController {
 		return result;
 	}
 
+	@PostMapping("/{namespace}/{name}/uninstall")
+	public Map<String, String> uninstall(@PathVariable String clusterId, @PathVariable String namespace,
+			@PathVariable String name) {
+		helm.uninstall(clusterId, namespace, name);
+		audit.record(clusterId, "helm-uninstall", name + " ns=" + namespace);
+		return Map.of("result", "uninstalled " + name);
+	}
+
 	@SuppressWarnings("unchecked")
 	private Map<String, Object> parseValues(String valuesYaml) {
 		if (valuesYaml == null || valuesYaml.isBlank()) {

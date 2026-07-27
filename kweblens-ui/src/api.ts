@@ -206,6 +206,10 @@ export const api = {
       JSON.stringify(body),
       'application/json',
     ),
+  helmUninstall: (cluster: string, namespace: string, name: string) =>
+    postJson<{ result: string }>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/uninstall`,
+    ),
   helmRollback: (cluster: string, namespace: string, name: string, body: { revision: number; dryRun: boolean }) =>
     postBody<HelmMutationResult>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/rollback`,
@@ -221,6 +225,7 @@ export const api = {
   helmAddRepo: (name: string, url: string) =>
     postNoContent('/api/v1/helm/repos', JSON.stringify({ name, url }), 'application/json'),
   helmRemoveRepo: (name: string) => deleteReq(`/api/v1/helm/repos/${encodeURIComponent(name)}`),
+  helmRefreshRepo: (name: string) => postNoContent(`/api/v1/helm/repos/${encodeURIComponent(name)}/refresh`),
   // --- Reusable values-file library (cluster-agnostic) + a release's stored values ---
   helmValuesList: () => getJson<string[]>('/api/v1/helm/values'),
   helmValuesGet: (name: string) => getText(`/api/v1/helm/values/${encodeURIComponent(name)}`),
@@ -229,6 +234,10 @@ export const api = {
   helmReleaseValues: (cluster: string, namespace: string, name: string) =>
     getText(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/values`,
+    ),
+  helmHistory: (cluster: string, namespace: string, name: string) =>
+    getJson<HelmRelease[]>(
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/history`,
     ),
   helmReleases: (cluster: string, namespace?: string) =>
     getJson<HelmRelease[]>(
