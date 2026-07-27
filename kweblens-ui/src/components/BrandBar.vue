@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { NSelect } from 'naive-ui';
+import { computed } from 'vue';
+
 import type { HelmRelease } from '../types';
 
-// The top brand bar: namespace + Helm-release filters and the sign-in / sign-out box.
-// Emits: update:namespace(v|null), update:helmRelease({namespace,name}|null), sign-in(), sign-out()
-defineProps<{
+// The top brand bar: namespace + Helm-release filters (Naive NSelect) and the sign-in box.
+// Emits: update:namespace(v|null), update:helmRelease({namespace,name}|null), sign-in(), sign-out(), toggle-theme()
+const props = defineProps<{
   cluster: string | null;
   namespace: string | null;
   namespaces: string[];
@@ -20,9 +23,17 @@ const emit = defineEmits<{
   (e: 'toggle-theme'): void;
 }>();
 
-const onNamespace = (e: Event) => emit('update:namespace', (e.target as HTMLSelectElement).value || null);
-const onHelm = (e: Event) => {
-  const v = (e.target as HTMLSelectElement).value;
+const nsOptions = computed(() => [
+  { label: 'All namespaces', value: '' },
+  ...props.namespaces.map((n) => ({ label: n, value: n })),
+]);
+const helmOptions = computed(() => [
+  { label: 'All releases', value: '' },
+  ...props.helmReleaseList.map((r) => ({ label: `${r.name} · ${r.namespace}`, value: `${r.namespace}/${r.name}` })),
+]);
+const helmValue = computed(() => (props.helmRelease ? `${props.helmRelease.namespace}/${props.helmRelease.name}` : ''));
+
+const onHelm = (v: string) => {
   if (!v) {
     emit('update:helmRelease', null);
     return;
@@ -41,19 +52,17 @@ const onHelm = (e: Event) => {
     <div v-if="cluster" class="bar-filters">
       <label class="bar-filter">
         <span>Namespace</span>
-        <select :value="namespace ?? ''" @change="onNamespace">
-          <option value="">All namespaces</option>
-          <option v-for="n in namespaces" :key="n" :value="n">{{ n }}</option>
-        </select>
+        <NSelect
+          :value="namespace ?? ''"
+          :options="nsOptions"
+          size="small"
+          style="width: 180px"
+          @update:value="(v) => emit('update:namespace', v || null)"
+        />
       </label>
       <label class="bar-filter">
         <span>Helm</span>
-        <select :value="helmRelease ? `${helmRelease.namespace}/${helmRelease.name}` : ''" @change="onHelm">
-          <option value="">All releases</option>
-          <option v-for="r in helmReleaseList" :key="`${r.namespace}/${r.name}`" :value="`${r.namespace}/${r.name}`">
-            {{ r.name }} · {{ r.namespace }}
-          </option>
-        </select>
+        <NSelect :value="helmValue" :options="helmOptions" size="small" style="width: 220px" @update:value="onHelm" />
       </label>
     </div>
     <div class="bar-right">

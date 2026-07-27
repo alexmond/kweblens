@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { NButton, NDataTable, NModal } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
+import { computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { useEscapeKey } from '../composables/useEscapeKey';
-import { useTableSort } from '../composables/useTableSort';
-import SortTh from './SortTh.vue';
 import type { HelmResourceRef } from '../types';
 
 // Objects a release manages (from its rendered manifest). Click a name to open it in the shell.
@@ -31,47 +30,45 @@ watch(
   { immediate: true },
 );
 
-useEscapeKey(() => emit('close'));
+const cmp = (k: keyof HelmResourceRef) => (a: HelmResourceRef, b: HelmResourceRef) =>
+  String(a[k] ?? '').localeCompare(String(b[k] ?? ''), undefined, { numeric: true });
 
-const { sorted, sort, clickHeader } = useTableSort(
-  () => resources.value ?? [],
-  'kind',
-  (r, k) => (r[k as keyof HelmResourceRef] as string) ?? '',
-);
+const columns = computed<DataTableColumns<HelmResourceRef>>(() => [
+  { title: 'Kind', key: 'kind', sorter: cmp('kind'), defaultSortOrder: 'ascend', render: (r) => r.kind },
+  { title: 'Namespace', key: 'namespace', sorter: cmp('namespace'), render: (r) => r.namespace },
+  {
+    title: 'Name',
+    key: 'name',
+    sorter: cmp('name'),
+    render: (r) => h('a', { class: 'cell-link', onClick: () => emit('open', r.kind, r.namespace) }, r.name),
+  },
+]);
+
+const rowKey = (r: HelmResourceRef) => `${r.kind}/${r.namespace}/${r.name}`;
 </script>
 
 <template>
-  <div class="modal-backdrop" @click="emit('close')">
-    <div class="modal wide" @click.stop>
-      <h2>Resources</h2>
-      <p class="modal-note">
-        Objects managed by release <strong>{{ name }}</strong> in <strong>{{ namespace }}</strong> (from its manifest).
-        Click a name to open it.
-      </p>
-      <div v-if="error" class="error">{{ error }}</div>
-      <div v-if="resources === null" class="empty">Loading…</div>
-      <div v-else-if="resources.length === 0" class="empty">No resources in this release's manifest.</div>
-      <table v-else class="grid">
-        <thead>
-          <tr>
-            <SortTh label="Kind" col-key="kind" :sort="sort" @sort="clickHeader" />
-            <SortTh label="Namespace" col-key="namespace" :sort="sort" @sort="clickHeader" />
-            <SortTh label="Name" col-key="name" :sort="sort" @sort="clickHeader" />
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in sorted" :key="r.kind + '/' + r.namespace + '/' + r.name">
-            <td>{{ r.kind }}</td>
-            <td>{{ r.namespace }}</td>
-            <td class="name">
-              <button class="cell-link" @click="emit('open', r.kind, r.namespace)">{{ r.name }}</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+  <NModal
+    :show="true"
+    preset="card"
+    title="Resources"
+    style="width: 720px; max-width: 92vw"
+    @update:show="(v) => !v && emit('close')"
+  >
+    <p class="modal-note">
+      Objects managed by release <strong>{{ name }}</strong> in <strong>{{ namespace }}</strong> (from its manifest).
+      Click a name to open it.
+    </p>
+    <div v-if="error" class="error">{{ error }}</div>
+    <NDataTable :columns="columns" :data="resources ?? []" :row-key="rowKey" :loading="resources === null" size="small">
+      <template #empty>
+        {{ resources === null ? 'Loading…' : "No resources in this release's manifest." }}
+      </template>
+    </NDataTable>
+    <template #footer>
       <div class="modal-actions">
-        <button type="button" class="btn" @click="emit('close')">Close</button>
+        <NButton @click="emit('close')">Close</NButton>
       </div>
-    </div>
-  </div>
+    </template>
+  </NModal>
 </template>

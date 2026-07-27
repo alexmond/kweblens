@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { NButton, NDataTable, NModal } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
+import { computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { age } from '../columns';
-import { useEscapeKey } from '../composables/useEscapeKey';
 import StatusBadge from './StatusBadge.vue';
 import type { HelmRelease } from '../types';
 
@@ -30,46 +31,41 @@ watch(
   { immediate: true },
 );
 
-useEscapeKey(() => emit('close'));
-
 const rows = computed(() => [...(history.value ?? [])].sort((a, b) => b.revision - a.revision));
+
+const columns: DataTableColumns<HelmRelease> = [
+  { title: 'Revision', key: 'revision', render: (r) => r.revision },
+  { title: 'Chart', key: 'chart', render: (r) => r.chart },
+  { title: 'Version', key: 'chartVersion', render: (r) => r.chartVersion },
+  { title: 'App Version', key: 'appVersion', render: (r) => r.appVersion },
+  { title: 'Status', key: 'status', render: (r) => h(StatusBadge, { text: r.status }) },
+  { title: 'Updated', key: 'updated', render: (r) => (r.updated ? age(r.updated) : '—') },
+];
+
+const rowKey = (r: HelmRelease) => r.revision;
 </script>
 
 <template>
-  <div class="modal-backdrop" @click="emit('close')">
-    <div class="modal wide" @click.stop>
-      <h2>History</h2>
-      <p class="modal-note">
-        Revision history of release <strong>{{ name }}</strong> in <strong>{{ namespace }}</strong> (helm history).
-      </p>
-      <div v-if="error" class="error">{{ error }}</div>
-      <div v-if="history === null" class="empty">Loading…</div>
-      <div v-else-if="rows.length === 0" class="empty">No history for this release.</div>
-      <table v-else class="grid">
-        <thead>
-          <tr>
-            <th>Revision</th>
-            <th>Chart</th>
-            <th>Version</th>
-            <th>App Version</th>
-            <th>Status</th>
-            <th>Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in rows" :key="r.revision">
-            <td>{{ r.revision }}</td>
-            <td>{{ r.chart }}</td>
-            <td>{{ r.chartVersion }}</td>
-            <td>{{ r.appVersion }}</td>
-            <td><StatusBadge :text="r.status" /></td>
-            <td>{{ r.updated ? age(r.updated) : '—' }}</td>
-          </tr>
-        </tbody>
-      </table>
+  <NModal
+    :show="true"
+    preset="card"
+    title="History"
+    style="width: 720px; max-width: 92vw"
+    @update:show="(v) => !v && emit('close')"
+  >
+    <p class="modal-note">
+      Revision history of release <strong>{{ name }}</strong> in <strong>{{ namespace }}</strong> (helm history).
+    </p>
+    <div v-if="error" class="error">{{ error }}</div>
+    <NDataTable :columns="columns" :data="rows" :row-key="rowKey" :loading="history === null" size="small">
+      <template #empty>
+        {{ history === null ? 'Loading…' : 'No history for this release.' }}
+      </template>
+    </NDataTable>
+    <template #footer>
       <div class="modal-actions">
-        <button type="button" class="btn" @click="emit('close')">Close</button>
+        <NButton @click="emit('close')">Close</NButton>
       </div>
-    </div>
-  </div>
+    </template>
+  </NModal>
 </template>

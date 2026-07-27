@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { NDataTable, NTag } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
+import { computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { age } from '../columns';
 import { useDialog } from '../dialog';
-import { useTableSort } from '../composables/useTableSort';
-import SortTh from './SortTh.vue';
 import StatusBadge from './StatusBadge.vue';
 import KebabMenu from './KebabMenu.vue';
 import type { HelmAction, KebabItem } from './helm-types';
@@ -75,20 +75,6 @@ const uninstall = (r: HelmRelease) => {
     });
 };
 
-const { sorted, sort, clickHeader } = useTableSort(
-  () => releases.value ?? [],
-  'name',
-  (r, k) => {
-    if (k === 'revision') {
-      return r.revision;
-    }
-    if (k === 'updated') {
-      return Date.parse(r.updated ?? '') || 0;
-    }
-    return (r[k as keyof HelmRelease] as string) ?? '';
-  },
-);
-
 const items = (r: HelmRelease): KebabItem[] => {
   const list: KebabItem[] = [
     { label: 'Resources', onClick: () => emit('resources', r.namespace, r.name) },
@@ -129,6 +115,45 @@ const items = (r: HelmRelease): KebabItem[] => {
   list.push({ label: 'Uninstall', danger: true, onClick: () => uninstall(r) });
   return list;
 };
+
+const str = (k: keyof HelmRelease) => (a: HelmRelease, b: HelmRelease) =>
+  String(a[k] ?? '').localeCompare(String(b[k] ?? ''), undefined, { numeric: true });
+
+const renderVersion = (r: HelmRelease) =>
+  h('span', { title: r.updateAvailable ? `Latest ${r.latestVersion} in ${r.latestRepository}` : undefined }, [
+    r.chartVersion,
+    r.updateAvailable
+      ? h(NTag, { size: 'small', type: 'warning', style: 'margin-left: 6px' }, () => `↑ ${r.latestVersion}`)
+      : null,
+  ]);
+
+const columns = computed<DataTableColumns<HelmRelease>>(() => [
+  { title: 'Name', key: 'name', sorter: str('name'), defaultSortOrder: 'ascend', render: (r) => r.name },
+  { title: 'Namespace', key: 'namespace', sorter: str('namespace'), render: (r) => r.namespace },
+  { title: 'Chart', key: 'chart', sorter: str('chart'), render: (r) => r.chart },
+  {
+    title: 'Source',
+    key: 'managedByKweblens',
+    sorter: str('managedByKweblens'),
+    render: (r) =>
+      r.managedByKweblens
+        ? h(NTag, { size: 'small', type: 'info' }, () => 'kweblens')
+        : h(NTag, { size: 'small', bordered: false }, () => 'external'),
+  },
+  { title: 'Revision', key: 'revision', sorter: (a, b) => a.revision - b.revision, render: (r) => r.revision },
+  { title: 'Version', key: 'chartVersion', sorter: str('chartVersion'), render: renderVersion },
+  { title: 'App Version', key: 'appVersion', sorter: str('appVersion'), render: (r) => r.appVersion },
+  { title: 'Status', key: 'status', sorter: str('status'), render: (r) => h(StatusBadge, { text: r.status }) },
+  {
+    title: 'Updated',
+    key: 'updated',
+    sorter: (a, b) => (Date.parse(a.updated ?? '') || 0) - (Date.parse(b.updated ?? '') || 0),
+    render: (r) => (r.updated ? age(r.updated) : '—'),
+  },
+  { title: '', key: '_menu', width: 44, render: (r) => h(KebabMenu, { items: items(r) }) },
+]);
+
+const rowKey = (r: HelmRelease) => `${r.namespace}/${r.name}`;
 </script>
 
 <template>
@@ -136,48 +161,9 @@ const items = (r: HelmRelease): KebabItem[] => {
     <span class="count">{{ releases ? `${releases.length} releases` : '' }}</span>
   </div>
   <div v-if="error" class="error">{{ error }}</div>
-  <div v-if="releases === null" class="empty">Loading…</div>
-  <div v-else-if="releases.length === 0" class="empty">No releases.</div>
-  <table v-else class="grid">
-    <thead>
-      <tr>
-        <SortTh label="Name" col-key="name" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Namespace" col-key="namespace" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Chart" col-key="chart" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Source" col-key="managedByKweblens" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Revision" col-key="revision" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Version" col-key="chartVersion" :sort="sort" @sort="clickHeader" />
-        <SortTh label="App Version" col-key="appVersion" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Status" col-key="status" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Updated" col-key="updated" :sort="sort" @sort="clickHeader" />
-        <th />
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-for="r in sorted" :key="r.namespace + '/' + r.name">
-        <td class="name">{{ r.name }}</td>
-        <td>{{ r.namespace }}</td>
-        <td>{{ r.chart }}</td>
-        <td>
-          <span v-if="r.managedByKweblens" class="chip">kweblens</span>
-          <span v-else class="chip subtle">external</span>
-        </td>
-        <td>{{ r.revision }}</td>
-        <td>
-          {{ r.chartVersion }}
-          <span
-            v-if="r.updateAvailable"
-            class="chip update-chip"
-            :title="`Latest ${r.latestVersion} in ${r.latestRepository}`"
-          >
-            ↑ {{ r.latestVersion }}
-          </span>
-        </td>
-        <td>{{ r.appVersion }}</td>
-        <td><StatusBadge :text="r.status" /></td>
-        <td>{{ r.updated ? age(r.updated) : '—' }}</td>
-        <td class="row-actions"><KebabMenu :items="items(r)" /></td>
-      </tr>
-    </tbody>
-  </table>
+  <NDataTable :columns="columns" :data="releases ?? []" :row-key="rowKey" :loading="releases === null" size="small">
+    <template #empty>
+      {{ releases === null ? 'Loading…' : 'No releases.' }}
+    </template>
+  </NDataTable>
 </template>

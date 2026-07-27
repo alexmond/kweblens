@@ -1,14 +1,10 @@
 <script setup lang="ts">
-// Create-from-YAML modal: a manifest textarea applied via server-side apply. On success it
-// briefly shows the created object, then closes; a 401/403 signals an expired session.
-//
-// Emits:
-//   close ()          — modal dismissed (backdrop / Cancel / Escape) or apply succeeded
-//   auth-expired ()   — apply returned 401/403; shell should force re-auth
+// Create-from-YAML modal (Naive NModal): a manifest textarea applied via server-side apply.
+// Emits: close () — dismissed or apply succeeded; auth-expired () — apply returned 401/403
+import { NButton, NInput, NModal } from 'naive-ui';
 import { ref } from 'vue';
 
 import { ApiError, api } from '../api';
-import { useEscapeKey } from '../composables/useEscapeKey';
 
 const props = defineProps<{ cluster: string }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'auth-expired'): void }>();
@@ -19,8 +15,6 @@ const draft = ref(
 const busy = ref(false);
 const msg = ref<string | null>(null);
 const err = ref(false);
-
-useEscapeKey(() => emit('close'));
 
 const apply = async () => {
   busy.value = true;
@@ -41,19 +35,48 @@ const apply = async () => {
     busy.value = false;
   }
 };
+const onShow = (v: boolean) => {
+  if (!v) {
+    emit('close');
+  }
+};
 </script>
 
 <template>
-  <div class="modal-backdrop" @click="emit('close')">
-    <div class="modal wide" @click.stop>
-      <h2>Create from YAML</h2>
-      <p class="modal-note">Server-side apply — paste or edit a manifest, then Apply.</p>
-      <textarea v-model="draft" class="yaml-edit tall" :spellcheck="false" />
-      <div v-if="msg" :class="'act-msg' + (err ? ' err' : '')">{{ msg }}</div>
-      <div class="modal-actions">
-        <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-        <button type="button" class="btn primary" :disabled="busy" @click="apply">Apply</button>
+  <NModal
+    :show="true"
+    preset="card"
+    title="Create from YAML"
+    :bordered="false"
+    style="max-width: 720px"
+    @update:show="onShow"
+  >
+    <p class="modal-note">Server-side apply — paste or edit a manifest, then Apply.</p>
+    <NInput
+      v-model:value="draft"
+      type="textarea"
+      :autosize="{ minRows: 12, maxRows: 24 }"
+      :input-props="{ spellcheck: 'false' }"
+      class="yaml-mono"
+    />
+    <div v-if="msg" :class="'act-msg' + (err ? ' err' : '')">{{ msg }}</div>
+    <template #footer>
+      <div class="dialog-actions">
+        <NButton :disabled="busy" @click="emit('close')">Cancel</NButton>
+        <NButton type="primary" :loading="busy" @click="apply">Apply</NButton>
       </div>
-    </div>
-  </div>
+    </template>
+  </NModal>
 </template>
+
+<style scoped>
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.yaml-mono :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+</style>

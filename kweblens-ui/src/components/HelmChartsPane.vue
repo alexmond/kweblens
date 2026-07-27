@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { NDataTable, NInput } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
+import { computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { useTableSort } from '../composables/useTableSort';
-import SortTh from './SortTh.vue';
 import KebabMenu from './KebabMenu.vue';
 import type { HelmAction, KebabItem } from './helm-types';
 import type { HelmChart } from '../types';
@@ -42,51 +42,38 @@ const filtered = computed(() => {
   );
 });
 
-const { sorted, sort, clickHeader } = useTableSort(
-  () => filtered.value,
-  'name',
-  (c, k) => (c[k as keyof HelmChart] as string) ?? '',
-);
-
 const items = (c: HelmChart): KebabItem[] => [
   {
     label: 'Install',
     onClick: () => emit('action', { mode: 'install', repository: c.repository, chart: c.name, version: c.version }),
   },
 ];
+
+const cmp = (k: keyof HelmChart) => (a: HelmChart, b: HelmChart) =>
+  String(a[k] ?? '').localeCompare(String(b[k] ?? ''), undefined, { numeric: true });
+
+const columns = computed<DataTableColumns<HelmChart>>(() => [
+  { title: 'Name', key: 'name', sorter: cmp('name'), defaultSortOrder: 'ascend', render: (r) => r.name },
+  { title: 'Description', key: 'description', sorter: cmp('description'), render: (r) => r.description ?? '—' },
+  { title: 'Version', key: 'version', sorter: cmp('version'), render: (r) => r.version },
+  { title: 'App Version', key: 'appVersion', sorter: cmp('appVersion'), render: (r) => r.appVersion ?? '—' },
+  { title: 'Repository', key: 'repository', sorter: cmp('repository'), render: (r) => r.repository },
+  { title: '', key: '_menu', width: 44, render: (r) => h(KebabMenu, { items: items(r) }) },
+]);
+
+const rowKey = (r: HelmChart) => `${r.repository}/${r.name}`;
 </script>
 
 <template>
   <div class="content-head">
     <span class="count">{{ charts ? `${filtered.length} charts` : '' }}</span>
     <div class="spacer" />
-    <input v-model="query" class="search" type="search" placeholder="Search charts…" />
+    <NInput v-model:value="query" placeholder="Search charts…" clearable style="max-width: 240px" />
   </div>
   <div v-if="error" class="error">{{ error }}</div>
-  <div v-if="charts === null" class="empty">Loading…</div>
-  <div v-else-if="filtered.length === 0" class="empty">
-    No charts. Configure repositories under kweblens.helm.repositories.
-  </div>
-  <table v-else class="grid">
-    <thead>
-      <tr>
-        <SortTh label="Name" col-key="name" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Description" col-key="description" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Version" col-key="version" :sort="sort" @sort="clickHeader" />
-        <SortTh label="App Version" col-key="appVersion" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Repository" col-key="repository" :sort="sort" @sort="clickHeader" />
-        <th />
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-for="c in sorted" :key="c.repository + '/' + c.name">
-        <td class="name">{{ c.name }}</td>
-        <td class="muted">{{ c.description ?? '—' }}</td>
-        <td>{{ c.version }}</td>
-        <td>{{ c.appVersion ?? '—' }}</td>
-        <td>{{ c.repository }}</td>
-        <td class="row-actions"><KebabMenu :items="items(c)" /></td>
-      </tr>
-    </tbody>
-  </table>
+  <NDataTable :columns="columns" :data="filtered" :row-key="rowKey" :loading="charts === null" size="small">
+    <template #empty>
+      {{ charts === null ? 'Loading…' : 'No charts. Configure repositories under kweblens.helm.repositories.' }}
+    </template>
+  </NDataTable>
 </template>

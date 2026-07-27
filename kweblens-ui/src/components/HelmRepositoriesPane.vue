@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { NButton, NDataTable, NInput } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
+import { computed, h, ref, watch } from 'vue';
 
 import { ApiError, api } from '../api';
 import { useDialog } from '../dialog';
@@ -137,6 +139,17 @@ const items = (r: { name: string; url: string }): KebabItem[] => [
   { label: 'Refresh', onClick: () => refresh(r.name) },
   { label: 'Remove', danger: true, onClick: () => remove(r.name) },
 ];
+
+const cmp = (k: 'name' | 'url') => (a: { name: string; url: string }, b: { name: string; url: string }) =>
+  a[k].localeCompare(b[k], undefined, { numeric: true });
+
+const columns = computed<DataTableColumns<{ name: string; url: string }>>(() => [
+  { title: 'Name', key: 'name', sorter: cmp('name'), defaultSortOrder: 'ascend', render: (r) => r.name },
+  { title: 'URL', key: 'url', sorter: cmp('url'), className: 'mono', render: (r) => r.url },
+  { title: '', key: '_menu', width: 44, render: (r) => h(KebabMenu, { items: items(r) }) },
+]);
+
+const rowKey = (r: { name: string; url: string }) => r.name;
 </script>
 
 <template>
@@ -145,26 +158,13 @@ const items = (r: { name: string; url: string }): KebabItem[] => [
   </div>
   <div v-if="error" class="error">{{ error }}</div>
   <div v-if="authed" class="repo-add">
-    <input v-model="name" placeholder="name" :disabled="busy" />
-    <input v-model="url" placeholder="https://charts.example.com" :disabled="busy" class="repo-url" />
-    <button class="btn primary" :disabled="busy || !name.trim() || !url.trim()" @click="add">Add repository</button>
+    <NInput v-model:value="name" placeholder="name" :disabled="busy" style="max-width: 200px" />
+    <NInput v-model:value="url" placeholder="https://charts.example.com" :disabled="busy" class="repo-url" />
+    <NButton type="primary" :disabled="busy || !name.trim() || !url.trim()" @click="add">Add repository</NButton>
   </div>
-  <div v-if="repos === null" class="empty">Loading…</div>
-  <div v-else-if="repos.length === 0" class="empty">No repositories. Add one above.</div>
-  <table v-else class="grid">
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>URL</th>
-        <th />
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-for="r in repos" :key="r.name">
-        <td class="name">{{ r.name }}</td>
-        <td class="mono">{{ r.url }}</td>
-        <td class="row-actions"><KebabMenu :items="items(r)" /></td>
-      </tr>
-    </tbody>
-  </table>
+  <NDataTable :columns="columns" :data="repos ?? []" :row-key="rowKey" :loading="repos === null" size="small">
+    <template #empty>
+      {{ repos === null ? 'Loading…' : 'No repositories. Add one above.' }}
+    </template>
+  </NDataTable>
 </template>

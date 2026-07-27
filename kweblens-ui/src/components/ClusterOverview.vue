@@ -2,14 +2,14 @@
 // The cluster dashboard: node/namespace/warnings stat cards, API-server line, cluster
 // CPU + memory metric charts, and a warnings table built from the cluster's events.
 // Emits nothing — purely presentational (data is fetched internally per cluster).
+import { NDataTable } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
 import { computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { ageToSeconds } from '../kube';
-import { useTableSort } from '../composables/useTableSort';
 import type { EventSummary, KubeObject } from '../types';
 import MetricChart from './MetricChart.vue';
-import SortTh from './SortTh.vue';
 import StatCard from './StatCard.vue';
 
 const props = defineProps<{ cluster: string; name: string; masterUrl?: string; namespaceCount: number }>();
@@ -45,12 +45,13 @@ const nodeReady = (o: KubeObject): boolean => {
 };
 const readyNodes = computed(() => (nodes.value ?? []).filter(nodeReady).length);
 
-const { sorted, sort, clickHeader } = useTableSort(
-  () => warnings.value ?? [],
-  'age',
-  (w, k) => (k === 'age' ? ageToSeconds(w.age) : ((w[k as keyof EventSummary] as string) ?? '')),
-);
-const warnRows = computed(() => sorted.value.slice(0, 30));
+const warnColumns: DataTableColumns<EventSummary> = [
+  { title: 'Reason', key: 'reason', sorter: 'default' },
+  { title: 'Object', key: 'object', sorter: 'default' },
+  { title: 'Message', key: 'message', sorter: 'default' },
+  { title: 'Age', key: 'age', sorter: (a, b) => ageToSeconds(a.age) - ageToSeconds(b.age), defaultSortOrder: 'ascend' },
+];
+const warnRows = computed(() => (warnings.value ?? []).slice(0, 30));
 </script>
 
 <template>
@@ -75,26 +76,15 @@ const warnRows = computed(() => sorted.value.slice(0, 30));
     </div>
     <section class="ov-sec">
       <h3>Warnings</h3>
-      <div v-if="warnings === null" class="empty">Loading…</div>
-      <div v-else-if="warnings.length === 0" class="empty">No warnings.</div>
-      <table v-else class="mini">
-        <thead>
-          <tr>
-            <SortTh label="Reason" col-key="reason" :sort="sort" @sort="clickHeader" />
-            <SortTh label="Object" col-key="object" :sort="sort" @sort="clickHeader" />
-            <SortTh label="Message" col-key="message" :sort="sort" @sort="clickHeader" />
-            <SortTh label="Age" col-key="age" :sort="sort" @sort="clickHeader" />
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(w, i) in warnRows" :key="i" class="warn">
-            <td>{{ w.reason }}</td>
-            <td>{{ w.object }}</td>
-            <td>{{ w.message }}</td>
-            <td>{{ w.age }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="warnings && warnings.length === 0" class="empty">No warnings.</div>
+      <NDataTable
+        v-else
+        :columns="warnColumns"
+        :data="warnRows"
+        :loading="warnings === null"
+        :row-key="(w) => `${w.object}/${w.reason}/${w.age}`"
+        size="small"
+      />
     </section>
   </div>
 </template>

@@ -1,12 +1,14 @@
 <script setup lang="ts">
-// The slide-in resource Detail drawer: header + tabs (Overview / YAML / Events, plus
-// Metrics for Pods) + Escape-to-close. Lazy-loads events when its tab is first shown.
+// The slide-in resource Detail drawer: NDrawer + NDrawerContent, a NTabs bar
+// (Overview / YAML / Events, plus Metrics for Pods) and Escape-to-close. Lazy-loads
+// events when its tab is first shown.
 //
 // Emits (mirror the React callback props' payloads):
 //   navigate     (kind: string, ns?: string)         — open another kind/object list
 //   helm-release (namespace: string, name: string)   — open a Helm release's resources
 //   auth-expired ()                                   — a YAML apply came back 401/403
 //   close        ()                                   — close the drawer (X or Escape)
+import { NDrawer, NDrawerContent, NTabPane, NTabs } from 'naive-ui';
 import { computed, ref, watch } from 'vue';
 
 import { api } from '../api';
@@ -41,6 +43,15 @@ const kind = computed(() => props.obj.kind ?? '');
 const name = computed(() => objName(props.obj));
 const ns = computed(() => objNs(props.obj) ?? '');
 
+// The parent mounts Detail via v-if; keep the drawer shown while mounted and route any
+// close (the X, the mask, or Escape) to the `close` emit so the parent tears it down.
+const show = ref(true);
+const onShow = (v: boolean) => {
+  if (!v) {
+    emit('close');
+  }
+};
+
 useEscapeKey(() => emit('close'));
 
 watch(
@@ -61,44 +72,53 @@ watch(
 </script>
 
 <template>
-  <div class="drawer" role="dialog" :aria-label="`${kind} ${name}`">
-    <div class="drawer-head">
-      <div class="drawer-title">
-        <span class="drawer-kind">{{ kind }}</span>
-        <span class="drawer-name">{{ name }}</span>
-      </div>
-      <button class="drawer-close" title="Close (Esc)" @click="emit('close')">×</button>
-    </div>
-    <div class="tabs">
-      <button :class="'tab' + (tab === 'overview' ? ' active' : '')" @click="tab = 'overview'">Overview</button>
-      <button :class="'tab' + (tab === 'yaml' ? ' active' : '')" @click="tab = 'yaml'">YAML</button>
-      <button :class="'tab' + (tab === 'events' ? ' active' : '')" @click="tab = 'events'">Events</button>
-      <button v-if="kind === 'Pod'" :class="'tab' + (tab === 'metrics' ? ' active' : '')" @click="tab = 'metrics'">
-        Metrics
-      </button>
-    </div>
-    <div class="drawer-body">
-      <Overview
-        v-if="tab === 'overview'"
-        :obj="obj"
-        @navigate="(k, n) => emit('navigate', k, n)"
-        @helm-release="(nsp, nm) => emit('helm-release', nsp, nm)"
-      />
-      <EventsPane v-if="tab === 'events'" :events="events" :error="eventsError" />
-      <div v-if="tab === 'metrics'" class="charts vertical">
-        <MetricChart :cluster="cluster" target="pod-cpu" :namespace="ns" :name="name" label="CPU (cores)" />
-        <MetricChart :cluster="cluster" target="pod-mem" :namespace="ns" :name="name" label="Memory" />
-      </div>
-      <YamlTab
-        v-if="tab === 'yaml'"
-        :cluster="cluster"
-        :resource-id="resourceId"
-        :name="name"
-        :ns="ns"
-        :initial-edit="initialEdit"
-        :authed="authed"
-        @auth-expired="emit('auth-expired')"
-      />
-    </div>
-  </div>
+  <NDrawer
+    :show="show"
+    :width="500"
+    placement="right"
+    :show-mask="false"
+    :trap-focus="false"
+    :block-scroll="false"
+    :aria-label="`${kind} ${name}`"
+    @update:show="onShow"
+  >
+    <NDrawerContent closable body-content-style="padding: 0; display: flex; flex-direction: column;">
+      <template #header>
+        <div class="drawer-title">
+          <span class="drawer-kind">{{ kind }}</span>
+          <span class="drawer-name">{{ name }}</span>
+        </div>
+      </template>
+
+      <NTabs v-model:value="tab" type="line" size="small" pane-class="drawer-body">
+        <NTabPane name="overview" tab="Overview" display-directive="if">
+          <Overview
+            :obj="obj"
+            @navigate="(k, n) => emit('navigate', k, n)"
+            @helm-release="(nsp, nm) => emit('helm-release', nsp, nm)"
+          />
+        </NTabPane>
+        <NTabPane name="yaml" tab="YAML" display-directive="if">
+          <YamlTab
+            :cluster="cluster"
+            :resource-id="resourceId"
+            :name="name"
+            :ns="ns"
+            :initial-edit="initialEdit"
+            :authed="authed"
+            @auth-expired="emit('auth-expired')"
+          />
+        </NTabPane>
+        <NTabPane name="events" tab="Events" display-directive="if">
+          <EventsPane :events="events" :error="eventsError" />
+        </NTabPane>
+        <NTabPane v-if="kind === 'Pod'" name="metrics" tab="Metrics" display-directive="if">
+          <div class="charts vertical">
+            <MetricChart :cluster="cluster" target="pod-cpu" :namespace="ns" :name="name" label="CPU (cores)" />
+            <MetricChart :cluster="cluster" target="pod-mem" :namespace="ns" :name="name" label="Memory" />
+          </div>
+        </NTabPane>
+      </NTabs>
+    </NDrawerContent>
+  </NDrawer>
 </template>

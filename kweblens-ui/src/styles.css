@@ -1592,6 +1592,12 @@ body.row-resizing {
   background: #fdecea;
 }
 
+/* Danger items in a Naive NDropdown row-actions menu (options carry class "menu-danger"). */
+.n-dropdown-option-body.menu-danger .n-dropdown-option-body__label,
+.menu-danger .n-dropdown-option-body__label {
+  color: #b3261e;
+}
+
 /* per-container status squares (Pods · Freelens-style) */
 .csquares {
   display: inline-flex;

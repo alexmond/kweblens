@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import { NButton, NCheckbox, NInput, NPopover } from 'naive-ui';
+
 import type { RowAction } from '../rowActions';
 import type { TableColumn } from '../table';
 import type { KubeObject, NavItem } from '../types';
 import ResourceTable from './ResourceTable.vue';
 
 // The resource-list surface: header (search, create, columns), bulk bar, and the table.
-// Emits: update:query, toggle-col(key), clear-selection, bulk-delete, toggle-row(key),
-//        toggle-all(keys), open(obj), namespace-click(ns), create, row-action(action,obj,container?)
+// Emits: update:query, toggle-col(key), clear-selection, bulk-delete, update:selection(keys),
+//        open(obj), namespace-click(ns), create, row-action(action,obj,container?)
 defineProps<{
   selected: NavItem;
   filtered: KubeObject[];
@@ -39,32 +41,35 @@ const emit = defineEmits<{
     <h1>{{ selected.label }}</h1>
     <span class="count">{{ query ? `${filtered.length} of ${objects.length}` : `${objects.length} items` }}</span>
     <span v-if="live" class="live" title="Live-updating (SSE watch)"><span class="dot" /> live</span>
-    <input
-      class="search"
-      type="search"
-      :placeholder="`Search ${selected.label}…`"
+    <NInput
       :value="query"
-      @input="emit('update:query', ($event.target as HTMLInputElement).value)"
+      size="small"
+      clearable
+      :placeholder="`Search ${selected.label}…`"
+      style="width: 220px"
+      @update:value="(v) => emit('update:query', v)"
     />
     <div class="spacer" />
-    <button class="btn create-btn" @click="emit('create')">+ Create</button>
+    <NButton size="small" type="primary" @click="emit('create')">+ Create</NButton>
     <span v-if="!selected.namespaced" class="ns-note">Cluster-scoped</span>
-    <details v-if="tableCols.length > 0" class="cols-menu">
-      <summary>Columns ▾</summary>
-      <ul>
-        <li v-for="c in tableCols" :key="c.key">
-          <label class="col-toggle">
-            <input type="checkbox" :checked="!hiddenCols.has(c.key)" @change="emit('toggle-col', c.key)" />
-            {{ c.header }}
-          </label>
-        </li>
-      </ul>
-    </details>
+    <NPopover v-if="tableCols.length > 0" trigger="click" placement="bottom-end">
+      <template #trigger><NButton size="small">Columns ▾</NButton></template>
+      <div class="cols-pop">
+        <NCheckbox
+          v-for="c in tableCols"
+          :key="c.key"
+          :checked="!hiddenCols.has(c.key)"
+          @update:checked="emit('toggle-col', c.key)"
+        >
+          {{ c.header }}
+        </NCheckbox>
+      </div>
+    </NPopover>
   </div>
   <div v-if="selection.size > 0" class="bulk-bar">
     <span>{{ selection.size }} selected</span>
-    <button class="btn danger" @click="emit('bulk-delete')">Delete</button>
-    <button class="btn" @click="emit('clear-selection')">Clear</button>
+    <NButton size="small" type="error" @click="emit('bulk-delete')">Delete</NButton>
+    <NButton size="small" @click="emit('clear-selection')">Clear</NButton>
   </div>
   <ResourceTable
     :objects="filtered"
@@ -80,3 +85,13 @@ const emit = defineEmits<{
     @row-action="(a, o, c) => emit('row-action', a, o, c)"
   />
 </template>
+
+<style scoped>
+.cols-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+</style>

@@ -1,15 +1,13 @@
 <script setup lang="ts">
-// The port-forwards table: lists active forwards (polled every 3s so Active/Closed/Failed
-// stays current), lets an authed user Stop one, and shows the loopback local port.
-//
-// Emits:
-//   require-auth ()   — a Stop was attempted without being signed in; shell prompts login
-import { ref, watch } from 'vue';
+// The port-forwards table (Naive NDataTable): lists active forwards (polled every 3s so
+// Active/Closed/Failed stays current), lets an authed user Stop one, shows the loopback local port.
+// Emits: require-auth () — a Stop was attempted without being signed in; shell prompts login
+import { NButton, NDataTable, NTag } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
+import { computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { useTableSort } from '../composables/useTableSort';
 import type { PortForward } from '../types';
-import SortTh from './SortTh.vue';
 
 const props = defineProps<{ cluster: string; authed: boolean }>();
 const emit = defineEmits<{ (e: 'require-auth'): void }>();
@@ -24,7 +22,6 @@ const refresh = () =>
     .then((f) => (forwards.value = f))
     .catch((e) => (error.value = String(e)));
 
-// Poll so status (Active/Closed/Failed) stays current as connections come and go.
 watch(
   () => props.cluster,
   (cluster, _old, onCleanup) => {
@@ -63,19 +60,36 @@ const stop = (id: string) => {
     .finally(() => (busy.value = null));
 };
 
-const { sorted, sort, clickHeader } = useTableSort(
-  () => forwards.value ?? [],
-  'name',
-  (f, k) => {
-    if (k === 'remotePort') {
-      return f.remotePort;
-    }
-    if (k === 'localPort') {
-      return f.localPort;
-    }
-    return (f[k as keyof PortForward] as string) ?? '';
+const STATUS_TYPE: Record<string, 'success' | 'error' | 'warning' | 'default'> = {
+  active: 'success',
+  closed: 'default',
+  failed: 'error',
+};
+const columns = computed<DataTableColumns<PortForward>>(() => [
+  { title: 'Name', key: 'name', sorter: 'default' },
+  { title: 'Namespace', key: 'namespace', sorter: 'default' },
+  { title: 'Kind', key: 'kind', sorter: 'default' },
+  { title: 'Pod Port', key: 'remotePort', sorter: (a, b) => a.remotePort - b.remotePort },
+  { title: 'Local Port', key: 'localPort', sorter: (a, b) => a.localPort - b.localPort },
+  { title: 'Protocol', key: 'protocol', sorter: 'default' },
+  {
+    title: 'Status',
+    key: 'status',
+    sorter: 'default',
+    render: (f) =>
+      h(
+        NTag,
+        { size: 'small', type: STATUS_TYPE[f.status.toLowerCase()] ?? 'default', bordered: false },
+        () => f.status,
+      ),
   },
-);
+  {
+    title: '',
+    key: '_stop',
+    render: (f) =>
+      h(NButton, { size: 'small', disabled: busy.value === f.id, onClick: () => stop(f.id) }, () => 'Stop'),
+  },
+]);
 </script>
 
 <template>
@@ -89,37 +103,12 @@ const { sorted, sort, clickHeader } = useTableSort(
       otherwise). Start one from a Pod or Service detail.
     </p>
     <div v-if="error" class="error">{{ error }}</div>
-    <div v-if="forwards === null" class="empty">Loading…</div>
-    <div v-else-if="forwards.length === 0" class="empty">No active forwards.</div>
-    <table v-else class="grid">
-      <thead>
-        <tr>
-          <SortTh label="Name" col-key="name" :sort="sort" @sort="clickHeader" />
-          <SortTh label="Namespace" col-key="namespace" :sort="sort" @sort="clickHeader" />
-          <SortTh label="Kind" col-key="kind" :sort="sort" @sort="clickHeader" />
-          <SortTh label="Pod Port" col-key="remotePort" :sort="sort" @sort="clickHeader" />
-          <SortTh label="Local Port" col-key="localPort" :sort="sort" @sort="clickHeader" />
-          <SortTh label="Protocol" col-key="protocol" :sort="sort" @sort="clickHeader" />
-          <SortTh label="Status" col-key="status" :sort="sort" @sort="clickHeader" />
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="f in sorted" :key="f.id">
-          <td class="name">{{ f.name }}</td>
-          <td>{{ f.namespace }}</td>
-          <td>{{ f.kind }}</td>
-          <td>{{ f.remotePort }}</td>
-          <td :title="`${f.address}:${f.localPort}`">{{ f.localPort }}</td>
-          <td>{{ f.protocol }}</td>
-          <td>
-            <span :class="'pf-status pf-' + f.status.toLowerCase()">{{ f.status }}</span>
-          </td>
-          <td>
-            <button class="btn" :disabled="busy === f.id" @click="stop(f.id)">Stop</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <NDataTable
+      :columns="columns"
+      :data="forwards ?? []"
+      :loading="forwards === null"
+      :row-key="(f) => f.id"
+      size="small"
+    />
   </div>
 </template>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { NButton, NFormItem, NInput, NSelect } from 'naive-ui';
+import type { SelectOption } from 'naive-ui';
+import { computed, ref } from 'vue';
 
 import { api } from '../api';
 import type { HelmAction } from './helm-types';
@@ -13,6 +15,11 @@ const savedValues = defineModel<string[]>('savedValues', { required: true });
 const pickValues = ref('');
 const saveName = ref('');
 const valuesMsg = ref<string | null>(null);
+
+const pickOptions = computed<SelectOption[]>(() => [
+  { label: '— saved values —', value: '' },
+  ...savedValues.value.map((n) => ({ label: n, value: n })),
+]);
 
 const loadSaved = () => {
   api
@@ -52,22 +59,24 @@ const save = () => {
 </script>
 
 <template>
-  <label>
-    <span>Values (YAML, optional)</span>
-    <div class="values-toolbar">
-      <select v-model="pickValues">
-        <option value="">— saved values —</option>
-        <option v-for="n in savedValues" :key="n" :value="n">{{ n }}</option>
-      </select>
-      <button type="button" class="btn" :disabled="!pickValues" @click="loadSaved">Load</button>
-      <button v-if="action.mode === 'upgrade'" type="button" class="btn" @click="loadCurrent">
-        Load current values
-      </button>
-      <span class="tb-spacer" />
-      <input v-model="saveName" class="save-name" placeholder="save as…" />
-      <button type="button" class="btn" :disabled="!saveName.trim()" @click="save">Save</button>
+  <NFormItem label="Values (YAML, optional)">
+    <div style="width: 100%">
+      <div class="values-toolbar">
+        <NSelect v-model:value="pickValues" :options="pickOptions" size="small" style="max-width: 220px" />
+        <NButton size="small" :disabled="!pickValues" @click="loadSaved">Load</NButton>
+        <NButton v-if="action.mode === 'upgrade'" size="small" @click="loadCurrent">Load current values</NButton>
+        <span class="tb-spacer" />
+        <NInput v-model:value="saveName" class="save-name" size="small" placeholder="save as…" />
+        <NButton size="small" :disabled="!saveName.trim()" @click="save">Save</NButton>
+      </div>
+      <div v-if="valuesMsg" class="values-msg">{{ valuesMsg }}</div>
+      <NInput
+        v-model:value="valuesYaml"
+        type="textarea"
+        class="values"
+        :autosize="{ minRows: 5 }"
+        placeholder="key: value"
+      />
     </div>
-    <div v-if="valuesMsg" class="values-msg">{{ valuesMsg }}</div>
-    <textarea v-model="valuesYaml" class="values" :rows="5" placeholder="key: value" />
-  </label>
+  </NFormItem>
 </template>
