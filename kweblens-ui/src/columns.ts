@@ -1,16 +1,15 @@
-import type { ReactNode } from 'react';
-
 import { objSpec as spec, objStatus as status, toNum as num } from './kube';
 import type { KubeObject, PrinterColumn } from './types';
 
 // A kind-specific column: the "middle" columns between Name/Namespace and Age
-// (those three are rendered by the table framework). render() returns display content
-// (usually a string; may be a small element such as a usage bar). Provide sortText when
-// render returns an element, so the column still sorts sensibly.
+// (those three are rendered by the table framework). render() returns a display string.
+// A few kinds render richer cells (usage bars, container squares) in the table component
+// keyed off the column `key`; those still return sortable text here. Provide sortText when
+// the displayed value differs from its natural sort order.
 export interface ColumnDef {
   key: string;
   header: string;
-  render: (o: KubeObject) => ReactNode;
+  render: (o: KubeObject) => string;
   sortText?: (o: KubeObject) => string;
 }
 

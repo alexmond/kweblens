@@ -11,10 +11,10 @@
     </parent>
 
     <artifactId>kweblens-ui</artifactId>
-    <name>kweblens :: ui (React SPA)</name>
-    <description>Vite/React/TypeScript single-page UI. Built with base "/ui/" and packaged as
-        classpath static resources under static/ui; consumed by kweblens-web and served at /ui.
-        Not published — it ships inside the kweblens-web container image.</description>
+    <name>kweblens :: ui (Vue SPA)</name>
+    <description>Vite/Vue/TypeScript single-page UI, a parity port of kweblens-ui. Built with
+        base "/ui/" and packaged as classpath static resources under static/ui; consumed by
+        kweblens-web and served at /ui. Not published — it ships inside the kweblens-web image.</description>
 
     <properties>
         <node.version>v22.14.0</node.version>
@@ -55,8 +55,7 @@
                             <arguments>install</arguments>
                         </configuration>
                     </execution>
-                    <!-- Quality gates (Prettier + ESLint/SonarJS + knip + Vitest coverage),
-                         the JS analog of the Java format/checkstyle/pmd/jacoco gates. -->
+                    <!-- Quality gates (Prettier + ESLint + vue-tsc + knip + Vitest coverage). -->
                     <execution>
                         <id>npm-check</id>
                         <goals>
