@@ -38,6 +38,13 @@
             <version>${project.version}</version>
         </dependency>
 
+        <!-- The Vue SPA (parity port), classpath static resources under static/ui2 (served at /ui2). -->
+        <dependency>
+            <groupId>org.alexmond</groupId>
+            <artifactId>kweblens-ui2</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Helm releases via the sibling jhelm library (dogfood). jhelm-kube brings jhelm-core +
              the official io.kubernetes client; jhelm's own auto-configuration is excluded (see
              application.yml) so we use it purely as a library, one KubeService per cluster. -->

@@ -1,0 +1,91 @@
+import type { Ref } from 'vue';
+
+import { auth } from '../auth';
+import type { DialogApi } from '../dialog';
+import type { RowAction } from '../rowActions';
+import { dispatchRowAction, fetchWorkloadPods, runBulkDelete, saveFavorites, toggleInSet } from '../shell';
+import type { DockKind, KubeObject, NavItem } from '../types';
+
+/** The shell's action handlers (row actions, selection/column toggles, favorites, bulk delete). */
+export function useAppActions(a: {
+  cluster: Ref<string | null>;
+  authUser: Ref<string | null>;
+  selected: Ref<NavItem | null>;
+  selection: Ref<Set<string>>;
+  objects: Ref<KubeObject[]>;
+  hiddenCols: Ref<Set<string>>;
+  favorites: Ref<string[]>;
+  dialog: DialogApi;
+  openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
+  setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean } | null) => void;
+  setError: (e: string) => void;
+  setObjects: (updater: (prev: KubeObject[]) => KubeObject[]) => void;
+  setShowLogin: (v: boolean) => void;
+  setAuthUser: (v: string | null) => void;
+}) {
+  const signOut = () => {
+    auth.clear();
+    a.setAuthUser(null);
+  };
+
+  const fetchPods = (obj: KubeObject): Promise<KubeObject[]> =>
+    a.cluster.value ? fetchWorkloadPods(a.cluster.value, obj) : Promise.resolve([]);
+
+  const handleRowAction = (resourceId: string, action: RowAction, obj: KubeObject, container?: string) => {
+    if (!a.cluster.value) {
+      return;
+    }
+    dispatchRowAction(resourceId, action, obj, container, {
+      cluster: a.cluster.value,
+      authUser: a.authUser.value,
+      dialog: a.dialog,
+      openDock: a.openDock,
+      setForward: a.setForward,
+      setDetail: a.setDetail,
+      setError: a.setError,
+      setObjects: a.setObjects,
+      setShowLogin: a.setShowLogin,
+    });
+  };
+
+  const toggleFavorite = (id: string) => {
+    const next = a.favorites.value.includes(id)
+      ? a.favorites.value.filter((x) => x !== id)
+      : [...a.favorites.value, id];
+    a.favorites.value = next;
+    if (a.cluster.value) {
+      saveFavorites(a.cluster.value, next);
+    }
+  };
+
+  const toggleCol = (key: string) => (a.hiddenCols.value = toggleInSet(a.hiddenCols.value, key));
+  const toggleRow = (key: string) => (a.selection.value = toggleInSet(a.selection.value, key));
+  const toggleAll = (keys: string[]) => {
+    a.selection.value = a.selection.value.size >= keys.length && keys.length > 0 ? new Set() : new Set(keys);
+  };
+
+  const bulkDelete = () => {
+    if (!a.cluster.value || !a.selected.value || a.selection.value.size === 0) {
+      return;
+    }
+    if (!a.authUser.value) {
+      a.setShowLogin(true);
+      return;
+    }
+    void runBulkDelete({
+      cluster: a.cluster.value,
+      selected: a.selected.value,
+      selection: a.selection.value,
+      objects: a.objects.value,
+      dialog: a.dialog,
+      onAuthCleared: () => {
+        signOut();
+        a.setShowLogin(true);
+      },
+      clearSelection: () => (a.selection.value = new Set()),
+    });
+  };
+
+  return { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, toggleRow, toggleAll, bulkDelete };
+}
