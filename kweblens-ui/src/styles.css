@@ -10,6 +10,16 @@
   --muted: #6b7b85;
 }
 
+/* The detail drawer is a NON-MODAL side panel (no mask): let clicks pass through its
+   full-viewport container to the table behind it, so the list stays interactive while the
+   drawer is open. Only the drawer panel itself captures pointer events. */
+.n-drawer-container {
+  pointer-events: none;
+}
+.n-drawer-container > .n-drawer {
+  pointer-events: auto;
+}
+
 /* Dark theme for the bespoke (non-Naive) surfaces. Toggled by App.vue adding `kw-dark`
    to <html>; Naive UI components are darkened separately via NConfigProvider's darkTheme. */
 html.kw-dark {
