@@ -200,6 +200,25 @@ body {
   margin-top: 18px;
 }
 
+.modal.dialog {
+  width: 400px;
+}
+
+.dialog-message {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.dialog-field {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.modal-actions .btn.danger {
+  margin-left: 0;
+}
+
 .btn.primary {
   background: var(--accent);
   color: #fff;
@@ -1666,6 +1685,20 @@ body.row-resizing {
   line-height: 1.4;
   background: #0f172a;
   color: #e2e8f0;
+}
+
+.yaml-view {
+  margin: 0;
+  padding: 10px;
+  max-height: 60vh;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.4;
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid var(--border, #d6dde2);
+  border-radius: 6px;
+  white-space: pre;
 }
 
 .btn.danger {

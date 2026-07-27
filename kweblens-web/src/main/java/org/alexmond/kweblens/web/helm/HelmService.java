@@ -28,6 +28,8 @@ import org.alexmond.jhelm.core.action.ListAction;
 import org.alexmond.jhelm.core.action.RollbackAction;
 import org.alexmond.jhelm.core.action.RollbackOptions;
 import org.alexmond.jhelm.core.action.StatusAction;
+import org.alexmond.jhelm.core.action.UninstallAction;
+import org.alexmond.jhelm.core.action.UninstallOptions;
 import org.alexmond.jhelm.core.action.UpgradeAction;
 import org.alexmond.jhelm.core.action.UpgradeOptions;
 import org.alexmond.jhelm.core.model.Chart;
@@ -116,6 +118,15 @@ public class HelmService {
 			.description(dryRun ? "kweblens dry-run" : "Upgraded via kweblens")
 			.build());
 		return toMutationResult(dryRun, release);
+	}
+
+	/**
+	 * Uninstall a release (like {@code helm uninstall}) — removes its resources and
+	 * history.
+	 */
+	public void uninstall(String clusterId, String namespace, String releaseName) {
+		new UninstallAction(kubeService(clusterId))
+			.uninstall(UninstallOptions.builder().releaseName(releaseName).namespace(namespace).build());
 	}
 
 	/** Roll a release back to an earlier revision. Dry-run previews only. */

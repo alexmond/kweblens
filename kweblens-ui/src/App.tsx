@@ -1,5 +1,5 @@
 import type { FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError, api } from './api';
@@ -418,6 +418,101 @@ function RowMenu(props: {
   );
 }
 
+type KebabItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean };
+
+// A generic kebab (⋮) actions menu with the same portal/anchor behaviour as RowMenu, for
+// non-resource tables (Helm charts/releases/repos) so their row actions match the rest.
+function KebabMenu(props: { items: KebabItem[] }) {
+  const { items } = props;
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ left: number; top: number; up: boolean } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) {
+        return;
+      }
+      setOpen(false);
+    };
+    const dismiss = () => setOpen(false);
+    document.addEventListener('mousedown', onDoc);
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', dismiss);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const estHeight = 20 + items.length * 30;
+      const up = r.bottom + estHeight > window.innerHeight;
+      setAnchor({ left: r.right, top: up ? r.top : r.bottom, up });
+    }
+    setOpen(true);
+  };
+
+  return (
+    <div className="rowmenu" onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={btnRef}
+        className="kebab"
+        title="Actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          toggle();
+        }}
+      >
+        ⋮
+      </button>
+      {open &&
+        anchor &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="menu menu-portal"
+            style={{
+              position: 'fixed',
+              left: anchor.left,
+              top: anchor.top,
+              transform: anchor.up ? 'translate(-100%, -100%)' : 'translate(-100%, 0)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {items.map((it) => (
+              <button
+                key={it.label}
+                className={'menu-item' + (it.danger ? ' danger' : '')}
+                disabled={it.disabled}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpen(false);
+                  it.onClick();
+                }}
+              >
+                {it.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 // A status/phase value coloured green/amber/red by health; plain text when unrecognised.
 function StatusBadge(props: { text: string }) {
   const { text } = props;
@@ -493,7 +588,145 @@ function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
   return result;
 }
 
+type ConfirmOpts = { title?: string; message: string; confirmLabel?: string; danger?: boolean };
+type PromptOpts = {
+  title?: string;
+  message: string;
+  label?: string;
+  initial?: string;
+  placeholder?: string;
+  type?: 'text' | 'number';
+  confirmLabel?: string;
+};
+
+type DialogApi = {
+  confirm: (opts: ConfirmOpts) => Promise<boolean>;
+  prompt: (opts: PromptOpts) => Promise<string | null>;
+};
+
+const DialogContext = createContext<DialogApi | null>(null);
+
+function useDialog(): DialogApi {
+  const api = useContext(DialogContext);
+  if (!api) {
+    throw new Error('useDialog outside DialogProvider');
+  }
+  return api;
+}
+
+type DialogState =
+  | { kind: 'confirm'; opts: ConfirmOpts; resolve: (v: boolean) => void }
+  | { kind: 'prompt'; opts: PromptOpts; resolve: (v: string | null) => void };
+
+function DialogProvider(props: { children: ReactNode }) {
+  const [state, setState] = useState<DialogState | null>(null);
+  const api = useMemo<DialogApi>(
+    () => ({
+      confirm: (opts) => new Promise<boolean>((resolve) => setState({ kind: 'confirm', opts, resolve })),
+      prompt: (opts) => new Promise<string | null>((resolve) => setState({ kind: 'prompt', opts, resolve })),
+    }),
+    [],
+  );
+  return (
+    <DialogContext.Provider value={api}>
+      {props.children}
+      {state && <DialogHost state={state} onClose={() => setState(null)} />}
+    </DialogContext.Provider>
+  );
+}
+
+function DialogHost(props: { state: DialogState; onClose: () => void }) {
+  const { state, onClose } = props;
+  const isPrompt = state.kind === 'prompt';
+  const [value, setValue] = useState(isPrompt ? (state.opts as PromptOpts).initial ?? '' : '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isPrompt) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isPrompt]);
+
+  const cancel = () => {
+    if (state.kind === 'prompt') {
+      state.resolve(null);
+    } else {
+      state.resolve(false);
+    }
+    onClose();
+  };
+  const accept = () => {
+    if (state.kind === 'prompt') {
+      state.resolve(value);
+    } else {
+      state.resolve(true);
+    }
+    onClose();
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        cancel();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  const danger = !isPrompt && (state.opts as ConfirmOpts).danger;
+  const confirmLabel = state.opts.confirmLabel ?? (isPrompt ? 'OK' : 'Confirm');
+
+  return createPortal(
+    <div className="modal-backdrop" onClick={cancel}>
+      <form
+        className="modal dialog"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          accept();
+        }}
+      >
+        {state.opts.title && <h2>{state.opts.title}</h2>}
+        <p className="dialog-message">{state.opts.message}</p>
+        {state.kind === 'prompt' && (
+          <label className="dialog-field">
+            {state.opts.label && <span>{state.opts.label}</span>}
+            <input
+              ref={inputRef}
+              type={state.opts.type ?? 'text'}
+              value={value}
+              placeholder={state.opts.placeholder}
+              onChange={(e) => setValue(e.target.value)}
+            />
+          </label>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={cancel}>
+            Cancel
+          </button>
+          <button type="submit" className={'btn ' + (danger ? 'danger' : 'primary')}>
+            {confirmLabel}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
 export function App() {
+  return (
+    <DialogProvider>
+      <AppInner />
+    </DialogProvider>
+  );
+}
+
+function AppInner() {
+  const dialog = useDialog();
   const [clusters, setClusters] = useState<ClusterInfo[]>([]);
   const [cluster, setCluster] = useState<string | null>(null);
   const [nav, setNav] = useState<NavCategory[]>([]);
@@ -1010,10 +1243,16 @@ export function App() {
     const conts = container ? [container] : containerNames(obj);
     // Mutating action wrapper: optional confirm, then surface any error.
     const run = (fn: () => Promise<{ result: string }>, confirmMsg?: string) => {
-      if (confirmMsg && !window.confirm(confirmMsg)) {
+      const go = () => fn().catch((e) => setError(String(e)));
+      if (!confirmMsg) {
+        go();
         return;
       }
-      fn().catch((e) => setError(String(e)));
+      dialog.confirm({ message: confirmMsg }).then((ok) => {
+        if (ok) {
+          go();
+        }
+      });
     };
     switch (action) {
       case 'logs':
@@ -1033,15 +1272,25 @@ export function App() {
         return;
       case 'scale': {
         const current = Number((obj.spec as Record<string, unknown>)?.replicas ?? 1);
-        const input = window.prompt(`Scale ${kind} ${nm} to how many replicas?`, String(current));
-        if (input === null) {
-          return;
-        }
-        const replicas = Math.max(0, Number.parseInt(input, 10));
-        if (Number.isNaN(replicas)) {
-          return;
-        }
-        run(() => api.scale(cluster, resourceId, ns, nm, replicas));
+        dialog
+          .prompt({
+            title: 'Scale',
+            message: `Scale ${kind} ${nm} to how many replicas?`,
+            label: 'Replicas',
+            initial: String(current),
+            type: 'number',
+            confirmLabel: 'Scale',
+          })
+          .then((input) => {
+            if (input === null) {
+              return;
+            }
+            const replicas = Math.max(0, Number.parseInt(input, 10));
+            if (Number.isNaN(replicas)) {
+              return;
+            }
+            run(() => api.scale(cluster, resourceId, ns, nm, replicas));
+          });
         return;
       }
       case 'restart':
@@ -1071,13 +1320,22 @@ export function App() {
       case 'delete':
       case 'forceDelete': {
         const force = action === 'forceDelete';
-        if (!window.confirm(`${force ? 'Force delete' : 'Delete'} ${kind} ${nm}? This cannot be undone.`)) {
-          return;
-        }
-        api.del(cluster, resourceId, ns, nm, force).then(
-          () => setObjects((prev) => prev.filter((o) => objKey(o) !== objKey(obj))),
-          (e) => setError(String(e)),
-        );
+        dialog
+          .confirm({
+            title: force ? 'Force delete' : 'Delete',
+            message: `${force ? 'Force delete' : 'Delete'} ${kind} ${nm}? This cannot be undone.`,
+            confirmLabel: force ? 'Force delete' : 'Delete',
+            danger: true,
+          })
+          .then((ok) => {
+            if (!ok) {
+              return;
+            }
+            api.del(cluster, resourceId, ns, nm, force).then(
+              () => setObjects((prev) => prev.filter((o) => objKey(o) !== objKey(obj))),
+              (e) => setError(String(e)),
+            );
+          });
         return;
       }
     }
@@ -1132,7 +1390,13 @@ export function App() {
       setShowLogin(true);
       return;
     }
-    if (!window.confirm(`Delete ${selection.size} ${selected.label}? This cannot be undone.`)) {
+    const ok = await dialog.confirm({
+      title: 'Delete',
+      message: `Delete ${selection.size} ${selected.label}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) {
       return;
     }
     const targets = objects.filter((o) => selection.has(objKey(o)) && objNs(o));
@@ -3502,6 +3766,8 @@ function HelmView(props: {
   const { cluster, view, authed, onNavigate, openResources, onResourcesConsumed, onRequireAuth, onAuthExpired } = props;
   const [action, setAction] = useState<HelmAction | null>(null);
   const [resourcesFor, setResourcesFor] = useState<{ namespace: string; name: string } | null>(null);
+  const [valuesFor, setValuesFor] = useState<{ namespace: string; name: string } | null>(null);
+  const [historyFor, setHistoryFor] = useState<{ namespace: string; name: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const onAction = (a: HelmAction) => (authed ? setAction(a) : onRequireAuth());
@@ -3521,7 +3787,7 @@ function HelmView(props: {
         <h1>{title}</h1>
       </div>
       {view === 'charts' ? (
-        <HelmCharts cluster={cluster} authed={authed} onAction={onAction} />
+        <HelmCharts cluster={cluster} onAction={onAction} />
       ) : view === 'repositories' ? (
         <HelmRepos authed={authed} onRequireAuth={onRequireAuth} onAuthExpired={onAuthExpired} />
       ) : (
@@ -3530,6 +3796,9 @@ function HelmView(props: {
           authed={authed}
           onAction={onAction}
           onResources={(namespace, name) => setResourcesFor({ namespace, name })}
+          onValues={(namespace, name) => setValuesFor({ namespace, name })}
+          onHistory={(namespace, name) => setHistoryFor({ namespace, name })}
+          onRequireAuth={onRequireAuth}
           refreshKey={refreshKey}
         />
       )}
@@ -3557,12 +3826,28 @@ function HelmView(props: {
           }}
         />
       )}
+      {valuesFor && (
+        <HelmValuesModal
+          cluster={cluster}
+          namespace={valuesFor.namespace}
+          name={valuesFor.name}
+          onClose={() => setValuesFor(null)}
+        />
+      )}
+      {historyFor && (
+        <HelmHistoryModal
+          cluster={cluster}
+          namespace={historyFor.namespace}
+          name={historyFor.name}
+          onClose={() => setHistoryFor(null)}
+        />
+      )}
     </div>
   );
 }
 
-function HelmCharts(props: { cluster: string; authed: boolean; onAction: (a: HelmAction) => void }) {
-  const { cluster, authed, onAction } = props;
+function HelmCharts(props: { cluster: string; onAction: (a: HelmAction) => void }) {
+  const { cluster, onAction } = props;
   const [charts, setCharts] = useState<HelmChart[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -3628,17 +3913,16 @@ function HelmCharts(props: { cluster: string; authed: boolean; onAction: (a: Hel
                 <td>{c.version}</td>
                 <td>{c.appVersion ?? '—'}</td>
                 <td>{c.repository}</td>
-                <td>
-                  {authed && (
-                    <button
-                      className="btn"
-                      onClick={() =>
-                        onAction({ mode: 'install', repository: c.repository, chart: c.name, version: c.version })
-                      }
-                    >
-                      Install
-                    </button>
-                  )}
+                <td className="row-actions">
+                  <KebabMenu
+                    items={[
+                      {
+                        label: 'Install',
+                        onClick: () =>
+                          onAction({ mode: 'install', repository: c.repository, chart: c.name, version: c.version }),
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
@@ -3654,11 +3938,16 @@ function HelmReleases(props: {
   authed: boolean;
   onAction: (a: HelmAction) => void;
   onResources: (namespace: string, name: string) => void;
+  onValues: (namespace: string, name: string) => void;
+  onHistory: (namespace: string, name: string) => void;
+  onRequireAuth: () => void;
   refreshKey: number;
 }) {
-  const { cluster, authed, onAction, onResources, refreshKey } = props;
+  const { cluster, authed, onAction, onResources, onValues, onHistory, onRequireAuth, refreshKey } = props;
+  const dialog = useDialog();
   const [releases, setReleases] = useState<HelmRelease[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localKey, setLocalKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -3671,7 +3960,30 @@ function HelmReleases(props: {
     return () => {
       cancelled = true;
     };
-  }, [cluster, refreshKey]);
+  }, [cluster, refreshKey, localKey]);
+
+  const uninstall = (r: HelmRelease) => {
+    if (!authed) {
+      onRequireAuth();
+      return;
+    }
+    dialog
+      .confirm({
+        title: 'Uninstall release',
+        message: `Uninstall release "${r.name}" in ${r.namespace}? This removes its resources and history.`,
+        confirmLabel: 'Uninstall',
+        danger: true,
+      })
+      .then((ok) => {
+        if (!ok) {
+          return;
+        }
+        api
+          .helmUninstall(cluster, r.namespace, r.name)
+          .then(() => setLocalKey((k) => k + 1))
+          .catch((e) => setError(String(e)));
+      });
+  };
 
   const { sorted, sort, clickHeader } = useTableSort(releases ?? [], 'name', (r, k) => {
     if (k === 'revision') {
@@ -3737,60 +4049,48 @@ function HelmReleases(props: {
                 </td>
                 <td>{r.updated ? age(r.updated) : '—'}</td>
                 <td className="row-actions">
-                  <button className="btn" onClick={() => onResources(r.namespace, r.name)}>
-                    Resources
-                  </button>
-                  {authed && r.updateAvailable && (
-                    <button
-                      className="btn primary"
-                      title={`Upgrade to ${r.latestVersion}`}
-                      onClick={() =>
-                        onAction({
-                          mode: 'upgrade',
-                          namespace: r.namespace,
-                          name: r.name,
-                          chart: r.chart,
-                          chartVersion: r.chartVersion,
-                          repository: r.latestRepository ?? undefined,
-                          version: r.latestVersion ?? undefined,
-                        })
-                      }
-                    >
-                      Update
-                    </button>
-                  )}
-                  {authed && (
-                    <>
-                      <button
-                        className="btn"
-                        onClick={() =>
+                  <KebabMenu
+                    items={[
+                      { label: 'Resources', onClick: () => onResources(r.namespace, r.name) },
+                      { label: 'Values', onClick: () => onValues(r.namespace, r.name) },
+                      { label: 'History', onClick: () => onHistory(r.namespace, r.name) },
+                      ...(r.updateAvailable
+                        ? [
+                            {
+                              label: `Update → ${r.latestVersion}`,
+                              onClick: () =>
+                                onAction({
+                                  mode: 'upgrade',
+                                  namespace: r.namespace,
+                                  name: r.name,
+                                  chart: r.chart,
+                                  chartVersion: r.chartVersion,
+                                  repository: r.latestRepository ?? undefined,
+                                  version: r.latestVersion ?? undefined,
+                                }),
+                            },
+                          ]
+                        : []),
+                      {
+                        label: 'Upgrade',
+                        onClick: () =>
                           onAction({
                             mode: 'upgrade',
                             namespace: r.namespace,
                             name: r.name,
                             chart: r.chart,
                             chartVersion: r.chartVersion,
-                          })
-                        }
-                      >
-                        Upgrade
-                      </button>
-                      <button
-                        className="btn"
-                        disabled={r.revision <= 1}
-                        onClick={() =>
-                          onAction({
-                            mode: 'rollback',
-                            namespace: r.namespace,
-                            name: r.name,
-                            revision: r.revision - 1,
-                          })
-                        }
-                      >
-                        Rollback
-                      </button>
-                    </>
-                  )}
+                          }),
+                      },
+                      {
+                        label: 'Rollback',
+                        disabled: r.revision <= 1,
+                        onClick: () =>
+                          onAction({ mode: 'rollback', namespace: r.namespace, name: r.name, revision: r.revision - 1 }),
+                      },
+                      { label: 'Uninstall', danger: true, onClick: () => uninstall(r) },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
@@ -3803,6 +4103,7 @@ function HelmReleases(props: {
 
 function HelmRepos(props: { authed: boolean; onRequireAuth: () => void; onAuthExpired: () => void }) {
   const { authed, onRequireAuth, onAuthExpired } = props;
+  const dialog = useDialog();
   const [repos, setRepos] = useState<{ name: string; url: string }[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -3856,12 +4157,57 @@ function HelmRepos(props: { authed: boolean; onRequireAuth: () => void; onAuthEx
       onRequireAuth();
       return;
     }
-    if (!window.confirm(`Remove repository ${repo}?`)) {
+    dialog
+      .confirm({ title: 'Remove repository', message: `Remove repository ${repo}?`, confirmLabel: 'Remove', danger: true })
+      .then((ok) => {
+        if (!ok) {
+          return;
+        }
+        setBusy(true);
+        api
+          .helmRemoveRepo(repo)
+          .then(() => setRefreshKey((k) => k + 1))
+          .catch(fail)
+          .finally(() => setBusy(false));
+      });
+  };
+
+  const edit = (repo: string, currentUrl: string) => {
+    if (!authed) {
+      onRequireAuth();
+      return;
+    }
+    dialog
+      .prompt({
+        title: 'Edit repository',
+        message: `New URL for repository "${repo}":`,
+        label: 'URL',
+        initial: currentUrl,
+        placeholder: 'https://charts.example.com',
+        confirmLabel: 'Save',
+      })
+      .then((next) => {
+        if (!next || !next.trim() || next.trim() === currentUrl) {
+          return;
+        }
+        setBusy(true);
+        api
+          .helmRemoveRepo(repo)
+          .then(() => api.helmAddRepo(repo, next.trim()))
+          .then(() => setRefreshKey((k) => k + 1))
+          .catch(fail)
+          .finally(() => setBusy(false));
+      });
+  };
+
+  const refresh = (repo: string) => {
+    if (!authed) {
+      onRequireAuth();
       return;
     }
     setBusy(true);
     api
-      .helmRemoveRepo(repo)
+      .helmRefreshRepo(repo)
       .then(() => setRefreshKey((k) => k + 1))
       .catch(fail)
       .finally(() => setBusy(false));
@@ -3907,11 +4253,13 @@ function HelmRepos(props: { authed: boolean; onRequireAuth: () => void; onAuthEx
                 <td className="name">{r.name}</td>
                 <td className="mono">{r.url}</td>
                 <td className="row-actions">
-                  {authed && (
-                    <button className="btn danger" disabled={busy} onClick={() => remove(r.name)}>
-                      Remove
-                    </button>
-                  )}
+                  <KebabMenu
+                    items={[
+                      { label: 'Edit', onClick: () => edit(r.name, r.url) },
+                      { label: 'Refresh', onClick: () => refresh(r.name) },
+                      { label: 'Remove', danger: true, onClick: () => remove(r.name) },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
@@ -3988,6 +4336,127 @@ function HelmResourcesModal(props: {
                       {r.name}
                     </button>
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HelmValuesModal(props: { cluster: string; namespace: string; name: string; onClose: () => void }) {
+  const { cluster, namespace, name, onClose } = props;
+  const [values, setValues] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .helmReleaseValues(cluster, namespace, name)
+      .then((y) => !cancelled && setValues(y))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, namespace, name]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <h2>Values</h2>
+        <p className="modal-note">
+          Stored configuration for release <strong>{name}</strong> in <strong>{namespace}</strong> (helm get values).
+        </p>
+        {error && <div className="error">{error}</div>}
+        {values === null ? (
+          <div className="empty">Loading…</div>
+        ) : values.trim() === '' ? (
+          <div className="empty">No user-supplied values (chart defaults only).</div>
+        ) : (
+          <pre className="yaml-view">{values}</pre>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HelmHistoryModal(props: { cluster: string; namespace: string; name: string; onClose: () => void }) {
+  const { cluster, namespace, name, onClose } = props;
+  const [history, setHistory] = useState<HelmRelease[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .helmHistory(cluster, namespace, name)
+      .then((h) => !cancelled && setHistory(h))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster, namespace, name]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const rows = [...(history ?? [])].sort((a, b) => b.revision - a.revision);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <h2>History</h2>
+        <p className="modal-note">
+          Revision history of release <strong>{name}</strong> in <strong>{namespace}</strong> (helm history).
+        </p>
+        {error && <div className="error">{error}</div>}
+        {history === null ? (
+          <div className="empty">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="empty">No history for this release.</div>
+        ) : (
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Revision</th>
+                <th>Chart</th>
+                <th>Version</th>
+                <th>App Version</th>
+                <th>Status</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.revision}>
+                  <td>{r.revision}</td>
+                  <td>{r.chart}</td>
+                  <td>{r.chartVersion}</td>
+                  <td>{r.appVersion}</td>
+                  <td>
+                    <StatusBadge text={r.status} />
+                  </td>
+                  <td>{r.updated ? age(r.updated) : '—'}</td>
                 </tr>
               ))}
             </tbody>

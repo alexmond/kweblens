@@ -141,6 +141,14 @@ public class HelmChartService {
 		return properties.getIndexCacheSeconds() * 1000L;
 	}
 
+	/**
+	 * Drop a repo's cached index so the next charts request re-fetches it (manual
+	 * refresh).
+	 */
+	public void evict(String repoName) {
+		cache.remove(repoName);
+	}
+
 	private List<HelmChartSummary> fetch(HelmProperties.Repository repo) {
 		String url = stripTrailingSlash(repo.getUrl()) + "/index.yaml";
 		try {
