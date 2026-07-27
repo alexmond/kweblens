@@ -79,7 +79,7 @@ export interface NodeDiskUsage {
   totalBytes: number;
 }
 
-interface MetricPoint {
+export interface MetricPoint {
   t: number;
   v: number;
 }
