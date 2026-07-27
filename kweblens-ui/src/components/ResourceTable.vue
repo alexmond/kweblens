@@ -76,7 +76,17 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
       sorter: (a, b) => (objNs(a) ?? '').localeCompare(objNs(b) ?? ''),
       render: (row) =>
         objNs(row)
-          ? h('a', { class: 'cell-link', onClick: () => emit('namespace-click', objNs(row) as string) }, objNs(row))
+          ? h(
+              'a',
+              {
+                class: 'cell-link',
+                onClick: (e: MouseEvent) => {
+                  e.stopPropagation();
+                  emit('namespace-click', objNs(row) as string);
+                },
+              },
+              objNs(row),
+            )
           : '—',
     });
   }
@@ -104,12 +114,16 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
     title: '',
     key: '_menu',
     width: 44,
+    // Stop the click bubbling to the row (which opens the detail drawer), so the kebab
+    // dropdown actually opens instead of being pre-empted / overlapped by the drawer.
     render: (row) =>
-      h(
-        NDropdown,
-        { trigger: 'click', options: menuOptions(row), onSelect: (k: string) => onMenu(k, row) },
-        { default: () => h(NButton, { text: true, size: 'small' }, () => '⋮') },
-      ),
+      h('div', { onClick: (e: MouseEvent) => e.stopPropagation() }, [
+        h(
+          NDropdown,
+          { trigger: 'click', options: menuOptions(row), onSelect: (k: string) => onMenu(k, row) },
+          { default: () => h(NButton, { text: true, size: 'small' }, () => '⋮') },
+        ),
+      ]),
   });
   return cols;
 });
@@ -151,7 +165,15 @@ const rowKey = (row: KubeObject) => objKey(row);
 const rowProps = (row: KubeObject) => ({
   class: objKey(row) === props.selectedKey ? 'row-active' : '',
   style: 'cursor: pointer',
-  onClick: () => emit('open', row),
+  // Open the detail drawer on row click — but not when the click lands on an interactive
+  // control (checkbox, expand toggle, the kebab menu, or a namespace link).
+  onClick: (e: MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('.n-checkbox, .n-data-table-expand-trigger, button, a, .n-dropdown')) {
+      return;
+    }
+    emit('open', row);
+  },
 });
 </script>
 
