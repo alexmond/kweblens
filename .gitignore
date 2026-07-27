@@ -11,6 +11,8 @@ data/
 kweblens-ui/node_modules/
 kweblens-ui/dist/
 kweblens-ui/.node/
+kweblens-ui/node/
+kweblens-ui/coverage/
 
 # Local kubeconfigs must never be committed
 *.kubeconfig

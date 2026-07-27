@@ -91,7 +91,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms = 20000): Pro
     return await fetch(url, { ...init, signal: ctrl.signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') {
-      throw new Error(`Request timed out after ${Math.round(ms / 1000)}s — ${url}`);
+      throw new Error(`Request timed out after ${Math.round(ms / 1000)}s — ${url}`, { cause: e });
     }
     throw e;
   } finally {

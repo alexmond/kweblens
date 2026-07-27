@@ -1,207 +1,209 @@
 {
   "version": 1,
-  "prompt_count": 2,
+  "prompt_count": 19,
   "reactivated": [],
-  "last_nudge_prompt": 0,
+  "last_nudge_prompt": 14,
   "rules": {
     "vague-reference": {
-      "fires_here": 0,
-      "clean_streak_here": 1,
-      "last_fired_at": null,
-      "last_nudged_at": null,
-      "last_nudged_prompt": null
+      "fires_here": 2,
+      "clean_streak_here": 9,
+      "last_fired_at": "2026-07-27T06:31:43Z",
+      "last_nudged_at": "2026-07-27T05:52:27Z",
+      "last_nudged_prompt": 4
     },
     "no-definition-of-done": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "unbounded-scope": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "improve-without-metric": {
-      "fires_here": 0,
-      "clean_streak_here": 1,
-      "last_fired_at": null,
+      "fires_here": 1,
+      "clean_streak_here": 12,
+      "last_fired_at": "2026-07-27T05:52:27Z",
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "missing-guardrails": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "compound-tasks": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-verify-loop": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "missing-context-fetch": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-answer-shape": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-format-spec": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-adversarial-check": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "retry-without-diagnosis": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-few-shot": {
-      "fires_here": 0,
-      "clean_streak_here": 1,
-      "last_fired_at": null,
-      "last_nudged_at": null,
-      "last_nudged_prompt": null
+      "fires_here": 3,
+      "clean_streak_here": 0,
+      "last_fired_at": "2026-07-27T13:47:09Z",
+      "last_nudged_at": "2026-07-27T06:32:52Z",
+      "last_nudged_prompt": 8
     },
     "no-chain-of-thought": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-rubric": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-uncertainty-budget": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "implicit-goal": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "unbounded-iteration": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-rubric-for-refine": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-plan-mode-for-risky": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-task-list-for-multi-step": {
-      "fires_here": 0,
-      "clean_streak_here": 1,
-      "last_fired_at": null,
+      "fires_here": 1,
+      "clean_streak_here": 12,
+      "last_fired_at": "2026-07-27T05:52:27Z",
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-agents-for-parallel-lookup": {
-      "fires_here": 0,
-      "clean_streak_here": 1,
-      "last_fired_at": null,
-      "last_nudged_at": null,
-      "last_nudged_prompt": null
+      "fires_here": 1,
+      "clean_streak_here": 2,
+      "last_fired_at": "2026-07-27T06:56:49Z",
+      "last_nudged_at": "2026-07-27T06:56:49Z",
+      "last_nudged_prompt": 14
     },
     "no-role-for-critique": {
-      "fires_here": 0,
-      "clean_streak_here": 1,
-      "last_fired_at": null,
+      "fires_here": 2,
+      "clean_streak_here": 2,
+      "last_fired_at": "2026-07-27T06:56:49Z",
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-panel-for-contested-design": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-workflow-for-fanout": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-skill-lookup": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "pattern-worth-abstracting": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     },
     "no-skill-composition": {
       "fires_here": 0,
-      "clean_streak_here": 1,
+      "clean_streak_here": 15,
       "last_fired_at": null,
       "last_nudged_at": null,
       "last_nudged_prompt": null
     }
   },
-  "clean_prompts_since_praise": 1,
-  "last_prompt_fired_rules": [],
-  "updated_at": "2026-07-27T01:49:22Z"
+  "clean_prompts_since_praise": 12,
+  "last_prompt_fired_rules": [
+    "no-few-shot"
+  ],
+  "updated_at": "2026-07-27T13:51:47Z"
 }
