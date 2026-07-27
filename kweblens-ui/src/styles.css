@@ -441,6 +441,7 @@ body {
 .content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   padding: 16px 20px;
   overflow: auto;
 }
@@ -1167,18 +1168,54 @@ body {
 }
 
 /* Dockable terminal */
-/* Dockable bottom panel: resize handle + session tabs + the active session body. */
-.dock-panel {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 300px;
-  background: #0f172a;
-  z-index: 70;
+/* The right-hand panel is a vertical split: the scrolling content on top and the
+   dockable terminal/log pane at the bottom. The left nav stays full height beside it. */
+.content-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Dockable pane at the bottom of the content column (NOT over the nav). */
+.dock-panel {
+  flex: 0 0 auto;
+  height: 300px;
+  width: 100%;
+  min-height: 0;
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #1e293b;
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.dock-panel.minimized {
+  height: auto !important;
+}
+
+.dock-panel.minimized .dock-bodies,
+.dock-panel.minimized .dock-resize {
+  display: none;
+}
+
+.dock-tab-spacer {
+  flex: 1;
+}
+
+.dock-min {
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.dock-min:hover {
+  color: #fff;
 }
 
 .dock-resize {
@@ -1808,4 +1845,13 @@ body.dragging {
 }
 .nav-footer .ver-line {
   margin-top: 2px;
+}
+
+/* Minimized (collapsed) floating window — just its title bar. */
+.float-window.collapsed .float-body,
+.float-window.collapsed .float-resize {
+  display: none;
+}
+.float-window.collapsed .float-head {
+  cursor: default;
 }

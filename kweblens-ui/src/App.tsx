@@ -1014,7 +1014,8 @@ export function App() {
           <AppFooter />
         </aside>
 
-        <main className="content">
+        <div className="content-col">
+          <main className="content">
           {error && <div className="error">{error}</div>}
           {(!selected || selected.id === 'overview:cluster') && !error && cluster && (
             <ClusterOverview
@@ -1121,7 +1122,18 @@ export function App() {
               />
             </>
           )}
-        </main>
+          </main>
+          {cluster && dockSessions.length > 0 && (
+            <DockArea
+              cluster={cluster}
+              sessions={dockSessions}
+              active={activeSession}
+              onActivate={setActiveSession}
+              onClose={closeDock}
+              onToggleFloat={toggleFloat}
+            />
+          )}
+        </div>
 
         {cluster && detail && (
           <Detail
@@ -1177,16 +1189,6 @@ export function App() {
         />
       )}
 
-      {cluster && dockSessions.length > 0 && (
-        <DockArea
-          cluster={cluster}
-          sessions={dockSessions}
-          active={activeSession}
-          onActivate={setActiveSession}
-          onClose={closeDock}
-          onToggleFloat={toggleFloat}
-        />
-      )}
 
       {cluster && forward && (
         <ForwardModal
@@ -1240,6 +1242,7 @@ function DockArea(props: {
 }) {
   const { cluster, sessions, active, onActivate, onClose, onToggleFloat } = props;
   const [height, setHeight] = useState(300);
+  const [minimized, setMinimized] = useState(false);
   const [dockBodyEl, setDockBodyEl] = useState<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
 
@@ -1249,7 +1252,8 @@ function DockArea(props: {
         return;
       }
       const h = window.innerHeight - e.clientY;
-      setHeight(Math.min(Math.max(h, 120), window.innerHeight - 80));
+      // Leave room for the brand bar + some content above the dock.
+      setHeight(Math.min(Math.max(h, 120), window.innerHeight - 180));
     };
     const up = () => {
       draggingRef.current = false;
@@ -1280,7 +1284,7 @@ function DockArea(props: {
         />
       ))}
       {docked.length > 0 && (
-        <div className="dock-panel" style={{ height }}>
+        <div className={'dock-panel' + (minimized ? ' minimized' : '')} style={minimized ? {} : { height }}>
           <div
             className="dock-resize"
             title="Drag to resize"
@@ -1322,6 +1326,14 @@ function DockArea(props: {
                 </button>
               </div>
             ))}
+            <span className="dock-tab-spacer" />
+            <button
+              className="dock-min"
+              title={minimized ? 'Expand' : 'Minimize'}
+              onClick={() => setMinimized((m) => !m)}
+            >
+              {minimized ? '▴' : '—'}
+            </button>
           </div>
           <div className="dock-bodies" ref={setDockBodyEl} />
         </div>
@@ -1381,6 +1393,7 @@ function FloatingFrame(props: {
 }) {
   const { session, onDock, onClose, setContentEl } = props;
   const [rect, setRect] = useState(session.rect ?? { x: 140, y: 140, w: 640, h: 340 });
+  const [collapsed, setCollapsed] = useState(false);
   const dragRef = useRef<{ resize: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number } | null>(null);
 
   useEffect(() => {
@@ -1416,13 +1429,23 @@ function FloatingFrame(props: {
   };
 
   return (
-    <div className="float-window" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
-      <div className="float-head" onPointerDown={start(false)}>
+    <div
+      className={'float-window' + (collapsed ? ' collapsed' : '')}
+      style={{ left: rect.x, top: rect.y, width: rect.w, height: collapsed ? 'auto' : rect.h }}
+    >
+      <div className="float-head" onPointerDown={collapsed ? undefined : start(false)}>
         <span className="float-title">
           <i className={'term-dot ' + session.kind} /> {session.kind === 'logs' ? 'logs' : 'sh'} · {session.namespace}/
           {session.pod}
         </span>
         <span className="float-actions">
+          <button
+            className="float-btn"
+            title={collapsed ? 'Expand' : 'Minimize'}
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            {collapsed ? '▢' : '—'}
+          </button>
           <button className="float-btn" title="Dock back" onClick={onDock}>
             ⧉
           </button>
