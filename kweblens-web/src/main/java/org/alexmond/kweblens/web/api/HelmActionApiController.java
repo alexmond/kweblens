@@ -35,7 +35,7 @@ public class HelmActionApiController {
 	public HelmMutationResult install(@PathVariable String clusterId, @RequestBody InstallRequest request) {
 		HelmMutationResult result = helm.install(clusterId, request.namespace(), request.releaseName(),
 				request.repository(), request.chart(), request.version(), parseValues(request.valuesYaml()),
-				request.dryRun(), request.createNamespace());
+				request.dryRun(), request.createNamespace(), request.noHooks(), request.description());
 		if (!request.dryRun()) {
 			audit.record(clusterId, "helm-install", request.releaseName() + " (" + request.repository() + "/"
 					+ request.chart() + "-" + request.version() + ") ns=" + request.namespace());
@@ -47,7 +47,8 @@ public class HelmActionApiController {
 	public HelmMutationResult upgrade(@PathVariable String clusterId, @PathVariable String namespace,
 			@PathVariable String name, @RequestBody UpgradeRequest request) {
 		HelmMutationResult result = helm.upgrade(clusterId, namespace, name, request.repository(), request.chart(),
-				request.version(), parseValues(request.valuesYaml()), request.dryRun());
+				request.version(), parseValues(request.valuesYaml()), request.dryRun(), request.noHooks(),
+				request.force(), request.valueStrategy(), request.maxHistory(), request.description());
 		if (!request.dryRun()) {
 			audit.record(clusterId, "helm-upgrade", name + " -> " + request.repository() + "/" + request.chart() + "-"
 					+ request.version() + " ns=" + namespace);
@@ -87,11 +88,16 @@ public class HelmActionApiController {
 	 * optional.
 	 */
 	public record InstallRequest(String namespace, String releaseName, String repository, String chart, String version,
-			String valuesYaml, boolean dryRun, boolean createNamespace) {
+			String valuesYaml, boolean dryRun, boolean createNamespace, boolean noHooks, String description) {
 	}
 
-	/** Upgrade an existing release to a chart version. */
-	public record UpgradeRequest(String repository, String chart, String version, String valuesYaml, boolean dryRun) {
+	/**
+	 * Upgrade an existing release to a chart version. {@code valueStrategy} is one of
+	 * jhelm's {@code UpgradeValueStrategy} names (default/reset/reuse/reset_then_reuse);
+	 * blank uses the jhelm default. {@code maxHistory} 0 leaves the default.
+	 */
+	public record UpgradeRequest(String repository, String chart, String version, String valuesYaml, boolean dryRun,
+			boolean noHooks, boolean force, String valueStrategy, Integer maxHistory, String description) {
 	}
 
 	/** Roll a release back to an earlier revision. */

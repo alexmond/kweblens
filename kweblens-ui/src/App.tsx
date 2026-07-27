@@ -4507,6 +4507,13 @@ function HelmActionModal(props: {
       .catch(() => setSavedValues([]));
   }, []);
   const [createNamespace, setCreateNamespace] = useState(false);
+  // Advanced options (map to jhelm InstallOptions / UpgradeOptions).
+  const [noHooks, setNoHooks] = useState(false);
+  const [description, setDescription] = useState('');
+  const [force, setForce] = useState(false);
+  const [valueStrategy, setValueStrategy] = useState('');
+  const [maxHistory, setMaxHistory] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [preview, setPreview] = useState<HelmMutationResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -4523,10 +4530,33 @@ function HelmActionModal(props: {
     setBusy(true);
     setError(null);
     let p: Promise<HelmMutationResult>;
+    const maxHist = Number.parseInt(maxHistory, 10);
     if (action.mode === 'install') {
-      p = api.helmInstall(cluster, { namespace, releaseName, repository, chart, version, valuesYaml, dryRun, createNamespace });
+      p = api.helmInstall(cluster, {
+        namespace,
+        releaseName,
+        repository,
+        chart,
+        version,
+        valuesYaml,
+        dryRun,
+        createNamespace,
+        noHooks,
+        description: description.trim() || undefined,
+      });
     } else if (action.mode === 'upgrade') {
-      p = api.helmUpgrade(cluster, action.namespace, action.name, { repository, chart, version, valuesYaml, dryRun });
+      p = api.helmUpgrade(cluster, action.namespace, action.name, {
+        repository,
+        chart,
+        version,
+        valuesYaml,
+        dryRun,
+        noHooks,
+        force,
+        valueStrategy: valueStrategy || undefined,
+        maxHistory: Number.isNaN(maxHist) ? undefined : maxHist,
+        description: description.trim() || undefined,
+      });
     } else {
       p = api.helmRollback(cluster, action.namespace, action.name, { revision, dryRun });
     }
@@ -4669,6 +4699,62 @@ function HelmActionModal(props: {
               />
             </>,
           )}
+
+        {action.mode !== 'rollback' && (
+          <div className="adv-options">
+            <button
+              type="button"
+              className="adv-toggle"
+              onClick={() => setShowAdvanced((v) => !v)}
+              aria-expanded={showAdvanced}
+            >
+              {showAdvanced ? '▾' : '▸'} Advanced options
+            </button>
+            {showAdvanced && (
+              <div className="adv-body">
+                <label className="check">
+                  <input type="checkbox" checked={noHooks} onChange={(e) => setNoHooks(e.target.checked)} />
+                  <span>Skip hooks (--no-hooks)</span>
+                </label>
+                {action.mode === 'upgrade' && (
+                  <>
+                    <label className="check">
+                      <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+                      <span>Force resource updates (--force)</span>
+                    </label>
+                    {field(
+                      'Values strategy',
+                      <select value={valueStrategy} onChange={(e) => setValueStrategy(e.target.value)}>
+                        <option value="">Default</option>
+                        <option value="REUSE">Reuse previous values</option>
+                        <option value="RESET">Reset to chart defaults</option>
+                        <option value="RESET_THEN_REUSE">Reset, then reuse</option>
+                      </select>,
+                    )}
+                    {field(
+                      'Max history (0 = keep default)',
+                      <input
+                        type="number"
+                        min={0}
+                        value={maxHistory}
+                        placeholder="0"
+                        onChange={(e) => setMaxHistory(e.target.value)}
+                      />,
+                    )}
+                  </>
+                )}
+                {field(
+                  'Description (optional)',
+                  <input
+                    value={description}
+                    placeholder="release description"
+                    onChange={(e) => setDescription(e.target.value)}
+                  />,
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {preview && (
           <div className="helm-preview">

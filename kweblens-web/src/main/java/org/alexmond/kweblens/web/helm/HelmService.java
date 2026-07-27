@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -32,6 +33,7 @@ import org.alexmond.jhelm.core.action.UninstallAction;
 import org.alexmond.jhelm.core.action.UninstallOptions;
 import org.alexmond.jhelm.core.action.UpgradeAction;
 import org.alexmond.jhelm.core.action.UpgradeOptions;
+import org.alexmond.jhelm.core.action.UpgradeValueStrategy;
 import org.alexmond.jhelm.core.model.Chart;
 import org.alexmond.jhelm.core.model.ChartMetadata;
 import org.alexmond.jhelm.core.model.Release;
@@ -84,7 +86,8 @@ public class HelmService {
 	 * release is created and the result describes it.
 	 */
 	public HelmMutationResult install(String clusterId, String namespace, String releaseName, String repository,
-			String chart, String version, Map<String, Object> values, boolean dryRun, boolean createNamespace) {
+			String chart, String version, Map<String, Object> values, boolean dryRun, boolean createNamespace,
+			boolean noHooks, String description) {
 		Chart chartModel = chartResolver.resolve(repository, chart, version);
 		InstallAction action = new InstallAction(new Engine(), kubeService(clusterId));
 		Release release = action.install(InstallOptions.builder()
@@ -94,8 +97,9 @@ public class HelmService {
 			.values((values != null) ? values : Map.of())
 			.dryRun(dryRun)
 			.createNamespace(createNamespace)
+			.noHooks(noHooks)
 			.labels(Map.of(MANAGED_BY_LABEL, MANAGED_BY_VALUE))
-			.description(dryRun ? "kweblens dry-run" : "Installed via kweblens")
+			.description(describe(description, dryRun, "Installed via kweblens"))
 			.build());
 		return toMutationResult(dryRun, release);
 	}
@@ -105,19 +109,57 @@ public class HelmService {
 	 * only.
 	 */
 	public HelmMutationResult upgrade(String clusterId, String namespace, String releaseName, String repository,
-			String chart, String version, Map<String, Object> values, boolean dryRun) {
+			String chart, String version, Map<String, Object> values, boolean dryRun, boolean noHooks, boolean force,
+			String valueStrategy, Integer maxHistory, String description) {
 		Release current = new StatusAction(kubeService(clusterId)).status(releaseName, namespace)
 			.orElseThrow(() -> new HelmException("No release '" + releaseName + "' in namespace " + namespace));
 		Chart chartModel = chartResolver.resolve(repository, chart, version);
-		Release release = new UpgradeAction(new Engine(), kubeService(clusterId)).upgrade(UpgradeOptions.builder()
+		UpgradeOptions.UpgradeOptionsBuilder builder = UpgradeOptions.builder()
 			.currentRelease(current)
 			.newChart(chartModel)
 			.values((values != null) ? values : Map.of())
 			.dryRun(dryRun)
+			.noHooks(noHooks)
+			.force(force)
 			.labels(Map.of(MANAGED_BY_LABEL, MANAGED_BY_VALUE))
-			.description(dryRun ? "kweblens dry-run" : "Upgraded via kweblens")
-			.build());
+			.description(describe(description, dryRun, "Upgraded via kweblens"));
+		if (maxHistory != null && maxHistory > 0) {
+			builder.maxHistory(maxHistory);
+		}
+		UpgradeValueStrategy strategy = parseValueStrategy(valueStrategy);
+		if (strategy != null) {
+			builder.valueStrategy(strategy);
+		}
+		Release release = new UpgradeAction(new Engine(), kubeService(clusterId)).upgrade(builder.build());
 		return toMutationResult(dryRun, release);
+	}
+
+	/**
+	 * Use the caller's description when given; otherwise a dry-run/apply-appropriate
+	 * default.
+	 */
+	private String describe(String provided, boolean dryRun, String fallback) {
+		if (StringUtils.hasText(provided)) {
+			return provided;
+		}
+		return dryRun ? "kweblens dry-run" : fallback;
+	}
+
+	/**
+	 * Parse the upgrade value-merge strategy leniently; unknown/blank falls back to
+	 * jhelm's default.
+	 */
+	private UpgradeValueStrategy parseValueStrategy(String value) {
+		if (!StringUtils.hasText(value)) {
+			return null;
+		}
+		try {
+			return UpgradeValueStrategy.valueOf(value.trim().toUpperCase(Locale.ROOT));
+		}
+		catch (IllegalArgumentException ex) {
+			log.warn("Unknown Helm value strategy '{}'; using jhelm default", value);
+			return null;
+		}
 	}
 
 	/**
