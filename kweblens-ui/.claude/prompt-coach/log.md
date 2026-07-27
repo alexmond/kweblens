@@ -23,3 +23,4 @@
 - [2026-07-27T07:16:13Z] fired=[—] chosen=— positives=[—] praise=— outcome=no-emit prompt=«go ahead and implement the worthwhile ones»
 - [2026-07-27T13:47:09Z] fired=[no-few-shot] chosen=— positives=[—] praise=— outcome=no-emit prompt=«Suggest top 5 code style tools similar to the ones used in maven but for js side of the project»
 - [2026-07-27T13:51:47Z] fired=[—] chosen=— positives=[—] praise=— outcome=skipped:conversational prompt=«Implement 1-4 and knip then run and fix found issues»
+- [2026-07-27T14:36:38Z] fired=[—] chosen=— positives=[cited-context, grounded-scope] praise=variable-ratio:cited-context outcome=praised:variable-ratio:inline prompt=«split App.tsx and make the complexity rules errors»
