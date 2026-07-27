@@ -4,9 +4,9 @@ import { gib, objKey, objName, parseCpuCores, parseMemBytes } from './kube';
 import type { KubeObject, NodeDiskUsage, UsageSummary } from './types';
 
 // The React table let a column's render() return a ReactNode (string OR a rich element like a
-// usage bar / container squares). A .ts file can't hold JSX, so the Vue table instead models
-// the rich cells as DATA — a CellSpec the ResourceCell SFC switches on. Text columns (from
-// columns.ts) render as before; only Pods/Nodes add the rich `cell`.
+// usage bar / container squares). A .ts file can't hold JSX, so the table instead models the
+// rich cells as DATA — a CellSpec the NDataTable column render fn switches on. Text columns
+// (from columns.ts) render as before; only Pods/Nodes add the rich `cell`.
 
 export type CellSpec =
   | { type: 'text'; text: string; tone?: StatusTone }

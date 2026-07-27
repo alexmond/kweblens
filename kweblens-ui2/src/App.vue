@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NConfigProvider, darkTheme } from 'naive-ui';
 import { computed, ref, watch } from 'vue';
 
 import { api } from './api';
@@ -48,6 +49,16 @@ const helmTarget = ref<{ namespace: string; name: string } | null>(null);
 const setError = (e: string | null) => (error.value = e);
 const dialog = useDialog();
 
+// Theme: Naive UI light/dark, toggled from the brand bar and persisted.
+const dark = ref(localStorage.getItem('kw-theme') !== 'light');
+const theme = computed(() => (dark.value ? darkTheme : null));
+const toggleTheme = () => {
+  dark.value = !dark.value;
+  localStorage.setItem('kw-theme', dark.value ? 'dark' : 'light');
+  document.documentElement.classList.toggle('kw-dark', dark.value);
+};
+document.documentElement.classList.toggle('kw-dark', dark.value);
+
 const { clusters, cluster } = useClusters(setError);
 const { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, helmScope } = useClusterScope(
   cluster,
@@ -83,24 +94,23 @@ const { navigateToKind, navigateToPortForwards, navigateToHelmRelease } = useNav
   setHelmTarget: (t) => (helmTarget.value = t),
 });
 
-const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, toggleRow, toggleAll, bulkDelete } =
-  useAppActions({
-    cluster,
-    authUser,
-    selected,
-    selection,
-    objects,
-    hiddenCols,
-    favorites,
-    dialog,
-    openDock,
-    setForward: (f) => (forward.value = f),
-    setDetail: (d) => (detail.value = d),
-    setError,
-    setObjects,
-    setShowLogin: (v) => (showLogin.value = v),
-    setAuthUser: (v) => (authUser.value = v),
-  });
+const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDelete } = useAppActions({
+  cluster,
+  authUser,
+  selected,
+  selection,
+  objects,
+  hiddenCols,
+  favorites,
+  dialog,
+  openDock,
+  setForward: (f) => (forward.value = f),
+  setDetail: (d) => (detail.value = d),
+  setError,
+  setObjects,
+  setShowLogin: (v) => (showLogin.value = v),
+  setAuthUser: (v) => (authUser.value = v),
+});
 
 const activeCluster = computed(() => clusters.value.find((c) => c.id === cluster.value) ?? null);
 const filtered = computed(() => filterObjects(objects.value, query.value, helmScope.value));
@@ -142,137 +152,141 @@ const onForwardStarted = () => {
 </script>
 
 <template>
-  <div class="app">
-    <BrandBar
-      :cluster="cluster"
-      :namespace="namespace"
-      :namespaces="namespaces"
-      :helm-release="helmRelease"
-      :helm-release-list="helmReleaseList"
-      :auth-user="authUser"
-      @update:namespace="(v) => (namespace = v)"
-      @update:helm-release="(v) => (helmRelease = v)"
-      @sign-in="showLogin = true"
-      @sign-out="signOut"
-    />
-
-    <div class="body">
-      <Sidebar
-        :clusters="clusters"
+  <NConfigProvider :theme="theme" class="app-theme-root">
+    <div class="app">
+      <button class="theme-toggle" :title="dark ? 'Switch to light' : 'Switch to dark'" @click="toggleTheme">
+        {{ dark ? '☀' : '☾' }}
+      </button>
+      <BrandBar
         :cluster="cluster"
-        :active-cluster="activeCluster"
-        :nav="nav"
-        :counts="mergedCounts"
-        :favorites="favorites"
-        :selected="selected"
-        @set-cluster="(idv) => (cluster = idv)"
-        @select="(i) => (selected = i)"
-        @toggle-favorite="toggleFavorite"
+        :namespace="namespace"
+        :namespaces="namespaces"
+        :helm-release="helmRelease"
+        :helm-release-list="helmReleaseList"
+        :auth-user="authUser"
+        @update:namespace="(v) => (namespace = v)"
+        @update:helm-release="(v) => (helmRelease = v)"
+        @sign-in="showLogin = true"
+        @sign-out="signOut"
       />
 
-      <div class="content-col">
-        <main class="content">
-          <div v-if="error" class="error">{{ error }}</div>
-          <template v-if="cluster">
-            <ClusterOverview
-              v-if="showClusterOverview"
-              :cluster="cluster"
-              :name="activeCluster?.name ?? cluster"
-              :master-url="activeCluster?.masterUrl"
-              :namespace-count="namespaces.length"
-            />
-            <WorkloadsOverview v-else-if="id === NAV.overviewWorkloads" :cluster="cluster" />
-            <HelmView
-              v-else-if="showHelm"
-              :cluster="cluster"
-              :view="helmViewName"
-              :authed="!!authUser"
-              :open-resources="helmTarget"
-              @navigate="navigateToKind"
-              @resources-consumed="helmTarget = null"
-              @require-auth="showLogin = true"
-              @auth-expired="signOut"
-            />
-            <PortForwards
-              v-else-if="id === NAV.portForwards"
-              :cluster="cluster"
-              :authed="!!authUser"
-              @require-auth="showLogin = true"
-            />
-          </template>
-          <ResourceListView
-            v-if="showList && selected"
-            :selected="selected"
-            :filtered="filtered"
-            :objects="objects"
-            :query="query"
-            :live="live"
-            :table-cols="tableCols"
-            :visible-cols="visibleCols"
-            :hidden-cols="hiddenCols"
-            :selection="selection"
-            :selected-key="selectedKey"
-            :loading="loading"
-            :fetch-children="fetchChildrenFn"
-            @update:query="(v) => (query = v)"
-            @toggle-col="toggleCol"
-            @clear-selection="selection = new Set()"
-            @bulk-delete="bulkDelete"
-            @toggle-row="toggleRow"
-            @toggle-all="toggleAll"
-            @open="(o) => (detail = { resourceId: selected!.id, obj: o })"
-            @namespace-click="(ns) => (namespace = ns)"
-            @create="authUser ? (showCreate = true) : (showLogin = true)"
-            @row-action="(a, o, c) => handleRowAction(selected!.id, a, o, c)"
-          />
-        </main>
-        <DockArea
-          v-if="cluster && dockSessions.length > 0"
+      <div class="body">
+        <Sidebar
+          :clusters="clusters"
           :cluster="cluster"
-          :sessions="dockSessions"
-          :active="activeSession"
-          @activate="setActive"
-          @close="closeDock"
-          @toggle-float="toggleFloat"
+          :active-cluster="activeCluster"
+          :nav="nav"
+          :counts="mergedCounts"
+          :favorites="favorites"
+          :selected="selected"
+          @set-cluster="(idv) => (cluster = idv)"
+          @select="(i) => (selected = i)"
+          @toggle-favorite="toggleFavorite"
+        />
+
+        <div class="content-col">
+          <main class="content">
+            <div v-if="error" class="error">{{ error }}</div>
+            <template v-if="cluster">
+              <ClusterOverview
+                v-if="showClusterOverview"
+                :cluster="cluster"
+                :name="activeCluster?.name ?? cluster"
+                :master-url="activeCluster?.masterUrl"
+                :namespace-count="namespaces.length"
+              />
+              <WorkloadsOverview v-else-if="id === NAV.overviewWorkloads" :cluster="cluster" />
+              <HelmView
+                v-else-if="showHelm"
+                :cluster="cluster"
+                :view="helmViewName"
+                :authed="!!authUser"
+                :open-resources="helmTarget"
+                @navigate="navigateToKind"
+                @resources-consumed="helmTarget = null"
+                @require-auth="showLogin = true"
+                @auth-expired="signOut"
+              />
+              <PortForwards
+                v-else-if="id === NAV.portForwards"
+                :cluster="cluster"
+                :authed="!!authUser"
+                @require-auth="showLogin = true"
+              />
+            </template>
+            <ResourceListView
+              v-if="showList && selected"
+              :selected="selected"
+              :filtered="filtered"
+              :objects="objects"
+              :query="query"
+              :live="live"
+              :table-cols="tableCols"
+              :visible-cols="visibleCols"
+              :hidden-cols="hiddenCols"
+              :selection="selection"
+              :selected-key="selectedKey"
+              :loading="loading"
+              :fetch-children="fetchChildrenFn"
+              @update:query="(v) => (query = v)"
+              @toggle-col="toggleCol"
+              @clear-selection="selection = new Set()"
+              @bulk-delete="bulkDelete"
+              @update:selection="(keys) => (selection = new Set(keys))"
+              @open="(o) => (detail = { resourceId: selected!.id, obj: o })"
+              @namespace-click="(ns) => (namespace = ns)"
+              @create="authUser ? (showCreate = true) : (showLogin = true)"
+              @row-action="(a, o, c) => handleRowAction(selected!.id, a, o, c)"
+            />
+          </main>
+          <DockArea
+            v-if="cluster && dockSessions.length > 0"
+            :cluster="cluster"
+            :sessions="dockSessions"
+            :active="activeSession"
+            @activate="setActive"
+            @close="closeDock"
+            @toggle-float="toggleFloat"
+          />
+        </div>
+
+        <Detail
+          v-if="cluster && detail"
+          :key="detail.resourceId + '/' + objKey(detail.obj)"
+          :cluster="cluster"
+          :resource-id="detail.resourceId"
+          :obj="detail.obj"
+          :initial-edit="detail.edit ?? false"
+          :authed="authUser !== null"
+          @navigate="navigateToKind"
+          @helm-release="navigateToHelmRelease"
+          @auth-expired="signOut"
+          @close="detail = null"
         />
       </div>
 
-      <Detail
-        v-if="cluster && detail"
-        :key="detail.resourceId + '/' + objKey(detail.obj)"
+      <AppFooter />
+
+      <LoginModal v-if="showLogin" :on-submit="loginSubmit" @cancel="showLogin = false" />
+      <CreateModal
+        v-if="showCreate && cluster"
         :cluster="cluster"
-        :resource-id="detail.resourceId"
-        :obj="detail.obj"
-        :initial-edit="detail.edit ?? false"
-        :authed="authUser !== null"
-        @navigate="navigateToKind"
-        @helm-release="navigateToHelmRelease"
-        @auth-expired="signOut"
-        @close="detail = null"
+        @close="showCreate = false"
+        @auth-expired="onCreateAuthExpired"
       />
+      <ForwardModal
+        v-if="cluster && forward"
+        :cluster="cluster"
+        :kind="forward.kind"
+        :namespace="forward.namespace"
+        :name="forward.name"
+        :ports="forward.ports"
+        @close="forward = null"
+        @started="onForwardStarted"
+        @auth-expired="signOut"
+      />
+
+      <DialogHost />
     </div>
-
-    <AppFooter />
-
-    <LoginModal v-if="showLogin" :on-submit="loginSubmit" @cancel="showLogin = false" />
-    <CreateModal
-      v-if="showCreate && cluster"
-      :cluster="cluster"
-      @close="showCreate = false"
-      @auth-expired="onCreateAuthExpired"
-    />
-    <ForwardModal
-      v-if="cluster && forward"
-      :cluster="cluster"
-      :kind="forward.kind"
-      :namespace="forward.namespace"
-      :name="forward.name"
-      :ports="forward.ports"
-      @close="forward = null"
-      @started="onForwardStarted"
-      @auth-expired="signOut"
-    />
-
-    <DialogHost />
-  </div>
+  </NConfigProvider>
 </template>
