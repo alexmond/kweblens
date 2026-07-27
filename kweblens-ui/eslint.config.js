@@ -19,15 +19,14 @@ export default tseslint.config(
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
       // Complexity / size gates — the analog of PMD + Checkstyle Method/FileLength.
-      // Warnings for now (App.tsx is a known monolith to split); tighten to error later.
-      'max-lines-per-function': ['warn', { max: 200, skipBlankLines: true, skipComments: true }],
-      complexity: ['warn', 20],
+      // Now errors: App.tsx was split into focused modules and the hot functions trimmed.
+      'max-lines-per-function': ['error', { max: 200, skipBlankLines: true, skipComments: true }],
+      complexity: ['error', 20],
+      'sonarjs/cognitive-complexity': ['error', 15],
       // SonarJS readability smells that are idiomatic here (JSX ternaries, handlers/render
-      // helpers defined inside components, the big App component) — tracked as warnings,
-      // not build-breaking. Genuine bug rules (identical-functions, etc.) stay errors.
+      // helpers defined inside components) — tracked as warnings, not build-breaking.
       'sonarjs/no-nested-conditional': 'warn',
       'sonarjs/no-nested-functions': 'warn',
-      'sonarjs/cognitive-complexity': 'warn',
     },
   },
   prettier,

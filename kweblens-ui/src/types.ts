@@ -144,3 +144,6 @@ export interface HelmMutationResult {
   status: string | null;
   manifest: string | null;
 }
+
+/** A dock pane is either an exec terminal or a log follow. */
+export type DockKind = 'terminal' | 'logs';
