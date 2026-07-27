@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.ResourceSummary;
+import org.alexmond.kweblens.resource.WellKnownKinds;
 
 /**
  * Reads core Kubernetes events and projects them into {@link EventSummary} rows, newest
@@ -26,8 +27,7 @@ import org.alexmond.kweblens.resource.ResourceSummary;
 @RequiredArgsConstructor
 public class EventService {
 
-	private static final ResourceDescriptor EVENTS = ResourceDescriptor.coreNamespaced("events", "Events", "Event",
-			"events");
+	private static final ResourceDescriptor EVENTS = WellKnownKinds.EVENTS;
 
 	private final ResourceService resources;
 

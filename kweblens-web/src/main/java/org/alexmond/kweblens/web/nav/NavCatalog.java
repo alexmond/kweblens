@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 import org.alexmond.kweblens.resource.ResourceDescriptor;
+import org.alexmond.kweblens.resource.WellKnownKinds;
 
 /**
  * The static left-navigation registry: categories → kinds. This is the single source that
@@ -29,11 +30,8 @@ public class NavCatalog {
 
 	private final List<NavCategory> categories = List.of(
 			new NavCategory("Cluster", "bi-diagram-3",
-					List.of(ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes"),
-							ResourceDescriptor.coreCluster("namespaces", "Namespaces", "Namespace", "namespaces"),
-							ResourceDescriptor.coreNamespaced("events", "Events", "Event", "events"))),
-			new NavCategory("Workloads", "bi-box-seam", List.of(
-					ResourceDescriptor.coreNamespaced("pods", "Pods", "Pod", "pods"),
+					List.of(WellKnownKinds.NODES, WellKnownKinds.NAMESPACES, WellKnownKinds.EVENTS)),
+			new NavCategory("Workloads", "bi-box-seam", List.of(WellKnownKinds.PODS,
 					ResourceDescriptor.namespaced("deployments", "Deployments", "Deployment", APPS, "v1", "deployments")
 						.asExpandable(),
 					ResourceDescriptor

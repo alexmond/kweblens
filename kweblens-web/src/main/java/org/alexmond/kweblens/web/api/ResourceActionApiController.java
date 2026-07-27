@@ -37,7 +37,8 @@ public class ResourceActionApiController {
 			@RequestParam(defaultValue = "false") boolean force) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		resources.delete(clusterId, descriptor, namespace, name, force);
-		audit.record(clusterId, force ? "force-delete" : "delete", descriptor.kind() + "/" + namespace + "/" + name);
+		audit.record(clusterId, force ? "force-delete" : "delete",
+				AuditService.ref(descriptor.kind(), namespace, name));
 		return Map.of("result", (force ? "force-deleted " : "deleted ") + descriptor.kind() + " " + name);
 	}
 
@@ -46,7 +47,7 @@ public class ResourceActionApiController {
 			@PathVariable String namespace, @PathVariable String name, @RequestParam int replicas) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		resources.scale(clusterId, descriptor, namespace, name, replicas);
-		audit.record(clusterId, "scale=" + replicas, descriptor.kind() + "/" + namespace + "/" + name);
+		audit.record(clusterId, "scale=" + replicas, AuditService.ref(descriptor.kind(), namespace, name));
 		return Map.of("result", "scaled " + name + " to " + replicas);
 	}
 
@@ -55,7 +56,7 @@ public class ResourceActionApiController {
 			@PathVariable String namespace, @PathVariable String name) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		resources.rolloutRestart(clusterId, descriptor, namespace, name);
-		audit.record(clusterId, "restart", descriptor.kind() + "/" + namespace + "/" + name);
+		audit.record(clusterId, "restart", AuditService.ref(descriptor.kind(), namespace, name));
 		return Map.of("result", "restarted " + name);
 	}
 
@@ -65,7 +66,7 @@ public class ResourceActionApiController {
 			@RequestParam(defaultValue = "true") boolean suspend) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		resources.setSuspended(clusterId, descriptor, namespace, name, suspend);
-		audit.record(clusterId, suspend ? "suspend" : "resume", descriptor.kind() + "/" + namespace + "/" + name);
+		audit.record(clusterId, suspend ? "suspend" : "resume", AuditService.ref(descriptor.kind(), namespace, name));
 		return Map.of("result", (suspend ? "suspended " : "resumed ") + name);
 	}
 
@@ -73,7 +74,7 @@ public class ResourceActionApiController {
 	public Map<String, String> trigger(@PathVariable String clusterId, @PathVariable String resourceId,
 			@PathVariable String namespace, @PathVariable String name) {
 		resources.triggerCronJob(clusterId, namespace, name);
-		audit.record(clusterId, "trigger", "CronJob/" + namespace + "/" + name);
+		audit.record(clusterId, "trigger", AuditService.ref("CronJob", namespace, name));
 		return Map.of("result", "triggered " + name);
 	}
 
@@ -82,7 +83,7 @@ public class ResourceActionApiController {
 			@PathVariable String namespace, @PathVariable String name) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		resources.rollback(clusterId, descriptor, namespace, name);
-		audit.record(clusterId, "rollback", descriptor.kind() + "/" + namespace + "/" + name);
+		audit.record(clusterId, "rollback", AuditService.ref(descriptor.kind(), namespace, name));
 		return Map.of("result", "rolled back " + name + " to the previous revision");
 	}
 

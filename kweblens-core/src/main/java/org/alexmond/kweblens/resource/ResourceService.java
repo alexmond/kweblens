@@ -227,8 +227,8 @@ public class ResourceService {
 	 * the safe half of a drain.
 	 */
 	public void setUnschedulable(String clusterId, String nodeName, boolean unschedulable) {
-		ResourceDescriptor nodes = ResourceDescriptor.coreCluster("nodes", "Nodes", "Node", "nodes");
-		strategicPatch(clusterId, nodes, null, nodeName, "{\"spec\":{\"unschedulable\":" + unschedulable + "}}");
+		strategicPatch(clusterId, WellKnownKinds.NODES, null, nodeName,
+				"{\"spec\":{\"unschedulable\":" + unschedulable + "}}");
 	}
 
 	/** Suspend or resume a CronJob/Job by setting {@code spec.suspend}. */
@@ -329,15 +329,14 @@ public class ResourceService {
 
 	/** List every namespace in the cluster. */
 	public List<ResourceSummary> listNamespaces(String clusterId) {
-		return list(clusterId, ResourceDescriptor.coreCluster("namespaces", "Namespaces", "Namespace", "namespaces"),
-				null);
+		return list(clusterId, WellKnownKinds.NAMESPACES, null);
 	}
 
 	/**
 	 * List pods in a namespace (or all namespaces when {@code namespace} is null/blank).
 	 */
 	public List<ResourceSummary> listPods(String clusterId, String namespace) {
-		return list(clusterId, ResourceDescriptor.coreNamespaced("pods", "Pods", "Pod", "pods"), namespace);
+		return list(clusterId, WellKnownKinds.PODS, namespace);
 	}
 
 	private ResourceSummary toSummary(String kind, GenericKubernetesResource resource) {

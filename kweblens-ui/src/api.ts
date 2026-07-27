@@ -115,36 +115,50 @@ async function getText(url: string): Promise<string> {
   return res.text();
 }
 
+/** Root of the per-cluster API; every cluster-scoped path builds on {@link clusterBase}. */
+const CLUSTERS = '/api/v1/clusters';
+
+/** `/api/v1/clusters/<cluster>` — the base every cluster-scoped endpoint shares. Exported
+ *  so raw EventSource/WebSocket/SSE URLs in the app use the same source of truth. */
+export const clusterBase = (cluster: string): string => `${CLUSTERS}/${encodeURIComponent(cluster)}`;
+
+/** The optional `?namespace=…` query suffix (empty when no namespace). */
+const nsQuery = (namespace?: string): string => (namespace ? `?namespace=${encodeURIComponent(namespace)}` : '');
+
+/** `/api/v1/clusters/<cluster>/helm/releases/<namespace>/<name>` — a single release. */
+const helmReleaseUrl = (cluster: string, namespace: string, name: string): string =>
+  `${clusterBase(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`;
+
 export const api = {
   // Validates HTTP Basic creds and establishes the session cookie the exec WebSocket rides.
   verifySession: () => postJson<{ user: string }>('/api/v1/auth/session'),
-  clusters: () => getJson<ClusterInfo[]>('/api/v1/clusters'),
+  clusters: () => getJson<ClusterInfo[]>(CLUSTERS),
   // Build/version metadata from Actuator (public). build.version + build.time when present.
   info: () =>
     getJson<{ build?: { version?: string; time?: string; name?: string }; git?: { commit?: { id?: string } } }>(
       '/actuator/info',
     ),
-  nav: (cluster: string) => getJson<NavCategory[]>(`/api/v1/clusters/${cluster}/nav`),
+  nav: (cluster: string) => getJson<NavCategory[]>(`${clusterBase(cluster)}/nav`),
   counts: (cluster: string, namespace?: string) =>
     getJson<Record<string, number>>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/counts` +
-        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+      `${clusterBase(cluster)}/counts` +
+        nsQuery(namespace),
     ),
   namespaces: (cluster: string) =>
-    getJson<ResourceRow[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/namespaces`),
+    getJson<ResourceRow[]>(`${clusterBase(cluster)}/namespaces`),
   objects: (cluster: string, resourceId: string, namespace?: string) =>
     getJson<KubeObject[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/objects` +
-        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+      `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}/objects` +
+        nsQuery(namespace),
     ),
   printerColumns: (cluster: string, resourceId: string) =>
     getJson<PrinterColumn[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}/columns`,
+      `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}/columns`,
     ),
   events: (cluster: string, namespace?: string) =>
     getJson<EventSummary[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/events` +
-        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+      `${clusterBase(cluster)}/events` +
+        nsQuery(namespace),
     ),
   metricGraph: (
     cluster: string,
@@ -161,20 +175,20 @@ export const api = {
     if (opts?.minutes) {
       p.set('minutes', String(opts.minutes));
     }
-    return getJson<MetricSeries>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/graph?${p.toString()}`);
+    return getJson<MetricSeries>(`${clusterBase(cluster)}/metrics/graph?${p.toString()}`);
   },
   nodeMetrics: (cluster: string) =>
-    getJson<UsageSummary[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/nodes`),
+    getJson<UsageSummary[]>(`${clusterBase(cluster)}/metrics/nodes`),
   nodeDisk: (cluster: string) =>
-    getJson<NodeDiskUsage[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/nodes/disk`),
+    getJson<NodeDiskUsage[]>(`${clusterBase(cluster)}/metrics/nodes/disk`),
   podMetrics: (cluster: string, namespace?: string) =>
     getJson<UsageSummary[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/metrics/pods` +
-        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+      `${clusterBase(cluster)}/metrics/pods` +
+        nsQuery(namespace),
     ),
   helmCharts: (cluster: string, query?: string) =>
     getJson<HelmChart[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/charts` +
+      `${clusterBase(cluster)}/helm/charts` +
         (query ? `?query=${encodeURIComponent(query)}` : ''),
     ),
   helmInstall: (
@@ -193,7 +207,7 @@ export const api = {
     },
   ) =>
     postBody<HelmMutationResult>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases`,
+      `${clusterBase(cluster)}/helm/releases`,
       JSON.stringify(body),
       'application/json',
     ),
@@ -215,23 +229,23 @@ export const api = {
     },
   ) =>
     postBody<HelmMutationResult>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/upgrade`,
+      `${helmReleaseUrl(cluster, namespace, name)}/upgrade`,
       JSON.stringify(body),
       'application/json',
     ),
   helmUninstall: (cluster: string, namespace: string, name: string) =>
     postJson<{ result: string }>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/uninstall`,
+      `${helmReleaseUrl(cluster, namespace, name)}/uninstall`,
     ),
   helmRollback: (cluster: string, namespace: string, name: string, body: { revision: number; dryRun: boolean }) =>
     postBody<HelmMutationResult>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/rollback`,
+      `${helmReleaseUrl(cluster, namespace, name)}/rollback`,
       JSON.stringify(body),
       'application/json',
     ),
   helmReleaseResources: (cluster: string, namespace: string, name: string) =>
     getJson<HelmResourceRef[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/resources`,
+      `${helmReleaseUrl(cluster, namespace, name)}/resources`,
     ),
   // --- Helm repositories (cluster-agnostic, served by jhelm-rest) ---
   helmRepos: () => getJson<{ name: string; url: string }[]>('/api/v1/helm/repos'),
@@ -246,39 +260,39 @@ export const api = {
   helmValuesDelete: (name: string) => deleteReq(`/api/v1/helm/values/${encodeURIComponent(name)}`),
   helmReleaseValues: (cluster: string, namespace: string, name: string) =>
     getText(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/values`,
+      `${helmReleaseUrl(cluster, namespace, name)}/values`,
     ),
   helmHistory: (cluster: string, namespace: string, name: string) =>
     getJson<HelmRelease[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/history`,
+      `${helmReleaseUrl(cluster, namespace, name)}/history`,
     ),
   helmReleases: (cluster: string, namespace?: string) =>
     getJson<HelmRelease[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases` +
-        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+      `${clusterBase(cluster)}/helm/releases` +
+        nsQuery(namespace),
     ),
   objectEvents: (cluster: string, kind: string, name: string, namespace?: string) => {
     const p = new URLSearchParams({ kind, name });
     if (namespace) {
       p.set('namespace', namespace);
     }
-    return getJson<EventSummary[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/events?${p.toString()}`);
+    return getJson<EventSummary[]>(`${clusterBase(cluster)}/events?${p.toString()}`);
   },
   resources: (cluster: string, resourceId: string, namespace?: string) =>
     getJson<ResourceRow[]>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}` +
-        (namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''),
+      `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}` +
+        nsQuery(namespace),
     ),
   yaml: (cluster: string, resourceId: string, name: string, namespace?: string) =>
     getText(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/yaml` +
+      `${clusterBase(cluster)}/yaml` +
         `?resource=${encodeURIComponent(resourceId)}&name=${encodeURIComponent(name)}` +
         (namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''),
     ),
 
   // --- Mutating actions (HTTP Basic auth required) ---
   apply: (cluster: string, manifest: string) =>
-    postBody<ResourceRow>(`/api/v1/clusters/${encodeURIComponent(cluster)}/apply`, manifest, 'application/yaml'),
+    postBody<ResourceRow>(`${clusterBase(cluster)}/apply`, manifest, 'application/yaml'),
   del: (cluster: string, resourceId: string, namespace: string, name: string, force = false) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'delete') + (force ? '?force=true' : '')),
   scale: (cluster: string, resourceId: string, namespace: string, name: string, replicas: number) =>
@@ -292,33 +306,33 @@ export const api = {
   rollback: (cluster: string, resourceId: string, namespace: string, name: string) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'rollback')),
   drain: (cluster: string, name: string) =>
-    postJson<ActionResult>(`/api/v1/clusters/${encodeURIComponent(cluster)}/nodes/${encodeURIComponent(name)}/drain`),
+    postJson<ActionResult>(`${clusterBase(cluster)}/nodes/${encodeURIComponent(name)}/drain`),
   portForwards: (cluster: string) =>
-    getJson<PortForward[]>(`/api/v1/clusters/${encodeURIComponent(cluster)}/port-forwards`),
+    getJson<PortForward[]>(`${clusterBase(cluster)}/port-forwards`),
   startPortForward: (
     cluster: string,
     body: { kind: string; namespace: string; name: string; remotePort: number; localPort?: number },
   ) =>
     postBody<PortForward>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/port-forwards`,
+      `${clusterBase(cluster)}/port-forwards`,
       JSON.stringify(body),
       'application/json',
     ),
   stopPortForward: (cluster: string, id: string) =>
     postJson<ActionResult>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/port-forwards/${encodeURIComponent(id)}/stop`,
+      `${clusterBase(cluster)}/port-forwards/${encodeURIComponent(id)}/stop`,
     ),
   cordon: (cluster: string, name: string) =>
-    postJson<ActionResult>(`/api/v1/clusters/${encodeURIComponent(cluster)}/nodes/${encodeURIComponent(name)}/cordon`),
+    postJson<ActionResult>(`${clusterBase(cluster)}/nodes/${encodeURIComponent(name)}/cordon`),
   uncordon: (cluster: string, name: string) =>
     postJson<ActionResult>(
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/nodes/${encodeURIComponent(name)}/uncordon`,
+      `${clusterBase(cluster)}/nodes/${encodeURIComponent(name)}/uncordon`,
     ),
 };
 
 function actionUrl(cluster: string, resourceId: string, namespace: string, name: string, action: string): string {
   return (
-    `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(resourceId)}` +
+    `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}` +
     `/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/${action}`
   );
 }

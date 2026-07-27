@@ -180,7 +180,7 @@ public class DashboardController {
 			case "uncordon" -> resources.setUnschedulable(clusterId, name, false);
 			default -> throw new IllegalArgumentException("Unknown action: " + action);
 		}
-		audit.record(clusterId, action, descriptor.kind() + "/" + namespace + "/" + name);
+		audit.record(clusterId, action, AuditService.ref(descriptor.kind(), namespace, name));
 		if ("delete".equals(action)) {
 			String query = (namespace != null && !namespace.isBlank()) ? "?namespace=" + namespace : "";
 			return "redirect:/clusters/" + clusterId + "/r/" + resource + query;
@@ -193,7 +193,7 @@ public class DashboardController {
 	public String apply(@PathVariable String clusterId, @RequestParam String manifest, @RequestParam String resource,
 			@RequestParam(required = false) String namespace) {
 		ResourceSummary applied = resources.apply(clusterId, manifest);
-		audit.record(clusterId, "apply", applied.kind() + "/" + applied.namespace() + "/" + applied.name());
+		audit.record(clusterId, "apply", AuditService.ref(applied.kind(), applied.namespace(), applied.name()));
 		String query = (namespace != null && !namespace.isBlank()) ? "?namespace=" + namespace : "";
 		return "redirect:/clusters/" + clusterId + "/r/" + resource + query;
 	}

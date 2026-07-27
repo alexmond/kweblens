@@ -30,6 +30,14 @@ public class AuditService {
 	// (a brief overshoot under heavy concurrency is fine for an audit history).
 	private final Deque<AuditEntry> entries = new ConcurrentLinkedDeque<>();
 
+	/**
+	 * Format an audit target as {@code kind/namespace/name} — the convention write
+	 * endpoints use.
+	 */
+	public static String ref(String kind, String namespace, String name) {
+		return kind + "/" + namespace + "/" + name;
+	}
+
 	/** Record a write against a cluster resource by the current authenticated user. */
 	public void record(String clusterId, String action, String target) {
 		String user = currentUser();
