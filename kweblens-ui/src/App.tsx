@@ -687,7 +687,6 @@ function Sidebar(props: {
             onToggleFavorite={onToggleFavorite}
           />
         )}
-        <AppFooter />
       </aside>
     </>
   );
@@ -1352,6 +1351,8 @@ function AppInner() {
         )}
       </div>
 
+      <AppFooter />
+
       <AppModals
         cluster={cluster}
         showLogin={showLogin}
@@ -1475,15 +1476,15 @@ function AppFooter() {
   const version = info?.build?.version;
   const built = info?.build?.time;
   return (
-    <div className="nav-footer">
+    <footer className="app-footer">
       <a className="repo-link" href="https://github.com/alexmond/kweblens" target="_blank" rel="noreferrer">
         github.com/alexmond/kweblens ↗
       </a>
-      <div className="ver-line" title={built ? `Built ${built}` : undefined}>
+      <span className="ver-line" title={built ? `Built ${built}` : undefined}>
         {version ? `v${version}` : 'dev'}
         {built ? ` · built ${new Date(built).toLocaleString()}` : ''}
-      </div>
-    </div>
+      </span>
+    </footer>
   );
 }
 

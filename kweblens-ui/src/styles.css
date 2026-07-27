@@ -1889,24 +1889,30 @@ body.dragging {
 }
 
 /* Version / repo / build-time footer at the bottom of the left nav. */
-.nav-footer {
-  margin-top: 16px;
-  padding-top: 10px;
+/* Page-wide footer bar — spans below the sidebar/content/drawer body. */
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 14px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  background: var(--bar-bg);
   color: var(--muted);
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1;
 }
-.nav-footer .repo-link {
+.app-footer .repo-link {
   color: var(--accent);
   text-decoration: none;
-  word-break: break-all;
 }
-.nav-footer .repo-link:hover {
+.app-footer .repo-link:hover {
   text-decoration: underline;
 }
-.nav-footer .ver-line {
-  margin-top: 2px;
+.app-footer .ver-line {
+  white-space: nowrap;
 }
 
 /* Minimized (collapsed) floating window — just its title bar. */
