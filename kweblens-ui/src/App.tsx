@@ -476,9 +476,21 @@ function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
   const helm: NavCategory = {
     label: 'Helm',
     icon: 'bi-hexagon',
-    items: [{ id: 'helm:home', label: 'Helm', kind: '', namespaced: false }],
+    items: [
+      { id: 'helm:charts', label: 'Charts', kind: '', namespaced: false },
+      { id: 'helm:releases', label: 'Releases', kind: '', namespaced: false },
+      { id: 'helm:repositories', label: 'Repositories', kind: '', namespaced: false },
+    ],
   };
-  return [...withOverview, helm];
+  // Place Helm right after the Cluster category (its three tabs are now nav sub-items).
+  const result: NavCategory[] = [];
+  for (const c of withOverview) {
+    result.push(c);
+    if (c.label === 'Cluster') {
+      result.push(helm);
+    }
+  }
+  return result;
 }
 
 export function App() {
@@ -486,6 +498,7 @@ export function App() {
   const [cluster, setCluster] = useState<string | null>(null);
   const [nav, setNav] = useState<NavCategory[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [helmCounts, setHelmCounts] = useState<Record<string, number>>({});
   const [favorites, setFavorites] = useState<string[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [namespace, setNamespace] = useState<string | null>(null);
@@ -647,6 +660,39 @@ export function App() {
       cancelled = true;
     };
   }, [cluster, namespace, helmScope, nav]);
+
+  // Counters for the Helm nav sub-items (releases / repositories / charts). Charts can be
+  // slow to warm; allSettled keeps the others working and the count appears once ready.
+  useEffect(() => {
+    if (!cluster) {
+      setHelmCounts({});
+      return;
+    }
+    let cancelled = false;
+    Promise.allSettled([
+      api.helmReleases(cluster).then((r) => r.length),
+      api.helmRepos().then((r) => r.length),
+      api.helmCharts(cluster).then((r) => r.length),
+    ]).then(([releases, repos, charts]) => {
+      if (cancelled) {
+        return;
+      }
+      const c: Record<string, number> = {};
+      if (releases.status === 'fulfilled') {
+        c['helm:releases'] = releases.value;
+      }
+      if (repos.status === 'fulfilled') {
+        c['helm:repositories'] = repos.value;
+      }
+      if (charts.status === 'fulfilled') {
+        c['helm:charts'] = charts.value;
+      }
+      setHelmCounts(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cluster]);
 
   // Fetch the selected kind's raw objects on kind/namespace change.
   useEffect(() => {
@@ -1040,7 +1086,7 @@ export function App() {
   // From a resource's "Managed By: Helm" link → open the owning release's Resources view.
   const navigateToHelmRelease = (namespace: string, name: string) => {
     setDetail(null);
-    setSelected({ id: 'helm:home', label: 'Helm', kind: '', namespaced: false });
+    setSelected({ id: 'helm:releases', label: 'Releases', kind: '', namespaced: false });
     setHelmTarget({ namespace, name });
   };
 
@@ -1193,7 +1239,7 @@ export function App() {
           {cluster && (
             <NavTree
               categories={nav}
-              counts={counts}
+              counts={{ ...counts, ...helmCounts }}
               favorites={favorites}
               selected={selected?.id ?? null}
               onSelect={setSelected}
@@ -1218,6 +1264,13 @@ export function App() {
           {cluster && selected?.id?.startsWith('helm:') && (
             <HelmView
               cluster={cluster}
+              view={
+                selected.id === 'helm:charts'
+                  ? 'charts'
+                  : selected.id === 'helm:repositories'
+                    ? 'repositories'
+                    : 'releases'
+              }
               authed={!!authUser}
               onNavigate={navigateToKind}
               openResources={helmTarget}
@@ -3438,6 +3491,7 @@ type HelmAction =
 
 function HelmView(props: {
   cluster: string;
+  view: 'charts' | 'releases' | 'repositories';
   authed: boolean;
   onNavigate: (kind: string, ns?: string) => void;
   openResources?: { namespace: string; name: string } | null;
@@ -3445,8 +3499,7 @@ function HelmView(props: {
   onRequireAuth: () => void;
   onAuthExpired: () => void;
 }) {
-  const { cluster, authed, onNavigate, openResources, onResourcesConsumed, onRequireAuth, onAuthExpired } = props;
-  const [tab, setTab] = useState<'charts' | 'releases' | 'repositories'>('releases');
+  const { cluster, view, authed, onNavigate, openResources, onResourcesConsumed, onRequireAuth, onAuthExpired } = props;
   const [action, setAction] = useState<HelmAction | null>(null);
   const [resourcesFor, setResourcesFor] = useState<{ namespace: string; name: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -3456,31 +3509,20 @@ function HelmView(props: {
   // Deep-linked from a resource's "Managed By: Helm" — open that release's resources.
   useEffect(() => {
     if (openResources) {
-      setTab('releases');
       setResourcesFor(openResources);
       onResourcesConsumed?.();
     }
   }, [openResources, onResourcesConsumed]);
 
+  const title = view === 'charts' ? 'Helm · Charts' : view === 'repositories' ? 'Helm · Repositories' : 'Helm · Releases';
   return (
     <div className="overview">
       <div className="content-head">
-        <h1>Helm</h1>
+        <h1>{title}</h1>
       </div>
-      <div className="tabs">
-        <button className={'tab' + (tab === 'charts' ? ' active' : '')} onClick={() => setTab('charts')}>
-          Charts
-        </button>
-        <button className={'tab' + (tab === 'releases' ? ' active' : '')} onClick={() => setTab('releases')}>
-          Releases
-        </button>
-        <button className={'tab' + (tab === 'repositories' ? ' active' : '')} onClick={() => setTab('repositories')}>
-          Repositories
-        </button>
-      </div>
-      {tab === 'charts' ? (
+      {view === 'charts' ? (
         <HelmCharts cluster={cluster} authed={authed} onAction={onAction} />
-      ) : tab === 'repositories' ? (
+      ) : view === 'repositories' ? (
         <HelmRepos authed={authed} onRequireAuth={onRequireAuth} onAuthExpired={onAuthExpired} />
       ) : (
         <HelmReleases
@@ -3498,7 +3540,6 @@ function HelmView(props: {
           onClose={() => setAction(null)}
           onApplied={() => {
             setAction(null);
-            setTab('releases');
             setRefreshKey((k) => k + 1);
           }}
           onAuthExpired={onAuthExpired}

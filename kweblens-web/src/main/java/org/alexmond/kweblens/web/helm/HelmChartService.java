@@ -8,15 +8,21 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.zip.GZIPInputStream;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -24,40 +30,70 @@ import org.springframework.web.client.RestClient;
 /**
  * The charts browser: lists charts from the configured HTTP chart repositories
  * ({@link HelmProperties}) by fetching each repo's {@code index.yaml}. Only the newest
- * version of each chart is surfaced (as {@code helm search repo} does). Each repo's index
- * is cached for {@link HelmProperties#getIndexCacheSeconds()} to avoid refetching on
- * every request.
+ * version of each chart is surfaced (as {@code helm search repo} does).
  *
  * <p>
- * Installing a chart (a future slice) pulls and renders it through jhelm; browsing only
- * needs the repository index, which is a static document, so it is fetched directly.
+ * Repo indexes are large (tens of MB for prometheus-community/bitnami), so fetching them
+ * must never block a request for long: indexes are cached per repo, fetched across repos
+ * in parallel, served <strong>stale-while-revalidating</strong> (an expired cache is
+ * returned immediately and refreshed in the background), and warmed once on startup. That
+ * keeps the {@code /helm/charts} endpoint fast instead of timing out on a cold fetch.
  */
 @Slf4j
 @Service
 public class HelmChartService {
 
-	private final HelmProperties properties;
-
-	private final RestClient restClient = RestClient.builder().build();
-
 	/** Repository indexes are large (tens of MB); lift SnakeYAML's default 3 MB cap. */
 	private static final int MAX_INDEX_CODE_POINTS = 64 * 1024 * 1024;
 
+	private final HelmProperties properties;
+
+	private final RestClient restClient;
+
 	private final ConcurrentMap<String, Cached> cache = new ConcurrentHashMap<>();
+
+	/** Repos currently being refreshed in the background, so we don't stack refreshes. */
+	private final Set<String> refreshing = ConcurrentHashMap.newKeySet();
+
+	private final ExecutorService refreshExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
 	public HelmChartService(HelmProperties properties) {
 		this.properties = properties;
+		// Bound each index fetch so one slow/unreachable repo can't hang the endpoint.
+		SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+		factory.setConnectTimeout(5_000);
+		factory.setReadTimeout(15_000);
+		this.restClient = RestClient.builder().requestFactory(factory).build();
+	}
+
+	/** Warm the cache once at startup so the first charts request is already fast. */
+	@PostConstruct
+	void warm() {
+		refreshExecutor.submit(() -> {
+			try {
+				listCharts(null);
+			}
+			catch (RuntimeException ex) {
+				log.debug("Helm charts warm-up skipped: {}", ex.getMessage());
+			}
+		});
+	}
+
+	@PreDestroy
+	void shutdown() {
+		refreshExecutor.shutdownNow();
 	}
 
 	/**
 	 * All charts across the configured repos, optionally filtered by a case-insensitive
-	 * query.
+	 * query. Repos are read in parallel; a cached index is used (and refreshed in the
+	 * background when stale) so the call does not block on slow remote fetches.
 	 */
 	public List<HelmChartSummary> listCharts(String query) {
-		List<HelmChartSummary> all = new ArrayList<>();
-		for (HelmProperties.Repository repo : properties.getRepositories()) {
-			all.addAll(chartsFor(repo));
-		}
+		List<HelmChartSummary> all = properties.getRepositories()
+			.parallelStream()
+			.flatMap((repo) -> chartsFor(repo).stream())
+			.toList();
 		String q = (query != null) ? query.trim().toLowerCase(Locale.ROOT) : "";
 		return all.stream()
 			.filter((chart) -> q.isEmpty() || matches(chart, q))
@@ -75,12 +111,34 @@ public class HelmChartService {
 			return List.of();
 		}
 		Cached cached = cache.get(repo.getName());
-		if (cached != null && cached.expiry > now()) {
-			return cached.charts;
+		if (cached != null) {
+			if (cached.expiry() <= now()) {
+				refreshAsync(repo);
+			}
+			return cached.charts();
 		}
+		// Cold cache: fetch now (callers run this per-repo in parallel).
 		List<HelmChartSummary> charts = fetch(repo);
-		cache.put(repo.getName(), new Cached(charts, now() + properties.getIndexCacheSeconds() * 1000L));
+		cache.put(repo.getName(), new Cached(charts, now() + ttlMillis()));
 		return charts;
+	}
+
+	private void refreshAsync(HelmProperties.Repository repo) {
+		if (!refreshing.add(repo.getName())) {
+			return;
+		}
+		refreshExecutor.submit(() -> {
+			try {
+				cache.put(repo.getName(), new Cached(fetch(repo), now() + ttlMillis()));
+			}
+			finally {
+				refreshing.remove(repo.getName());
+			}
+		});
+	}
+
+	private long ttlMillis() {
+		return properties.getIndexCacheSeconds() * 1000L;
 	}
 
 	private List<HelmChartSummary> fetch(HelmProperties.Repository repo) {
