@@ -2,7 +2,7 @@ import type { FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 're
 import { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { ApiError, api } from './api';
+import { ApiError, api, clusterBase } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
 import { age, columnsFor, printerColumnDefs, readyTone, statusTone } from './columns';
@@ -273,7 +273,7 @@ type RowActionCtx = {
   containers: string[];
   container?: string;
   dialog: DialogApi;
-  openDock: (kind: 'terminal' | 'logs', ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
   setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
   setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean }) => void;
   setError: (msg: string) => void;
@@ -940,7 +940,7 @@ function AppInner() {
   const dockSeq = useRef(0);
 
   const openDock = (
-    kind: 'terminal' | 'logs',
+    kind: DockKind,
     namespace: string,
     pod: string,
     containers: string[],
@@ -1230,7 +1230,7 @@ function AppInner() {
     }
     const ns = selected.namespaced ? namespace ?? undefined : undefined;
     const url =
-      `/api/v1/clusters/${encodeURIComponent(cluster)}/resources/${encodeURIComponent(selected.id)}/objects/watch` +
+      `${clusterBase(cluster)}/resources/${encodeURIComponent(selected.id)}/objects/watch` +
       (ns ? `?namespace=${encodeURIComponent(ns)}` : '');
     const es = new EventSource(url);
     const upsert = (e: MessageEvent) => {
@@ -1823,10 +1823,13 @@ function AppInner() {
   );
 }
 
+/** A dock pane is either an exec terminal or a log follow. */
+type DockKind = 'terminal' | 'logs';
+
 /** One open dock session — an exec terminal or a log follow, shown as a tab. */
 type DockSession = {
   id: string;
-  kind: 'terminal' | 'logs';
+  kind: DockKind;
   namespace: string;
   pod: string;
   containers: string[];
@@ -2171,7 +2174,7 @@ function LogsSession(props: { cluster: string; session: DockSession }) {
     let cancelled = false;
     setLines([]);
     const enc = encodeURIComponent;
-    const base = `/api/v1/clusters/${enc(cluster)}/pods/${enc(namespace)}/${enc(pod)}/log`;
+    const base = `${clusterBase(cluster)}/pods/${enc(namespace)}/${enc(pod)}/log`;
     const cq = container ? `container=${enc(container)}&` : '';
     // Tail snapshot, then follow via SSE.
     fetch(`${base}?${cq}tailLines=500`)

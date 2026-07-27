@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.alexmond.kweblens.event.EventService;
 import org.alexmond.kweblens.event.EventSummary;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
+import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.resource.ResourceService;
 
 /**
@@ -31,7 +32,7 @@ import org.alexmond.kweblens.resource.ResourceService;
 @RequiredArgsConstructor
 public class DiagnoseService {
 
-	private static final ResourceDescriptor PODS = ResourceDescriptor.coreNamespaced("pods", "Pods", "Pod", "pods");
+	private static final ResourceDescriptor PODS = WellKnownKinds.PODS;
 
 	private static final Set<String> HEALTHY_PHASES = Set.of("Running", "Succeeded");
 

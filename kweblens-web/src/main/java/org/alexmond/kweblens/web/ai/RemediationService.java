@@ -61,7 +61,7 @@ public class RemediationService {
 			throw new IllegalArgumentException("Unsupported remediation action: " + action);
 		}
 		clusters.require(clusterId).pods().inNamespace(namespace).withName(target).delete();
-		audit.record(clusterId, RESTART_POD, "Pod/" + namespace + "/" + target);
+		audit.record(clusterId, RESTART_POD, AuditService.ref("Pod", namespace, target));
 		return "Deleted pod '" + target + "'; its controller will recreate it.";
 	}
 

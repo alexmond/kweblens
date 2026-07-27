@@ -38,7 +38,7 @@ public class PortForwardApiController {
 	public PortForwardInfo start(@PathVariable String clusterId, @RequestBody StartRequest request) {
 		PortForwardInfo info = portForwards.start(clusterId, request.kind(), request.namespace(), request.name(),
 				request.remotePort(), request.localPort());
-		audit.record(clusterId, "port-forward", info.kind() + "/" + info.namespace() + "/" + info.name() + " "
+		audit.record(clusterId, "port-forward", AuditService.ref(info.kind(), info.namespace(), info.name()) + " "
 				+ info.remotePort() + "->" + info.localPort());
 		return info;
 	}

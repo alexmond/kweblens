@@ -46,7 +46,7 @@ public class YamlApiController {
 			consumes = { MediaType.TEXT_PLAIN_VALUE, "application/yaml" })
 	public ResourceSummary apply(@PathVariable String clusterId, @RequestBody String manifest) {
 		ResourceSummary applied = resources.apply(clusterId, manifest);
-		audit.record(clusterId, "apply", applied.kind() + "/" + applied.namespace() + "/" + applied.name());
+		audit.record(clusterId, "apply", AuditService.ref(applied.kind(), applied.namespace(), applied.name()));
 		return applied;
 	}
 

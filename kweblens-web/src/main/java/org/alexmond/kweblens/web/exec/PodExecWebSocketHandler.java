@@ -56,7 +56,7 @@ public class PodExecWebSocketHandler extends TextWebSocketHandler {
 			ExecWatch watch = attach ? execService.attach(cluster, namespace, pod, container, output, null)
 					: execService.exec(cluster, namespace, pod, container, output, null);
 			watches.put(session.getId(), watch);
-			audit.record(cluster, attach ? "attach" : "exec", "Pod/" + namespace + "/" + pod);
+			audit.record(cluster, attach ? "attach" : "exec", AuditService.ref("Pod", namespace, pod));
 		}
 		catch (RuntimeException ex) {
 			log.warn("Could not open {} session for {}/{}: {}", attach ? "attach" : "exec", namespace, pod,
