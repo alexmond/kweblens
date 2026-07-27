@@ -34,13 +34,16 @@ public class NavCatalog {
 							ResourceDescriptor.coreNamespaced("events", "Events", "Event", "events"))),
 			new NavCategory("Workloads", "bi-box-seam", List.of(
 					ResourceDescriptor.coreNamespaced("pods", "Pods", "Pod", "pods"),
-					ResourceDescriptor.namespaced("deployments", "Deployments", "Deployment", APPS, "v1",
-							"deployments"),
-					ResourceDescriptor.namespaced("statefulsets", "Stateful Sets", "StatefulSet", APPS, "v1",
-							"statefulsets"),
-					ResourceDescriptor.namespaced("daemonsets", "Daemon Sets", "DaemonSet", APPS, "v1", "daemonsets"),
-					ResourceDescriptor.namespaced("replicasets", "Replica Sets", "ReplicaSet", APPS, "v1",
-							"replicasets"),
+					ResourceDescriptor.namespaced("deployments", "Deployments", "Deployment", APPS, "v1", "deployments")
+						.asExpandable(),
+					ResourceDescriptor
+						.namespaced("statefulsets", "Stateful Sets", "StatefulSet", APPS, "v1", "statefulsets")
+						.asExpandable(),
+					ResourceDescriptor.namespaced("daemonsets", "Daemon Sets", "DaemonSet", APPS, "v1", "daemonsets")
+						.asExpandable(),
+					ResourceDescriptor
+						.namespaced("replicasets", "Replica Sets", "ReplicaSet", APPS, "v1", "replicasets")
+						.asExpandable(),
 					ResourceDescriptor.namespaced("jobs", "Jobs", "Job", BATCH, "v1", "jobs"),
 					ResourceDescriptor.namespaced("cronjobs", "Cron Jobs", "CronJob", BATCH, "v1", "cronjobs"),
 					ResourceDescriptor.coreNamespaced("replicationcontrollers", "Replication Controllers",
