@@ -423,21 +423,24 @@ const ROW_ACTIONS: RowActionDef[] = [
     label: 'Trigger',
     section: 'main',
     applies: (c) => c.kind === 'CronJob',
-    run: (c) => c.confirmRun(() => api.trigger(c.cluster, c.resourceId, c.ns, c.name), `Trigger a manual run of ${c.name}?`),
+    run: (c) =>
+      c.confirmRun(() => api.trigger(c.cluster, c.resourceId, c.ns, c.name), `Trigger a manual run of ${c.name}?`),
   },
   {
     id: 'suspend',
     label: 'Suspend',
     section: 'main',
     applies: (c) => (c.kind === 'CronJob' || c.kind === 'Job') && !c.suspended,
-    run: (c) => c.confirmRun(() => api.suspend(c.cluster, c.resourceId, c.ns, c.name, true), `Suspend ${c.kind} ${c.name}?`),
+    run: (c) =>
+      c.confirmRun(() => api.suspend(c.cluster, c.resourceId, c.ns, c.name, true), `Suspend ${c.kind} ${c.name}?`),
   },
   {
     id: 'resume',
     label: 'Resume',
     section: 'main',
     applies: (c) => (c.kind === 'CronJob' || c.kind === 'Job') && c.suspended,
-    run: (c) => c.confirmRun(() => api.suspend(c.cluster, c.resourceId, c.ns, c.name, false), `Resume ${c.kind} ${c.name}?`),
+    run: (c) =>
+      c.confirmRun(() => api.suspend(c.cluster, c.resourceId, c.ns, c.name, false), `Resume ${c.kind} ${c.name}?`),
   },
   {
     id: 'cordon',
@@ -459,7 +462,8 @@ const ROW_ACTIONS: RowActionDef[] = [
     danger: true,
     section: 'main',
     applies: (c) => c.kind === 'Node',
-    run: (c) => c.confirmRun(() => api.drain(c.cluster, c.name), `Drain ${c.name}? This cordons it and evicts its pods.`),
+    run: (c) =>
+      c.confirmRun(() => api.drain(c.cluster, c.name), `Drain ${c.name}? This cordons it and evicts its pods.`),
   },
   {
     id: 'edit',
@@ -762,10 +766,16 @@ function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
       return { ...c, items: [{ id: NAV.overviewCluster, label: 'Overview', kind: '', namespaced: false }, ...c.items] };
     }
     if (c.label === CATEGORY.workloads) {
-      return { ...c, items: [{ id: NAV.overviewWorkloads, label: 'Overview', kind: '', namespaced: false }, ...c.items] };
+      return {
+        ...c,
+        items: [{ id: NAV.overviewWorkloads, label: 'Overview', kind: '', namespaced: false }, ...c.items],
+      };
     }
     if (c.label === CATEGORY.network) {
-      return { ...c, items: [...c.items, { id: NAV.portForwards, label: 'Port Forwards', kind: '', namespaced: false }] };
+      return {
+        ...c,
+        items: [...c.items, { id: NAV.portForwards, label: 'Port Forwards', kind: '', namespaced: false }],
+      };
     }
     return c;
   });
@@ -839,7 +849,7 @@ function DialogProvider(props: { children: ReactNode }) {
 function DialogHost(props: { state: DialogState; onClose: () => void }) {
   const { state, onClose } = props;
   const isPrompt = state.kind === 'prompt';
-  const [value, setValue] = useState(isPrompt ? (state.opts as PromptOpts).initial ?? '' : '');
+  const [value, setValue] = useState(isPrompt ? ((state.opts as PromptOpts).initial ?? '') : '');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -958,13 +968,7 @@ function AppInner() {
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const dockSeq = useRef(0);
 
-  const openDock = (
-    kind: DockKind,
-    namespace: string,
-    pod: string,
-    containers: string[],
-    attach = false,
-  ) => {
+  const openDock = (kind: DockKind, namespace: string, pod: string, containers: string[], attach = false) => {
     dockSeq.current += 1;
     const id = `${kind}:${namespace}/${pod}#${dockSeq.current}`;
     setDockSessions((prev) => [...prev, { id, kind, namespace, pod, containers, attach }]);
@@ -1134,7 +1138,7 @@ function AppInner() {
       setObjects([]);
       return;
     }
-    const ns = selected.namespaced ? namespace ?? undefined : undefined;
+    const ns = selected.namespaced ? (namespace ?? undefined) : undefined;
     let cancelled = false;
     setDetail(null);
     setQuery('');
@@ -1202,7 +1206,7 @@ function AppInner() {
       const p =
         selected.id === 'nodes'
           ? api.nodeMetrics(cluster)
-          : api.podMetrics(cluster, selected.namespaced ? namespace ?? undefined : undefined);
+          : api.podMetrics(cluster, selected.namespaced ? (namespace ?? undefined) : undefined);
       p.then((list) => {
         if (cancelled) {
           return;
@@ -1247,7 +1251,7 @@ function AppInner() {
     if (!cluster || !selected || isSynthetic(selected.id)) {
       return;
     }
-    const ns = selected.namespaced ? namespace ?? undefined : undefined;
+    const ns = selected.namespaced ? (namespace ?? undefined) : undefined;
     const url =
       `${clusterBase(cluster)}/resources/${encodeURIComponent(selected.id)}/objects/watch` +
       (ns ? `?namespace=${encodeURIComponent(ns)}` : '');
@@ -1300,7 +1304,8 @@ function AppInner() {
   // show used/allocatable with a proportional bar; Pods show the raw usage value.
   const tableCols = useMemo<ColumnDef[]>(() => {
     if (selected?.id === 'nodes') {
-      const alloc = (o: KubeObject) => ((o.status as Record<string, unknown>)?.allocatable as Record<string, string>) ?? {};
+      const alloc = (o: KubeObject) =>
+        ((o.status as Record<string, unknown>)?.allocatable as Record<string, string>) ?? {};
       return [
         ...cols,
         {
@@ -1333,11 +1338,7 @@ function AppInner() {
               return '—';
             }
             return (
-              <UsageBar
-                fraction={total ? used / total : 0}
-                color="#c026a8"
-                text={`${gib(used)} / ${gib(total)}`}
-              />
+              <UsageBar fraction={total ? used / total : 0} color="#c026a8" text={`${gib(used)} / ${gib(total)}`} />
             );
           },
         },
@@ -1366,7 +1367,11 @@ function AppInner() {
         key: 'containers',
         header: 'Containers',
         sortText: (o) =>
-          String((((o.status as Record<string, unknown>)?.containerStatuses as { ready?: boolean }[]) ?? []).filter((c) => c.ready).length),
+          String(
+            (((o.status as Record<string, unknown>)?.containerStatuses as { ready?: boolean }[]) ?? []).filter(
+              (c) => c.ready,
+            ).length,
+          ),
         render: (o) => <ContainerSquares obj={o} />,
       };
       const withContainers: ColumnDef[] = [];
@@ -1413,8 +1418,8 @@ function AppInner() {
     if (!cluster) {
       return [];
     }
-    const sel = ((obj.spec as Record<string, unknown>)?.selector as { matchLabels?: Record<string, string> })
-      ?.matchLabels ?? {};
+    const sel =
+      ((obj.spec as Record<string, unknown>)?.selector as { matchLabels?: Record<string, string> })?.matchLabels ?? {};
     const keys = Object.keys(sel);
     if (keys.length === 0) {
       return [];
@@ -1647,115 +1652,115 @@ function AppInner() {
 
         <div className="content-col">
           <main className="content">
-          {error && <div className="error">{error}</div>}
-          {(!selected || selected.id === NAV.overviewCluster) && !error && cluster && (
-            <ClusterOverview
-              cluster={cluster}
-              name={activeCluster?.name ?? cluster}
-              masterUrl={activeCluster?.masterUrl}
-              namespaceCount={namespaces.length}
-            />
-          )}
-          {cluster && selected?.id === NAV.overviewWorkloads && <WorkloadsOverview cluster={cluster} />}
-          {cluster && selected?.id !== undefined && HELM_VIEW_IDS.includes(selected.id) && (
-            <HelmView
-              cluster={cluster}
-              view={
-                selected.id === NAV.helmCharts
-                  ? 'charts'
-                  : selected.id === NAV.helmRepositories
-                    ? 'repositories'
-                    : 'releases'
-              }
-              authed={!!authUser}
-              onNavigate={navigateToKind}
-              openResources={helmTarget}
-              onResourcesConsumed={() => setHelmTarget(null)}
-              onRequireAuth={() => setShowLogin(true)}
-              onAuthExpired={() => {
-                auth.clear();
-                setAuthUser(null);
-              }}
-            />
-          )}
-          {cluster && selected?.id === NAV.portForwards && (
-            <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={() => setShowLogin(true)} />
-          )}
-          {selected && !isSynthetic(selected.id) && (
-            <>
-              <div className="content-head">
-                <h1>{selected.label}</h1>
-                <span className="count">
-                  {query ? `${filtered.length} of ${objects.length}` : `${objects.length} items`}
-                </span>
-                {live && (
-                  <span className="live" title="Live-updating (SSE watch)">
-                    <span className="dot" /> live
-                  </span>
-                )}
-                <input
-                  className="search"
-                  type="search"
-                  placeholder={`Search ${selected.label}…`}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-                <div className="spacer" />
-                <button
-                  className="btn create-btn"
-                  onClick={() => (authUser ? setShowCreate(true) : setShowLogin(true))}
-                >
-                  + Create
-                </button>
-                {!selected.namespaced && <span className="ns-note">Cluster-scoped</span>}
-                {tableCols.length > 0 && (
-                  <details className="cols-menu">
-                    <summary>Columns ▾</summary>
-                    <ul>
-                      {tableCols.map((c) => (
-                        <li key={c.key}>
-                          <label className="col-toggle">
-                            <input
-                              type="checkbox"
-                              checked={!hiddenCols.has(c.key)}
-                              onChange={() => toggleCol(c.key)}
-                            />
-                            {c.header}
-                          </label>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-              </div>
-              {selection.size > 0 && (
-                <div className="bulk-bar">
-                  <span>{selection.size} selected</span>
-                  <button className="btn danger" onClick={bulkDelete}>
-                    Delete
-                  </button>
-                  <button className="btn" onClick={() => setSelection(new Set())}>
-                    Clear
-                  </button>
-                </div>
-              )}
-              <ResourceTable
-                objects={filtered}
-                columns={visibleCols}
-                namespaced={selected.namespaced}
-                loading={loading}
-                selectedKey={detail ? objKey(detail.obj) : null}
-                selection={selection}
-                onToggleRow={toggleRow}
-                onToggleAll={toggleAll}
-                onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
-                onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
-                authed={authUser !== null}
-                onRowAction={(action, obj, container) => handleRowAction(selected.id, action, obj, container)}
-                fetchChildren={selected.expandable ? fetchWorkloadPods : undefined}
+            {error && <div className="error">{error}</div>}
+            {(!selected || selected.id === NAV.overviewCluster) && !error && cluster && (
+              <ClusterOverview
+                cluster={cluster}
+                name={activeCluster?.name ?? cluster}
+                masterUrl={activeCluster?.masterUrl}
+                namespaceCount={namespaces.length}
               />
-            </>
-          )}
+            )}
+            {cluster && selected?.id === NAV.overviewWorkloads && <WorkloadsOverview cluster={cluster} />}
+            {cluster && selected?.id !== undefined && HELM_VIEW_IDS.includes(selected.id) && (
+              <HelmView
+                cluster={cluster}
+                view={
+                  selected.id === NAV.helmCharts
+                    ? 'charts'
+                    : selected.id === NAV.helmRepositories
+                      ? 'repositories'
+                      : 'releases'
+                }
+                authed={!!authUser}
+                onNavigate={navigateToKind}
+                openResources={helmTarget}
+                onResourcesConsumed={() => setHelmTarget(null)}
+                onRequireAuth={() => setShowLogin(true)}
+                onAuthExpired={() => {
+                  auth.clear();
+                  setAuthUser(null);
+                }}
+              />
+            )}
+            {cluster && selected?.id === NAV.portForwards && (
+              <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={() => setShowLogin(true)} />
+            )}
+            {selected && !isSynthetic(selected.id) && (
+              <>
+                <div className="content-head">
+                  <h1>{selected.label}</h1>
+                  <span className="count">
+                    {query ? `${filtered.length} of ${objects.length}` : `${objects.length} items`}
+                  </span>
+                  {live && (
+                    <span className="live" title="Live-updating (SSE watch)">
+                      <span className="dot" /> live
+                    </span>
+                  )}
+                  <input
+                    className="search"
+                    type="search"
+                    placeholder={`Search ${selected.label}…`}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <div className="spacer" />
+                  <button
+                    className="btn create-btn"
+                    onClick={() => (authUser ? setShowCreate(true) : setShowLogin(true))}
+                  >
+                    + Create
+                  </button>
+                  {!selected.namespaced && <span className="ns-note">Cluster-scoped</span>}
+                  {tableCols.length > 0 && (
+                    <details className="cols-menu">
+                      <summary>Columns ▾</summary>
+                      <ul>
+                        {tableCols.map((c) => (
+                          <li key={c.key}>
+                            <label className="col-toggle">
+                              <input
+                                type="checkbox"
+                                checked={!hiddenCols.has(c.key)}
+                                onChange={() => toggleCol(c.key)}
+                              />
+                              {c.header}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+                {selection.size > 0 && (
+                  <div className="bulk-bar">
+                    <span>{selection.size} selected</span>
+                    <button className="btn danger" onClick={bulkDelete}>
+                      Delete
+                    </button>
+                    <button className="btn" onClick={() => setSelection(new Set())}>
+                      Clear
+                    </button>
+                  </div>
+                )}
+                <ResourceTable
+                  objects={filtered}
+                  columns={visibleCols}
+                  namespaced={selected.namespaced}
+                  loading={loading}
+                  selectedKey={detail ? objKey(detail.obj) : null}
+                  selection={selection}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAll}
+                  onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
+                  onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
+                  authed={authUser !== null}
+                  onRowAction={(action, obj, container) => handleRowAction(selected.id, action, obj, container)}
+                  fetchChildren={selected.expandable ? fetchWorkloadPods : undefined}
+                />
+              </>
+            )}
           </main>
           {cluster && dockSessions.length > 0 && (
             <DockArea
@@ -1818,7 +1823,6 @@ function AppInner() {
           }}
         />
       )}
-
 
       {cluster && forward && (
         <ForwardModal
@@ -2029,7 +2033,15 @@ function FloatingFrame(props: {
   const { session, onDock, onClose, setContentEl } = props;
   const [rect, setRect] = useState(session.rect ?? { x: 140, y: 140, w: 640, h: 340 });
   const [collapsed, setCollapsed] = useState(false);
-  const dragRef = useRef<{ resize: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number } | null>(null);
+  const dragRef = useRef<{
+    resize: boolean;
+    sx: number;
+    sy: number;
+    ox: number;
+    oy: number;
+    ow: number;
+    oh: number;
+  } | null>(null);
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -2291,7 +2303,12 @@ function CreateModal(props: { cluster: string; onClose: () => void; onAuthExpire
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <h2>Create from YAML</h2>
         <p className="modal-note">Server-side apply — paste or edit a manifest, then Apply.</p>
-        <textarea className="yaml-edit tall" value={draft} spellCheck={false} onChange={(e) => setDraft(e.target.value)} />
+        <textarea
+          className="yaml-edit tall"
+          value={draft}
+          spellCheck={false}
+          onChange={(e) => setDraft(e.target.value)}
+        />
         {msg && <div className={'act-msg' + (err ? ' err' : '')}>{msg}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
@@ -2520,8 +2537,20 @@ function ResourceTable(props: {
   onRowAction: (action: RowAction, obj: KubeObject, container?: string) => void;
   fetchChildren?: (obj: KubeObject) => Promise<KubeObject[]>;
 }) {
-  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick, onRowAction, fetchChildren } =
-    props;
+  const {
+    objects,
+    columns: cols,
+    namespaced,
+    loading,
+    selectedKey,
+    selection,
+    onToggleRow,
+    onToggleAll,
+    onOpen,
+    onNamespaceClick,
+    onRowAction,
+    fetchChildren,
+  } = props;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [children, setChildren] = useState<Record<string, KubeObject[] | null>>({});
   const toggleExpand = (o: KubeObject) => {
@@ -2633,70 +2662,67 @@ function ResourceTable(props: {
           const rowKey = objKey(o);
           const isExpanded = expanded.has(rowKey);
           const rows = [
-          <tr
-            key={rowKey}
-            className={
-              (objKey(o) === selectedKey ? 'row-active' : '') + (selection.has(objKey(o)) ? ' row-checked' : '')
-            }
-            onClick={() => onOpen(o)}
-          >
-            <td className="chk" onClick={(e) => e.stopPropagation()}>
-              <input
-                type="checkbox"
-                checked={selection.has(objKey(o))}
-                onChange={() => onToggleRow(objKey(o))}
-              />
-            </td>
-            <td className="name">
-              {fetchChildren && (
-                <button
-                  className="tree-toggle"
-                  title={isExpanded ? 'Collapse' : 'Show pods'}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleExpand(o);
-                  }}
-                >
-                  {isExpanded ? '▾' : '▸'}
-                </button>
-              )}
-              {objName(o)}
-            </td>
-            {showNs &&
-              (onNamespaceClick && objNs(o) ? (
-                <td>
+            <tr
+              key={rowKey}
+              className={
+                (objKey(o) === selectedKey ? 'row-active' : '') + (selection.has(objKey(o)) ? ' row-checked' : '')
+              }
+              onClick={() => onOpen(o)}
+            >
+              <td className="chk" onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={selection.has(objKey(o))} onChange={() => onToggleRow(objKey(o))} />
+              </td>
+              <td className="name">
+                {fetchChildren && (
                   <button
-                    className="cell-link"
+                    className="tree-toggle"
+                    title={isExpanded ? 'Collapse' : 'Show pods'}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onNamespaceClick(objNs(o) as string);
+                      toggleExpand(o);
                     }}
                   >
-                    {objNs(o)}
+                    {isExpanded ? '▾' : '▸'}
                   </button>
-                </td>
-              ) : (
-                <td>{objNs(o) ?? '—'}</td>
-              ))}
-            {cols.map((c) => {
-              const cell = c.render(o);
-              const text = typeof cell === 'string' ? cell : null;
-              // Tone keys off the stable column key (a code id), not the display header.
-              const tone = text === null ? '' : c.key === 'status' ? statusTone(text) : c.key === 'ready' ? readyTone(text) : '';
-              return (
-                <td key={c.key}>{tone ? <span className={'status-pill status-' + tone}>{text}</span> : cell}</td>
-              );
-            })}
-            {showAge && <td>{age(o.metadata?.creationTimestamp)}</td>}
-            <td className="rowmenu-cell" onClick={(e) => e.stopPropagation()}>
-              <RowMenu
-                kind={o.kind ?? ''}
-                suspended={Boolean((o.spec as Record<string, unknown>)?.suspend)}
-                containers={containerNames(o)}
-                onAction={(a, c) => onRowAction(a, o, c)}
-              />
-            </td>
-          </tr>,
+                )}
+                {objName(o)}
+              </td>
+              {showNs &&
+                (onNamespaceClick && objNs(o) ? (
+                  <td>
+                    <button
+                      className="cell-link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onNamespaceClick(objNs(o) as string);
+                      }}
+                    >
+                      {objNs(o)}
+                    </button>
+                  </td>
+                ) : (
+                  <td>{objNs(o) ?? '—'}</td>
+                ))}
+              {cols.map((c) => {
+                const cell = c.render(o);
+                const text = typeof cell === 'string' ? cell : null;
+                // Tone keys off the stable column key (a code id), not the display header.
+                const tone =
+                  text === null ? '' : c.key === 'status' ? statusTone(text) : c.key === 'ready' ? readyTone(text) : '';
+                return (
+                  <td key={c.key}>{tone ? <span className={'status-pill status-' + tone}>{text}</span> : cell}</td>
+                );
+              })}
+              {showAge && <td>{age(o.metadata?.creationTimestamp)}</td>}
+              <td className="rowmenu-cell" onClick={(e) => e.stopPropagation()}>
+                <RowMenu
+                  kind={o.kind ?? ''}
+                  suspended={Boolean((o.spec as Record<string, unknown>)?.suspend)}
+                  containers={containerNames(o)}
+                  onAction={(a, c) => onRowAction(a, o, c)}
+                />
+              </td>
+            </tr>,
           ];
           if (isExpanded) {
             const kids = children[rowKey];
@@ -2858,7 +2884,6 @@ function Detail(props: {
       setBusy(false);
     }
   };
-
 
   return (
     <div className="drawer" role="dialog" aria-label={`${kind} ${name}`}>
@@ -3037,8 +3062,7 @@ const ovMeta = (o: KubeObject): NonNullable<KubeObject['metadata']> => o.metadat
 const ovSpec = objSpec;
 const ovStatus = objStatus;
 const ovArr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
-const ovMap = (v: unknown): Record<string, string> =>
-  v && typeof v === 'object' ? (v as Record<string, string>) : {};
+const ovMap = (v: unknown): Record<string, string> => (v && typeof v === 'object' ? (v as Record<string, string>) : {});
 
 // A summary key/value row. `get` returns null/'' to hide the row.
 type OverviewField = { label: string; get: (c: OverviewCtx) => ReactNode | null; mono?: boolean };
@@ -3104,11 +3128,7 @@ const OVERVIEW_FIELDS: OverviewField[] = [
       return (
         <>
           <span className="helm-badge">Helm</span>{' '}
-          <button
-            className="cell-link"
-            title="Open this release's resources"
-            onClick={() => c.onHelmRelease(rns, rel)}
-          >
+          <button className="cell-link" title="Open this release's resources" onClick={() => c.onHelmRelease(rns, rel)}>
             {rel}
             {rns ? ` (${rns})` : ''}
           </button>
@@ -3147,7 +3167,8 @@ type OverviewSection = {
 // The service/workload selector (Service is flat; workloads nest under matchLabels).
 function ovSelectorEntries(o: KubeObject): [string, string][] {
   const raw = ovSpec(o).selector as Record<string, unknown> | undefined;
-  const sel = (raw?.matchLabels as Record<string, string> | undefined) ?? (raw as Record<string, string> | undefined) ?? {};
+  const sel =
+    (raw?.matchLabels as Record<string, string> | undefined) ?? (raw as Record<string, string> | undefined) ?? {};
   return Object.entries(sel).filter(([, v]) => typeof v === 'string') as [string, string][];
 }
 
@@ -3188,8 +3209,7 @@ const OVERVIEW_SECTIONS: OverviewSection[] = [
           .join(', ');
       const resources = (cc: Record<string, unknown>) => {
         const req = (cc.resources as Record<string, unknown> | undefined)?.requests as
-          | Record<string, string>
-          | undefined;
+          Record<string, string> | undefined;
         if (!req) {
           return '—';
         }
@@ -3558,7 +3578,7 @@ function Overview(props: {
 function EventsPane(props: { events: EventSummary[] | null; error: string | null }) {
   const { events, error } = props;
   const { sorted, sort, clickHeader } = useTableSort(events ?? [], 'age', (e, k) =>
-    k === 'age' ? ageToSeconds(e.age) : (e[k as keyof EventSummary] as string) ?? '',
+    k === 'age' ? ageToSeconds(e.age) : ((e[k as keyof EventSummary] as string) ?? ''),
   );
   if (error) {
     return <div className="error">{error}</div>;
@@ -3688,7 +3708,8 @@ function useTableSort<T>(rows: T[], initialKey: string, value: (row: T, key: str
     }
     return String(va).localeCompare(String(vb), undefined, { numeric: true }) * sort.dir;
   });
-  const clickHeader = (key: string) => setSort((prev) => (prev.key === key ? { key, dir: -prev.dir } : { key, dir: 1 }));
+  const clickHeader = (key: string) =>
+    setSort((prev) => (prev.key === key ? { key, dir: -prev.dir } : { key, dir: 1 }));
   return { sorted, sort, clickHeader };
 }
 
@@ -3881,13 +3902,7 @@ function ForwardModal(props: {
               ))}
             </select>
           ) : (
-            <input
-              type="number"
-              min={1}
-              value={remotePort}
-              onChange={(e) => setRemotePort(e.target.value)}
-              autoFocus
-            />
+            <input type="number" min={1} value={remotePort} onChange={(e) => setRemotePort(e.target.value)} autoFocus />
           )}
         </label>
         <label>
@@ -3947,7 +3962,8 @@ function HelmView(props: {
     }
   }, [openResources, onResourcesConsumed]);
 
-  const title = view === 'charts' ? 'Helm · Charts' : view === 'repositories' ? 'Helm · Repositories' : 'Helm · Releases';
+  const title =
+    view === 'charts' ? 'Helm · Charts' : view === 'repositories' ? 'Helm · Repositories' : 'Helm · Releases';
   return (
     <div className="overview">
       <div className="content-head">
@@ -4253,7 +4269,12 @@ function HelmReleases(props: {
                         label: 'Rollback',
                         disabled: r.revision <= 1,
                         onClick: () =>
-                          onAction({ mode: 'rollback', namespace: r.namespace, name: r.name, revision: r.revision - 1 }),
+                          onAction({
+                            mode: 'rollback',
+                            namespace: r.namespace,
+                            name: r.name,
+                            revision: r.revision - 1,
+                          }),
                       },
                       { label: 'Uninstall', danger: true, onClick: () => uninstall(r) },
                     ]}
@@ -4325,7 +4346,12 @@ function HelmRepos(props: { authed: boolean; onRequireAuth: () => void; onAuthEx
       return;
     }
     dialog
-      .confirm({ title: 'Remove repository', message: `Remove repository ${repo}?`, confirmLabel: 'Remove', danger: true })
+      .confirm({
+        title: 'Remove repository',
+        message: `Remove repository ${repo}?`,
+        confirmLabel: 'Remove',
+        danger: true,
+      })
       .then((ok) => {
         if (!ok) {
           return;
@@ -4691,7 +4717,8 @@ function HelmActionModal(props: {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const title = action.mode === 'install' ? 'Install chart' : action.mode === 'upgrade' ? 'Upgrade release' : 'Rollback release';
+  const title =
+    action.mode === 'install' ? 'Install chart' : action.mode === 'upgrade' ? 'Upgrade release' : 'Rollback release';
 
   const run = (dryRun: boolean) => {
     setBusy(true);
@@ -4766,7 +4793,10 @@ function HelmActionModal(props: {
         {action.mode === 'upgrade' && (
           <>
             {field('Release', <input value={`${action.namespace}/${action.name}`} readOnly />)}
-            {field('Repository', <input value={repository} placeholder="repo name" onChange={(e) => setRepository(e.target.value)} />)}
+            {field(
+              'Repository',
+              <input value={repository} placeholder="repo name" onChange={(e) => setRepository(e.target.value)} />,
+            )}
             {field('Chart', <input value={chart} onChange={(e) => setChart(e.target.value)} />)}
             {field('Version', <input value={version} onChange={(e) => setVersion(e.target.value)} />)}
           </>
@@ -4925,7 +4955,9 @@ function HelmActionModal(props: {
 
         {preview && (
           <div className="helm-preview">
-            <div className="preview-head">Rendered manifest (dry-run) — {preview.manifest ? '' : 'no manifest returned'}</div>
+            <div className="preview-head">
+              Rendered manifest (dry-run) — {preview.manifest ? '' : 'no manifest returned'}
+            </div>
             {preview.manifest && <pre>{preview.manifest}</pre>}
           </div>
         )}
@@ -4956,7 +4988,11 @@ const WORKLOAD_KINDS: { id: string; label: string; healthy: (o: KubeObject) => b
   { id: 'pods', label: 'Pods', healthy: (o) => ovStatus(o).phase === 'Running' || ovStatus(o).phase === 'Succeeded' },
   { id: 'deployments', label: 'Deployments', healthy: replicasReady },
   { id: 'statefulsets', label: 'Stateful Sets', healthy: replicasReady },
-  { id: 'daemonsets', label: 'Daemon Sets', healthy: (o) => numOf(ovStatus(o).numberReady) === numOf(ovStatus(o).desiredNumberScheduled) },
+  {
+    id: 'daemonsets',
+    label: 'Daemon Sets',
+    healthy: (o) => numOf(ovStatus(o).numberReady) === numOf(ovStatus(o).desiredNumberScheduled),
+  },
   { id: 'replicasets', label: 'Replica Sets', healthy: replicasReady },
   { id: 'jobs', label: 'Jobs', healthy: (o) => numOf(ovStatus(o).succeeded) > 0 },
   { id: 'cronjobs', label: 'Cron Jobs', healthy: () => true },
@@ -5065,7 +5101,7 @@ function ClusterOverview(props: { cluster: string; name: string; masterUrl?: str
   };
   const readyNodes = (nodes ?? []).filter(nodeReady).length;
   const warnSort = useTableSort(warnings ?? [], 'age', (w, k) =>
-    k === 'age' ? ageToSeconds(w.age) : (w[k as keyof EventSummary] as string) ?? '',
+    k === 'age' ? ageToSeconds(w.age) : ((w[k as keyof EventSummary] as string) ?? ''),
   );
 
   return (

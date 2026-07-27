@@ -195,8 +195,16 @@ export const COLUMNS: Record<string, ColumnDef[]> = {
     { key: 'ready', header: 'Ready', render: (o) => String(num(status(o).readyReplicas)) },
   ],
   jobs: [
-    { key: 'completions', header: 'Completions', render: (o) => `${num(status(o).succeeded)}/${num(spec(o).completions)}` },
-    { key: 'status', header: 'Status', render: (o) => (num(status(o).succeeded) > 0 ? 'Complete' : dash(str(status(o).active ? 'Running' : ''))) },
+    {
+      key: 'completions',
+      header: 'Completions',
+      render: (o) => `${num(status(o).succeeded)}/${num(spec(o).completions)}`,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (o) => (num(status(o).succeeded) > 0 ? 'Complete' : dash(str(status(o).active ? 'Running' : ''))),
+    },
   ],
   cronjobs: [
     { key: 'schedule', header: 'Schedule', render: (o) => dash(str(spec(o).schedule)) },
@@ -220,7 +228,13 @@ export const COLUMNS: Record<string, ColumnDef[]> = {
     {
       key: 'hosts',
       header: 'Hosts',
-      render: (o) => dash(((spec(o).rules as Any[]) ?? []).map((r) => str((r as Any).host)).filter(Boolean).join(', ')),
+      render: (o) =>
+        dash(
+          ((spec(o).rules as Any[]) ?? [])
+            .map((r) => str((r as Any).host))
+            .filter(Boolean)
+            .join(', '),
+        ),
     },
   ],
   configmaps: [{ key: 'keys', header: 'Keys', render: keys }],
