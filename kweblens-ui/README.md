@@ -67,3 +67,26 @@ cluster/resource identity plus capabilities (`dialog`, `openDock`, `setForward`,
 `setDetail`, `confirmRun`, `removeObject`, …). Flags: `danger` (red), `containerScoped`
 (per-container submenu on multi-container pods), `requiresAuth: false` (readable
 signed-out, e.g. Logs).
+
+### Add a detail-drawer field or section
+
+The drawer's Overview tab is driven by two registries in `src/App.tsx`:
+`OVERVIEW_FIELDS` (the summary key/value rows) and `OVERVIEW_SECTIONS` (the collapsible
+accordions). Both are presence-driven — a field whose `get` returns `null`, or a section
+whose `applies` is false, is simply omitted, so a new kind's data appears automatically.
+
+```ts
+// a summary row
+{ label: 'Cluster IP', mono: true, get: (c) => (ovSpec(c.obj).clusterIP as string) || null }
+
+// a section
+{
+  title: 'Conditions',
+  applies: (o) => ovArr(ovStatus(o).conditions).length > 0,
+  count: (o) => ovArr(ovStatus(o).conditions).length,
+  body: (c) => (/* table JSX built from c.obj */),
+}
+```
+
+`ovMeta/ovSpec/ovStatus/ovArr/ovMap` are the small defensive accessors; `get`/`body`
+receive `{ obj, onNavigate, onHelmRelease }`. Adding a row or section is one entry.

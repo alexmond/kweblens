@@ -3005,276 +3005,253 @@ function chipsOf(map: Record<string, string>) {
   );
 }
 
-function Overview(props: {
+// ---- Detail drawer Overview: declarative field + section registries ----
+// Adding a summary row or a whole section is one entry below; Overview just maps over
+// them. Rows/sections are presence-driven — a `get` that returns null (or an `applies`
+// that returns false) simply omits it, so a new kind's data shows up automatically.
+type OverviewCtx = {
   obj: KubeObject;
   onNavigate: (kind: string, ns?: string) => void;
   onHelmRelease: (namespace: string, name: string) => void;
-}) {
-  const { obj, onNavigate, onHelmRelease } = props;
-  const kind = obj.kind ?? '';
-  const md = obj.metadata ?? {};
-  const spec = (obj.spec as Record<string, unknown>) ?? {};
-  const status = (obj.status as Record<string, unknown>) ?? {};
-  const labels = md.labels ?? {};
-  const annotations = md.annotations ?? {};
-  const owners = md.ownerReferences ?? [];
-  // Helm stamps managed objects with these; surface the owning release.
-  const helmRelease = annotations['meta.helm.sh/release-name'];
-  const helmReleaseNs = annotations['meta.helm.sh/release-namespace'] ?? md.namespace ?? '';
-  const conditions = (status.conditions as Record<string, unknown>[]) ?? [];
-  const containers = (spec.containers as Record<string, unknown>[]) ?? [];
-  const containerStatuses = (status.containerStatuses as Record<string, unknown>[]) ?? [];
-  const statusFor = (n: string) => containerStatuses.find((c) => c.name === n);
-  const restartsFor = (n: string) => Number(statusFor(n)?.restartCount ?? 0);
-  const readyFor = (n: string) => Boolean(statusFor(n)?.ready);
+};
 
-  // Kind-specific projections.
-  const nodeName = spec.nodeName as string | undefined;
-  const podIP = status.podIP as string | undefined;
-  const hostIP = status.hostIP as string | undefined;
-  const qos = status.qosClass as string | undefined;
-  const svcType = spec.type as string | undefined;
-  const clusterIP = spec.clusterIP as string | undefined;
-  const nodeInfo = status.nodeInfo as Record<string, string> | undefined;
-  const addresses = (status.addresses as { type: string; address: string }[] | undefined) ?? [];
-  const internalIP = addresses.find((a) => a.type === 'InternalIP')?.address;
-  const capacity = status.capacity as Record<string, string> | undefined;
-  const allocatable = status.allocatable as Record<string, string> | undefined;
-  const taints = (spec.taints as Record<string, unknown>[] | undefined) ?? [];
-  const tolerations = (spec.tolerations as Record<string, unknown>[] | undefined) ?? [];
-  const nodeSelector = (spec.nodeSelector as Record<string, string> | undefined) ?? {};
-  const volumes = (spec.volumes as Record<string, unknown>[] | undefined) ?? [];
-  const servicePorts = (spec.ports as Record<string, unknown>[] | undefined) ?? [];
-  // Service uses a flat selector; workloads nest it under matchLabels.
-  const rawSelector = spec.selector as Record<string, unknown> | undefined;
-  const selector = ((rawSelector?.matchLabels as Record<string, string> | undefined) ??
-    (rawSelector as Record<string, string> | undefined) ??
-    {}) as Record<string, string>;
-  const selectorEntries = Object.entries(selector).filter(([, v]) => typeof v === 'string');
-  const configData = (kind === 'ConfigMap' ? (obj.data as Record<string, string> | undefined) : undefined) ?? {};
-  const secretData = (kind === 'Secret' ? (obj.data as Record<string, string> | undefined) : undefined) ?? {};
-  const secretType = obj.type as string | undefined;
-  const ingressRules = (spec.rules as Record<string, unknown>[] | undefined) ?? [];
-  const ingressTls = (spec.tls as Record<string, unknown>[] | undefined) ?? [];
+const ovMeta = (o: KubeObject): NonNullable<KubeObject['metadata']> => o.metadata ?? {};
+const ovSpec = (o: KubeObject): Record<string, unknown> => (o.spec as Record<string, unknown>) ?? {};
+const ovStatus = (o: KubeObject): Record<string, unknown> => (o.status as Record<string, unknown>) ?? {};
+const ovArr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
+const ovMap = (v: unknown): Record<string, string> =>
+  v && typeof v === 'object' ? (v as Record<string, string>) : {};
 
-  const containerPorts = (c: Record<string, unknown>) =>
-    ((c.ports as Record<string, unknown>[] | undefined) ?? [])
-      .map((p) => `${p.containerPort}${p.protocol && p.protocol !== 'TCP' ? '/' + p.protocol : ''}`)
-      .join(', ');
-  const containerResources = (c: Record<string, unknown>) => {
-    const req = (c.resources as Record<string, unknown> | undefined)?.requests as Record<string, string> | undefined;
-    if (!req) {
-      return '—';
-    }
-    return [req.cpu && `cpu ${req.cpu}`, req.memory && `mem ${req.memory}`].filter(Boolean).join(', ') || '—';
-  };
+// A summary key/value row. `get` returns null/'' to hide the row.
+type OverviewField = { label: string; get: (c: OverviewCtx) => ReactNode | null; mono?: boolean };
 
-  return (
-    <div className="ov">
-      <dl className="kv">
-        <dt>Kind</dt>
-        <dd>{obj.kind ?? '—'}</dd>
-        {md.namespace && (
-          <>
-            <dt>Namespace</dt>
-            <dd>{md.namespace}</dd>
-          </>
-        )}
-        <dt>Name</dt>
-        <dd>{md.name ?? '—'}</dd>
-        {typeof status.phase === 'string' && (
-          <>
-            <dt>Status</dt>
-            <dd>{status.phase as string}</dd>
-          </>
-        )}
-        {nodeName && (
-          <>
-            <dt>Node</dt>
-            <dd>
-              <button className="cell-link" onClick={() => onNavigate('Node')}>
-                {nodeName}
-              </button>
-            </dd>
-          </>
-        )}
-        {podIP && (
-          <>
-            <dt>Pod IP</dt>
-            <dd className="mono">{podIP}</dd>
-          </>
-        )}
-        {hostIP && (
-          <>
-            <dt>Host IP</dt>
-            <dd className="mono">{hostIP}</dd>
-          </>
-        )}
-        {qos && (
-          <>
-            <dt>QoS Class</dt>
-            <dd>{qos}</dd>
-          </>
-        )}
-        {svcType && (
-          <>
-            <dt>Type</dt>
-            <dd>{svcType}</dd>
-          </>
-        )}
-        {clusterIP && (
-          <>
-            <dt>Cluster IP</dt>
-            <dd className="mono">{clusterIP}</dd>
-          </>
-        )}
-        {internalIP && (
-          <>
-            <dt>Internal IP</dt>
-            <dd className="mono">{internalIP}</dd>
-          </>
-        )}
-        {nodeInfo?.kubeletVersion && (
-          <>
-            <dt>Kubelet</dt>
-            <dd>{nodeInfo.kubeletVersion}</dd>
-          </>
-        )}
-        {secretType && (
-          <>
-            <dt>Secret Type</dt>
-            <dd className="mono">{secretType}</dd>
-          </>
-        )}
-        <dt>Created</dt>
-        <dd>
-          {age(md.creationTimestamp)}
-          {md.creationTimestamp ? ` · ${md.creationTimestamp}` : ''}
-        </dd>
-        {helmRelease && (
-          <>
-            <dt>Managed By</dt>
-            <dd>
-              <span className="helm-badge">Helm</span>{' '}
-              <button
-                className="cell-link"
-                title="Open this release's resources"
-                onClick={() => onHelmRelease(helmReleaseNs, helmRelease)}
-              >
-                {helmRelease}
-                {helmReleaseNs ? ` (${helmReleaseNs})` : ''}
-              </button>
-            </dd>
-          </>
-        )}
-        {owners.length > 0 && (
-          <>
-            <dt>Controlled By</dt>
-            <dd>
-              {owners.map((o, i) => (
-                <span key={o.kind + '/' + o.name}>
-                  {i > 0 ? ', ' : ''}
-                  <button className="cell-link" onClick={() => onNavigate(o.kind, md.namespace)}>
-                    {o.kind}/{o.name}
-                  </button>
-                </span>
-              ))}
-            </dd>
-          </>
-        )}
-      </dl>
+const OVERVIEW_FIELDS: OverviewField[] = [
+  { label: 'Kind', get: (c) => c.obj.kind ?? '—' },
+  { label: 'Namespace', get: (c) => ovMeta(c.obj).namespace ?? null },
+  { label: 'Name', get: (c) => ovMeta(c.obj).name ?? '—' },
+  {
+    label: 'Status',
+    get: (c) => (typeof ovStatus(c.obj).phase === 'string' ? (ovStatus(c.obj).phase as string) : null),
+  },
+  {
+    label: 'Node',
+    get: (c) => {
+      const n = ovSpec(c.obj).nodeName as string | undefined;
+      return n ? (
+        <button className="cell-link" onClick={() => c.onNavigate('Node')}>
+          {n}
+        </button>
+      ) : null;
+    },
+  },
+  { label: 'Pod IP', mono: true, get: (c) => (ovStatus(c.obj).podIP as string) || null },
+  { label: 'Host IP', mono: true, get: (c) => (ovStatus(c.obj).hostIP as string) || null },
+  { label: 'QoS Class', get: (c) => (ovStatus(c.obj).qosClass as string) || null },
+  { label: 'Type', get: (c) => (ovSpec(c.obj).type as string) || null },
+  { label: 'Cluster IP', mono: true, get: (c) => (ovSpec(c.obj).clusterIP as string) || null },
+  {
+    label: 'Internal IP',
+    mono: true,
+    get: (c) => {
+      const addrs = (ovStatus(c.obj).addresses as { type: string; address: string }[] | undefined) ?? [];
+      return addrs.find((a) => a.type === 'InternalIP')?.address || null;
+    },
+  },
+  {
+    label: 'Kubelet',
+    get: (c) => (ovStatus(c.obj).nodeInfo as Record<string, string> | undefined)?.kubeletVersion || null,
+  },
+  { label: 'Secret Type', mono: true, get: (c) => (c.obj.type as string) || null },
+  {
+    label: 'Created',
+    get: (c) => {
+      const t = ovMeta(c.obj).creationTimestamp;
+      return (
+        <>
+          {age(t)}
+          {t ? ` · ${t}` : ''}
+        </>
+      );
+    },
+  },
+  {
+    label: 'Managed By',
+    get: (c) => {
+      const a = ovMeta(c.obj).annotations ?? {};
+      const rel = a['meta.helm.sh/release-name'];
+      if (!rel) {
+        return null;
+      }
+      const rns = a['meta.helm.sh/release-namespace'] ?? ovMeta(c.obj).namespace ?? '';
+      return (
+        <>
+          <span className="helm-badge">Helm</span>{' '}
+          <button
+            className="cell-link"
+            title="Open this release's resources"
+            onClick={() => c.onHelmRelease(rns, rel)}
+          >
+            {rel}
+            {rns ? ` (${rns})` : ''}
+          </button>
+        </>
+      );
+    },
+  },
+  {
+    label: 'Controlled By',
+    get: (c) => {
+      const owners = ovMeta(c.obj).ownerReferences ?? [];
+      if (owners.length === 0) {
+        return null;
+      }
+      return owners.map((o, i) => (
+        <span key={o.kind + '/' + o.name}>
+          {i > 0 ? ', ' : ''}
+          <button className="cell-link" onClick={() => c.onNavigate(o.kind, ovMeta(c.obj).namespace)}>
+            {o.kind}/{o.name}
+          </button>
+        </span>
+      ));
+    },
+  },
+];
 
-      {Object.keys(labels).length > 0 && (
-        <Accordion title="Labels" count={Object.keys(labels).length} defaultOpen={false}>
-          <div className="chips">
-            {Object.entries(labels).map(([k, v]) => (
-              <span className="chip" key={k}>
-                {k}={v}
-              </span>
-            ))}
-          </div>
-        </Accordion>
-      )}
+// A collapsible section. `applies` decides visibility; `body` renders its content.
+type OverviewSection = {
+  title: string;
+  defaultOpen?: boolean;
+  count?: (o: KubeObject) => number;
+  applies: (o: KubeObject) => boolean;
+  body: (c: OverviewCtx) => ReactNode;
+};
 
-      {Object.keys(annotations).length > 0 && (
-        <Accordion title="Annotations" count={Object.keys(annotations).length} defaultOpen={false}>
-          <div className="chips">
-            {Object.entries(annotations).map(([k, v]) => (
-              <span className="chip subtle" key={k} title={`${k}=${v}`}>
-                {k}={v.length > 48 ? v.slice(0, 48) + '…' : v}
-              </span>
-            ))}
-          </div>
-        </Accordion>
-      )}
+// The service/workload selector (Service is flat; workloads nest under matchLabels).
+function ovSelectorEntries(o: KubeObject): [string, string][] {
+  const raw = ovSpec(o).selector as Record<string, unknown> | undefined;
+  const sel = (raw?.matchLabels as Record<string, string> | undefined) ?? (raw as Record<string, string> | undefined) ?? {};
+  return Object.entries(sel).filter(([, v]) => typeof v === 'string') as [string, string][];
+}
 
-      {containers.length > 0 && (
-        <Accordion title="Containers" count={containers.length}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Image</th>
-                <th>Ports</th>
-                <th>Requests</th>
-                <th>Ready</th>
-                <th>Restarts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {containers.map((c) => {
-                const cn = String(c.name ?? '');
-                return (
-                  <tr key={cn}>
-                    <td>{cn}</td>
-                    <td className="mono">{String(c.image ?? '')}</td>
-                    <td>{containerPorts(c) || '—'}</td>
-                    <td>{containerResources(c)}</td>
-                    <td>{readyFor(cn) ? 'Yes' : 'No'}</td>
-                    <td>{restartsFor(cn)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </Accordion>
-      )}
-
-      {servicePorts.length > 0 && (
-        <Accordion title="Ports" count={servicePorts.length}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Port</th>
-                <th>Target</th>
-                <th>Protocol</th>
-                <th>Node Port</th>
-              </tr>
-            </thead>
-            <tbody>
-              {servicePorts.map((p, i) => (
-                <tr key={String(p.name ?? i)}>
-                  <td>{String(p.name ?? '—')}</td>
-                  <td>{String(p.port ?? '')}</td>
-                  <td>{String(p.targetPort ?? '')}</td>
-                  <td>{String(p.protocol ?? 'TCP')}</td>
-                  <td>{String(p.nodePort ?? '—')}</td>
+const OVERVIEW_SECTIONS: OverviewSection[] = [
+  {
+    title: 'Labels',
+    defaultOpen: false,
+    applies: (o) => Object.keys(ovMeta(o).labels ?? {}).length > 0,
+    count: (o) => Object.keys(ovMeta(o).labels ?? {}).length,
+    body: (c) => chipsOf(ovMeta(c.obj).labels ?? {}),
+  },
+  {
+    title: 'Annotations',
+    defaultOpen: false,
+    applies: (o) => Object.keys(ovMeta(o).annotations ?? {}).length > 0,
+    count: (o) => Object.keys(ovMeta(o).annotations ?? {}).length,
+    body: (c) => (
+      <div className="chips">
+        {Object.entries(ovMeta(c.obj).annotations ?? {}).map(([k, v]) => (
+          <span className="chip subtle" key={k} title={`${k}=${v}`}>
+            {k}={v.length > 48 ? v.slice(0, 48) + '…' : v}
+          </span>
+        ))}
+      </div>
+    ),
+  },
+  {
+    title: 'Containers',
+    applies: (o) => ovArr(ovSpec(o).containers).length > 0,
+    count: (o) => ovArr(ovSpec(o).containers).length,
+    body: (c) => {
+      const containers = ovArr(ovSpec(c.obj).containers);
+      const cs = ovArr(ovStatus(c.obj).containerStatuses);
+      const statusFor = (n: string) => cs.find((s) => s.name === n);
+      const ports = (cc: Record<string, unknown>) =>
+        ovArr(cc.ports)
+          .map((p) => `${p.containerPort}${p.protocol && p.protocol !== 'TCP' ? '/' + p.protocol : ''}`)
+          .join(', ');
+      const resources = (cc: Record<string, unknown>) => {
+        const req = (cc.resources as Record<string, unknown> | undefined)?.requests as
+          | Record<string, string>
+          | undefined;
+        if (!req) {
+          return '—';
+        }
+        return [req.cpu && `cpu ${req.cpu}`, req.memory && `mem ${req.memory}`].filter(Boolean).join(', ') || '—';
+      };
+      return (
+        <table className="mini">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Image</th>
+              <th>Ports</th>
+              <th>Requests</th>
+              <th>Ready</th>
+              <th>Restarts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {containers.map((cc) => {
+              const cn = String(cc.name ?? '');
+              return (
+                <tr key={cn}>
+                  <td>{cn}</td>
+                  <td className="mono">{String(cc.image ?? '')}</td>
+                  <td>{ports(cc) || '—'}</td>
+                  <td>{resources(cc)}</td>
+                  <td>{statusFor(cn)?.ready ? 'Yes' : 'No'}</td>
+                  <td>{Number(statusFor(cn)?.restartCount ?? 0)}</td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </Accordion>
-      )}
-
-      {selectorEntries.length > 0 && (
-        <Accordion title="Selector" count={selectorEntries.length}>
-          {chipsOf(Object.fromEntries(selectorEntries))}
-        </Accordion>
-      )}
-
-      {ingressRules.length > 0 && (
-        <Accordion title="Rules" count={ingressRules.length}>
+              );
+            })}
+          </tbody>
+        </table>
+      );
+    },
+  },
+  {
+    title: 'Ports',
+    applies: (o) => ovArr(ovSpec(o).ports).length > 0,
+    count: (o) => ovArr(ovSpec(o).ports).length,
+    body: (c) => (
+      <table className="mini">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Port</th>
+            <th>Target</th>
+            <th>Protocol</th>
+            <th>Node Port</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ovArr(ovSpec(c.obj).ports).map((p, i) => (
+            <tr key={String(p.name ?? i)}>
+              <td>{String(p.name ?? '—')}</td>
+              <td>{String(p.port ?? '')}</td>
+              <td>{String(p.targetPort ?? '')}</td>
+              <td>{String(p.protocol ?? 'TCP')}</td>
+              <td>{String(p.nodePort ?? '—')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+  },
+  {
+    title: 'Selector',
+    applies: (o) => ovSelectorEntries(o).length > 0,
+    count: (o) => ovSelectorEntries(o).length,
+    body: (c) => chipsOf(Object.fromEntries(ovSelectorEntries(c.obj))),
+  },
+  {
+    title: 'Rules',
+    applies: (o) => ovArr(ovSpec(o).rules).length > 0,
+    count: (o) => ovArr(ovSpec(o).rules).length,
+    body: (c) => {
+      const rules = ovArr(ovSpec(c.obj).rules);
+      const tls = ovArr(ovSpec(c.obj).tls);
+      return (
+        <>
           <table className="mini">
             <thead>
               <tr>
@@ -3284,9 +3261,9 @@ function Overview(props: {
               </tr>
             </thead>
             <tbody>
-              {ingressRules.flatMap((r, ri) => {
+              {rules.flatMap((r, ri) => {
                 const host = String(r.host ?? '*');
-                const paths = ((r.http as Record<string, unknown>)?.paths as Record<string, unknown>[] | undefined) ?? [];
+                const paths = ovArr((r.http as Record<string, unknown>)?.paths);
                 if (paths.length === 0) {
                   return [
                     <tr key={ri}>
@@ -3303,18 +3280,16 @@ function Overview(props: {
                     <tr key={ri + '-' + pi}>
                       <td>{host}</td>
                       <td className="mono">{String(p.path ?? '/')}</td>
-                      <td className="mono">
-                        {svc ? `${svc.name}${port ? ':' + port : ''}` : '—'}
-                      </td>
+                      <td className="mono">{svc ? `${svc.name}${port ? ':' + port : ''}` : '—'}</td>
                     </tr>
                   );
                 });
               })}
             </tbody>
           </table>
-          {ingressTls.length > 0 && (
+          {tls.length > 0 && (
             <div className="chips" style={{ marginTop: 8 }}>
-              {ingressTls.flatMap((t, i) =>
+              {tls.flatMap((t, i) =>
                 ((t.hosts as string[] | undefined) ?? []).map((h) => (
                   <span className="chip" key={i + h}>
                     TLS: {h}
@@ -3323,180 +3298,241 @@ function Overview(props: {
               )}
             </div>
           )}
-        </Accordion>
-      )}
-
-      {Object.keys(configData).length > 0 && (
-        <Accordion title="Data" count={Object.keys(configData).length}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Value</th>
+        </>
+      );
+    },
+  },
+  {
+    title: 'Data',
+    applies: (o) => o.kind === 'ConfigMap' && Object.keys(ovMap(o.data)).length > 0,
+    count: (o) => Object.keys(ovMap(o.data)).length,
+    body: (c) => (
+      <table className="mini">
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(ovMap(c.obj.data)).map(([k, v]) => (
+            <tr key={k}>
+              <td className="mono">{k}</td>
+              <td className="mono">{v.length > 200 ? v.slice(0, 200) + '…' : v}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+  },
+  {
+    title: 'Data',
+    applies: (o) => o.kind === 'Secret' && Object.keys(ovMap(o.data)).length > 0,
+    count: (o) => Object.keys(ovMap(o.data)).length,
+    body: (c) => <SecretData data={ovMap(c.obj.data)} />,
+  },
+  {
+    title: 'Node Selector',
+    defaultOpen: false,
+    applies: (o) => Object.keys(ovMap(ovSpec(o).nodeSelector)).length > 0,
+    count: (o) => Object.keys(ovMap(ovSpec(o).nodeSelector)).length,
+    body: (c) => chipsOf(ovMap(ovSpec(c.obj).nodeSelector)),
+  },
+  {
+    title: 'Tolerations',
+    defaultOpen: false,
+    applies: (o) => ovArr(ovSpec(o).tolerations).length > 0,
+    count: (o) => ovArr(ovSpec(o).tolerations).length,
+    body: (c) => (
+      <table className="mini">
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Operator</th>
+            <th>Value</th>
+            <th>Effect</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ovArr(ovSpec(c.obj).tolerations).map((t, i) => (
+            <tr key={String(t.key ?? i)}>
+              <td className="mono">{String(t.key ?? '*')}</td>
+              <td>{String(t.operator ?? '')}</td>
+              <td>{String(t.value ?? '—')}</td>
+              <td>{String(t.effect ?? 'All')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+  },
+  {
+    title: 'Volumes',
+    defaultOpen: false,
+    applies: (o) => ovArr(ovSpec(o).volumes).length > 0,
+    count: (o) => ovArr(ovSpec(o).volumes).length,
+    body: (c) => (
+      <table className="mini">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ovArr(ovSpec(c.obj).volumes).map((v, i) => {
+            const type = Object.keys(v).find((key) => key !== 'name') ?? '—';
+            return (
+              <tr key={String(v.name ?? i)}>
+                <td>{String(v.name ?? '')}</td>
+                <td className="mono">{type}</td>
               </tr>
-            </thead>
-            <tbody>
-              {Object.entries(configData).map(([k, v]) => (
-                <tr key={k}>
-                  <td className="mono">{k}</td>
-                  <td className="mono">{v.length > 200 ? v.slice(0, 200) + '…' : v}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Accordion>
-      )}
-
-      {Object.keys(secretData).length > 0 && (
-        <Accordion title="Data" count={Object.keys(secretData).length}>
-          <SecretData data={secretData} />
-        </Accordion>
-      )}
-
-      {Object.keys(nodeSelector).length > 0 && (
-        <Accordion title="Node Selector" count={Object.keys(nodeSelector).length} defaultOpen={false}>
-          {chipsOf(nodeSelector)}
-        </Accordion>
-      )}
-
-      {tolerations.length > 0 && (
-        <Accordion title="Tolerations" count={tolerations.length} defaultOpen={false}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Operator</th>
-                <th>Value</th>
-                <th>Effect</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tolerations.map((t, i) => (
-                <tr key={String(t.key ?? i)}>
-                  <td className="mono">{String(t.key ?? '*')}</td>
-                  <td>{String(t.operator ?? '')}</td>
-                  <td>{String(t.value ?? '—')}</td>
-                  <td>{String(t.effect ?? 'All')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Accordion>
-      )}
-
-      {volumes.length > 0 && (
-        <Accordion title="Volumes" count={volumes.length} defaultOpen={false}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-              </tr>
-            </thead>
-            <tbody>
-              {volumes.map((v, i) => {
-                const type = Object.keys(v).find((key) => key !== 'name') ?? '—';
-                return (
-                  <tr key={String(v.name ?? i)}>
-                    <td>{String(v.name ?? '')}</td>
-                    <td className="mono">{type}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </Accordion>
-      )}
-
-      {taints.length > 0 && (
-        <Accordion title="Taints" count={taints.length}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Value</th>
-                <th>Effect</th>
-              </tr>
-            </thead>
-            <tbody>
-              {taints.map((t, i) => (
-                <tr key={String(t.key ?? i)}>
-                  <td className="mono">{String(t.key ?? '')}</td>
-                  <td>{String(t.value ?? '—')}</td>
-                  <td>{String(t.effect ?? '')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Accordion>
-      )}
-
-      {nodeInfo && (
-        <Accordion title="Node Info" defaultOpen={false}>
-          <dl className="kv">
-            {[
+            );
+          })}
+        </tbody>
+      </table>
+    ),
+  },
+  {
+    title: 'Taints',
+    applies: (o) => ovArr(ovSpec(o).taints).length > 0,
+    count: (o) => ovArr(ovSpec(o).taints).length,
+    body: (c) => (
+      <table className="mini">
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Value</th>
+            <th>Effect</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ovArr(ovSpec(c.obj).taints).map((t, i) => (
+            <tr key={String(t.key ?? i)}>
+              <td className="mono">{String(t.key ?? '')}</td>
+              <td>{String(t.value ?? '—')}</td>
+              <td>{String(t.effect ?? '')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+  },
+  {
+    title: 'Node Info',
+    defaultOpen: false,
+    applies: (o) => !!ovStatus(o).nodeInfo,
+    body: (c) => {
+      const nodeInfo = (ovStatus(c.obj).nodeInfo as Record<string, string> | undefined) ?? {};
+      return (
+        <dl className="kv">
+          {(
+            [
               ['OS Image', nodeInfo.osImage],
               ['Architecture', nodeInfo.architecture],
               ['Kernel', nodeInfo.kernelVersion],
               ['Container Runtime', nodeInfo.containerRuntimeVersion],
               ['Kube-Proxy', nodeInfo.kubeProxyVersion],
-            ]
-              .filter(([, v]) => v)
-              .map(([k, v]) => (
-                <Fragment key={k}>
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </Fragment>
-              ))}
-          </dl>
-        </Accordion>
-      )}
-
-      {(capacity || allocatable) && (
-        <Accordion title="Capacity" defaultOpen={false}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Resource</th>
-                <th>Capacity</th>
-                <th>Allocatable</th>
+            ] as [string, string | undefined][]
+          )
+            .filter(([, v]) => v)
+            .map(([k, v]) => (
+              <Fragment key={k}>
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              </Fragment>
+            ))}
+        </dl>
+      );
+    },
+  },
+  {
+    title: 'Capacity',
+    defaultOpen: false,
+    applies: (o) => !!ovStatus(o).capacity || !!ovStatus(o).allocatable,
+    body: (c) => {
+      const capacity = ovMap(ovStatus(c.obj).capacity);
+      const allocatable = ovMap(ovStatus(c.obj).allocatable);
+      return (
+        <table className="mini">
+          <thead>
+            <tr>
+              <th>Resource</th>
+              <th>Capacity</th>
+              <th>Allocatable</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from(new Set([...Object.keys(capacity), ...Object.keys(allocatable)])).map((r) => (
+              <tr key={r}>
+                <td className="mono">{r}</td>
+                <td>{capacity[r] ?? '—'}</td>
+                <td>{allocatable[r] ?? '—'}</td>
               </tr>
-            </thead>
-            <tbody>
-              {Array.from(new Set([...Object.keys(capacity ?? {}), ...Object.keys(allocatable ?? {})])).map((r) => (
-                <tr key={r}>
-                  <td className="mono">{r}</td>
-                  <td>{capacity?.[r] ?? '—'}</td>
-                  <td>{allocatable?.[r] ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Accordion>
-      )}
+            ))}
+          </tbody>
+        </table>
+      );
+    },
+  },
+  {
+    title: 'Conditions',
+    applies: (o) => ovArr(ovStatus(o).conditions).length > 0,
+    count: (o) => ovArr(ovStatus(o).conditions).length,
+    body: (c) => (
+      <table className="mini">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ovArr(ovStatus(c.obj).conditions).map((cond, i) => (
+            <tr key={String(cond.type ?? i)}>
+              <td>{String(cond.type ?? '')}</td>
+              <td>{String(cond.status ?? '')}</td>
+              <td>{String(cond.reason ?? '')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+  },
+];
 
-      {conditions.length > 0 && (
-        <Accordion title="Conditions" count={conditions.length}>
-          <table className="mini">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {conditions.map((c, i) => (
-                <tr key={String(c.type ?? i)}>
-                  <td>{String(c.type ?? '')}</td>
-                  <td>{String(c.status ?? '')}</td>
-                  <td>{String(c.reason ?? '')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+// Renders the detail drawer's Overview tab purely by mapping the field + section
+// registries above — no per-kind markup lives here.
+function Overview(props: {
+  obj: KubeObject;
+  onNavigate: (kind: string, ns?: string) => void;
+  onHelmRelease: (namespace: string, name: string) => void;
+}) {
+  const { obj, onNavigate, onHelmRelease } = props;
+  const ctx: OverviewCtx = { obj, onNavigate, onHelmRelease };
+
+  return (
+    <div className="ov">
+      <dl className="kv">
+        {OVERVIEW_FIELDS.map((f) => {
+          const value = f.get(ctx);
+          if (value === null) {
+            return null;
+          }
+          return (
+            <Fragment key={f.label}>
+              <dt>{f.label}</dt>
+              <dd className={f.mono ? 'mono' : undefined}>{value}</dd>
+            </Fragment>
+          );
+        })}
+      </dl>
+      {OVERVIEW_SECTIONS.filter((s) => s.applies(obj)).map((s, i) => (
+        <Accordion key={s.title + i} title={s.title} count={s.count?.(obj)} defaultOpen={s.defaultOpen}>
+          {s.body(ctx)}
         </Accordion>
-      )}
+      ))}
     </div>
   );
 }
