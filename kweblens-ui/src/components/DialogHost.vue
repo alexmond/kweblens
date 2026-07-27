@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import { NButton, NInput } from 'naive-ui';
+import { NModal } from 'naive-ui';
 import { computed, nextTick, ref, watch } from 'vue';
 
 import { closeDialog, dialogState } from '../dialog';
 import type { ConfirmOpts, PromptOpts } from '../dialog';
-import { useEscapeKey } from '../composables/useEscapeKey';
 
+// Promise-based confirm/prompt (dialog.ts) rendered with Naive NModal so it themes with the app.
 const value = ref('');
-const inputRef = ref<HTMLInputElement | null>(null);
+const inputRef = ref<{ focus: () => void; select: () => void } | null>(null);
 
 const isPrompt = computed(() => dialogState.value?.kind === 'prompt');
 const opts = computed(() => dialogState.value?.opts ?? null);
@@ -42,30 +44,43 @@ const accept = () => {
   }
   closeDialog();
 };
-
-useEscapeKey(cancel);
+const onShow = (v: boolean) => {
+  if (!v) {
+    cancel();
+  }
+};
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="dialogState" class="modal-backdrop" @click="cancel">
-      <form class="modal dialog" @click.stop @submit.prevent="accept">
-        <h2 v-if="opts?.title">{{ opts.title }}</h2>
-        <p class="dialog-message">{{ opts?.message }}</p>
-        <label v-if="promptOpts" class="dialog-field">
-          <span v-if="promptOpts.label">{{ promptOpts.label }}</span>
-          <input
-            ref="inputRef"
-            v-model="value"
-            :type="promptOpts.type ?? 'text'"
-            :placeholder="promptOpts.placeholder"
-          />
-        </label>
-        <div class="modal-actions">
-          <button type="button" class="btn" @click="cancel">Cancel</button>
-          <button type="submit" :class="'btn ' + (danger ? 'danger' : 'primary')">{{ confirmLabel }}</button>
-        </div>
-      </form>
-    </div>
-  </Teleport>
+  <NModal
+    :show="!!dialogState"
+    preset="card"
+    :title="opts?.title ?? (isPrompt ? 'Input' : 'Confirm')"
+    :style="{ maxWidth: '440px' }"
+    :bordered="false"
+    @update:show="onShow"
+  >
+    <p class="dialog-message">{{ opts?.message }}</p>
+    <NInput
+      v-if="promptOpts"
+      ref="inputRef"
+      v-model:value="value"
+      :placeholder="promptOpts.placeholder"
+      @keyup.enter="accept"
+    />
+    <template #footer>
+      <div class="dialog-actions">
+        <NButton @click="cancel">Cancel</NButton>
+        <NButton :type="danger ? 'error' : 'primary'" @click="accept">{{ confirmLabel }}</NButton>
+      </div>
+    </template>
+  </NModal>
 </template>
+
+<style scoped>
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+</style>

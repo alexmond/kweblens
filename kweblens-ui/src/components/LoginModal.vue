@@ -1,14 +1,9 @@
 <script setup lang="ts">
-// HTTP Basic sign-in modal. Credentials are kept in memory for the tab only.
-//
-// Callback prop (Vue emits can't return a promise, so this is a prop, not an emit):
-//   onSubmit(user: string, pass: string) => Promise<boolean>
-//                     — resolves true on success (modal closes via shell), false shows error
-// Emits:
-//   cancel ()          — user dismissed the modal (backdrop / Cancel / Escape)
+// HTTP Basic sign-in modal (Naive NModal). Credentials kept in memory for the tab only.
+// Callback prop (emits can't return a promise): onSubmit(user,pass) => Promise<boolean>
+// Emits: cancel () — user dismissed the modal
+import { NButton, NForm, NFormItem, NInput, NModal } from 'naive-ui';
 import { ref } from 'vue';
-
-import { useEscapeKey } from '../composables/useEscapeKey';
 
 const props = defineProps<{ onSubmit: (user: string, pass: string) => Promise<boolean> }>();
 const emit = defineEmits<{ (e: 'cancel'): void }>();
@@ -17,8 +12,6 @@ const user = ref('admin');
 const pass = ref('');
 const busy = ref(false);
 const failed = ref(false);
-
-useEscapeKey(() => emit('cancel'));
 
 const submit = () => {
   busy.value = true;
@@ -30,26 +23,38 @@ const submit = () => {
     }
   });
 };
+const onShow = (v: boolean) => {
+  if (!v) {
+    emit('cancel');
+  }
+};
 </script>
 
 <template>
-  <div class="modal-backdrop" @click="emit('cancel')">
-    <form class="modal" @click.stop @submit.prevent="submit">
-      <h2>Sign in</h2>
-      <p class="modal-note">Credentials are kept in memory for this tab only and sent over HTTP Basic.</p>
-      <div v-if="failed" class="error">Invalid credentials.</div>
-      <label>
-        <span>Username</span>
-        <input v-model="user" autofocus />
-      </label>
-      <label>
-        <span>Password</span>
-        <input v-model="pass" type="password" />
-      </label>
-      <div class="modal-actions">
-        <button type="button" class="btn" :disabled="busy" @click="emit('cancel')">Cancel</button>
-        <button type="submit" class="btn primary" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
+  <NModal :show="true" preset="card" title="Sign in" :bordered="false" style="max-width: 420px" @update:show="onShow">
+    <p class="modal-note">Credentials are kept in memory for this tab only and sent over HTTP Basic.</p>
+    <div v-if="failed" class="error">Invalid credentials.</div>
+    <NForm @submit.prevent="submit">
+      <NFormItem label="Username">
+        <NInput v-model:value="user" autofocus @keyup.enter="submit" />
+      </NFormItem>
+      <NFormItem label="Password">
+        <NInput v-model:value="pass" type="password" @keyup.enter="submit" />
+      </NFormItem>
+    </NForm>
+    <template #footer>
+      <div class="dialog-actions">
+        <NButton :disabled="busy" @click="emit('cancel')">Cancel</NButton>
+        <NButton type="primary" :loading="busy" @click="submit">{{ busy ? 'Signing in…' : 'Sign in' }}</NButton>
       </div>
-    </form>
-  </div>
+    </template>
+  </NModal>
 </template>
+
+<style scoped>
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+</style>

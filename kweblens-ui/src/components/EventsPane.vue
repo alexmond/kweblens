@@ -1,40 +1,57 @@
 <script setup lang="ts">
-// The reusable events table (also used outside the drawer). Sortable columns, warning
-// rows highlighted. Emits nothing — purely presentational.
-import { useTableSort } from '../composables/useTableSort';
+// The reusable events table (also used outside the drawer). NDataTable with sortable
+// columns; Warning rows are highlighted (a red NTag on Type + a `warn` row class).
+// Emits nothing — purely presentational.
+import { NDataTable, NTag } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
+import { computed, h } from 'vue';
+
 import { ageToSeconds } from '../kube';
 import type { EventSummary } from '../types';
-import SortTh from './SortTh.vue';
 
 const props = defineProps<{ events: EventSummary[] | null; error: string | null }>();
 
-const { sorted, sort, clickHeader } = useTableSort(
-  () => props.events ?? [],
-  'age',
-  (e, k) => (k === 'age' ? ageToSeconds(e.age) : ((e[k as keyof EventSummary] as string) ?? '')),
-);
+const columns = computed<DataTableColumns<EventSummary>>(() => [
+  {
+    title: 'Type',
+    key: 'type',
+    sorter: (a, b) => (a.type ?? '').localeCompare(b.type ?? ''),
+    render: (row) =>
+      h(NTag, { size: 'small', type: row.type === 'Warning' ? 'error' : 'default', bordered: false }, () => row.type),
+  },
+  {
+    title: 'Reason',
+    key: 'reason',
+    sorter: (a, b) => (a.reason ?? '').localeCompare(b.reason ?? ''),
+  },
+  {
+    title: 'Message',
+    key: 'message',
+    sorter: (a, b) => (a.message ?? '').localeCompare(b.message ?? ''),
+  },
+  {
+    title: 'Age',
+    key: 'age',
+    defaultSortOrder: 'ascend',
+    sorter: (a, b) => ageToSeconds(a.age) - ageToSeconds(b.age),
+    render: (row) => row.age,
+  },
+]);
+
+const rowClassName = (row: EventSummary) => (row.type === 'Warning' ? 'warn' : '');
+const data = computed(() => props.events ?? []);
 </script>
 
 <template>
   <div v-if="error" class="error">{{ error }}</div>
-  <div v-else-if="events === null" class="empty">Loading…</div>
-  <div v-else-if="events.length === 0" class="empty">No events.</div>
-  <table v-else class="mini">
-    <thead>
-      <tr>
-        <SortTh label="Type" col-key="type" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Reason" col-key="reason" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Message" col-key="message" :sort="sort" @sort="clickHeader" />
-        <SortTh label="Age" col-key="age" :sort="sort" @sort="clickHeader" />
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-for="(e, i) in sorted" :key="i" :class="e.type === 'Warning' ? 'warn' : ''">
-        <td>{{ e.type }}</td>
-        <td>{{ e.reason }}</td>
-        <td>{{ e.message }}</td>
-        <td>{{ e.age }}</td>
-      </tr>
-    </tbody>
-  </table>
+  <NDataTable
+    v-else
+    :columns="columns"
+    :data="data"
+    :loading="events === null"
+    :row-class-name="rowClassName"
+    size="small"
+  >
+    <template #empty>No events.</template>
+  </NDataTable>
 </template>

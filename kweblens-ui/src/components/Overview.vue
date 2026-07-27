@@ -5,6 +5,7 @@
 // Emits (mirrors the React `onNavigate` / `onHelmRelease` callback props):
 //   navigate     (kind: string, ns?: string)         — open another kind/object list
 //   helm-release (namespace: string, name: string)   — open a Helm release's resources
+import { NTag } from 'naive-ui';
 import { computed } from 'vue';
 
 import type { KubeObject } from '../types';
@@ -49,7 +50,7 @@ const clip = (v: string) => (v.length > 48 ? v.slice(0, 48) + '…' : v);
             {{ value!.text }}
           </button>
           <template v-else-if="value!.kind === 'helm'">
-            <span class="helm-badge">Helm</span>{{ ' ' }}
+            <NTag size="small" type="info" :bordered="false">Helm</NTag>{{ ' ' }}
             <button
               class="cell-link"
               title="Open this release's resources"

@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal } from 'naive-ui';
 import { onMounted, ref } from 'vue';
 
 import { ApiError, api } from '../api';
-import { useEscapeKey } from '../composables/useEscapeKey';
 import HelmValuesEditor from './HelmValuesEditor.vue';
 import HelmAdvancedOptions from './HelmAdvancedOptions.vue';
 import YamlView from './YamlView.vue';
@@ -69,8 +69,6 @@ onMounted(() => {
     .catch(() => (savedValues.value = []));
 });
 
-useEscapeKey(() => emit('close'));
-
 const title =
   props.action.mode === 'install'
     ? 'Install chart'
@@ -80,11 +78,6 @@ const title =
 
 const applyLabel =
   props.action.mode === 'install' ? 'Install' : props.action.mode === 'upgrade' ? 'Upgrade' : 'Rollback';
-
-const clampRevision = (e: Event) => {
-  const raw = (e.target as HTMLInputElement).value || '1';
-  revision.value = Math.max(1, Number.parseInt(raw, 10));
-};
 
 const mutation = (dryRun: boolean): Promise<HelmMutationResult> => {
   const a = props.action;
@@ -142,34 +135,55 @@ const run = (dryRun: boolean) => {
 </script>
 
 <template>
-  <div class="modal-backdrop" @click="emit('close')">
-    <form class="modal wide" @click.stop @submit.prevent>
-      <h2>{{ title }}</h2>
-      <p class="modal-note">Preview a dry-run first; Apply is enabled once the render succeeds.</p>
-      <div v-if="error" class="error">{{ error }}</div>
+  <NModal
+    :show="true"
+    preset="card"
+    :title="title"
+    style="width: 780px; max-width: 94vw"
+    @update:show="(v) => !v && emit('close')"
+  >
+    <p class="modal-note">Preview a dry-run first; Apply is enabled once the render succeeds.</p>
+    <div v-if="error" class="error">{{ error }}</div>
 
+    <NForm label-placement="top" :show-feedback="false">
       <template v-if="action.mode === 'install'">
-        <label><span>Chart</span><input :value="`${repository}/${chart}`" readonly /></label>
-        <label><span>Version</span><input v-model="version" /></label>
-        <label><span>Release name</span><input v-model="releaseName" /></label>
-        <label><span>Namespace</span><input v-model="namespace" /></label>
-        <label class="check">
-          <input v-model="createNamespace" type="checkbox" />
-          <span>Create namespace if missing</span>
-        </label>
+        <NFormItem label="Chart">
+          <NInput :value="`${repository}/${chart}`" readonly />
+        </NFormItem>
+        <NFormItem label="Version">
+          <NInput v-model:value="version" />
+        </NFormItem>
+        <NFormItem label="Release name">
+          <NInput v-model:value="releaseName" />
+        </NFormItem>
+        <NFormItem label="Namespace">
+          <NInput v-model:value="namespace" />
+        </NFormItem>
+        <NFormItem :show-label="false">
+          <NCheckbox v-model:checked="createNamespace">Create namespace if missing</NCheckbox>
+        </NFormItem>
       </template>
       <template v-else-if="action.mode === 'upgrade'">
-        <label><span>Release</span><input :value="`${action.namespace}/${action.name}`" readonly /></label>
-        <label><span>Repository</span><input v-model="repository" placeholder="repo name" /></label>
-        <label><span>Chart</span><input v-model="chart" /></label>
-        <label><span>Version</span><input v-model="version" /></label>
+        <NFormItem label="Release">
+          <NInput :value="`${action.namespace}/${action.name}`" readonly />
+        </NFormItem>
+        <NFormItem label="Repository">
+          <NInput v-model:value="repository" placeholder="repo name" />
+        </NFormItem>
+        <NFormItem label="Chart">
+          <NInput v-model:value="chart" />
+        </NFormItem>
+        <NFormItem label="Version">
+          <NInput v-model:value="version" />
+        </NFormItem>
       </template>
       <template v-else>
-        <label><span>Release</span><input :value="`${action.namespace}/${action.name}`" readonly /></label>
-        <label>
-          <span>Roll back to revision</span>
-          <input type="number" :min="1" :value="revision" @input="clampRevision" />
-        </label>
+        <NFormItem label="Release">
+          <NInput :value="`${action.namespace}/${action.name}`" readonly />
+        </NFormItem>
+        <NFormItem label="Roll back to revision">
+          <NInputNumber v-model:value="revision" :min="1" style="max-width: 160px" />
+        </NFormItem>
       </template>
 
       <HelmValuesEditor
@@ -189,23 +203,23 @@ const run = (dryRun: boolean) => {
         v-model:description="description"
         :is-upgrade="action.mode === 'upgrade'"
       />
+    </NForm>
 
-      <div v-if="preview" class="helm-preview">
-        <div class="preview-head">
-          Rendered manifest (dry-run) — {{ preview.manifest ? '' : 'no manifest returned' }}
-        </div>
-        <YamlView v-if="preview.manifest" :text="preview.manifest" />
-      </div>
+    <div v-if="preview" class="helm-preview">
+      <div class="preview-head">Rendered manifest (dry-run) — {{ preview.manifest ? '' : 'no manifest returned' }}</div>
+      <YamlView v-if="preview.manifest" :text="preview.manifest" />
+    </div>
 
+    <template #footer>
       <div class="modal-actions">
-        <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-        <button type="button" class="btn" :disabled="busy" @click="run(true)">
+        <NButton :disabled="busy" @click="emit('close')">Cancel</NButton>
+        <NButton :disabled="busy" @click="run(true)">
           {{ busy ? 'Rendering…' : 'Preview (dry-run)' }}
-        </button>
-        <button type="button" class="btn primary" :disabled="busy || !preview" @click="run(false)">
+        </NButton>
+        <NButton type="primary" :disabled="busy || !preview" @click="run(false)">
           {{ applyLabel }}
-        </button>
+        </NButton>
       </div>
-    </form>
-  </div>
+    </template>
+  </NModal>
 </template>

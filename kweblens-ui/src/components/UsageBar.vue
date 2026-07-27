@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { NProgress } from 'naive-ui';
 import { computed } from 'vue';
 
-// A used/total value with a proportional fill bar (vCenter/Freelens style).
+// A used/total value with a proportional fill bar (Naive NProgress) + a value label.
 const props = defineProps<{ fraction: number; color: string; text: string }>();
 
 const pct = computed(() => Math.max(0, Math.min(100, props.fraction * 100)));
@@ -9,9 +10,7 @@ const pct = computed(() => Math.max(0, Math.min(100, props.fraction * 100)));
 
 <template>
   <div class="ubar" :title="`${Math.round(pct)}%`">
-    <div class="ubar-track">
-      <div class="ubar-fill" :style="{ width: pct + '%', background: color }" />
-    </div>
+    <NProgress type="line" :percentage="pct" :color="color" :show-indicator="false" :height="8" />
     <div class="ubar-text">{{ text }}</div>
   </div>
 </template>
