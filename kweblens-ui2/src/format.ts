@@ -12,6 +12,4 @@ export function fmtValue(unit: string, v: number): string {
 }
 
 // t is epoch SECONDS (Prometheus range query) — ×1000 for the JS Date.
-export const fmtClock = (t: number): string =>
-  new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 export const fmtStamp = (t: number): string => new Date(t * 1000).toLocaleString();

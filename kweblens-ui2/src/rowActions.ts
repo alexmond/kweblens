@@ -30,7 +30,7 @@ export type RowAction =
   | 'forceDelete';
 
 // Capabilities a row action's handler may use; the shell builds one per fired action.
-export interface RowActionCtx {
+interface RowActionCtx {
   cluster: string;
   resourceId: string;
   obj: KubeObject;
