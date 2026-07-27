@@ -188,6 +188,8 @@ export const api = {
       valuesYaml?: string;
       dryRun: boolean;
       createNamespace?: boolean;
+      noHooks?: boolean;
+      description?: string;
     },
   ) =>
     postBody<HelmMutationResult>(
@@ -199,7 +201,18 @@ export const api = {
     cluster: string,
     namespace: string,
     name: string,
-    body: { repository: string; chart: string; version: string; valuesYaml?: string; dryRun: boolean },
+    body: {
+      repository: string;
+      chart: string;
+      version: string;
+      valuesYaml?: string;
+      dryRun: boolean;
+      noHooks?: boolean;
+      force?: boolean;
+      valueStrategy?: string;
+      maxHistory?: number;
+      description?: string;
+    },
   ) =>
     postBody<HelmMutationResult>(
       `/api/v1/clusters/${encodeURIComponent(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/upgrade`,
