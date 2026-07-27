@@ -1,5 +1,6 @@
-import type { FormEvent, ReactNode } from 'react';
+import type { FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { ApiError, api } from './api';
 import { auth } from './auth';
@@ -409,6 +410,35 @@ export function App() {
       setActiveSession((cur) => (cur === id ? (next[next.length - 1]?.id ?? null) : cur));
       return next;
     });
+  };
+
+  const toggleFloat = (id: string, floating: boolean) => {
+    setDockSessions((prev) =>
+      prev.map((s, i) => {
+        if (s.id !== id) {
+          return s;
+        }
+        const rect = s.rect ?? {
+          x: 120 + ((i * 32) % 240),
+          y: 120 + ((i * 32) % 240),
+          w: 640,
+          h: 340,
+        };
+        return { ...s, floating, rect };
+      }),
+    );
+    if (floating) {
+      // Activate the last remaining docked tab when one pops out.
+      setActiveSession((cur) => {
+        if (cur !== id) {
+          return cur;
+        }
+        const docked = dockSessions.filter((s) => s.id !== id && !s.floating);
+        return docked[docked.length - 1]?.id ?? null;
+      });
+    } else {
+      setActiveSession(id);
+    }
   };
   const [forward, setForward] = useState<{ kind: string; namespace: string; name: string; ports: number[] } | null>(
     null,
@@ -981,6 +1011,7 @@ export function App() {
               onToggleFavorite={toggleFavorite}
             />
           )}
+          <AppFooter />
         </aside>
 
         <main className="content">
@@ -1147,12 +1178,13 @@ export function App() {
       )}
 
       {cluster && dockSessions.length > 0 && (
-        <DockPanel
+        <DockArea
           cluster={cluster}
           sessions={dockSessions}
           active={activeSession}
           onActivate={setActiveSession}
           onClose={closeDock}
+          onToggleFloat={toggleFloat}
         />
       )}
 
@@ -1185,23 +1217,30 @@ type DockSession = {
   namespace: string;
   pod: string;
   containers: string[];
+  /** Popped out of the dock into a floating window. */
+  floating?: boolean;
+  /** Floating window geometry (viewport px). */
+  rect?: { x: number; y: number; w: number; h: number };
 };
 
 /**
- * A dockable bottom panel holding many terminal + log sessions at once, one tab each.
- * All sessions stay mounted (their WebSocket/SSE keep streaming) while hidden, so
- * switching tabs never drops a shell or log follow. The top edge is a drag handle that
- * resizes the whole panel.
+ * Owns all terminal + log sessions. Docked sessions appear as tabs in a resizable bottom
+ * panel; a session can be popped out into a floating, draggable/resizable window and folded
+ * back. Each session's body is rendered into a STABLE detached DOM node and that node is
+ * moved (appendChild) between the dock and its floating frame — never re-created — so the
+ * shell/WebSocket/log stream survives detach and re-dock.
  */
-function DockPanel(props: {
+function DockArea(props: {
   cluster: string;
   sessions: DockSession[];
   active: string | null;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
+  onToggleFloat: (id: string, floating: boolean) => void;
 }) {
-  const { cluster, sessions, active, onActivate, onClose } = props;
+  const { cluster, sessions, active, onActivate, onClose, onToggleFloat } = props;
   const [height, setHeight] = useState(300);
+  const [dockBodyEl, setDockBodyEl] = useState<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
 
   useEffect(() => {
@@ -1224,59 +1263,182 @@ function DockPanel(props: {
     };
   }, []);
 
-  const activeId = sessions.some((s) => s.id === active) ? active : (sessions[sessions.length - 1]?.id ?? null);
+  const docked = sessions.filter((s) => !s.floating);
+  const activeId = docked.some((s) => s.id === active) ? active : (docked[docked.length - 1]?.id ?? null);
 
   return (
-    <div className="dock-panel" style={{ height }}>
-      <div
-        className="dock-resize"
-        title="Drag to resize"
-        onPointerDown={() => {
-          draggingRef.current = true;
-          document.body.classList.add('row-resizing');
-        }}
-      />
-      <div className="dock-tabs">
-        {sessions.map((s) => (
+    <>
+      {sessions.map((s) => (
+        <SessionWindow
+          key={s.id}
+          cluster={cluster}
+          session={s}
+          active={s.id === activeId}
+          dockBodyEl={dockBodyEl}
+          onDock={() => onToggleFloat(s.id, false)}
+          onClose={() => onClose(s.id)}
+        />
+      ))}
+      {docked.length > 0 && (
+        <div className="dock-panel" style={{ height }}>
           <div
-            key={s.id}
-            className={'dock-tab' + (s.id === activeId ? ' active' : '')}
-            onClick={() => onActivate(s.id)}
-          >
-            <i className={'term-dot ' + s.kind} />
-            <span className="dock-tab-label">
-              {s.kind === 'logs' ? 'logs' : 'sh'} · {s.namespace}/{s.pod}
-            </span>
-            <button
-              className="dock-tab-close"
-              title="Close"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(s.id);
-              }}
-            >
-              ×
-            </button>
+            className="dock-resize"
+            title="Drag to resize"
+            onPointerDown={() => {
+              draggingRef.current = true;
+              document.body.classList.add('row-resizing');
+            }}
+          />
+          <div className="dock-tabs">
+            {docked.map((s) => (
+              <div
+                key={s.id}
+                className={'dock-tab' + (s.id === activeId ? ' active' : '')}
+                onClick={() => onActivate(s.id)}
+              >
+                <i className={'term-dot ' + s.kind} />
+                <span className="dock-tab-label">
+                  {s.kind === 'logs' ? 'logs' : 'sh'} · {s.namespace}/{s.pod}
+                </span>
+                <button
+                  className="dock-tab-btn"
+                  title="Open in a floating window"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFloat(s.id, true);
+                  }}
+                >
+                  ⧉
+                </button>
+                <button
+                  className="dock-tab-close"
+                  title="Close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose(s.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
+          <div className="dock-bodies" ref={setDockBodyEl} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function SessionWindow(props: {
+  cluster: string;
+  session: DockSession;
+  active: boolean;
+  dockBodyEl: HTMLDivElement | null;
+  onDock: () => void;
+  onClose: () => void;
+}) {
+  const { cluster, session, active, dockBodyEl, onDock, onClose } = props;
+  // A stable node the body renders into; relocated (not re-created) between dock and float.
+  const hostEl = useMemo(() => {
+    const el = document.createElement('div');
+    el.className = 'session-host';
+    return el;
+  }, []);
+  const [floatEl, setFloatEl] = useState<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const target = session.floating ? floatEl : dockBodyEl;
+    if (target && hostEl.parentElement !== target) {
+      target.appendChild(hostEl);
+    }
+    // Docked, inactive tabs are hidden; floating and active-docked are shown.
+    hostEl.style.display = session.floating || active ? 'flex' : 'none';
+  }, [session.floating, active, dockBodyEl, floatEl, hostEl]);
+
+  const body =
+    session.kind === 'terminal' ? (
+      <TerminalSession cluster={cluster} session={session} />
+    ) : (
+      <LogsSession cluster={cluster} session={session} />
+    );
+
+  return (
+    <>
+      {createPortal(body, hostEl)}
+      {session.floating && (
+        <FloatingFrame session={session} onDock={onDock} onClose={onClose} setContentEl={setFloatEl} />
+      )}
+    </>
+  );
+}
+
+function FloatingFrame(props: {
+  session: DockSession;
+  onDock: () => void;
+  onClose: () => void;
+  setContentEl: (el: HTMLDivElement | null) => void;
+}) {
+  const { session, onDock, onClose, setContentEl } = props;
+  const [rect, setRect] = useState(session.rect ?? { x: 140, y: 140, w: 640, h: 340 });
+  const dragRef = useRef<{ resize: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number } | null>(null);
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) {
+        return;
+      }
+      const dx = e.clientX - d.sx;
+      const dy = e.clientY - d.sy;
+      if (d.resize) {
+        setRect((r) => ({ ...r, w: Math.max(280, d.ow + dx), h: Math.max(160, d.oh + dy) }));
+      } else {
+        setRect((r) => ({ ...r, x: Math.max(0, d.ox + dx), y: Math.max(0, d.oy + dy) }));
+      }
+    };
+    const up = () => {
+      dragRef.current = null;
+      document.body.classList.remove('dragging');
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, []);
+
+  const start = (resize: boolean) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    dragRef.current = { resize, sx: e.clientX, sy: e.clientY, ox: rect.x, oy: rect.y, ow: rect.w, oh: rect.h };
+    document.body.classList.add('dragging');
+  };
+
+  return (
+    <div className="float-window" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
+      <div className="float-head" onPointerDown={start(false)}>
+        <span className="float-title">
+          <i className={'term-dot ' + session.kind} /> {session.kind === 'logs' ? 'logs' : 'sh'} · {session.namespace}/
+          {session.pod}
+        </span>
+        <span className="float-actions">
+          <button className="float-btn" title="Dock back" onClick={onDock}>
+            ⧉
+          </button>
+          <button className="float-btn" title="Close" onClick={onClose}>
+            ×
+          </button>
+        </span>
       </div>
-      <div className="dock-bodies">
-        {sessions.map((s) => (
-          <div key={s.id} className="dock-slot" style={{ display: s.id === activeId ? 'flex' : 'none' }}>
-            {s.kind === 'terminal' ? (
-              <TerminalSession cluster={cluster} session={s} active={s.id === activeId} height={height} />
-            ) : (
-              <LogsSession cluster={cluster} session={s} />
-            )}
-          </div>
-        ))}
-      </div>
+      <div className="float-body" ref={setContentEl} />
+      <div className="float-resize" onPointerDown={start(true)} title="Resize" />
     </div>
   );
 }
 
-function TerminalSession(props: { cluster: string; session: DockSession; active: boolean; height: number }) {
-  const { cluster, session, active, height } = props;
+function TerminalSession(props: { cluster: string; session: DockSession }) {
+  const { cluster, session } = props;
   const { namespace, pod, containers } = session;
   const ref = useRef<HTMLDivElement>(null);
   const fitRef = useRef<{ fit: () => void } | null>(null);
@@ -1312,16 +1474,7 @@ function TerminalSession(props: { cluster: string; session: DockSession; active:
           ws.send(d);
         }
       });
-      const onResize = () => {
-        try {
-          fit.fit();
-        } catch {
-          // terminal not ready to fit yet
-        }
-      };
-      window.addEventListener('resize', onResize);
       cleanup = () => {
-        window.removeEventListener('resize', onResize);
         fitRef.current = null;
         ws.close();
         term.dispose();
@@ -1333,17 +1486,23 @@ function TerminalSession(props: { cluster: string; session: DockSession; active:
     };
   }, [cluster, namespace, pod, container]);
 
-  // Refit when this tab becomes active or the dock is resized (xterm can't measure a
-  // hidden element).
+  // Refit whenever the terminal body changes size — tab shown/hidden, dock resize, float
+  // move/resize, or window resize (xterm can't measure a hidden or stale-sized element).
   useEffect(() => {
-    if (active && fitRef.current) {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    const ro = new ResizeObserver(() => {
       try {
-        fitRef.current.fit();
+        fitRef.current?.fit();
       } catch {
         // not ready to fit yet
       }
-    }
-  }, [active, height]);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div className="dock-session">
@@ -1523,6 +1682,30 @@ function NavLeaf(props: {
         {favorited ? '★' : '☆'}
       </span>
     </button>
+  );
+}
+
+/** Version / build-time / source-repo footer, from Actuator's public /actuator/info. */
+function AppFooter() {
+  const [info, setInfo] = useState<{ build?: { version?: string; time?: string } } | null>(null);
+  useEffect(() => {
+    api
+      .info()
+      .then(setInfo)
+      .catch(() => undefined);
+  }, []);
+  const version = info?.build?.version;
+  const built = info?.build?.time;
+  return (
+    <div className="nav-footer">
+      <a className="repo-link" href="https://github.com/alexmond/kweblens" target="_blank" rel="noreferrer">
+        github.com/alexmond/kweblens ↗
+      </a>
+      <div className="ver-line" title={built ? `Built ${built}` : undefined}>
+        {version ? `v${version}` : 'dev'}
+        {built ? ` · built ${new Date(built).toLocaleString()}` : ''}
+      </div>
+    </div>
   );
 }
 
