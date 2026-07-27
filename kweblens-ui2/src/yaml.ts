@@ -9,6 +9,7 @@ export interface YamlToken {
 
 export function yamlTokens(line: string): YamlToken[] {
   // Runs on a single, bounded YAML line (non-global, anchored) — no ReDoS in practice.
+  // eslint-disable-next-line sonarjs/super-linear-regex
   const m = /^(\s*)(-\s+)?(?:([\w.\-/]+)(:))?(\s*)(.*)$/.exec(line);
   if (!m) {
     return [{ text: line }];

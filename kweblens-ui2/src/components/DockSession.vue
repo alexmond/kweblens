@@ -79,7 +79,13 @@ function initTerminal() {
     cleanup();
     signal = { cancelled: false };
     const active = signal;
-    startTerminal(active).then((c) => (active.cancelled ? c() : (cleanup = c)));
+    startTerminal(active).then((c) => {
+      if (active.cancelled) {
+        c();
+      } else {
+        cleanup = c;
+      }
+    });
   };
   onMounted(() => {
     restart();

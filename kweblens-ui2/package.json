@@ -30,6 +30,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-sonarjs": "^4.2.0",
     "eslint-plugin-vue": "^10.1.0",
     "jsdom": "^25.0.1",
     "knip": "^6.29.0",

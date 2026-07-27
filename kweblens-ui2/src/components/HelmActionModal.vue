@@ -124,7 +124,13 @@ const run = (dryRun: boolean) => {
   busy.value = true;
   error.value = null;
   mutation(dryRun)
-    .then((res) => (dryRun ? (preview.value = res) : emit('applied')))
+    .then((res) => {
+      if (dryRun) {
+        preview.value = res;
+      } else {
+        emit('applied');
+      }
+    })
     .catch((err) => {
       if (err instanceof ApiError && err.status === 401) {
         emit('auth-expired');
