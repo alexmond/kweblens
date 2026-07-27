@@ -1,4 +1,4 @@
-import type { FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { FormEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
 import { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -30,6 +30,50 @@ function initials(id: string): string {
 const objName = (o: KubeObject): string => o.metadata?.name ?? '';
 const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
+
+/** Call `handler` whenever Escape is pressed while the component is mounted. */
+function useEscapeKey(handler: () => void): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handler();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handler]);
+}
+
+/** Close a portal menu on outside-click / scroll / resize while it is open. */
+function useMenuDismiss(
+  open: boolean,
+  setOpen: (v: boolean) => void,
+  btnRef: RefObject<HTMLButtonElement | null>,
+  menuRef: RefObject<HTMLDivElement | null>,
+): void {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) {
+        return;
+      }
+      setOpen(false);
+    };
+    const dismiss = () => setOpen(false);
+    document.addEventListener('mousedown', onDoc);
+    // The menu is fixed-positioned, so close it if the page scrolls or resizes under it.
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', dismiss);
+    };
+  }, [open, setOpen, btnRef, menuRef]);
+}
 
 // Ports worth suggesting when starting a forward: a Pod's containerPorts, a Service's ports.
 function objectPorts(kind: string, o: KubeObject): number[] {
@@ -156,6 +200,8 @@ function stripManagedFields(yaml: string): string {
 
 // Split one YAML line into coloured tokens (indent · list-dash · key · value/comment).
 function yamlTokens(line: string): ReactNode[] {
+  // Runs on a single, bounded YAML line (non-global, anchored) — no ReDoS in practice.
+  // eslint-disable-next-line sonarjs/super-linear-regex
   const m = /^(\s*)(-\s+)?(?:([\w.\-/]+)(:))?(\s*)(.*)$/.exec(line);
   if (!m) {
     return [line];
@@ -506,28 +552,7 @@ function RowMenu(props: {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) {
-        return;
-      }
-      setOpen(false);
-    };
-    const dismiss = () => setOpen(false);
-    document.addEventListener('mousedown', onDoc);
-    // The menu is fixed-positioned, so close it if the page scrolls or resizes under it.
-    window.addEventListener('scroll', dismiss, true);
-    window.addEventListener('resize', dismiss);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      window.removeEventListener('scroll', dismiss, true);
-      window.removeEventListener('resize', dismiss);
-    };
-  }, [open]);
+  useMenuDismiss(open, setOpen, btnRef, menuRef);
 
   const toggle = () => {
     if (open) {
@@ -634,27 +659,7 @@ function KebabMenu(props: { items: KebabItem[] }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) {
-        return;
-      }
-      setOpen(false);
-    };
-    const dismiss = () => setOpen(false);
-    document.addEventListener('mousedown', onDoc);
-    window.addEventListener('scroll', dismiss, true);
-    window.addEventListener('resize', dismiss);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      window.removeEventListener('scroll', dismiss, true);
-      window.removeEventListener('resize', dismiss);
-    };
-  }, [open]);
+  useMenuDismiss(open, setOpen, btnRef, menuRef);
 
   const toggle = () => {
     if (open) {
@@ -876,16 +881,7 @@ function DialogHost(props: { state: DialogState; onClose: () => void }) {
     onClose();
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        cancel();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
+  useEscapeKey(cancel);
 
   const danger = !isPrompt && (state.opts as ConfirmOpts).danger;
   const confirmLabel = state.opts.confirmLabel ?? (isPrompt ? 'OK' : 'Confirm');
@@ -2268,15 +2264,7 @@ function CreateModal(props: { cluster: string; onClose: () => void; onAuthExpire
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const apply = async () => {
     setBusy(true);
@@ -2786,15 +2774,7 @@ function Detail(props: {
   const name = objName(obj);
   const ns = objNs(obj) ?? '';
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   useEffect(() => {
     if (tab !== 'yaml' || yaml !== null || yamlError !== null) {
@@ -3851,15 +3831,7 @@ function ForwardModal(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -4485,11 +4457,7 @@ function HelmResourcesModal(props: {
     };
   }, [cluster, namespace, name]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const { sorted, sort, clickHeader } = useTableSort(
     resources ?? [],
@@ -4560,11 +4528,7 @@ function HelmValuesModal(props: { cluster: string; namespace: string; name: stri
     };
   }, [cluster, namespace, name]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -4607,11 +4571,7 @@ function HelmHistoryModal(props: { cluster: string; namespace: string; name: str
     };
   }, [cluster, namespace, name]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const rows = [...(history ?? [])].sort((a, b) => b.revision - a.revision);
 
@@ -4711,11 +4671,7 @@ function HelmActionModal(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const title =
     action.mode === 'install' ? 'Install chart' : action.mode === 'upgrade' ? 'Upgrade release' : 'Rollback release';
@@ -5166,15 +5122,7 @@ function LoginModal(props: { onCancel: () => void; onSubmit: (user: string, pass
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
+  useEscapeKey(onCancel);
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>

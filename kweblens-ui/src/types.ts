@@ -79,7 +79,7 @@ export interface NodeDiskUsage {
   totalBytes: number;
 }
 
-export interface MetricPoint {
+interface MetricPoint {
   t: number;
   v: number;
 }
@@ -101,12 +101,6 @@ export interface PortForward {
   address: string;
   protocol: string;
   status: string;
-}
-
-/** A configured Helm chart repository (cluster-agnostic, managed via jhelm-rest). */
-export interface HelmRepo {
-  name: string;
-  url: string;
 }
 
 export interface HelmRelease {

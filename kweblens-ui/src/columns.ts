@@ -169,7 +169,7 @@ function involvedObject(o: KubeObject): string {
 }
 
 // resourceId -> the kind-specific middle columns
-export const COLUMNS: Record<string, ColumnDef[]> = {
+const COLUMNS: Record<string, ColumnDef[]> = {
   pods: [
     { key: 'ready', header: 'Ready', render: podReady },
     { key: 'status', header: 'Status', render: (o) => dash(str(status(o).phase)) },
