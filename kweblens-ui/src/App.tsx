@@ -4928,35 +4928,30 @@ function HelmActionModal(props: {
   );
 }
 
-const WORKLOAD_KINDS = [
-  { id: 'pods', label: 'Pods' },
-  { id: 'deployments', label: 'Deployments' },
-  { id: 'statefulsets', label: 'Stateful Sets' },
-  { id: 'daemonsets', label: 'Daemon Sets' },
-  { id: 'replicasets', label: 'Replica Sets' },
-  { id: 'jobs', label: 'Jobs' },
-  { id: 'cronjobs', label: 'Cron Jobs' },
+const numOf = (v: unknown): number => (typeof v === 'number' ? v : 0);
+// Scaled-to-zero counts as healthy (intentionally scaled down, not failing).
+const replicasReady = (o: KubeObject): boolean => numOf(ovStatus(o).readyReplicas) === numOf(ovSpec(o).replicas);
+
+// The Workloads overview cards. Each entry carries its own health predicate, so adding a
+// workload kind is one entry here (no separate switch to keep in sync).
+const WORKLOAD_KINDS: { id: string; label: string; healthy: (o: KubeObject) => boolean }[] = [
+  { id: 'pods', label: 'Pods', healthy: (o) => ovStatus(o).phase === 'Running' || ovStatus(o).phase === 'Succeeded' },
+  { id: 'deployments', label: 'Deployments', healthy: replicasReady },
+  { id: 'statefulsets', label: 'Stateful Sets', healthy: replicasReady },
+  { id: 'daemonsets', label: 'Daemon Sets', healthy: (o) => numOf(ovStatus(o).numberReady) === numOf(ovStatus(o).desiredNumberScheduled) },
+  { id: 'replicasets', label: 'Replica Sets', healthy: replicasReady },
+  { id: 'jobs', label: 'Jobs', healthy: (o) => numOf(ovStatus(o).succeeded) > 0 },
+  { id: 'cronjobs', label: 'Cron Jobs', healthy: () => true },
 ];
 
-function isHealthy(kindId: string, o: KubeObject): boolean {
-  const s = (o.status as Record<string, unknown>) ?? {};
-  const sp = (o.spec as Record<string, unknown>) ?? {};
-  const n = (v: unknown) => (typeof v === 'number' ? v : 0);
-  switch (kindId) {
-    case 'pods':
-      return s.phase === 'Running' || s.phase === 'Succeeded';
-    case 'deployments':
-    case 'statefulsets':
-    case 'replicasets':
-      // Scaled-to-zero counts as healthy (intentionally scaled down, not failing).
-      return n(s.readyReplicas) === n(sp.replicas);
-    case 'daemonsets':
-      return n(s.numberReady) === n(s.desiredNumberScheduled);
-    case 'jobs':
-      return n(s.succeeded) > 0;
-    default:
-      return true;
-  }
+// One dashboard stat card, shared by the Cluster and Workloads overviews.
+function StatCard(props: { value: ReactNode; label: ReactNode; danger?: boolean }) {
+  return (
+    <div className={'ov-card' + (props.danger ? ' danger' : '')}>
+      <div className="ov-num">{props.value}</div>
+      <div className="ov-lbl">{props.label}</div>
+    </div>
+  );
 }
 
 function WorkloadsOverview(props: { cluster: string }) {
@@ -4977,7 +4972,7 @@ function WorkloadsOverview(props: { cluster: string }) {
           }
           setCounts((prev) => ({
             ...prev,
-            [k.id]: { total: objs.length, ready: objs.filter((o) => isHealthy(k.id, o)).length },
+            [k.id]: { total: objs.length, ready: objs.filter((o) => k.healthy(o)).length },
           }));
         })
         .catch(() => undefined);
@@ -4999,13 +4994,17 @@ function WorkloadsOverview(props: { cluster: string }) {
           const c = counts[k.id];
           const unhealthy = c ? c.total - c.ready : 0;
           return (
-            <div className={'ov-card' + (unhealthy > 0 ? ' danger' : '')} key={k.id}>
-              <div className="ov-num">{c ? c.total : '…'}</div>
-              <div className="ov-lbl">
-                {k.label}
-                {c ? ` · ${c.ready} ready` : ''}
-              </div>
-            </div>
+            <StatCard
+              key={k.id}
+              value={c ? c.total : '…'}
+              label={
+                <>
+                  {k.label}
+                  {c ? ` · ${c.ready} ready` : ''}
+                </>
+              }
+              danger={unhealthy > 0}
+            />
           );
         })}
       </div>
@@ -5055,18 +5054,13 @@ function ClusterOverview(props: { cluster: string; name: string; masterUrl?: str
     <div className="overview">
       <h1 className="ov-title">{name}</h1>
       <div className="ov-cards">
-        <div className="ov-card">
-          <div className="ov-num">{nodes ? nodes.length : '…'}</div>
-          <div className="ov-lbl">Nodes{nodes ? ` · ${readyNodes} ready` : ''}</div>
-        </div>
-        <div className="ov-card">
-          <div className="ov-num">{namespaceCount}</div>
-          <div className="ov-lbl">Namespaces</div>
-        </div>
-        <div className={'ov-card' + (warnings && warnings.length > 0 ? ' danger' : '')}>
-          <div className="ov-num">{warnings ? warnings.length : '…'}</div>
-          <div className="ov-lbl">Warnings</div>
-        </div>
+        <StatCard value={nodes ? nodes.length : '…'} label={<>Nodes{nodes ? ` · ${readyNodes} ready` : ''}</>} />
+        <StatCard value={namespaceCount} label="Namespaces" />
+        <StatCard
+          value={warnings ? warnings.length : '…'}
+          label="Warnings"
+          danger={!!(warnings && warnings.length > 0)}
+        />
       </div>
       {masterUrl && (
         <div className="ov-api">

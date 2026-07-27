@@ -90,3 +90,15 @@ whose `applies` is false, is simply omitted, so a new kind's data appears automa
 
 `ovMeta/ovSpec/ovStatus/ovArr/ovMap` are the small defensive accessors; `get`/`body`
 receive `{ obj, onNavigate, onHelmRelease }`. Adding a row or section is one entry.
+
+### Overview pages (Cluster / Workloads)
+
+Both overview dashboards build their stat tiles from the shared `StatCard`
+(`{ value, label, danger? }`). The Workloads cards come from `WORKLOAD_KINDS`, where each
+entry carries its own health predicate:
+
+```ts
+{ id: 'deployments', label: 'Deployments', healthy: replicasReady }
+```
+
+So adding a workload tile is one entry — no separate health `switch` to keep in sync.
