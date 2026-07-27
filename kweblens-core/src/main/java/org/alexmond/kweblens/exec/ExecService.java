@@ -28,14 +28,24 @@ public class ExecService {
 
 	public ExecWatch exec(String clusterId, String namespace, String pod, String container, OutputStream output,
 			ExecListener listener) {
+		return session(clusterId, namespace, pod, container, output, listener).exec("sh");
+	}
+
+	/**
+	 * Attach to a running container's process (like {@code kubectl attach}) — streams its
+	 * existing stdout/stderr and forwards keystrokes to its stdin, rather than starting a
+	 * new shell. A blank container selects the pod's default container.
+	 */
+	public ExecWatch attach(String clusterId, String namespace, String pod, String container, OutputStream output,
+			ExecListener listener) {
+		return session(clusterId, namespace, pod, container, output, listener).attach();
+	}
+
+	private io.fabric8.kubernetes.client.dsl.Execable session(String clusterId, String namespace, String pod,
+			String container, OutputStream output, ExecListener listener) {
 		PodResource podResource = clusters.require(clusterId).pods().inNamespace(namespace).withName(pod);
 		ContainerResource target = StringUtils.hasText(container) ? podResource.inContainer(container) : podResource;
-		return target.redirectingInput()
-			.writingOutput(output)
-			.writingError(output)
-			.withTTY()
-			.usingListener(listener)
-			.exec("sh");
+		return target.redirectingInput().writingOutput(output).writingError(output).withTTY().usingListener(listener);
 	}
 
 }

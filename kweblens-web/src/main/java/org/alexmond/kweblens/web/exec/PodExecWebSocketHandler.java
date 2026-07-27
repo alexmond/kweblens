@@ -49,16 +49,19 @@ public class PodExecWebSocketHandler extends TextWebSocketHandler {
 		String namespace = params.getFirst("namespace");
 		String pod = params.getFirst("pod");
 		String container = params.getFirst("container");
+		boolean attach = "attach".equals(params.getFirst("mode"));
 		WebSocketSession safe = new ConcurrentWebSocketSessionDecorator(session, 5000, SEND_BUFFER);
 		OutputStream output = new WebSocketOutputStream(safe);
 		try {
-			ExecWatch watch = execService.exec(cluster, namespace, pod, container, output, null);
+			ExecWatch watch = attach ? execService.attach(cluster, namespace, pod, container, output, null)
+					: execService.exec(cluster, namespace, pod, container, output, null);
 			watches.put(session.getId(), watch);
-			audit.record(cluster, "exec", "Pod/" + namespace + "/" + pod);
+			audit.record(cluster, attach ? "attach" : "exec", "Pod/" + namespace + "/" + pod);
 		}
 		catch (RuntimeException ex) {
-			log.warn("Could not open exec session for {}/{}: {}", namespace, pod, ex.getMessage());
-			closeQuietly(session, CloseStatus.SERVER_ERROR.withReason("exec failed"));
+			log.warn("Could not open {} session for {}/{}: {}", attach ? "attach" : "exec", namespace, pod,
+					ex.getMessage());
+			closeQuietly(session, CloseStatus.SERVER_ERROR.withReason("session failed"));
 		}
 	}
 
