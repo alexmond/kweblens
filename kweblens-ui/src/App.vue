@@ -154,9 +154,6 @@ const onForwardStarted = () => {
 <template>
   <NConfigProvider :theme="theme" class="app-theme-root">
     <div class="app">
-      <button class="theme-toggle" :title="dark ? 'Switch to light' : 'Switch to dark'" @click="toggleTheme">
-        {{ dark ? '☀' : '☾' }}
-      </button>
       <BrandBar
         :cluster="cluster"
         :namespace="namespace"
@@ -164,10 +161,12 @@ const onForwardStarted = () => {
         :helm-release="helmRelease"
         :helm-release-list="helmReleaseList"
         :auth-user="authUser"
+        :dark="dark"
         @update:namespace="(v) => (namespace = v)"
         @update:helm-release="(v) => (helmRelease = v)"
         @sign-in="showLogin = true"
         @sign-out="signOut"
+        @toggle-theme="toggleTheme"
       />
 
       <div class="body">
