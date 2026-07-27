@@ -262,10 +262,213 @@ type RowAction =
   | 'delete'
   | 'forceDelete';
 
-// Per-row kebab (⋮) actions menu (Freelens-style), kind-aware: it surfaces the same
-// per-kind actions the detail drawer offers — Logs/Terminal/Forward (Pod/Service),
-// Scale/Restart/Rollback (workloads), Trigger/Suspend/Resume (CronJob/Job),
-// Cordon/Uncordon/Drain (Node) — plus Edit/Delete/Force-Delete.
+// Capabilities a row action's handler may use; the table builds one per fired action.
+type RowActionCtx = {
+  cluster: string;
+  resourceId: string;
+  obj: KubeObject;
+  ns: string;
+  name: string;
+  kind: string;
+  containers: string[];
+  container?: string;
+  dialog: DialogApi;
+  openDock: (kind: 'terminal' | 'logs', ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
+  setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean }) => void;
+  setError: (msg: string) => void;
+  removeObject: (obj: KubeObject) => void;
+  // Optional-confirm wrapper: run fn and surface errors; confirm first when confirmMsg is set.
+  confirmRun: (fn: () => Promise<unknown>, confirmMsg?: string) => void;
+};
+
+// One declarative row action. Adding a menu item = adding one entry to ROW_ACTIONS below;
+// nothing else changes. `applies` decides which kinds show it; `run` does the work.
+type RowActionDef = {
+  id: RowAction;
+  label: string;
+  danger?: boolean;
+  // Renders as a per-container submenu on multi-container pods (Attach/Shell/Logs).
+  containerScoped?: boolean;
+  // Only Logs is readable without signing in; everything else prompts for auth first.
+  requiresAuth?: boolean;
+  // 'main' = kind-specific actions; 'lifecycle' = Edit/Delete (separated by a divider).
+  section: 'main' | 'lifecycle';
+  applies: (ctx: { kind: string; suspended: boolean }) => boolean;
+  run: (ctx: RowActionCtx) => void;
+};
+
+// Containers to target: the one chosen from a submenu, else all of the pod's containers.
+function scopedContainers(c: RowActionCtx): string[] {
+  return c.container ? [c.container] : c.containers;
+}
+
+function confirmDelete(c: RowActionCtx, force: boolean) {
+  c.dialog
+    .confirm({
+      title: force ? 'Force delete' : 'Delete',
+      message: `${force ? 'Force delete' : 'Delete'} ${c.kind} ${c.name}? This cannot be undone.`,
+      confirmLabel: force ? 'Force delete' : 'Delete',
+      danger: true,
+    })
+    .then((ok) => {
+      if (!ok) {
+        return;
+      }
+      api.del(c.cluster, c.resourceId, c.ns, c.name, force).then(
+        () => c.removeObject(c.obj),
+        (e) => c.setError(String(e)),
+      );
+    });
+}
+
+function scaleAction(c: RowActionCtx) {
+  const current = Number((c.obj.spec as Record<string, unknown>)?.replicas ?? 1);
+  c.dialog
+    .prompt({
+      title: 'Scale',
+      message: `Scale ${c.kind} ${c.name} to how many replicas?`,
+      label: 'Replicas',
+      initial: String(current),
+      type: 'number',
+      confirmLabel: 'Scale',
+    })
+    .then((input) => {
+      if (input === null) {
+        return;
+      }
+      const replicas = Math.max(0, Number.parseInt(input, 10));
+      if (Number.isNaN(replicas)) {
+        return;
+      }
+      c.confirmRun(() => api.scale(c.cluster, c.resourceId, c.ns, c.name, replicas));
+    });
+}
+
+// The single source of truth for per-row actions — the kebab menu renders it and the
+// dashboard dispatches it. Both derive entirely from this list.
+const ROW_ACTIONS: RowActionDef[] = [
+  {
+    id: 'attach',
+    label: 'Attach to Pod',
+    containerScoped: true,
+    section: 'main',
+    applies: (c) => c.kind === 'Pod',
+    run: (c) => c.openDock('terminal', c.ns, c.name, scopedContainers(c), true),
+  },
+  {
+    id: 'terminal',
+    label: 'Shell',
+    containerScoped: true,
+    section: 'main',
+    applies: (c) => c.kind === 'Pod',
+    run: (c) => c.openDock('terminal', c.ns, c.name, scopedContainers(c)),
+  },
+  {
+    id: 'logs',
+    label: 'Logs',
+    containerScoped: true,
+    requiresAuth: false,
+    section: 'main',
+    applies: (c) => c.kind === 'Pod',
+    run: (c) => c.openDock('logs', c.ns, c.name, scopedContainers(c)),
+  },
+  {
+    id: 'forward',
+    label: 'Port Forward',
+    section: 'main',
+    applies: (c) => c.kind === 'Service',
+    run: (c) => c.setForward({ kind: c.kind, namespace: c.ns, name: c.name, ports: objectPorts(c.kind, c.obj) }),
+  },
+  { id: 'scale', label: 'Scale…', section: 'main', applies: (c) => SCALABLE.includes(c.kind), run: scaleAction },
+  {
+    id: 'restart',
+    label: 'Restart',
+    section: 'main',
+    applies: (c) => RESTARTABLE.includes(c.kind),
+    run: (c) => c.confirmRun(() => api.restart(c.cluster, c.resourceId, c.ns, c.name), `Rolling-restart ${c.name}?`),
+  },
+  {
+    id: 'rollback',
+    label: 'Rollback',
+    section: 'main',
+    applies: (c) => ROLLBACKABLE.includes(c.kind),
+    run: (c) =>
+      c.confirmRun(
+        () => api.rollback(c.cluster, c.resourceId, c.ns, c.name),
+        `Roll ${c.kind} ${c.name} back to its previous revision?`,
+      ),
+  },
+  {
+    id: 'trigger',
+    label: 'Trigger',
+    section: 'main',
+    applies: (c) => c.kind === 'CronJob',
+    run: (c) => c.confirmRun(() => api.trigger(c.cluster, c.resourceId, c.ns, c.name), `Trigger a manual run of ${c.name}?`),
+  },
+  {
+    id: 'suspend',
+    label: 'Suspend',
+    section: 'main',
+    applies: (c) => (c.kind === 'CronJob' || c.kind === 'Job') && !c.suspended,
+    run: (c) => c.confirmRun(() => api.suspend(c.cluster, c.resourceId, c.ns, c.name, true), `Suspend ${c.kind} ${c.name}?`),
+  },
+  {
+    id: 'resume',
+    label: 'Resume',
+    section: 'main',
+    applies: (c) => (c.kind === 'CronJob' || c.kind === 'Job') && c.suspended,
+    run: (c) => c.confirmRun(() => api.suspend(c.cluster, c.resourceId, c.ns, c.name, false), `Resume ${c.kind} ${c.name}?`),
+  },
+  {
+    id: 'cordon',
+    label: 'Cordon',
+    section: 'main',
+    applies: (c) => c.kind === 'Node',
+    run: (c) => c.confirmRun(() => api.cordon(c.cluster, c.name), `Cordon ${c.name}?`),
+  },
+  {
+    id: 'uncordon',
+    label: 'Uncordon',
+    section: 'main',
+    applies: (c) => c.kind === 'Node',
+    run: (c) => c.confirmRun(() => api.uncordon(c.cluster, c.name)),
+  },
+  {
+    id: 'drain',
+    label: 'Drain',
+    danger: true,
+    section: 'main',
+    applies: (c) => c.kind === 'Node',
+    run: (c) => c.confirmRun(() => api.drain(c.cluster, c.name), `Drain ${c.name}? This cordons it and evicts its pods.`),
+  },
+  {
+    id: 'edit',
+    label: 'Edit',
+    section: 'lifecycle',
+    applies: () => true,
+    run: (c) => c.setDetail({ resourceId: c.resourceId, obj: c.obj, edit: true }),
+  },
+  {
+    id: 'delete',
+    label: 'Delete',
+    danger: true,
+    section: 'lifecycle',
+    applies: (c) => c.kind !== 'Node',
+    run: (c) => confirmDelete(c, false),
+  },
+  {
+    id: 'forceDelete',
+    label: 'Force Delete',
+    danger: true,
+    section: 'lifecycle',
+    applies: (c) => c.kind !== 'Node',
+    run: (c) => confirmDelete(c, true),
+  },
+];
+
+// Per-row kebab (⋮) actions menu (Freelens-style), kind-aware: it renders whichever
+// entries of ROW_ACTIONS apply to this kind — no per-kind markup lives here.
 function RowMenu(props: {
   kind: string;
   suspended: boolean;
@@ -303,7 +506,6 @@ function RowMenu(props: {
     };
   }, [open]);
 
-  const isPod = kind === 'Pod';
   const toggle = () => {
     if (open) {
       setOpen(false);
@@ -321,52 +523,46 @@ function RowMenu(props: {
     setOpen(false);
     onAction(action, container);
   };
-  const item = (label: string, action: RowAction, danger?: boolean) => (
-    <button
-      className={'menu-item' + (danger ? ' danger' : '')}
-      onClick={(e) => {
-        e.stopPropagation();
-        run(action);
-      }}
-    >
-      {label}
-    </button>
-  );
-  // Freelens-style container-scoped action: a direct item for 0/1 container, or a
-  // hover submenu of containers (Attach to Pod / Shell / Logs) for a multi-container pod.
-  const containerItem = (label: string, action: RowAction) => {
-    if (containers.length <= 1) {
-      return item(label, action);
+  const applicable = ROW_ACTIONS.filter((a) => a.applies({ kind, suspended }));
+  const main = applicable.filter((a) => a.section === 'main');
+  const lifecycle = applicable.filter((a) => a.section === 'lifecycle');
+  const renderItem = (a: RowActionDef) => {
+    // Multi-container pod: a hover submenu of containers; otherwise a plain item.
+    if (a.containerScoped && containers.length > 1) {
+      return (
+        <div key={a.id} className="menu-item has-sub">
+          <span>{a.label}</span>
+          <span className="sub-arrow">›</span>
+          <div className="submenu">
+            {containers.map((c) => (
+              <button
+                key={c}
+                className="menu-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  run(a.id, c);
+                }}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
     }
     return (
-      <div className="menu-item has-sub">
-        <span>{label}</span>
-        <span className="sub-arrow">›</span>
-        <div className="submenu">
-          {containers.map((c) => (
-            <button
-              key={c}
-              className="menu-item"
-              onClick={(e) => {
-                e.stopPropagation();
-                run(action, c);
-              }}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      </div>
+      <button
+        key={a.id}
+        className={'menu-item' + (a.danger ? ' danger' : '')}
+        onClick={(e) => {
+          e.stopPropagation();
+          run(a.id);
+        }}
+      >
+        {a.label}
+      </button>
     );
   };
-  const hasResourceActions =
-    isPod ||
-    kind === 'Service' ||
-    kind === 'Node' ||
-    kind === 'CronJob' ||
-    kind === 'Job' ||
-    SCALABLE.includes(kind) ||
-    RESTARTABLE.includes(kind);
   return (
     <div className="rowmenu" onClick={(e) => e.stopPropagation()}>
       <button
@@ -394,23 +590,9 @@ function RowMenu(props: {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {isPod && containerItem('Attach to Pod', 'attach')}
-            {isPod && containerItem('Shell', 'terminal')}
-            {isPod && containerItem('Logs', 'logs')}
-            {kind === 'Service' && item('Port Forward', 'forward')}
-            {SCALABLE.includes(kind) && item('Scale…', 'scale')}
-            {RESTARTABLE.includes(kind) && item('Restart', 'restart')}
-            {ROLLBACKABLE.includes(kind) && item('Rollback', 'rollback')}
-            {kind === 'CronJob' && item('Trigger', 'trigger')}
-            {(kind === 'CronJob' || kind === 'Job') &&
-              item(suspended ? 'Resume' : 'Suspend', suspended ? 'resume' : 'suspend')}
-            {kind === 'Node' && item('Cordon', 'cordon')}
-            {kind === 'Node' && item('Uncordon', 'uncordon')}
-            {kind === 'Node' && item('Drain', 'drain', true)}
-            {hasResourceActions && <div className="menu-sep" />}
-            {item('Edit', 'edit')}
-            {kind !== 'Node' && item('Delete', 'delete', true)}
-            {kind !== 'Node' && item('Force Delete', 'forceDelete', true)}
+            {main.map(renderItem)}
+            {main.length > 0 && lifecycle.length > 0 && <div className="menu-sep" />}
+            {lifecycle.map(renderItem)}
           </div>,
           document.body,
         )}
@@ -1230,19 +1412,18 @@ function AppInner() {
     if (!cluster) {
       return;
     }
-    // Every action except read-only Logs requires the admin login; prompt for it. The
-    // menu shows all actions (Freelens-style) so they're discoverable even when signed out.
-    if (action !== 'logs' && authUser === null) {
+    const def = ROW_ACTIONS.find((a) => a.id === action);
+    if (!def) {
+      return;
+    }
+    // Everything except read-only Logs requires the admin login; prompt for it. The menu
+    // shows all actions (Freelens-style) so they're discoverable even when signed out.
+    if (def.requiresAuth !== false && authUser === null) {
       setShowLogin(true);
       return;
     }
-    const ns = objNs(obj) ?? '';
-    const nm = objName(obj);
-    const kind = obj.kind ?? '';
-    // A container was chosen from a submenu → scope to just it; otherwise offer them all.
-    const conts = container ? [container] : containerNames(obj);
-    // Mutating action wrapper: optional confirm, then surface any error.
-    const run = (fn: () => Promise<{ result: string }>, confirmMsg?: string) => {
+    // Optional-confirm wrapper handed to action handlers: run fn, surface any error.
+    const confirmRun = (fn: () => Promise<unknown>, confirmMsg?: string) => {
       const go = () => fn().catch((e) => setError(String(e)));
       if (!confirmMsg) {
         go();
@@ -1254,91 +1435,23 @@ function AppInner() {
         }
       });
     };
-    switch (action) {
-      case 'logs':
-        openDock('logs', ns, nm, conts);
-        return;
-      case 'terminal':
-        openDock('terminal', ns, nm, conts);
-        return;
-      case 'attach':
-        openDock('terminal', ns, nm, conts, true);
-        return;
-      case 'forward':
-        setForward({ kind, namespace: ns, name: nm, ports: objectPorts(kind, obj) });
-        return;
-      case 'edit':
-        setDetail({ resourceId, obj, edit: true });
-        return;
-      case 'scale': {
-        const current = Number((obj.spec as Record<string, unknown>)?.replicas ?? 1);
-        dialog
-          .prompt({
-            title: 'Scale',
-            message: `Scale ${kind} ${nm} to how many replicas?`,
-            label: 'Replicas',
-            initial: String(current),
-            type: 'number',
-            confirmLabel: 'Scale',
-          })
-          .then((input) => {
-            if (input === null) {
-              return;
-            }
-            const replicas = Math.max(0, Number.parseInt(input, 10));
-            if (Number.isNaN(replicas)) {
-              return;
-            }
-            run(() => api.scale(cluster, resourceId, ns, nm, replicas));
-          });
-        return;
-      }
-      case 'restart':
-        run(() => api.restart(cluster, resourceId, ns, nm), `Rolling-restart ${nm}?`);
-        return;
-      case 'rollback':
-        run(() => api.rollback(cluster, resourceId, ns, nm), `Roll ${kind} ${nm} back to its previous revision?`);
-        return;
-      case 'suspend':
-        run(() => api.suspend(cluster, resourceId, ns, nm, true), `Suspend ${kind} ${nm}?`);
-        return;
-      case 'resume':
-        run(() => api.suspend(cluster, resourceId, ns, nm, false), `Resume ${kind} ${nm}?`);
-        return;
-      case 'trigger':
-        run(() => api.trigger(cluster, resourceId, ns, nm), `Trigger a manual run of ${nm}?`);
-        return;
-      case 'cordon':
-        run(() => api.cordon(cluster, nm), `Cordon ${nm}?`);
-        return;
-      case 'uncordon':
-        run(() => api.uncordon(cluster, nm));
-        return;
-      case 'drain':
-        run(() => api.drain(cluster, nm), `Drain ${nm}? This cordons it and evicts its pods.`);
-        return;
-      case 'delete':
-      case 'forceDelete': {
-        const force = action === 'forceDelete';
-        dialog
-          .confirm({
-            title: force ? 'Force delete' : 'Delete',
-            message: `${force ? 'Force delete' : 'Delete'} ${kind} ${nm}? This cannot be undone.`,
-            confirmLabel: force ? 'Force delete' : 'Delete',
-            danger: true,
-          })
-          .then((ok) => {
-            if (!ok) {
-              return;
-            }
-            api.del(cluster, resourceId, ns, nm, force).then(
-              () => setObjects((prev) => prev.filter((o) => objKey(o) !== objKey(obj))),
-              (e) => setError(String(e)),
-            );
-          });
-        return;
-      }
-    }
+    def.run({
+      cluster,
+      resourceId,
+      obj,
+      ns: objNs(obj) ?? '',
+      name: objName(obj),
+      kind: obj.kind ?? '',
+      containers: containerNames(obj),
+      container,
+      dialog,
+      openDock,
+      setForward,
+      setDetail,
+      setError,
+      removeObject: (o) => setObjects((prev) => prev.filter((x) => objKey(x) !== objKey(o))),
+      confirmRun,
+    });
   };
 
   // From a resource's "Managed By: Helm" link → open the owning release's Resources view.
