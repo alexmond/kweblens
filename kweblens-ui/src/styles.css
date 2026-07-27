@@ -749,27 +749,55 @@ body {
   margin-bottom: 6px;
 }
 
-.spark-svg {
-  width: 100%;
-  height: 120px;
-  display: block;
+/* Recharts surface: clicking a point selects it, so hint it's interactive. */
+.chart .recharts-wrapper {
+  cursor: pointer;
+}
+.chart .recharts-cartesian-axis-line,
+.chart .recharts-cartesian-axis-tick-line {
+  stroke: var(--border);
 }
 
-.spark-line {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.5;
+/* Hover tooltip (custom-rendered) — timestamp over value. */
+.chart-tip {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-size: 11px;
+  line-height: 1.35;
 }
-
-.spark-area {
-  fill: rgba(10, 122, 194, 0.12);
-  stroke: none;
+.chart-tip-t {
+  color: var(--muted);
+}
+.chart-tip-v {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .spark-meta {
   font-size: 11px;
   color: var(--muted);
   margin-top: 4px;
+}
+
+/* Selected-point readout in the meta line. */
+.chart-sel {
+  color: var(--accent);
+}
+.chart-sel-clear {
+  margin-left: 6px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.chart-sel-clear:hover {
+  color: var(--text);
 }
 
 .error {

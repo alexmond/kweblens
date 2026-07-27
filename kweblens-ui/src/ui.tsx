@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { api } from './api';
 import { statusTone } from './columns';
 import type { SortState } from './hooks';
-import type { KubeObject, MetricSeries } from './types';
+import type { KubeObject, MetricPoint, MetricSeries } from './types';
 
 // Shared, low-level display primitives used across the dashboard's feature views.
 
@@ -213,8 +214,76 @@ function fmtValue(unit: string, v: number): string {
   return String(Math.round(v));
 }
 
-function Sparkline(props: { series: MetricSeries | null }) {
+// t is epoch SECONDS (Prometheus range query) — ×1000 for the JS Date.
+const fmtClock = (t: number): string =>
+  new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtStamp = (t: number): string => new Date(t * 1000).toLocaleString();
+
+// Hover tooltip: full timestamp + formatted value for the point under the cursor.
+function ChartTooltip(props: { unit: string; active?: boolean; payload?: { value: number }[]; label?: number }) {
+  const { unit, active, payload, label } = props;
+  if (!active || !payload || payload.length === 0) {
+    return null;
+  }
+  return (
+    <div className="chart-tip">
+      <div className="chart-tip-t">{fmtStamp(label ?? 0)}</div>
+      <div className="chart-tip-v">{fmtValue(unit, payload[0].value)}</div>
+    </div>
+  );
+}
+
+// Time (x) / value (y) area chart with axes, hover tooltip, and click-to-select a point.
+function MetricGraph(props: { series: MetricSeries; onSelect: (p: MetricPoint | null) => void }) {
+  const { series, onSelect } = props;
+  const accent = 'var(--accent)';
+  const pick = (state: { activePayload?: { payload: MetricPoint }[] }) => {
+    onSelect(state?.activePayload?.[0]?.payload ?? null);
+  };
+  return (
+    <ResponsiveContainer width="100%" height={150}>
+      <AreaChart data={series.points} margin={{ top: 6, right: 10, bottom: 0, left: 0 }} onClick={pick}>
+        <defs>
+          <linearGradient id="metric-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={accent} stopOpacity={0.28} />
+            <stop offset="100%" stopColor={accent} stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+        <XAxis
+          dataKey="t"
+          type="number"
+          domain={['dataMin', 'dataMax']}
+          tickFormatter={fmtClock}
+          tick={{ fontSize: 10, fill: 'var(--muted)' }}
+          stroke="var(--border)"
+          minTickGap={44}
+        />
+        <YAxis
+          width={46}
+          tickFormatter={(v: number) => fmtValue(series.unit, v)}
+          tick={{ fontSize: 10, fill: 'var(--muted)' }}
+          stroke="var(--border)"
+        />
+        <Tooltip content={<ChartTooltip unit={series.unit} />} />
+        <Area
+          type="monotone"
+          dataKey="v"
+          stroke={accent}
+          strokeWidth={1.5}
+          fill="url(#metric-fill)"
+          activeDot={{ r: 4, stroke: accent, strokeWidth: 2, fill: 'var(--panel)' }}
+          isAnimationActive={false}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ChartBody(props: { series: MetricSeries | null }) {
   const { series } = props;
+  const [selected, setSelected] = useState<MetricPoint | null>(null);
+  useEffect(() => setSelected(null), [series]);
   if (series === null) {
     return <div className="empty">Loading…</div>;
   }
@@ -224,30 +293,25 @@ function Sparkline(props: { series: MetricSeries | null }) {
   if (series.points.length === 0) {
     return <div className="empty">No data.</div>;
   }
-  const width = 600;
-  const height = 120;
-  const pad = 6;
   const vals = series.points.map((p) => p.v);
-  const min = Math.min(...vals);
   const max = Math.max(...vals);
-  const span = max - min || 1;
-  const t0 = series.points[0].t;
-  const tspan = series.points[series.points.length - 1].t - t0 || 1;
-  const x = (t: number) => pad + ((t - t0) / tspan) * (width - 2 * pad);
-  const y = (v: number) => height - pad - ((v - min) / span) * (height - 2 * pad);
-  const line = series.points.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ');
-  const area =
-    `M${x(t0).toFixed(1)} ${(height - pad).toFixed(1)} ` +
-    series.points.map((p) => 'L' + x(p.t).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ') +
-    ` L${x(series.points[series.points.length - 1].t).toFixed(1)} ${(height - pad).toFixed(1)} Z`;
   return (
     <div className="spark">
-      <svg className="spark-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-        <path className="spark-area" d={area} />
-        <path className="spark-line" d={line} />
-      </svg>
+      <MetricGraph series={series} onSelect={setSelected} />
       <div className="spark-meta">
-        now {fmtValue(series.unit, vals[vals.length - 1])} · peak {fmtValue(series.unit, max)}
+        {selected ? (
+          <span className="chart-sel">
+            selected {fmtStamp(selected.t)} · <strong>{fmtValue(series.unit, selected.v)}</strong>
+            <button className="chart-sel-clear" onClick={() => setSelected(null)} aria-label="Clear selection">
+              ×
+            </button>
+          </span>
+        ) : (
+          <>
+            now {fmtValue(series.unit, vals[vals.length - 1])} · peak {fmtValue(series.unit, max)} · click a point to
+            inspect
+          </>
+        )}
       </div>
     </div>
   );
@@ -276,7 +340,7 @@ export function MetricChart(props: {
   return (
     <div className="chart">
       <div className="chart-title">{label}</div>
-      <Sparkline series={series} />
+      <ChartBody series={series} />
     </div>
   );
 }
