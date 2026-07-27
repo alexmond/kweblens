@@ -82,8 +82,25 @@ async function putText(url: string, body: string): Promise<void> {
   }
 }
 
+/** fetch with a hard timeout so a stalled request surfaces an error instead of a
+ *  never-ending "Loading…" (e.g. after a pod restart drops the request mid-flight). */
+async function fetchWithTimeout(url: string, init: RequestInit, ms = 20000): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(ms / 1000)}s — ${url}`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText} — ${url}`);
   }
@@ -91,7 +108,7 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 async function getText(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { Accept: 'application/yaml, text/plain' } });
+  const res = await fetchWithTimeout(url, { headers: { Accept: 'application/yaml, text/plain' } });
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText} — ${url}`);
   }
