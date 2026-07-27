@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { objSpec as spec, objStatus as status, toNum as num } from './kube';
 import type { KubeObject, PrinterColumn } from './types';
 
 // A kind-specific column: the "middle" columns between Name/Namespace and Age
@@ -14,10 +15,8 @@ export interface ColumnDef {
 }
 
 // ---- small accessors (defensive: cluster objects vary) ----
+// spec/status/num come from ./kube (shared with App.tsx); str/dash are column-only.
 type Any = Record<string, unknown>;
-const spec = (o: KubeObject): Any => (o.spec as Any) ?? {};
-const status = (o: KubeObject): Any => (o.status as Any) ?? {};
-const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
 const str = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
 const dash = (s: string): string => (s === '' ? '—' : s);
 

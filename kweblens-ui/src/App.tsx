@@ -6,6 +6,7 @@ import { ApiError, api, clusterBase } from './api';
 import { auth } from './auth';
 import type { ColumnDef } from './columns';
 import { age, columnsFor, printerColumnDefs, readyTone, statusTone } from './columns';
+import { objSpec, objStatus, toNum } from './kube';
 import type {
   ClusterInfo,
   EventSummary,
@@ -32,7 +33,7 @@ const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
 // Ports worth suggesting when starting a forward: a Pod's containerPorts, a Service's ports.
 function objectPorts(kind: string, o: KubeObject): number[] {
-  const spec = (o.spec as Record<string, unknown>) ?? {};
+  const spec = objSpec(o);
   const ports = new Set<number>();
   if (kind === 'Service') {
     for (const p of (spec.ports as { port?: number }[]) ?? []) {
@@ -52,9 +53,27 @@ function objectPorts(kind: string, o: KubeObject): number[] {
   return [...ports];
 }
 
+// Ids of the synthetic (client-only) nav items — dashboards and Helm/Port-Forward views,
+// not resource kinds. Centralized so the ids we build match the ids we test against.
+const NAV = {
+  overviewCluster: 'overview:cluster',
+  overviewWorkloads: 'overview:workloads',
+  portForwards: 'portforward:list',
+  helmCharts: 'helm:charts',
+  helmReleases: 'helm:releases',
+  helmRepositories: 'helm:repositories',
+} as const;
+
+// Prefixes that mark an id as synthetic (client-only) rather than a resource kind.
+const SYNTHETIC_PREFIXES = ['overview:', 'helm:', 'portforward:'] as const;
+
+// Category labels that drive placement of the synthetic items in withSyntheticNav.
+const CATEGORY = { cluster: 'Cluster', workloads: 'Workloads', network: 'Network', helm: 'Helm' } as const;
+
+const HELM_VIEW_IDS: string[] = [NAV.helmCharts, NAV.helmReleases, NAV.helmRepositories];
+
 // Synthetic nav items are client-only views (dashboards, Helm) rather than resource kinds.
-const isSynthetic = (id: string): boolean =>
-  id.startsWith('overview:') || id.startsWith('helm:') || id.startsWith('portforward:');
+const isSynthetic = (id: string): boolean => SYNTHETIC_PREFIXES.some((prefix) => id.startsWith(prefix));
 
 // All nav items across categories and their nested sub-groups (Custom Resources).
 function allNavItems(categories: NavCategory[]): NavItem[] {
@@ -739,31 +758,31 @@ function saveFavorites(cluster: string, favorites: string[]): void {
 // section (client-only views, not resource kinds).
 function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
   const withOverview = cats.map((c) => {
-    if (c.label === 'Cluster') {
-      return { ...c, items: [{ id: 'overview:cluster', label: 'Overview', kind: '', namespaced: false }, ...c.items] };
+    if (c.label === CATEGORY.cluster) {
+      return { ...c, items: [{ id: NAV.overviewCluster, label: 'Overview', kind: '', namespaced: false }, ...c.items] };
     }
-    if (c.label === 'Workloads') {
-      return { ...c, items: [{ id: 'overview:workloads', label: 'Overview', kind: '', namespaced: false }, ...c.items] };
+    if (c.label === CATEGORY.workloads) {
+      return { ...c, items: [{ id: NAV.overviewWorkloads, label: 'Overview', kind: '', namespaced: false }, ...c.items] };
     }
-    if (c.label === 'Network') {
-      return { ...c, items: [...c.items, { id: 'portforward:list', label: 'Port Forwards', kind: '', namespaced: false }] };
+    if (c.label === CATEGORY.network) {
+      return { ...c, items: [...c.items, { id: NAV.portForwards, label: 'Port Forwards', kind: '', namespaced: false }] };
     }
     return c;
   });
   const helm: NavCategory = {
-    label: 'Helm',
+    label: CATEGORY.helm,
     icon: 'bi-hexagon',
     items: [
-      { id: 'helm:charts', label: 'Charts', kind: '', namespaced: false },
-      { id: 'helm:releases', label: 'Releases', kind: '', namespaced: false },
-      { id: 'helm:repositories', label: 'Repositories', kind: '', namespaced: false },
+      { id: NAV.helmCharts, label: 'Charts', kind: '', namespaced: false },
+      { id: NAV.helmReleases, label: 'Releases', kind: '', namespaced: false },
+      { id: NAV.helmRepositories, label: 'Repositories', kind: '', namespaced: false },
     ],
   };
   // Place Helm right after the Cluster category (its three tabs are now nav sub-items).
   const result: NavCategory[] = [];
   for (const c of withOverview) {
     result.push(c);
-    if (c.label === 'Cluster') {
+    if (c.label === CATEGORY.cluster) {
       result.push(helm);
     }
   }
@@ -1094,13 +1113,13 @@ function AppInner() {
       }
       const c: Record<string, number> = {};
       if (releases.status === 'fulfilled') {
-        c['helm:releases'] = releases.value;
+        c[NAV.helmReleases] = releases.value;
       }
       if (repos.status === 'fulfilled') {
-        c['helm:repositories'] = repos.value;
+        c[NAV.helmRepositories] = repos.value;
       }
       if (charts.status === 'fulfilled') {
-        c['helm:charts'] = charts.value;
+        c[NAV.helmCharts] = charts.value;
       }
       setHelmCounts(c);
     });
@@ -1386,7 +1405,7 @@ function AppInner() {
 
   const navigateToPortForwards = () => {
     setDetail(null);
-    setSelected({ id: 'portforward:list', label: 'Port Forwards', kind: '', namespaced: false });
+    setSelected({ id: NAV.portForwards, label: 'Port Forwards', kind: '', namespaced: false });
   };
 
   // The pods a workload owns — matched by its spec.selector.matchLabels in its namespace.
@@ -1457,7 +1476,7 @@ function AppInner() {
   // From a resource's "Managed By: Helm" link → open the owning release's Resources view.
   const navigateToHelmRelease = (namespace: string, name: string) => {
     setDetail(null);
-    setSelected({ id: 'helm:releases', label: 'Releases', kind: '', namespaced: false });
+    setSelected({ id: NAV.helmReleases, label: 'Releases', kind: '', namespaced: false });
     setHelmTarget({ namespace, name });
   };
 
@@ -1629,7 +1648,7 @@ function AppInner() {
         <div className="content-col">
           <main className="content">
           {error && <div className="error">{error}</div>}
-          {(!selected || selected.id === 'overview:cluster') && !error && cluster && (
+          {(!selected || selected.id === NAV.overviewCluster) && !error && cluster && (
             <ClusterOverview
               cluster={cluster}
               name={activeCluster?.name ?? cluster}
@@ -1637,14 +1656,14 @@ function AppInner() {
               namespaceCount={namespaces.length}
             />
           )}
-          {cluster && selected?.id === 'overview:workloads' && <WorkloadsOverview cluster={cluster} />}
-          {cluster && selected?.id?.startsWith('helm:') && (
+          {cluster && selected?.id === NAV.overviewWorkloads && <WorkloadsOverview cluster={cluster} />}
+          {cluster && selected?.id !== undefined && HELM_VIEW_IDS.includes(selected.id) && (
             <HelmView
               cluster={cluster}
               view={
-                selected.id === 'helm:charts'
+                selected.id === NAV.helmCharts
                   ? 'charts'
-                  : selected.id === 'helm:repositories'
+                  : selected.id === NAV.helmRepositories
                     ? 'repositories'
                     : 'releases'
               }
@@ -1659,7 +1678,7 @@ function AppInner() {
               }}
             />
           )}
-          {cluster && selected?.id === 'portforward:list' && (
+          {cluster && selected?.id === NAV.portForwards && (
             <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={() => setShowLogin(true)} />
           )}
           {selected && !isSynthetic(selected.id) && (
@@ -2662,8 +2681,8 @@ function ResourceTable(props: {
             {cols.map((c) => {
               const cell = c.render(o);
               const text = typeof cell === 'string' ? cell : null;
-              const tone =
-                text === null ? '' : c.header === 'Status' ? statusTone(text) : c.header === 'Ready' ? readyTone(text) : '';
+              // Tone keys off the stable column key (a code id), not the display header.
+              const tone = text === null ? '' : c.key === 'status' ? statusTone(text) : c.key === 'ready' ? readyTone(text) : '';
               return (
                 <td key={c.key}>{tone ? <span className={'status-pill status-' + tone}>{text}</span> : cell}</td>
               );
@@ -3015,8 +3034,8 @@ type OverviewCtx = {
 };
 
 const ovMeta = (o: KubeObject): NonNullable<KubeObject['metadata']> => o.metadata ?? {};
-const ovSpec = (o: KubeObject): Record<string, unknown> => (o.spec as Record<string, unknown>) ?? {};
-const ovStatus = (o: KubeObject): Record<string, unknown> => (o.status as Record<string, unknown>) ?? {};
+const ovSpec = objSpec;
+const ovStatus = objStatus;
 const ovArr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
 const ovMap = (v: unknown): Record<string, string> =>
   v && typeof v === 'object' ? (v as Record<string, string>) : {};
@@ -4927,7 +4946,7 @@ function HelmActionModal(props: {
   );
 }
 
-const numOf = (v: unknown): number => (typeof v === 'number' ? v : 0);
+const numOf = toNum;
 // Scaled-to-zero counts as healthy (intentionally scaled down, not failing).
 const replicasReady = (o: KubeObject): boolean => numOf(ovStatus(o).readyReplicas) === numOf(ovSpec(o).replicas);
 
