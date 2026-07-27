@@ -403,6 +403,7 @@
             </activation>
             <modules>
                 <module>kweblens-ui</module>
+                <module>kweblens-ui2</module>
                 <module>kweblens-web</module>
                 <module>kweblens-it</module>
             </modules>
@@ -448,9 +449,10 @@
         -->
         <profile>
             <id>docker</id>
-            <!-- Re-add the app (+ its UI): explicitly activating this profile deactivates 'default'. -->
+            <!-- Re-add the app (+ its UIs): explicitly activating this profile deactivates 'default'. -->
             <modules>
                 <module>kweblens-ui</module>
+                <module>kweblens-ui2</module>
                 <module>kweblens-web</module>
             </modules>
             <properties>

@@ -18,4 +18,9 @@ public class SpaController {
 		return "forward:/ui/index.html";
 	}
 
+	@GetMapping({ "/ui2", "/ui2/" })
+	public String spa2() {
+		return "forward:/ui2/index.html";
+	}
+
 }
