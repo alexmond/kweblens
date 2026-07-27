@@ -1855,3 +1855,49 @@ body.dragging {
 .float-window.collapsed .float-head {
   cursor: default;
 }
+
+/* Separator between action groups in the row kebab menu. */
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+/* Kebab menu rendered in a body portal (fixed) so the table's overflow never clips it. */
+.menu-portal {
+  right: auto;
+  top: auto;
+  z-index: 200;
+}
+
+/* Container submenu (Attach to Pod / Shell / Logs) — opens to the left, matching Freelens. */
+.menu-item.has-sub {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+.menu-item.has-sub .sub-arrow {
+  color: var(--muted);
+  font-size: 12px;
+}
+.menu-item.has-sub .submenu {
+  position: absolute;
+  right: 100%;
+  top: -5px;
+  display: none;
+  flex-direction: column;
+  min-width: 160px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  z-index: 1;
+}
+.menu-item.has-sub:hover .submenu {
+  display: flex;
+}

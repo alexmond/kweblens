@@ -244,62 +244,176 @@ function containerNames(o: KubeObject): string[] {
     .filter(Boolean);
 }
 
-type RowAction = 'logs' | 'edit' | 'delete' | 'forceDelete';
+type RowAction =
+  | 'logs'
+  | 'terminal'
+  | 'attach'
+  | 'forward'
+  | 'scale'
+  | 'restart'
+  | 'rollback'
+  | 'suspend'
+  | 'resume'
+  | 'trigger'
+  | 'cordon'
+  | 'uncordon'
+  | 'drain'
+  | 'edit'
+  | 'delete'
+  | 'forceDelete';
 
-// Per-row kebab (⋮) actions menu (Freelens-style): Logs (pods) / Edit / Delete / Force Delete.
-function RowMenu(props: { authed: boolean; isPod: boolean; onAction: (a: RowAction) => void }) {
-  const { authed, isPod, onAction } = props;
+// Per-row kebab (⋮) actions menu (Freelens-style), kind-aware: it surfaces the same
+// per-kind actions the detail drawer offers — Logs/Terminal/Forward (Pod/Service),
+// Scale/Restart/Rollback (workloads), Trigger/Suspend/Resume (CronJob/Job),
+// Cordon/Uncordon/Drain (Node) — plus Edit/Delete/Force-Delete.
+function RowMenu(props: {
+  kind: string;
+  suspended: boolean;
+  containers: string[];
+  onAction: (a: RowAction, container?: string) => void;
+}) {
+  const { kind, suspended, containers, onAction } = props;
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  // Fixed-position anchor so the menu is rendered in a portal on document.body and never
+  // clipped by the table's overflow container.
+  const [anchor, setAnchor] = useState<{ left: number; top: number; up: boolean } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) {
       return;
     }
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) {
+        return;
       }
+      setOpen(false);
     };
+    const dismiss = () => setOpen(false);
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    // The menu is fixed-positioned, so close it if the page scrolls or resizes under it.
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', dismiss);
+    };
   }, [open]);
 
-  if (!isPod && !authed) {
-    return null;
-  }
+  const isPod = kind === 'Pod';
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const estHeight = 280;
+      const up = r.bottom + estHeight > window.innerHeight;
+      setAnchor({ left: r.right, top: up ? r.top : r.bottom, up });
+    }
+    setOpen(true);
+  };
+  const run = (action: RowAction, container?: string) => {
+    setOpen(false);
+    onAction(action, container);
+  };
   const item = (label: string, action: RowAction, danger?: boolean) => (
     <button
       className={'menu-item' + (danger ? ' danger' : '')}
       onClick={(e) => {
         e.stopPropagation();
-        setOpen(false);
-        onAction(action);
+        run(action);
       }}
     >
       {label}
     </button>
   );
+  // Freelens-style container-scoped action: a direct item for 0/1 container, or a
+  // hover submenu of containers (Attach to Pod / Shell / Logs) for a multi-container pod.
+  const containerItem = (label: string, action: RowAction) => {
+    if (containers.length <= 1) {
+      return item(label, action);
+    }
+    return (
+      <div className="menu-item has-sub">
+        <span>{label}</span>
+        <span className="sub-arrow">›</span>
+        <div className="submenu">
+          {containers.map((c) => (
+            <button
+              key={c}
+              className="menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                run(action, c);
+              }}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+  const hasResourceActions =
+    isPod ||
+    kind === 'Service' ||
+    kind === 'Node' ||
+    kind === 'CronJob' ||
+    kind === 'Job' ||
+    SCALABLE.includes(kind) ||
+    RESTARTABLE.includes(kind);
   return (
-    <div className="rowmenu" ref={ref} onClick={(e) => e.stopPropagation()}>
+    <div className="rowmenu" onClick={(e) => e.stopPropagation()}>
       <button
+        ref={btnRef}
         className="kebab"
         title="Actions"
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((v) => !v);
+          toggle();
         }}
       >
         ⋮
       </button>
-      {open && (
-        <div className="menu">
-          {isPod && item('Logs', 'logs')}
-          {authed && item('Edit', 'edit')}
-          {authed && item('Delete', 'delete', true)}
-          {authed && item('Force Delete', 'forceDelete', true)}
-        </div>
-      )}
+      {open &&
+        anchor &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="menu menu-portal"
+            style={{
+              position: 'fixed',
+              left: anchor.left,
+              top: anchor.top,
+              transform: anchor.up ? 'translate(-100%, -100%)' : 'translate(-100%, 0)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {isPod && containerItem('Attach to Pod', 'attach')}
+            {isPod && containerItem('Shell', 'terminal')}
+            {isPod && containerItem('Logs', 'logs')}
+            {kind === 'Service' && item('Port Forward', 'forward')}
+            {SCALABLE.includes(kind) && item('Scale…', 'scale')}
+            {RESTARTABLE.includes(kind) && item('Restart', 'restart')}
+            {ROLLBACKABLE.includes(kind) && item('Rollback', 'rollback')}
+            {kind === 'CronJob' && item('Trigger', 'trigger')}
+            {(kind === 'CronJob' || kind === 'Job') &&
+              item(suspended ? 'Resume' : 'Suspend', suspended ? 'resume' : 'suspend')}
+            {kind === 'Node' && item('Cordon', 'cordon')}
+            {kind === 'Node' && item('Uncordon', 'uncordon')}
+            {kind === 'Node' && item('Drain', 'drain', true)}
+            {hasResourceActions && <div className="menu-sep" />}
+            {item('Edit', 'edit')}
+            {kind !== 'Node' && item('Delete', 'delete', true)}
+            {kind !== 'Node' && item('Force Delete', 'forceDelete', true)}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -397,10 +511,16 @@ export function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const dockSeq = useRef(0);
 
-  const openDock = (kind: 'terminal' | 'logs', namespace: string, pod: string, containers: string[]) => {
+  const openDock = (
+    kind: 'terminal' | 'logs',
+    namespace: string,
+    pod: string,
+    containers: string[],
+    attach = false,
+  ) => {
     dockSeq.current += 1;
     const id = `${kind}:${namespace}/${pod}#${dockSeq.current}`;
-    setDockSessions((prev) => [...prev, { id, kind, namespace, pod, containers }]);
+    setDockSessions((prev) => [...prev, { id, kind, namespace, pod, containers, attach }]);
     setActiveSession(id);
   };
 
@@ -827,25 +947,94 @@ export function App() {
   };
 
   // Per-row kebab actions: open logs, jump to YAML edit, or delete / force-delete.
-  const handleRowAction = (resourceId: string, action: RowAction, obj: KubeObject) => {
+  const handleRowAction = (resourceId: string, action: RowAction, obj: KubeObject, container?: string) => {
+    if (!cluster) {
+      return;
+    }
+    // Every action except read-only Logs requires the admin login; prompt for it. The
+    // menu shows all actions (Freelens-style) so they're discoverable even when signed out.
+    if (action !== 'logs' && authUser === null) {
+      setShowLogin(true);
+      return;
+    }
     const ns = objNs(obj) ?? '';
     const nm = objName(obj);
-    if (action === 'logs') {
-      openDock('logs', ns, nm, containerNames(obj));
-      return;
+    const kind = obj.kind ?? '';
+    // A container was chosen from a submenu → scope to just it; otherwise offer them all.
+    const conts = container ? [container] : containerNames(obj);
+    // Mutating action wrapper: optional confirm, then surface any error.
+    const run = (fn: () => Promise<{ result: string }>, confirmMsg?: string) => {
+      if (confirmMsg && !window.confirm(confirmMsg)) {
+        return;
+      }
+      fn().catch((e) => setError(String(e)));
+    };
+    switch (action) {
+      case 'logs':
+        openDock('logs', ns, nm, conts);
+        return;
+      case 'terminal':
+        openDock('terminal', ns, nm, conts);
+        return;
+      case 'attach':
+        openDock('terminal', ns, nm, conts, true);
+        return;
+      case 'forward':
+        setForward({ kind, namespace: ns, name: nm, ports: objectPorts(kind, obj) });
+        return;
+      case 'edit':
+        setDetail({ resourceId, obj, edit: true });
+        return;
+      case 'scale': {
+        const current = Number((obj.spec as Record<string, unknown>)?.replicas ?? 1);
+        const input = window.prompt(`Scale ${kind} ${nm} to how many replicas?`, String(current));
+        if (input === null) {
+          return;
+        }
+        const replicas = Math.max(0, Number.parseInt(input, 10));
+        if (Number.isNaN(replicas)) {
+          return;
+        }
+        run(() => api.scale(cluster, resourceId, ns, nm, replicas));
+        return;
+      }
+      case 'restart':
+        run(() => api.restart(cluster, resourceId, ns, nm), `Rolling-restart ${nm}?`);
+        return;
+      case 'rollback':
+        run(() => api.rollback(cluster, resourceId, ns, nm), `Roll ${kind} ${nm} back to its previous revision?`);
+        return;
+      case 'suspend':
+        run(() => api.suspend(cluster, resourceId, ns, nm, true), `Suspend ${kind} ${nm}?`);
+        return;
+      case 'resume':
+        run(() => api.suspend(cluster, resourceId, ns, nm, false), `Resume ${kind} ${nm}?`);
+        return;
+      case 'trigger':
+        run(() => api.trigger(cluster, resourceId, ns, nm), `Trigger a manual run of ${nm}?`);
+        return;
+      case 'cordon':
+        run(() => api.cordon(cluster, nm), `Cordon ${nm}?`);
+        return;
+      case 'uncordon':
+        run(() => api.uncordon(cluster, nm));
+        return;
+      case 'drain':
+        run(() => api.drain(cluster, nm), `Drain ${nm}? This cordons it and evicts its pods.`);
+        return;
+      case 'delete':
+      case 'forceDelete': {
+        const force = action === 'forceDelete';
+        if (!window.confirm(`${force ? 'Force delete' : 'Delete'} ${kind} ${nm}? This cannot be undone.`)) {
+          return;
+        }
+        api.del(cluster, resourceId, ns, nm, force).then(
+          () => setObjects((prev) => prev.filter((o) => objKey(o) !== objKey(obj))),
+          (e) => setError(String(e)),
+        );
+        return;
+      }
     }
-    if (action === 'edit') {
-      setDetail({ resourceId, obj, edit: true });
-      return;
-    }
-    const force = action === 'forceDelete';
-    if (!cluster || !window.confirm(`${force ? 'Force delete' : 'Delete'} ${obj.kind} ${nm}? This cannot be undone.`)) {
-      return;
-    }
-    api.del(cluster, resourceId, ns, nm, force).then(
-      () => setObjects((prev) => prev.filter((o) => objKey(o) !== objKey(obj))),
-      (e) => setError(String(e)),
-    );
   };
 
   // From a resource's "Managed By: Helm" link → open the owning release's Resources view.
@@ -1113,7 +1302,7 @@ export function App() {
                 onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
                 onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
                 authed={authUser !== null}
-                onRowAction={(action, obj) => handleRowAction(selected.id, action, obj)}
+                onRowAction={(action, obj, container) => handleRowAction(selected.id, action, obj, container)}
                 fetchChildren={
                   ['deployments', 'statefulsets', 'daemonsets', 'replicasets'].includes(selected.id)
                     ? fetchWorkloadPods
@@ -1145,10 +1334,6 @@ export function App() {
             authed={authUser !== null}
             onNavigate={navigateToKind}
             onHelmRelease={navigateToHelmRelease}
-            onTerminal={(namespace, pod, containers) => openDock('terminal', namespace, pod, containers)}
-            onLogs={(namespace, pod, containers) => openDock('logs', namespace, pod, containers)}
-            onForward={(kind, namespace, name, ports) => setForward({ kind, namespace, name, ports })}
-            onRequireAuth={() => setShowLogin(true)}
             onAuthExpired={() => {
               auth.clear();
               setAuthUser(null);
@@ -1223,6 +1408,8 @@ type DockSession = {
   floating?: boolean;
   /** Floating window geometry (viewport px). */
   rect?: { x: number; y: number; w: number; h: number };
+  /** Terminal only: attach to the running process (kubectl attach) instead of a new shell. */
+  attach?: boolean;
 };
 
 /**
@@ -1483,7 +1670,8 @@ function TerminalSession(props: { cluster: string; session: DockSession }) {
       fit.fit();
       fitRef.current = fit;
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const url = `${proto}://${window.location.host}/ws/exec?cluster=${enc(cluster)}&namespace=${enc(namespace)}&pod=${enc(pod)}&container=${enc(container)}`;
+      const mode = session.attach ? '&mode=attach' : '';
+      const url = `${proto}://${window.location.host}/ws/exec?cluster=${enc(cluster)}&namespace=${enc(namespace)}&pod=${enc(pod)}&container=${enc(container)}${mode}`;
       const ws = new WebSocket(url);
       ws.onmessage = (e) => {
         if (typeof e.data === 'string') {
@@ -1881,10 +2069,10 @@ function ResourceTable(props: {
   onOpen: (obj: KubeObject) => void;
   onNamespaceClick?: (ns: string) => void;
   authed: boolean;
-  onRowAction: (action: RowAction, obj: KubeObject) => void;
+  onRowAction: (action: RowAction, obj: KubeObject, container?: string) => void;
   fetchChildren?: (obj: KubeObject) => Promise<KubeObject[]>;
 }) {
-  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick, authed, onRowAction, fetchChildren } =
+  const { objects, columns: cols, namespaced, loading, selectedKey, selection, onToggleRow, onToggleAll, onOpen, onNamespaceClick, onRowAction, fetchChildren } =
     props;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [children, setChildren] = useState<Record<string, KubeObject[] | null>>({});
@@ -2053,7 +2241,12 @@ function ResourceTable(props: {
             })}
             {showAge && <td>{age(o.metadata?.creationTimestamp)}</td>}
             <td className="rowmenu-cell" onClick={(e) => e.stopPropagation()}>
-              <RowMenu authed={authed} isPod={(o.kind ?? '') === 'Pod'} onAction={(a) => onRowAction(a, o)} />
+              <RowMenu
+                kind={o.kind ?? ''}
+                suspended={Boolean((o.spec as Record<string, unknown>)?.suspend)}
+                containers={containerNames(o)}
+                onAction={(a, c) => onRowAction(a, o, c)}
+              />
             </td>
           </tr>,
           ];
@@ -2096,17 +2289,12 @@ function Detail(props: {
   obj: KubeObject;
   initialEdit: boolean;
   authed: boolean;
-  onRequireAuth: () => void;
   onAuthExpired: () => void;
   onNavigate: (kind: string, ns?: string) => void;
   onHelmRelease: (namespace: string, name: string) => void;
-  onTerminal: (namespace: string, pod: string, containers: string[]) => void;
-  onLogs: (namespace: string, pod: string, containers: string[]) => void;
-  onForward: (kind: string, namespace: string, name: string, ports: number[]) => void;
   onClose: () => void;
 }) {
-  const { cluster, resourceId, obj, initialEdit, authed, onRequireAuth, onAuthExpired, onNavigate, onHelmRelease, onTerminal, onLogs, onForward, onClose } =
-    props;
+  const { cluster, resourceId, obj, initialEdit, authed, onAuthExpired, onNavigate, onHelmRelease, onClose } = props;
   const [tab, setTab] = useState<'overview' | 'yaml' | 'events' | 'metrics'>(initialEdit ? 'yaml' : 'overview');
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
@@ -2116,7 +2304,6 @@ function Detail(props: {
   const [draft, setDraft] = useState('');
   const [events, setEvents] = useState<EventSummary[] | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
-  const [replicas, setReplicas] = useState(1);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState(false);
@@ -2124,12 +2311,6 @@ function Detail(props: {
   const kind = obj.kind ?? '';
   const name = objName(obj);
   const ns = objNs(obj) ?? '';
-  const isNode = kind === 'Node';
-  const suspendable = kind === 'CronJob' || kind === 'Job';
-  const suspended = Boolean((obj.spec as Record<string, unknown>)?.suspend);
-  const podContainers = ((obj.spec as Record<string, unknown>)?.containers as { name?: string }[] | undefined ?? [])
-    .map((c) => c.name ?? '')
-    .filter(Boolean);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2230,31 +2411,6 @@ function Detail(props: {
     }
   };
 
-  const act = async (fn: () => Promise<{ result: string }>, opts?: { confirm?: string; closeOnDone?: boolean }) => {
-    if (opts?.confirm && !window.confirm(opts.confirm)) {
-      return;
-    }
-    setBusy(true);
-    setActionMsg(null);
-    setActionErr(false);
-    try {
-      const r = await fn();
-      setActionMsg(r.result);
-      if (opts?.closeOnDone) {
-        onClose();
-      }
-    } catch (e) {
-      setActionErr(true);
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-        onAuthExpired();
-        setActionMsg('Authentication failed — sign in again.');
-      } else {
-        setActionMsg(String(e));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="drawer" role="dialog" aria-label={`${kind} ${name}`}>
@@ -2344,123 +2500,11 @@ function Detail(props: {
         )}
       </div>
 
-      <div className="drawer-actions">
-        {!authed && (
-          <button className="linkbtn strong" onClick={onRequireAuth}>
-            Sign in to run actions
-          </button>
-        )}
-        {authed && SCALABLE.includes(kind) && (
-          <span className="act">
-            <input
-              type="number"
-              min={0}
-              className="repl"
-              value={replicas}
-              disabled={busy}
-              onChange={(e) => setReplicas(Math.max(0, Number.parseInt(e.target.value || '0', 10)))}
-            />
-            <button className="btn" disabled={busy} onClick={() => act(() => api.scale(cluster, resourceId, ns, name, replicas))}>
-              Scale
-            </button>
-          </span>
-        )}
-        {authed && RESTARTABLE.includes(kind) && (
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() => act(() => api.restart(cluster, resourceId, ns, name), { confirm: `Rolling-restart ${name}?` })}
-          >
-            Restart
-          </button>
-        )}
-        {authed && ROLLBACKABLE.includes(kind) && (
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() =>
-              act(() => api.rollback(cluster, resourceId, ns, name), {
-                confirm: `Roll ${kind} ${name} back to its previous revision?`,
-              })
-            }
-          >
-            Rollback
-          </button>
-        )}
-        {kind === 'Pod' && ns && (
-          <button className="btn" onClick={() => onLogs(ns, name, podContainers)}>
-            Logs
-          </button>
-        )}
-        {authed && kind === 'Pod' && ns && (
-          <button className="btn" onClick={() => onTerminal(ns, name, podContainers)}>
-            Terminal
-          </button>
-        )}
-        {authed && (kind === 'Pod' || kind === 'Service') && ns && (
-          <button className="btn" onClick={() => onForward(kind, ns, name, objectPorts(kind, obj))}>
-            Forward
-          </button>
-        )}
-        {authed && isNode && (
-          <>
-            <button className="btn" disabled={busy} onClick={() => act(() => api.cordon(cluster, name), { confirm: `Cordon ${name}?` })}>
-              Cordon
-            </button>
-            <button className="btn" disabled={busy} onClick={() => act(() => api.uncordon(cluster, name))}>
-              Uncordon
-            </button>
-            <button
-              className="btn danger"
-              disabled={busy}
-              onClick={() =>
-                act(() => api.drain(cluster, name), {
-                  confirm: `Drain ${name}? This cordons the node and evicts its pods (DaemonSet and mirror pods are kept).`,
-                })
-              }
-            >
-              Drain
-            </button>
-          </>
-        )}
-        {authed && kind === 'CronJob' && ns && (
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() => act(() => api.trigger(cluster, resourceId, ns, name), { confirm: `Trigger a manual run of ${name}?` })}
-          >
-            Trigger
-          </button>
-        )}
-        {authed && suspendable && ns && (
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() =>
-              act(() => api.suspend(cluster, resourceId, ns, name, !suspended), {
-                confirm: `${suspended ? 'Resume' : 'Suspend'} ${kind} ${name}?`,
-              })
-            }
-          >
-            {suspended ? 'Resume' : 'Suspend'}
-          </button>
-        )}
-        {authed && !isNode && ns && (
-          <button
-            className="btn danger"
-            disabled={busy}
-            onClick={() =>
-              act(() => api.del(cluster, resourceId, ns, name), {
-                confirm: `Delete ${kind} ${name}? This cannot be undone.`,
-                closeOnDone: true,
-              })
-            }
-          >
-            Delete
-          </button>
-        )}
-        {actionMsg && <span className={'act-msg' + (actionErr ? ' err' : '')}>{actionMsg}</span>}
-      </div>
+      {actionMsg && (
+        <div className="drawer-actions">
+          <span className={'act-msg' + (actionErr ? ' err' : '')}>{actionMsg}</span>
+        </div>
+      )}
     </div>
   );
 }
