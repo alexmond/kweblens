@@ -26,8 +26,7 @@ const emit = defineEmits<{
   (e: 'toggle-col', key: string): void;
   (e: 'clear-selection'): void;
   (e: 'bulk-delete'): void;
-  (e: 'toggle-row', key: string): void;
-  (e: 'toggle-all', keys: string[]): void;
+  (e: 'update:selection', keys: string[]): void;
   (e: 'open', obj: KubeObject): void;
   (e: 'namespace-click', ns: string): void;
   (e: 'create'): void;
@@ -75,8 +74,7 @@ const emit = defineEmits<{
     :selected-key="selectedKey"
     :selection="selection"
     :fetch-children="fetchChildren"
-    @toggle-row="(k) => emit('toggle-row', k)"
-    @toggle-all="(k) => emit('toggle-all', k)"
+    @update:selection="(k) => emit('update:selection', k)"
     @open="(o) => emit('open', o)"
     @namespace-click="(ns) => emit('namespace-click', ns)"
     @row-action="(a, o, c) => emit('row-action', a, o, c)"

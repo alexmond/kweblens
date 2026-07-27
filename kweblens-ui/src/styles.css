@@ -10,6 +10,22 @@
   --muted: #6b7b85;
 }
 
+/* Dark theme for the bespoke (non-Naive) surfaces. Toggled by App.vue adding `kw-dark`
+   to <html>; Naive UI components are darkened separately via NConfigProvider's darkTheme. */
+html.kw-dark {
+  --bar-bg: #10151a;
+  --bar-fg: #e3e8ec;
+  --accent: #3d9be0;
+  --bg: #16191d;
+  --panel: #1f242a;
+  --border: #333a42;
+  --text: #dfe4e8;
+  --muted: #8b959f;
+}
+html.kw-dark body {
+  background: var(--bg);
+}
+
 * {
   box-sizing: border-box;
 }

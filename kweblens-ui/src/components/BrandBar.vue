@@ -10,12 +10,14 @@ defineProps<{
   helmRelease: { namespace: string; name: string } | null;
   helmReleaseList: HelmRelease[];
   authUser: string | null;
+  dark: boolean;
 }>();
 const emit = defineEmits<{
   (e: 'update:namespace', v: string | null): void;
   (e: 'update:helmRelease', v: { namespace: string; name: string } | null): void;
   (e: 'sign-in'): void;
   (e: 'sign-out'): void;
+  (e: 'toggle-theme'): void;
 }>();
 
 const onNamespace = (e: Event) => emit('update:namespace', (e.target as HTMLSelectElement).value || null);
@@ -55,6 +57,13 @@ const onHelm = (e: Event) => {
       </label>
     </div>
     <div class="bar-right">
+      <button
+        class="linkbtn theme-toggle"
+        :title="dark ? 'Switch to light' : 'Switch to dark'"
+        @click="emit('toggle-theme')"
+      >
+        {{ dark ? '☀' : '☾' }}
+      </button>
       <span v-if="authUser" class="authbox">
         <i class="user-dot" /> {{ authUser }}
         <button class="linkbtn" @click="emit('sign-out')">Sign out</button>

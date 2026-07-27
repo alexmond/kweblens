@@ -31,17 +31,10 @@
             <artifactId>kweblens-core</artifactId>
         </dependency>
 
-        <!-- The React SPA, packaged as classpath static resources under static/ui (served at /ui). -->
+        <!-- The Vue SPA, packaged as classpath static resources under static/ui (served at /ui). -->
         <dependency>
             <groupId>org.alexmond</groupId>
             <artifactId>kweblens-ui</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <!-- The Vue SPA (parity port), classpath static resources under static/ui2 (served at /ui2). -->
-        <dependency>
-            <groupId>org.alexmond</groupId>
-            <artifactId>kweblens-ui2</artifactId>
             <version>${project.version}</version>
         </dependency>
 
