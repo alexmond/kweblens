@@ -22,6 +22,7 @@ import {
 import { useEscapeKey, useTableSort } from './hooks';
 import { ContainerSquares, MetricChart, SortTh, UsageBar } from './ui';
 import { DialogProvider, useDialog } from './dialog';
+import type { DialogApi } from './dialog';
 import { ROW_ACTIONS } from './rowMenu';
 import { ResourceTable } from './resourceTable';
 import { HelmView } from './helm';
@@ -134,91 +135,158 @@ export function App() {
   );
 }
 
-// The top-level app shell / orchestrator: owns cluster+nav+selection state, wires every
-// feature view together, and holds the data-loading effects. It is the one function
-// intentionally exempt from the size/complexity gates (which are errors everywhere else);
-// decomposing it further into a data hook + layout components is a tracked follow-up.
-// eslint-disable-next-line max-lines-per-function, complexity
-function AppInner() {
-  const dialog = useDialog();
-  const [clusters, setClusters] = useState<ClusterInfo[]>([]);
-  const [cluster, setCluster] = useState<string | null>(null);
-  const [nav, setNav] = useState<NavCategory[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [helmCounts, setHelmCounts] = useState<Record<string, number>>({});
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [namespaces, setNamespaces] = useState<string[]>([]);
-  const [namespace, setNamespace] = useState<string | null>(null);
-  const [helmReleaseList, setHelmReleaseList] = useState<HelmRelease[]>([]);
-  const [helmRelease, setHelmRelease] = useState<{ namespace: string; name: string } | null>(null);
-  const [helmScope, setHelmScope] = useState<Set<string> | null>(null);
-  const [selected, setSelected] = useState<NavItem | null>(null);
-  const [objects, setObjects] = useState<KubeObject[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [live, setLive] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject; edit?: boolean } | null>(null);
-  const [cols, setCols] = useState<ColumnDef[]>([]);
-  const [usage, setUsage] = useState<Record<string, UsageSummary>>({});
-  const [nodeDisk, setNodeDisk] = useState<Record<string, NodeDiskUsage>>({});
-  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
-  const [selection, setSelection] = useState<Set<string>>(new Set());
-  const [query, setQuery] = useState('');
-  const [authUser, setAuthUser] = useState<string | null>(null);
-  const [showLogin, setShowLogin] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  const [dockSessions, setDockSessions] = useState<DockSession[]>([]);
-  const [activeSession, setActiveSession] = useState<string | null>(null);
-  const dockSeq = useRef(0);
+/** Node table: append live CPU / Memory / Disk usage-bar columns (metrics-server + node-exporter). */
+function nodeUsageColumns(usage: Record<string, UsageSummary>, nodeDisk: Record<string, NodeDiskUsage>): ColumnDef[] {
+  const alloc = (o: KubeObject) => ((o.status as Record<string, unknown>)?.allocatable as Record<string, string>) ?? {};
+  return [
+    {
+      key: 'm-cpu',
+      header: 'CPU',
+      sortText: (o) => String(parseCpuCores(usage[objKey(o)]?.cpu)),
+      render: (o) => {
+        const used = parseCpuCores(usage[objKey(o)]?.cpu);
+        const total = parseCpuCores(alloc(o).cpu);
+        if (!usage[objKey(o)]) {
+          return '—';
+        }
+        return (
+          <UsageBar
+            fraction={total ? used / total : 0}
+            color="#2e9e8f"
+            text={`${used.toFixed(2)} / ${total.toFixed(2)}`}
+          />
+        );
+      },
+    },
+    {
+      key: 'm-mem',
+      header: 'Memory',
+      sortText: (o) => String(parseMemBytes(usage[objKey(o)]?.memory)),
+      render: (o) => {
+        const used = parseMemBytes(usage[objKey(o)]?.memory);
+        const total = parseMemBytes(alloc(o).memory);
+        if (!usage[objKey(o)]) {
+          return '—';
+        }
+        return <UsageBar fraction={total ? used / total : 0} color="#c026a8" text={`${gib(used)} / ${gib(total)}`} />;
+      },
+    },
+    {
+      key: 'm-disk',
+      header: 'Disk',
+      sortText: (o) => String(nodeDisk[objName(o)]?.usedBytes ?? 0),
+      render: (o) => {
+        const d = nodeDisk[objName(o)];
+        if (!d) {
+          return '—';
+        }
+        return (
+          <UsageBar
+            fraction={d.totalBytes ? d.usedBytes / d.totalBytes : 0}
+            color="#e08a1e"
+            text={`${gib(d.usedBytes)} / ${gib(d.totalBytes)}`}
+          />
+        );
+      },
+    },
+  ];
+}
+
+/** Pod table: a per-container status-square column plus raw CPU / Memory usage. */
+function podUsageColumns(cols: ColumnDef[], usage: Record<string, UsageSummary>): ColumnDef[] {
+  const containersCol: ColumnDef = {
+    key: 'containers',
+    header: 'Containers',
+    sortText: (o) =>
+      String(
+        (((o.status as Record<string, unknown>)?.containerStatuses as { ready?: boolean }[]) ?? []).filter(
+          (c) => c.ready,
+        ).length,
+      ),
+    render: (o) => <ContainerSquares obj={o} />,
+  };
+  const withContainers: ColumnDef[] = [];
+  cols.forEach((c) => {
+    withContainers.push(c);
+    if (c.key === 'ready') {
+      withContainers.push(containersCol);
+    }
+  });
+  return [
+    ...withContainers,
+    { key: 'm-cpu', header: 'CPU', render: (o) => usage[objKey(o)]?.cpu ?? '—' },
+    { key: 'm-mem', header: 'Memory', render: (o) => usage[objKey(o)]?.memory ?? '—' },
+  ];
+}
+
+/** The columns for the selected kind, with live metrics columns for Pods/Nodes. */
+function buildResourceColumns(
+  id: string | undefined,
+  cols: ColumnDef[],
+  usage: Record<string, UsageSummary>,
+  nodeDisk: Record<string, NodeDiskUsage>,
+): ColumnDef[] {
+  if (id === 'nodes') {
+    return [...cols, ...nodeUsageColumns(usage, nodeDisk)];
+  }
+  if (id === 'pods') {
+    return podUsageColumns(cols, usage);
+  }
+  return cols;
+}
+
+/** Terminal/log dock sessions: open, close, and pop out into floating windows. */
+function useDock() {
+  const [sessions, setSessions] = useState<DockSession[]>([]);
+  const [active, setActive] = useState<string | null>(null);
+  const seq = useRef(0);
 
   const openDock = (kind: DockKind, namespace: string, pod: string, containers: string[], attach = false) => {
-    dockSeq.current += 1;
-    const id = `${kind}:${namespace}/${pod}#${dockSeq.current}`;
-    setDockSessions((prev) => [...prev, { id, kind, namespace, pod, containers, attach }]);
-    setActiveSession(id);
+    seq.current += 1;
+    const id = `${kind}:${namespace}/${pod}#${seq.current}`;
+    setSessions((prev) => [...prev, { id, kind, namespace, pod, containers, attach }]);
+    setActive(id);
   };
 
   const closeDock = (id: string) => {
-    setDockSessions((prev) => {
+    setSessions((prev) => {
       const next = prev.filter((s) => s.id !== id);
-      setActiveSession((cur) => (cur === id ? (next[next.length - 1]?.id ?? null) : cur));
+      setActive((cur) => (cur === id ? (next[next.length - 1]?.id ?? null) : cur));
       return next;
     });
   };
 
   const toggleFloat = (id: string, floating: boolean) => {
-    setDockSessions((prev) =>
+    setSessions((prev) =>
       prev.map((s, i) => {
         if (s.id !== id) {
           return s;
         }
-        const rect = s.rect ?? {
-          x: 120 + ((i * 32) % 240),
-          y: 120 + ((i * 32) % 240),
-          w: 640,
-          h: 340,
-        };
+        const rect = s.rect ?? { x: 120 + ((i * 32) % 240), y: 120 + ((i * 32) % 240), w: 640, h: 340 };
         return { ...s, floating, rect };
       }),
     );
     if (floating) {
       // Activate the last remaining docked tab when one pops out.
-      setActiveSession((cur) => {
+      setActive((cur) => {
         if (cur !== id) {
           return cur;
         }
-        const docked = dockSessions.filter((s) => s.id !== id && !s.floating);
+        const docked = sessions.filter((s) => s.id !== id && !s.floating);
         return docked[docked.length - 1]?.id ?? null;
       });
     } else {
-      setActiveSession(id);
+      setActive(id);
     }
   };
-  const [forward, setForward] = useState<{ kind: string; namespace: string; name: string; ports: number[] } | null>(
-    null,
-  );
-  const [helmTarget, setHelmTarget] = useState<{ namespace: string; name: string } | null>(null);
 
+  return { sessions, active, setActive, openDock, closeDock, toggleFloat };
+}
+
+/** The clusters list + the currently-selected cluster (defaults to the first). */
+function useClusters(setError: (e: string | null) => void) {
+  const [clusters, setClusters] = useState<ClusterInfo[]>([]);
+  const [cluster, setCluster] = useState<string | null>(null);
   useEffect(() => {
     api
       .clusters()
@@ -227,7 +295,24 @@ function AppInner() {
         setCluster((prev) => prev ?? cs[0]?.id ?? null);
       })
       .catch((e) => setError(String(e)));
-  }, []);
+  }, [setError]);
+  return { clusters, cluster, setCluster };
+}
+
+/** Per-cluster nav tree, count badges, namespaces, Helm releases, and the active Helm scope. */
+function useClusterScope(
+  cluster: string | null,
+  namespace: string | null,
+  helmRelease: { namespace: string; name: string } | null,
+  setError: (e: string | null) => void,
+) {
+  const [nav, setNav] = useState<NavCategory[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [helmCounts, setHelmCounts] = useState<Record<string, number>>({});
+  const [namespaces, setNamespaces] = useState<string[]>([]);
+  const [helmReleaseList, setHelmReleaseList] = useState<HelmRelease[]>([]);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [helmScope, setHelmScope] = useState<Set<string> | null>(null);
 
   useEffect(() => {
     if (!cluster) {
@@ -237,10 +322,7 @@ function AppInner() {
     setCounts({});
     setFavorites(loadFavorites(cluster));
     setNamespaces([]);
-    setNamespace(null);
-    setHelmRelease(null);
-    setSelected(null);
-    setObjects([]);
+    setHelmReleaseList([]);
     setError(null);
     api
       .nav(cluster)
@@ -254,10 +336,8 @@ function AppInner() {
       .helmReleases(cluster)
       .then(setHelmReleaseList)
       .catch(() => setHelmReleaseList([]));
-  }, [cluster]);
+  }, [cluster, setError]);
 
-  // Resolve the selected Helm release to the set of objects it manages (kind/name), for
-  // scoping lists and counts.
   useEffect(() => {
     if (!cluster || !helmRelease) {
       setHelmScope(null);
@@ -273,8 +353,6 @@ function AppInner() {
     };
   }, [cluster, helmRelease]);
 
-  // Count badges track the active scope: a Helm release → counts from its manifest;
-  // otherwise the (namespace-aware) server counts.
   useEffect(() => {
     if (!cluster) {
       return;
@@ -302,8 +380,6 @@ function AppInner() {
     };
   }, [cluster, namespace, helmScope, nav]);
 
-  // Counters for the Helm nav sub-items (releases / repositories / charts). Charts can be
-  // slow to warm; allSettled keeps the others working and the count appears once ready.
   useEffect(() => {
     if (!cluster) {
       setHelmCounts({});
@@ -335,7 +411,23 @@ function AppInner() {
     };
   }, [cluster]);
 
-  // Fetch the selected kind's raw objects on kind/namespace change.
+  return { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, setFavorites, helmScope };
+}
+
+/** The selected kind's objects (live-watched), its columns, and Pod/Node metrics usage. */
+function useResourceData(
+  cluster: string | null,
+  selected: NavItem | null,
+  namespace: string | null,
+  setError: (e: string | null) => void,
+) {
+  const [objects, setObjects] = useState<KubeObject[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [live, setLive] = useState(false);
+  const [cols, setCols] = useState<ColumnDef[]>([]);
+  const [usage, setUsage] = useState<Record<string, UsageSummary>>({});
+  const [nodeDisk, setNodeDisk] = useState<Record<string, NodeDiskUsage>>({});
+
   useEffect(() => {
     if (!cluster || !selected || isSynthetic(selected.id)) {
       setObjects([]);
@@ -343,37 +435,23 @@ function AppInner() {
     }
     const ns = selected.namespaced ? (namespace ?? undefined) : undefined;
     let cancelled = false;
-    setDetail(null);
-    setQuery('');
-    setHiddenCols(new Set());
-    setSelection(new Set());
     setLoading(true);
     setError(null);
     api
       .objects(cluster, selected.id, ns)
-      .then((r) => {
-        if (!cancelled) {
-          setObjects(r);
-        }
-      })
+      .then((r) => !cancelled && setObjects(r))
       .catch((e) => {
         if (!cancelled) {
           setError(String(e));
           setObjects([]);
         }
       })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
+      .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [cluster, selected, namespace]);
+  }, [cluster, selected, namespace, setError]);
 
-  // Columns for the selected kind: built-in registry, or the CRD's printer columns for
-  // custom kinds (their id is "group.plural"), falling back to Name/Namespace/Age.
   useEffect(() => {
     if (!cluster || !selected || isSynthetic(selected.id)) {
       setCols([]);
@@ -383,11 +461,7 @@ function AppInner() {
       let cancelled = false;
       api
         .printerColumns(cluster, selected.id)
-        .then((pc) => {
-          if (!cancelled) {
-            setCols(pc.length ? printerColumnDefs(pc) : []);
-          }
-        })
+        .then((pc) => !cancelled && setCols(pc.length ? printerColumnDefs(pc) : []))
         .catch(() => setCols([]));
       return () => {
         cancelled = true;
@@ -397,7 +471,6 @@ function AppInner() {
     return undefined;
   }, [cluster, selected]);
 
-  // In-list metrics-server usage for Pods/Nodes; refreshed every 15s.
   useEffect(() => {
     if (!cluster || !selected || (selected.id !== 'pods' && selected.id !== 'nodes')) {
       setUsage({});
@@ -419,12 +492,7 @@ function AppInner() {
           map[(u.namespace ?? '') + '/' + u.name] = u;
         });
         setUsage(map);
-      }).catch(() => {
-        if (!cancelled) {
-          setUsage({});
-        }
-      });
-      // Disk (Prometheus/node-exporter) is node-only and lives on a separate endpoint.
+      }).catch(() => !cancelled && setUsage({}));
       if (selected.id === 'nodes') {
         api
           .nodeDisk(cluster)
@@ -449,7 +517,6 @@ function AppInner() {
     };
   }, [cluster, selected, namespace]);
 
-  // Live object stream: patch the table in place.
   useEffect(() => {
     if (!cluster || !selected || isSynthetic(selected.id)) {
       return;
@@ -487,121 +554,382 @@ function AppInner() {
     };
   }, [cluster, selected, namespace]);
 
-  const activeCluster = useMemo(() => clusters.find((c) => c.id === cluster) ?? null, [clusters, cluster]);
+  return { objects, setObjects, loading, live, cols, usage, nodeDisk };
+}
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const scoped = helmScope ? objects.filter((o) => helmScope.has(`${o.kind ?? ''}/${objName(o)}`)) : objects;
-    if (!q) {
-      return scoped;
-    }
-    return scoped.filter(
-      (o) =>
-        objName(o).toLowerCase().includes(q) ||
-        (objNs(o) ?? '').toLowerCase().includes(q) ||
-        (o.kind ?? '').toLowerCase().includes(q),
-    );
-  }, [objects, query, helmScope]);
+/** The top brand bar: namespace + Helm-release filters and the sign-in / sign-out box. */
+function BrandBar(props: {
+  cluster: string | null;
+  namespace: string | null;
+  setNamespace: (v: string | null) => void;
+  namespaces: string[];
+  helmRelease: { namespace: string; name: string } | null;
+  setHelmRelease: (v: { namespace: string; name: string } | null) => void;
+  helmReleaseList: HelmRelease[];
+  authUser: string | null;
+  onSignIn: () => void;
+  onSignOut: () => void;
+}) {
+  const { cluster, namespace, setNamespace, namespaces, helmRelease, setHelmRelease, helmReleaseList } = props;
+  const { authUser, onSignIn, onSignOut } = props;
+  return (
+    <header className="brandbar">
+      <div className="brand">
+        <span className="logo">◆</span> kweblens
+        <span className="tag">web Kubernetes IDE · SPA</span>
+      </div>
+      {cluster && (
+        <div className="bar-filters">
+          <label className="bar-filter">
+            <span>Namespace</span>
+            <select value={namespace ?? ''} onChange={(e) => setNamespace(e.target.value || null)}>
+              <option value="">All namespaces</option>
+              {namespaces.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="bar-filter">
+            <span>Helm</span>
+            <select
+              value={helmRelease ? `${helmRelease.namespace}/${helmRelease.name}` : ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) {
+                  setHelmRelease(null);
+                } else {
+                  const slash = v.indexOf('/');
+                  setHelmRelease({ namespace: v.slice(0, slash), name: v.slice(slash + 1) });
+                }
+              }}
+            >
+              <option value="">All releases</option>
+              {helmReleaseList.map((r) => (
+                <option key={`${r.namespace}/${r.name}`} value={`${r.namespace}/${r.name}`}>
+                  {r.name} · {r.namespace}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+      <div className="bar-right">
+        {authUser ? (
+          <span className="authbox">
+            <i className="user-dot" /> {authUser}
+            <button className="linkbtn" onClick={onSignOut}>
+              Sign out
+            </button>
+          </span>
+        ) : (
+          <button className="linkbtn" onClick={onSignIn}>
+            Sign in
+          </button>
+        )}
+        <a className="switch" href="/">
+          Classic UI ↗
+        </a>
+      </div>
+    </header>
+  );
+}
 
-  // For Pods/Nodes, append live CPU/Memory columns backed by metrics-server usage. Nodes
-  // show used/allocatable with a proportional bar; Pods show the raw usage value.
-  const tableCols = useMemo<ColumnDef[]>(() => {
-    if (selected?.id === 'nodes') {
-      const alloc = (o: KubeObject) =>
-        ((o.status as Record<string, unknown>)?.allocatable as Record<string, string>) ?? {};
-      return [
-        ...cols,
-        {
-          key: 'm-cpu',
-          header: 'CPU',
-          sortText: (o) => String(parseCpuCores(usage[objKey(o)]?.cpu)),
-          render: (o) => {
-            const used = parseCpuCores(usage[objKey(o)]?.cpu);
-            const total = parseCpuCores(alloc(o).cpu);
-            if (!usage[objKey(o)]) {
-              return '—';
+/** The cluster rail + the per-cluster nav tree sidebar. */
+function Sidebar(props: {
+  clusters: ClusterInfo[];
+  cluster: string | null;
+  setCluster: (id: string) => void;
+  activeCluster: ClusterInfo | null;
+  nav: NavCategory[];
+  counts: Record<string, number>;
+  favorites: string[];
+  selected: NavItem | null;
+  setSelected: (i: NavItem) => void;
+  onToggleFavorite: (id: string) => void;
+}) {
+  const {
+    clusters,
+    cluster,
+    setCluster,
+    activeCluster,
+    nav,
+    counts,
+    favorites,
+    selected,
+    setSelected,
+    onToggleFavorite,
+  } = props;
+  return (
+    <>
+      <nav className="rail" aria-label="Clusters">
+        {clusters.map((c) => (
+          <button
+            key={c.id}
+            className={'tile' + (c.id === cluster ? ' active' : '')}
+            title={c.name}
+            onClick={() => setCluster(c.id)}
+          >
+            {initials(c.id)}
+          </button>
+        ))}
+      </nav>
+      <aside className="nav">
+        <div className="nav-title">{activeCluster?.name ?? cluster ?? '—'}</div>
+        {cluster && (
+          <NavTree
+            categories={nav}
+            counts={counts}
+            favorites={favorites}
+            selected={selected?.id ?? null}
+            onSelect={setSelected}
+            onToggleFavorite={onToggleFavorite}
+          />
+        )}
+        <AppFooter />
+      </aside>
+    </>
+  );
+}
+
+/** The client-only views (cluster/workloads overviews, Helm, port-forwards) for the content pane. */
+function SyntheticViews(props: {
+  cluster: string;
+  selected: NavItem | null;
+  error: string | null;
+  activeCluster: ClusterInfo | null;
+  namespaces: string[];
+  authUser: string | null;
+  helmTarget: { namespace: string; name: string } | null;
+  onHelmTargetConsumed: () => void;
+  onNavigate: (kind: string, ns?: string) => void;
+  onRequireAuth: () => void;
+  onAuthExpired: () => void;
+}) {
+  const { cluster, selected, error, activeCluster, namespaces, authUser, helmTarget } = props;
+  const { onHelmTargetConsumed, onNavigate, onRequireAuth, onAuthExpired } = props;
+  const id = selected?.id;
+  return (
+    <>
+      {(!selected || id === NAV.overviewCluster) && !error && (
+        <ClusterOverview
+          cluster={cluster}
+          name={activeCluster?.name ?? cluster}
+          masterUrl={activeCluster?.masterUrl}
+          namespaceCount={namespaces.length}
+        />
+      )}
+      {id === NAV.overviewWorkloads && <WorkloadsOverview cluster={cluster} />}
+      {id !== undefined && HELM_VIEW_IDS.includes(id) && (
+        <HelmView
+          cluster={cluster}
+          view={id === NAV.helmCharts ? 'charts' : id === NAV.helmRepositories ? 'repositories' : 'releases'}
+          authed={!!authUser}
+          onNavigate={onNavigate}
+          openResources={helmTarget}
+          onResourcesConsumed={onHelmTargetConsumed}
+          onRequireAuth={onRequireAuth}
+          onAuthExpired={onAuthExpired}
+        />
+      )}
+      {id === NAV.portForwards && <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={onRequireAuth} />}
+    </>
+  );
+}
+
+/** The resource-list surface: header (search, create, columns), bulk bar, and the table. */
+function ResourceListView(props: {
+  selected: NavItem;
+  filtered: KubeObject[];
+  objects: KubeObject[];
+  query: string;
+  setQuery: (v: string) => void;
+  live: boolean;
+  tableCols: ColumnDef[];
+  visibleCols: ColumnDef[];
+  hiddenCols: Set<string>;
+  toggleCol: (key: string) => void;
+  selection: Set<string>;
+  clearSelection: () => void;
+  bulkDelete: () => void;
+  toggleRow: (key: string) => void;
+  toggleAll: (keys: string[]) => void;
+  detail: { resourceId: string; obj: KubeObject; edit?: boolean } | null;
+  onOpen: (obj: KubeObject) => void;
+  onNamespaceClick: (ns: string) => void;
+  authUser: string | null;
+  onCreate: () => void;
+  onRowAction: (action: RowAction, obj: KubeObject, container?: string) => void;
+  fetchChildren?: (obj: KubeObject) => Promise<KubeObject[]>;
+  loading: boolean;
+}) {
+  const { selected, filtered, objects, query, setQuery, live, tableCols, visibleCols, hiddenCols, toggleCol } = props;
+  const { selection, clearSelection, bulkDelete, toggleRow, toggleAll, detail, onOpen, onNamespaceClick } = props;
+  const { authUser, onCreate, onRowAction, fetchChildren, loading } = props;
+  return (
+    <>
+      <div className="content-head">
+        <h1>{selected.label}</h1>
+        <span className="count">{query ? `${filtered.length} of ${objects.length}` : `${objects.length} items`}</span>
+        {live && (
+          <span className="live" title="Live-updating (SSE watch)">
+            <span className="dot" /> live
+          </span>
+        )}
+        <input
+          className="search"
+          type="search"
+          placeholder={`Search ${selected.label}…`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <div className="spacer" />
+        <button className="btn create-btn" onClick={onCreate}>
+          + Create
+        </button>
+        {!selected.namespaced && <span className="ns-note">Cluster-scoped</span>}
+        {tableCols.length > 0 && (
+          <details className="cols-menu">
+            <summary>Columns ▾</summary>
+            <ul>
+              {tableCols.map((c) => (
+                <li key={c.key}>
+                  <label className="col-toggle">
+                    <input type="checkbox" checked={!hiddenCols.has(c.key)} onChange={() => toggleCol(c.key)} />
+                    {c.header}
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+      {selection.size > 0 && (
+        <div className="bulk-bar">
+          <span>{selection.size} selected</span>
+          <button className="btn danger" onClick={bulkDelete}>
+            Delete
+          </button>
+          <button className="btn" onClick={clearSelection}>
+            Clear
+          </button>
+        </div>
+      )}
+      <ResourceTable
+        objects={filtered}
+        columns={visibleCols}
+        namespaced={selected.namespaced}
+        loading={loading}
+        selectedKey={detail ? objKey(detail.obj) : null}
+        selection={selection}
+        onToggleRow={toggleRow}
+        onToggleAll={toggleAll}
+        onOpen={onOpen}
+        onNamespaceClick={selected.namespaced ? onNamespaceClick : undefined}
+        authed={authUser !== null}
+        onRowAction={onRowAction}
+        fetchChildren={fetchChildren}
+      />
+    </>
+  );
+}
+
+/** The app-level modals: sign-in, create-from-YAML, and start-port-forward. */
+function AppModals(props: {
+  cluster: string | null;
+  showLogin: boolean;
+  setShowLogin: (v: boolean) => void;
+  setAuthUser: (v: string | null) => void;
+  showCreate: boolean;
+  setShowCreate: (v: boolean) => void;
+  forward: { kind: string; namespace: string; name: string; ports: number[] } | null;
+  setForward: (v: null) => void;
+  onForwardStarted: () => void;
+  signOut: () => void;
+}) {
+  const { cluster, showLogin, setShowLogin, setAuthUser, showCreate, setShowCreate } = props;
+  const { forward, setForward, onForwardStarted, signOut } = props;
+  return (
+    <>
+      {showLogin && (
+        <LoginModal
+          onCancel={() => setShowLogin(false)}
+          onSubmit={async (user, pass) => {
+            auth.set(user, pass);
+            try {
+              await api.verifySession();
+              setAuthUser(user);
+              setShowLogin(false);
+              return true;
+            } catch {
+              auth.clear();
+              return false;
             }
-            return (
-              <UsageBar
-                fraction={total ? used / total : 0}
-                color="#2e9e8f"
-                text={`${used.toFixed(2)} / ${total.toFixed(2)}`}
-              />
-            );
-          },
-        },
-        {
-          key: 'm-mem',
-          header: 'Memory',
-          sortText: (o) => String(parseMemBytes(usage[objKey(o)]?.memory)),
-          render: (o) => {
-            const used = parseMemBytes(usage[objKey(o)]?.memory);
-            const total = parseMemBytes(alloc(o).memory);
-            if (!usage[objKey(o)]) {
-              return '—';
-            }
-            return (
-              <UsageBar fraction={total ? used / total : 0} color="#c026a8" text={`${gib(used)} / ${gib(total)}`} />
-            );
-          },
-        },
-        {
-          key: 'm-disk',
-          header: 'Disk',
-          sortText: (o) => String(nodeDisk[objName(o)]?.usedBytes ?? 0),
-          render: (o) => {
-            const d = nodeDisk[objName(o)];
-            if (!d) {
-              return '—';
-            }
-            return (
-              <UsageBar
-                fraction={d.totalBytes ? d.usedBytes / d.totalBytes : 0}
-                color="#e08a1e"
-                text={`${gib(d.usedBytes)} / ${gib(d.totalBytes)}`}
-              />
-            );
-          },
-        },
-      ];
-    }
-    if (selected?.id === 'pods') {
-      const containersCol: ColumnDef = {
-        key: 'containers',
-        header: 'Containers',
-        sortText: (o) =>
-          String(
-            (((o.status as Record<string, unknown>)?.containerStatuses as { ready?: boolean }[]) ?? []).filter(
-              (c) => c.ready,
-            ).length,
-          ),
-        render: (o) => <ContainerSquares obj={o} />,
-      };
-      const withContainers: ColumnDef[] = [];
-      cols.forEach((c) => {
-        withContainers.push(c);
-        if (c.key === 'ready') {
-          withContainers.push(containersCol);
-        }
-      });
-      return [
-        ...withContainers,
-        { key: 'm-cpu', header: 'CPU', render: (o) => usage[objKey(o)]?.cpu ?? '—' },
-        { key: 'm-mem', header: 'Memory', render: (o) => usage[objKey(o)]?.memory ?? '—' },
-      ];
-    }
-    return cols;
-  }, [cols, usage, nodeDisk, selected]);
+          }}
+        />
+      )}
+      {showCreate && cluster && (
+        <CreateModal
+          cluster={cluster}
+          onClose={() => setShowCreate(false)}
+          onAuthExpired={() => {
+            signOut();
+            setShowCreate(false);
+            setShowLogin(true);
+          }}
+        />
+      )}
+      {cluster && forward && (
+        <ForwardModal
+          cluster={cluster}
+          kind={forward.kind}
+          namespace={forward.namespace}
+          name={forward.name}
+          ports={forward.ports}
+          onClose={() => setForward(null)}
+          onStarted={() => {
+            setForward(null);
+            onForwardStarted();
+          }}
+          onAuthExpired={signOut}
+        />
+      )}
+    </>
+  );
+}
 
-  const visibleCols = useMemo(() => tableCols.filter((c) => !hiddenCols.has(c.key)), [tableCols, hiddenCols]);
+/** Filter the object list by the active Helm scope and the search query. */
+function filterObjects(objects: KubeObject[], query: string, helmScope: Set<string> | null): KubeObject[] {
+  const q = query.trim().toLowerCase();
+  const scoped = helmScope ? objects.filter((o) => helmScope.has(`${o.kind ?? ''}/${objName(o)}`)) : objects;
+  if (!q) {
+    return scoped;
+  }
+  return scoped.filter(
+    (o) =>
+      objName(o).toLowerCase().includes(q) ||
+      (objNs(o) ?? '').toLowerCase().includes(q) ||
+      (o.kind ?? '').toLowerCase().includes(q),
+  );
+}
 
-  // Map a Kubernetes kind to its nav item, so cross-links (owner refs) can navigate.
+/** Cross-link navigation: jump to a kind (owner refs), Port Forwards, or a Helm release. */
+function useNavigation(
+  nav: NavCategory[],
+  actions: {
+    setSelected: (i: NavItem) => void;
+    setDetail: (d: null) => void;
+    setNamespace: (ns: string | null) => void;
+    setHelmTarget: (t: { namespace: string; name: string }) => void;
+  },
+) {
+  const { setSelected, setDetail, setNamespace, setHelmTarget } = actions;
   const kindNav = useMemo(() => {
     const map = new Map<string, NavItem>();
     allNavItems(nav).forEach((i) => i.kind && map.set(i.kind, i));
     return map;
   }, [nav]);
-
   const navigateToKind = (kind: string, ns?: string) => {
     const item = kindNav.get(kind);
     if (item) {
@@ -610,359 +938,387 @@ function AppInner() {
       setNamespace(item.namespaced && ns ? ns : null);
     }
   };
-
   const navigateToPortForwards = () => {
     setDetail(null);
     setSelected({ id: NAV.portForwards, label: 'Port Forwards', kind: '', namespaced: false });
   };
-
-  // The pods a workload owns — matched by its spec.selector.matchLabels in its namespace.
-  const fetchWorkloadPods = async (obj: KubeObject): Promise<KubeObject[]> => {
-    if (!cluster) {
-      return [];
-    }
-    const sel =
-      ((obj.spec as Record<string, unknown>)?.selector as { matchLabels?: Record<string, string> })?.matchLabels ?? {};
-    const keys = Object.keys(sel);
-    if (keys.length === 0) {
-      return [];
-    }
-    const pods = await api.objects(cluster, 'pods', objNs(obj) ?? undefined);
-    return pods.filter((p) => {
-      const labels = p.metadata?.labels ?? {};
-      return keys.every((k) => labels[k] === sel[k]);
-    });
-  };
-
-  // Per-row kebab actions: open logs, jump to YAML edit, or delete / force-delete.
-  const handleRowAction = (resourceId: string, action: RowAction, obj: KubeObject, container?: string) => {
-    if (!cluster) {
-      return;
-    }
-    const def = ROW_ACTIONS.find((a) => a.id === action);
-    if (!def) {
-      return;
-    }
-    // Everything except read-only Logs requires the admin login; prompt for it. The menu
-    // shows all actions (Freelens-style) so they're discoverable even when signed out.
-    if (def.requiresAuth !== false && authUser === null) {
-      setShowLogin(true);
-      return;
-    }
-    // Optional-confirm wrapper handed to action handlers: run fn, surface any error.
-    const confirmRun = (fn: () => Promise<unknown>, confirmMsg?: string) => {
-      const go = () => fn().catch((e) => setError(String(e)));
-      if (!confirmMsg) {
-        go();
-        return;
-      }
-      dialog.confirm({ message: confirmMsg }).then((ok) => {
-        if (ok) {
-          go();
-        }
-      });
-    };
-    def.run({
-      cluster,
-      resourceId,
-      obj,
-      ns: objNs(obj) ?? '',
-      name: objName(obj),
-      kind: obj.kind ?? '',
-      containers: containerNames(obj),
-      container,
-      dialog,
-      openDock,
-      setForward,
-      setDetail,
-      setError,
-      removeObject: (o) => setObjects((prev) => prev.filter((x) => objKey(x) !== objKey(o))),
-      confirmRun,
-    });
-  };
-
-  // From a resource's "Managed By: Helm" link → open the owning release's Resources view.
   const navigateToHelmRelease = (namespace: string, name: string) => {
     setDetail(null);
     setSelected({ id: NAV.helmReleases, label: 'Releases', kind: '', namespaced: false });
     setHelmTarget({ namespace, name });
   };
+  return { navigateToKind, navigateToPortForwards, navigateToHelmRelease };
+}
+
+/** The shell's action handlers (row actions, selection/column toggles, favorites, bulk delete). */
+function useAppActions(a: {
+  cluster: string | null;
+  authUser: string | null;
+  selected: NavItem | null;
+  selection: Set<string>;
+  objects: KubeObject[];
+  dialog: DialogApi;
+  openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
+  setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean } | null) => void;
+  setError: (e: string) => void;
+  setObjects: (updater: (prev: KubeObject[]) => KubeObject[]) => void;
+  setShowLogin: (v: boolean) => void;
+  setSelection: (u: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
+  setHiddenCols: (u: (prev: Set<string>) => Set<string>) => void;
+  setFavorites: (u: (prev: string[]) => string[]) => void;
+  setAuthUser: (v: string | null) => void;
+}) {
+  const signOut = () => {
+    auth.clear();
+    a.setAuthUser(null);
+  };
+
+  const fetchPods = (obj: KubeObject): Promise<KubeObject[]> =>
+    a.cluster ? fetchWorkloadPods(a.cluster, obj) : Promise.resolve([]);
+
+  const handleRowAction = (resourceId: string, action: RowAction, obj: KubeObject, container?: string) => {
+    if (!a.cluster) {
+      return;
+    }
+    dispatchRowAction(resourceId, action, obj, container, {
+      cluster: a.cluster,
+      authUser: a.authUser,
+      dialog: a.dialog,
+      openDock: a.openDock,
+      setForward: a.setForward,
+      setDetail: a.setDetail,
+      setError: a.setError,
+      setObjects: a.setObjects,
+      setShowLogin: a.setShowLogin,
+    });
+  };
 
   const toggleFavorite = (id: string) =>
-    setFavorites((prev) => {
+    a.setFavorites((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      if (cluster) {
-        saveFavorites(cluster, next);
+      if (a.cluster) {
+        saveFavorites(a.cluster, next);
       }
       return next;
     });
 
-  const toggleCol = (key: string) =>
-    setHiddenCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-
-  const toggleRow = (key: string) =>
-    setSelection((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-
+  const toggleCol = (key: string) => a.setHiddenCols((prev) => toggleInSet(prev, key));
+  const toggleRow = (key: string) => a.setSelection((prev) => toggleInSet(prev, key));
   const toggleAll = (keys: string[]) =>
-    setSelection((prev) => (prev.size >= keys.length && keys.length > 0 ? new Set() : new Set(keys)));
+    a.setSelection((prev) => (prev.size >= keys.length && keys.length > 0 ? new Set() : new Set(keys)));
 
-  const bulkDelete = async () => {
-    if (!cluster || !selected || selection.size === 0) {
+  const bulkDelete = () => {
+    if (!a.cluster || !a.selected || a.selection.size === 0) {
       return;
     }
-    if (!authUser) {
-      setShowLogin(true);
+    if (!a.authUser) {
+      a.setShowLogin(true);
       return;
     }
-    const ok = await dialog.confirm({
-      title: 'Delete',
-      message: `Delete ${selection.size} ${selected.label}? This cannot be undone.`,
-      confirmLabel: 'Delete',
-      danger: true,
+    void runBulkDelete({
+      cluster: a.cluster,
+      selected: a.selected,
+      selection: a.selection,
+      objects: a.objects,
+      dialog: a.dialog,
+      onAuthCleared: () => {
+        signOut();
+        a.setShowLogin(true);
+      },
+      clearSelection: () => a.setSelection(new Set()),
     });
-    if (!ok) {
+  };
+
+  return { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, toggleRow, toggleAll, bulkDelete };
+}
+
+/** The pods a workload owns — matched by its spec.selector.matchLabels in its namespace. */
+async function fetchWorkloadPods(cluster: string, obj: KubeObject): Promise<KubeObject[]> {
+  const sel =
+    ((obj.spec as Record<string, unknown>)?.selector as { matchLabels?: Record<string, string> })?.matchLabels ?? {};
+  const keys = Object.keys(sel);
+  if (keys.length === 0) {
+    return [];
+  }
+  const pods = await api.objects(cluster, 'pods', objNs(obj) ?? undefined);
+  return pods.filter((p) => {
+    const labels = p.metadata?.labels ?? {};
+    return keys.every((k) => labels[k] === sel[k]);
+  });
+}
+
+/** Toggle a key's membership in a Set, returning a new Set. */
+function toggleInSet<T>(set: Set<T>, key: T): Set<T> {
+  const next = new Set(set);
+  if (next.has(key)) {
+    next.delete(key);
+  } else {
+    next.add(key);
+  }
+  return next;
+}
+
+type RowActionDeps = {
+  cluster: string;
+  authUser: string | null;
+  dialog: DialogApi;
+  openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
+  setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean }) => void;
+  setError: (e: string) => void;
+  setObjects: (updater: (prev: KubeObject[]) => KubeObject[]) => void;
+  setShowLogin: (v: boolean) => void;
+};
+
+/** Dispatch a per-row action through the ROW_ACTIONS registry, gating on auth. */
+function dispatchRowAction(
+  resourceId: string,
+  action: RowAction,
+  obj: KubeObject,
+  container: string | undefined,
+  deps: RowActionDeps,
+) {
+  const def = ROW_ACTIONS.find((a) => a.id === action);
+  if (!def) {
+    return;
+  }
+  // Everything except read-only Logs requires the admin login; prompt for it.
+  if (def.requiresAuth !== false && deps.authUser === null) {
+    deps.setShowLogin(true);
+    return;
+  }
+  const confirmRun = (fn: () => Promise<unknown>, confirmMsg?: string) => {
+    const go = () => fn().catch((e) => deps.setError(String(e)));
+    if (!confirmMsg) {
+      go();
       return;
     }
-    const targets = objects.filter((o) => selection.has(objKey(o)) && objNs(o));
-    for (const o of targets) {
-      try {
-        await api.del(cluster, selected.id, objNs(o) as string, objName(o));
-      } catch (e) {
-        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-          auth.clear();
-          setAuthUser(null);
-          setShowLogin(true);
-          break;
-        }
+    deps.dialog.confirm({ message: confirmMsg }).then((ok) => {
+      if (ok) {
+        go();
+      }
+    });
+  };
+  def.run({
+    cluster: deps.cluster,
+    resourceId,
+    obj,
+    ns: objNs(obj) ?? '',
+    name: objName(obj),
+    kind: obj.kind ?? '',
+    containers: containerNames(obj),
+    container,
+    dialog: deps.dialog,
+    openDock: deps.openDock,
+    setForward: deps.setForward,
+    setDetail: deps.setDetail,
+    setError: deps.setError,
+    removeObject: (o) => deps.setObjects((prev) => prev.filter((x) => objKey(x) !== objKey(o))),
+    confirmRun,
+  });
+}
+
+/** Delete every selected object, prompting once; clears auth on 401/403. */
+async function runBulkDelete(deps: {
+  cluster: string;
+  selected: NavItem;
+  selection: Set<string>;
+  objects: KubeObject[];
+  dialog: DialogApi;
+  onAuthCleared: () => void;
+  clearSelection: () => void;
+}) {
+  const { cluster, selected, selection, objects, dialog, onAuthCleared, clearSelection } = deps;
+  const ok = await dialog.confirm({
+    title: 'Delete',
+    message: `Delete ${selection.size} ${selected.label}? This cannot be undone.`,
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) {
+    return;
+  }
+  const targets = objects.filter((o) => selection.has(objKey(o)) && objNs(o));
+  for (const o of targets) {
+    try {
+      await api.del(cluster, selected.id, objNs(o) as string, objName(o));
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        onAuthCleared();
+        break;
       }
     }
+  }
+  clearSelection();
+}
+
+function AppInner() {
+  const dialog = useDialog();
+  // UI state — the shell owns selection/detail/query/auth/modals; data comes from hooks.
+  const [error, setError] = useState<string | null>(null);
+  const [namespace, setNamespace] = useState<string | null>(null);
+  const [helmRelease, setHelmRelease] = useState<{ namespace: string; name: string } | null>(null);
+  const [selected, setSelected] = useState<NavItem | null>(null);
+  const [detail, setDetail] = useState<{ resourceId: string; obj: KubeObject; edit?: boolean } | null>(null);
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState('');
+  const [authUser, setAuthUser] = useState<string | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [forward, setForward] = useState<{ kind: string; namespace: string; name: string; ports: number[] } | null>(
+    null,
+  );
+  const [helmTarget, setHelmTarget] = useState<{ namespace: string; name: string } | null>(null);
+
+  const { clusters, cluster, setCluster } = useClusters(setError);
+  const { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, setFavorites, helmScope } = useClusterScope(
+    cluster,
+    namespace,
+    helmRelease,
+    setError,
+  );
+  const { objects, setObjects, loading, live, cols, usage, nodeDisk } = useResourceData(
+    cluster,
+    selected,
+    namespace,
+    setError,
+  );
+  const {
+    sessions: dockSessions,
+    active: activeSession,
+    setActive: setActiveSession,
+    openDock,
+    closeDock,
+    toggleFloat,
+  } = useDock();
+
+  // Reset the view when the active cluster, or the selected kind/namespace, changes.
+  useEffect(() => {
+    setSelected(null);
+    setNamespace(null);
+    setHelmRelease(null);
+  }, [cluster]);
+  useEffect(() => {
+    setDetail(null);
+    setQuery('');
+    setHiddenCols(new Set());
     setSelection(new Set());
-  };
+  }, [selected, namespace]);
+
+  const activeCluster = useMemo(() => clusters.find((c) => c.id === cluster) ?? null, [clusters, cluster]);
+
+  const filtered = useMemo(() => filterObjects(objects, query, helmScope), [objects, query, helmScope]);
+
+  // For Pods/Nodes, append live CPU/Memory/Disk columns backed by metrics-server usage.
+  const tableCols = useMemo<ColumnDef[]>(
+    () => buildResourceColumns(selected?.id, cols, usage, nodeDisk),
+    [cols, usage, nodeDisk, selected],
+  );
+
+  const visibleCols = useMemo(() => tableCols.filter((c) => !hiddenCols.has(c.key)), [tableCols, hiddenCols]);
+
+  const { navigateToKind, navigateToPortForwards, navigateToHelmRelease } = useNavigation(nav, {
+    setSelected,
+    setDetail,
+    setNamespace,
+    setHelmTarget,
+  });
+
+  const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, toggleRow, toggleAll, bulkDelete } =
+    useAppActions({
+      cluster,
+      authUser,
+      selected,
+      selection,
+      objects,
+      dialog,
+      openDock,
+      setForward,
+      setDetail,
+      setError,
+      setObjects,
+      setShowLogin,
+      setSelection,
+      setHiddenCols,
+      setFavorites,
+      setAuthUser,
+    });
 
   return (
     <div className="app">
-      <header className="brandbar">
-        <div className="brand">
-          <span className="logo">◆</span> kweblens
-          <span className="tag">web Kubernetes IDE · SPA</span>
-        </div>
-        {cluster && (
-          <div className="bar-filters">
-            <label className="bar-filter">
-              <span>Namespace</span>
-              <select value={namespace ?? ''} onChange={(e) => setNamespace(e.target.value || null)}>
-                <option value="">All namespaces</option>
-                {namespaces.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="bar-filter">
-              <span>Helm</span>
-              <select
-                value={helmRelease ? `${helmRelease.namespace}/${helmRelease.name}` : ''}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (!v) {
-                    setHelmRelease(null);
-                  } else {
-                    const slash = v.indexOf('/');
-                    setHelmRelease({ namespace: v.slice(0, slash), name: v.slice(slash + 1) });
-                  }
-                }}
-              >
-                <option value="">All releases</option>
-                {helmReleaseList.map((r) => (
-                  <option key={`${r.namespace}/${r.name}`} value={`${r.namespace}/${r.name}`}>
-                    {r.name} · {r.namespace}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
-        <div className="bar-right">
-          {authUser ? (
-            <span className="authbox">
-              <i className="user-dot" /> {authUser}
-              <button
-                className="linkbtn"
-                onClick={() => {
-                  auth.clear();
-                  setAuthUser(null);
-                }}
-              >
-                Sign out
-              </button>
-            </span>
-          ) : (
-            <button className="linkbtn" onClick={() => setShowLogin(true)}>
-              Sign in
-            </button>
-          )}
-          <a className="switch" href="/">
-            Classic UI ↗
-          </a>
-        </div>
-      </header>
+      <BrandBar
+        cluster={cluster}
+        namespace={namespace}
+        setNamespace={setNamespace}
+        namespaces={namespaces}
+        helmRelease={helmRelease}
+        setHelmRelease={setHelmRelease}
+        helmReleaseList={helmReleaseList}
+        authUser={authUser}
+        onSignIn={() => setShowLogin(true)}
+        onSignOut={signOut}
+      />
 
       <div className="body">
-        <nav className="rail" aria-label="Clusters">
-          {clusters.map((c) => (
-            <button
-              key={c.id}
-              className={'tile' + (c.id === cluster ? ' active' : '')}
-              title={c.name}
-              onClick={() => setCluster(c.id)}
-            >
-              {initials(c.id)}
-            </button>
-          ))}
-        </nav>
-
-        <aside className="nav">
-          <div className="nav-title">{activeCluster?.name ?? cluster ?? '—'}</div>
-          {cluster && (
-            <NavTree
-              categories={nav}
-              counts={{ ...counts, ...helmCounts }}
-              favorites={favorites}
-              selected={selected?.id ?? null}
-              onSelect={setSelected}
-              onToggleFavorite={toggleFavorite}
-            />
-          )}
-          <AppFooter />
-        </aside>
+        <Sidebar
+          clusters={clusters}
+          cluster={cluster}
+          setCluster={setCluster}
+          activeCluster={activeCluster}
+          nav={nav}
+          counts={{ ...counts, ...helmCounts }}
+          favorites={favorites}
+          selected={selected}
+          setSelected={setSelected}
+          onToggleFavorite={toggleFavorite}
+        />
 
         <div className="content-col">
           <main className="content">
             {error && <div className="error">{error}</div>}
-            {(!selected || selected.id === NAV.overviewCluster) && !error && cluster && (
-              <ClusterOverview
+            {cluster && (
+              <SyntheticViews
                 cluster={cluster}
-                name={activeCluster?.name ?? cluster}
-                masterUrl={activeCluster?.masterUrl}
-                namespaceCount={namespaces.length}
-              />
-            )}
-            {cluster && selected?.id === NAV.overviewWorkloads && <WorkloadsOverview cluster={cluster} />}
-            {cluster && selected?.id !== undefined && HELM_VIEW_IDS.includes(selected.id) && (
-              <HelmView
-                cluster={cluster}
-                view={
-                  selected.id === NAV.helmCharts
-                    ? 'charts'
-                    : selected.id === NAV.helmRepositories
-                      ? 'repositories'
-                      : 'releases'
-                }
-                authed={!!authUser}
+                selected={selected}
+                error={error}
+                activeCluster={activeCluster}
+                namespaces={namespaces}
+                authUser={authUser}
+                helmTarget={helmTarget}
+                onHelmTargetConsumed={() => setHelmTarget(null)}
                 onNavigate={navigateToKind}
-                openResources={helmTarget}
-                onResourcesConsumed={() => setHelmTarget(null)}
                 onRequireAuth={() => setShowLogin(true)}
-                onAuthExpired={() => {
-                  auth.clear();
-                  setAuthUser(null);
-                }}
+                onAuthExpired={signOut}
               />
-            )}
-            {cluster && selected?.id === NAV.portForwards && (
-              <PortForwards cluster={cluster} authed={!!authUser} onRequireAuth={() => setShowLogin(true)} />
             )}
             {selected && !isSynthetic(selected.id) && (
-              <>
-                <div className="content-head">
-                  <h1>{selected.label}</h1>
-                  <span className="count">
-                    {query ? `${filtered.length} of ${objects.length}` : `${objects.length} items`}
-                  </span>
-                  {live && (
-                    <span className="live" title="Live-updating (SSE watch)">
-                      <span className="dot" /> live
-                    </span>
-                  )}
-                  <input
-                    className="search"
-                    type="search"
-                    placeholder={`Search ${selected.label}…`}
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                  <div className="spacer" />
-                  <button
-                    className="btn create-btn"
-                    onClick={() => (authUser ? setShowCreate(true) : setShowLogin(true))}
-                  >
-                    + Create
-                  </button>
-                  {!selected.namespaced && <span className="ns-note">Cluster-scoped</span>}
-                  {tableCols.length > 0 && (
-                    <details className="cols-menu">
-                      <summary>Columns ▾</summary>
-                      <ul>
-                        {tableCols.map((c) => (
-                          <li key={c.key}>
-                            <label className="col-toggle">
-                              <input
-                                type="checkbox"
-                                checked={!hiddenCols.has(c.key)}
-                                onChange={() => toggleCol(c.key)}
-                              />
-                              {c.header}
-                            </label>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </div>
-                {selection.size > 0 && (
-                  <div className="bulk-bar">
-                    <span>{selection.size} selected</span>
-                    <button className="btn danger" onClick={bulkDelete}>
-                      Delete
-                    </button>
-                    <button className="btn" onClick={() => setSelection(new Set())}>
-                      Clear
-                    </button>
-                  </div>
-                )}
-                <ResourceTable
-                  objects={filtered}
-                  columns={visibleCols}
-                  namespaced={selected.namespaced}
-                  loading={loading}
-                  selectedKey={detail ? objKey(detail.obj) : null}
-                  selection={selection}
-                  onToggleRow={toggleRow}
-                  onToggleAll={toggleAll}
-                  onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
-                  onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
-                  authed={authUser !== null}
-                  onRowAction={(action, obj, container) => handleRowAction(selected.id, action, obj, container)}
-                  fetchChildren={selected.expandable ? fetchWorkloadPods : undefined}
-                />
-              </>
+              <ResourceListView
+                selected={selected}
+                filtered={filtered}
+                objects={objects}
+                query={query}
+                setQuery={setQuery}
+                live={live}
+                tableCols={tableCols}
+                visibleCols={visibleCols}
+                hiddenCols={hiddenCols}
+                toggleCol={toggleCol}
+                selection={selection}
+                clearSelection={() => setSelection(new Set())}
+                bulkDelete={bulkDelete}
+                toggleRow={toggleRow}
+                toggleAll={toggleAll}
+                detail={detail}
+                onOpen={(obj) => setDetail({ resourceId: selected.id, obj })}
+                onNamespaceClick={(ns) => setNamespace(ns)}
+                authUser={authUser}
+                onCreate={() => (authUser ? setShowCreate(true) : setShowLogin(true))}
+                onRowAction={(action, obj, container) => handleRowAction(selected.id, action, obj, container)}
+                fetchChildren={selected.expandable ? fetchPods : undefined}
+                loading={loading}
+              />
             )}
           </main>
           {cluster && dockSessions.length > 0 && (
@@ -996,55 +1352,18 @@ function AppInner() {
         )}
       </div>
 
-      {showLogin && (
-        <LoginModal
-          onCancel={() => setShowLogin(false)}
-          onSubmit={async (user, pass) => {
-            auth.set(user, pass);
-            try {
-              await api.verifySession();
-              setAuthUser(user);
-              setShowLogin(false);
-              return true;
-            } catch {
-              auth.clear();
-              return false;
-            }
-          }}
-        />
-      )}
-
-      {showCreate && cluster && (
-        <CreateModal
-          cluster={cluster}
-          onClose={() => setShowCreate(false)}
-          onAuthExpired={() => {
-            auth.clear();
-            setAuthUser(null);
-            setShowCreate(false);
-            setShowLogin(true);
-          }}
-        />
-      )}
-
-      {cluster && forward && (
-        <ForwardModal
-          cluster={cluster}
-          kind={forward.kind}
-          namespace={forward.namespace}
-          name={forward.name}
-          ports={forward.ports}
-          onClose={() => setForward(null)}
-          onStarted={() => {
-            setForward(null);
-            navigateToPortForwards();
-          }}
-          onAuthExpired={() => {
-            auth.clear();
-            setAuthUser(null);
-          }}
-        />
-      )}
+      <AppModals
+        cluster={cluster}
+        showLogin={showLogin}
+        setShowLogin={setShowLogin}
+        setAuthUser={setAuthUser}
+        showCreate={showCreate}
+        setShowCreate={setShowCreate}
+        forward={forward}
+        setForward={setForward}
+        onForwardStarted={navigateToPortForwards}
+        signOut={signOut}
+      />
     </div>
   );
 }
