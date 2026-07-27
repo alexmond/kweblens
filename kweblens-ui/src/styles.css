@@ -35,6 +35,27 @@ html.kw-dark {
 html.kw-dark body {
   background: var(--bg);
 }
+/* Left column (cluster rail + tiles + nav hovers/badges) uses hardcoded light colors that
+   don't key off the CSS vars — override them for dark so the whole shell honours the theme. */
+html.kw-dark .rail {
+  background: #10151a;
+}
+html.kw-dark .tile {
+  background: #242a31;
+  color: var(--text);
+  border-color: var(--border);
+}
+html.kw-dark .tile:hover {
+  background: #2c333b;
+}
+html.kw-dark .group > summary:hover,
+html.kw-dark .leaf:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+html.kw-dark .nav-badge,
+html.kw-dark .acc-count {
+  background: #2c333b;
+}
 
 * {
   box-sizing: border-box;
