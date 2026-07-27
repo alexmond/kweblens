@@ -29,6 +29,10 @@ nav badge counts, the list table, YAML view, and row menu all work off this — 
 change needed for a standard kind. (CRDs are discovered dynamically and grouped under
 **Custom Resources**.)
 
+Chain `.asExpandable()` on the descriptor to let its list rows disclose owned pods (as
+the workload kinds do); the flag rides through to the SPA `NavItem` and drives the
+row's tree-toggle — no per-kind list in the table code.
+
 ### Add a table column
 
 Columns live in `src/columns.ts` — a `COLUMNS: Record<resourceId, ColumnDef[]>` map.

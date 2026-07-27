@@ -11,6 +11,9 @@ export interface NavItem {
   label: string;
   kind: string;
   namespaced: boolean;
+  // Dashboard hint from the nav catalog: rows can expand to show owned child pods
+  // (workload kinds). Absent on synthetic items (Overview/Helm/Port Forwards).
+  expandable?: boolean;
 }
 
 export interface NavCategory {

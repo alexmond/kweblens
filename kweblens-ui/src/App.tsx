@@ -1733,11 +1733,7 @@ function AppInner() {
                 onNamespaceClick={selected.namespaced ? (ns) => setNamespace(ns) : undefined}
                 authed={authUser !== null}
                 onRowAction={(action, obj, container) => handleRowAction(selected.id, action, obj, container)}
-                fetchChildren={
-                  ['deployments', 'statefulsets', 'daemonsets', 'replicasets'].includes(selected.id)
-                    ? fetchWorkloadPods
-                    : undefined
-                }
+                fetchChildren={selected.expandable ? fetchWorkloadPods : undefined}
               />
             </>
           )}

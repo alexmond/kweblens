@@ -112,7 +112,7 @@ public class CrdService {
 			return null;
 		}
 		boolean namespaced = "Namespaced".equals(spec.getScope());
-		return new ResourceDescriptor(group + "." + plural, kind, kind, group, version, plural, namespaced);
+		return new ResourceDescriptor(group + "." + plural, kind, kind, group, version, plural, namespaced, false);
 	}
 
 	private String servedVersion(CustomResourceDefinitionSpec spec) {
