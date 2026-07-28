@@ -13,10 +13,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Exercises the jhelm integration end-to-end against the fabric8 mock server: an official
- * io.kubernetes {@link io.kubernetes.client.openapi.ApiClient} built from the cluster's
- * fabric8 config queries Helm release Secrets. With none present, listing returns empty
- * (not an error), proving the per-cluster wiring works without a live cluster.
+ * Exercises the jhelm integration end-to-end against the fabric8 mock server: jhelm's
+ * fabric8-backed {@link org.alexmond.jhelm.core.service.KubeService}, built from the
+ * cluster's fabric8 client via {@code KubeServices.fabric8(...)}, queries Helm release
+ * Secrets. With none present, listing returns empty (not an error), proving the
+ * per-cluster wiring works without a live cluster.
  */
 @EnableKubernetesMockClient(crud = true)
 class HelmServiceTest {

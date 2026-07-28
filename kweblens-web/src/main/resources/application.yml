@@ -2,16 +2,16 @@ spring:
   application:
     name: kweblens
 
-  # We keep JhelmKubeAutoConfiguration excluded so jhelm builds NO ambient KubeService — kweblens
-  # builds one KubeService per cluster inside HelmService for multi-cluster release ops. But
-  # JhelmCoreAutoConfiguration IS enabled: without a KubeService bean it registers only the
-  # cluster-agnostic beans (RepoManager, ChartLoader, Show/Template/Create/SearchHub actions),
-  # which back jhelm-rest's Repo/Chart/Hub controllers (the dogfood). Its release actions are
-  # @ConditionalOnBean(KubeService.class) so they never register.
+  # jhelm.kubernetes.backend=none (below) makes JhelmKubeAutoConfiguration build NO ambient client
+  # and NO default KubeService — so we no longer exclude it by class name; kweblens builds one
+  # fabric8 KubeService per cluster inside HelmService for multi-cluster release ops. With no
+  # KubeService bean, JhelmCoreAutoConfiguration registers only the cluster-agnostic beans
+  # (RepoManager, ChartLoader, Show/Template/Create/SearchHub actions) that back jhelm-rest's
+  # Repo/Chart/Hub controllers (the dogfood); its release actions are @ConditionalOnBean(KubeService)
+  # so they never register.
   autoconfigure:
     exclude:
       - org.alexmond.jhelm.core.JhelmMetricsAutoConfiguration
-      - org.alexmond.jhelm.kube.JhelmKubeAutoConfiguration
 
   cloud:
     config:
@@ -86,6 +86,14 @@ jhelm:
   # sit directly here, not under jhelm.core.)
   config-path: ${KWEBLENS_HELM_HOME:${user.home}/.kweblens/helm}/repositories.yaml
   repository-cache-path: ${KWEBLENS_HELM_HOME:${user.home}/.kweblens/helm}/cache
+  kubernetes:
+    # backend=none: jhelm builds no ambient Kubernetes client and no default KubeService (#796).
+    # kweblens supplies one fabric8 KubeService per cluster via KubeServices.fabric8(...) in
+    # HelmService — reusing the registry's authenticated fabric8 client (in-cluster SA or
+    # kubeconfig). No ambient cluster to probe, so the jhelm Kubernetes health indicator is off.
+    backend: none
+    health:
+      enabled: false
   rest:
     # Namespaced under kweblens's API so it doesn't collide with /api/v1/clusters/*.
     base-path: /api/v1/helm

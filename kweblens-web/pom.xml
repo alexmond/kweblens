@@ -38,9 +38,11 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- Helm releases via the sibling jhelm library (dogfood). jhelm-kube brings jhelm-core +
-             the official io.kubernetes client; jhelm's own auto-configuration is excluded (see
-             application.yml) so we use it purely as a library, one KubeService per cluster. -->
+        <!-- Helm releases via the sibling jhelm library (dogfood). jhelm-kube's client backend is
+             pluggable and optional; kweblens already has fabric8 on the classpath (via kweblens-core),
+             so jhelm uses its fabric8 backend. jhelm.kubernetes.backend=none (application.yml) means
+             jhelm builds no ambient client — HelmService builds one fabric8 KubeService per cluster
+             from the registry's client via the public KubeServices.fabric8(...) factory. -->
         <dependency>
             <groupId>org.alexmond</groupId>
             <artifactId>jhelm-kube</artifactId>
@@ -58,15 +60,6 @@
             <artifactId>jhelm-rest-starter</artifactId>
             <version>${jhelm.version}</version>
         </dependency>
-        <!-- Credential providers (client-cert / token) to authenticate Helm's official ApiClient
-             the same way the cluster's kubeconfig does — jhelm-kube only pulls client-java-api. The
-             io.kubernetes.client.util.credentials.* classes live in the main client-java artifact. -->
-        <dependency>
-            <groupId>io.kubernetes</groupId>
-            <artifactId>client-java</artifactId>
-            <version>${kubernetes-client.version}</version>
-        </dependency>
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
