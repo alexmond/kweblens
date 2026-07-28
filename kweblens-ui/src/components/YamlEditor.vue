@@ -1,15 +1,13 @@
 <script setup lang="ts">
 /**
- * A CodeMirror 6 YAML editor (Phase A of the editor redesign — replaces the plain
- * textarea). Line numbers, folding, undo history, bracket matching and YAML syntax
- * highlighting come from `basicSetup`; the chrome (background, gutter, selection, cursor)
- * is themed through the app's CSS variables so it follows the light/dark palette. The
- * `dark` flag is read from the <html> `kw-dark` class and kept in sync with a
- * MutationObserver, so CodeMirror's own dark-mode defaults match the app theme.
+ * A CodeMirror 6 YAML editor. Line numbers, folding, undo history, bracket matching and
+ * YAML syntax highlighting come from `basicSetup`; the chrome (background, gutter,
+ * selection, cursor) is themed through the app's CSS variables so it follows the
+ * light/dark palette, kept in sync with a MutationObserver on the <html> `kw-dark` class.
  *
- * Schema-aware completion/lint (codemirror-json-schema) lands in Phase B; this component
- * exposes the same `v-model:value` contract the old NInput used, so wiring it up is a
- * drop-in swap.
+ * When a `schema` prop is supplied (the kind's JSON Schema, from the cluster's OpenAPI),
+ * codemirror-json-schema adds schema-aware completion, lint and hover. Exposes a
+ * `v-model:value` contract.
  */
 import { yaml } from '@codemirror/lang-yaml';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
@@ -17,14 +15,22 @@ import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
+import { yamlSchema } from 'codemirror-json-schema/yaml';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-const props = defineProps<{ value: string }>();
+// `schema` (a JSON Schema for the object's kind, from the cluster's OpenAPI) turns on
+// schema-aware completion, lint and hover; without it the editor is plain YAML.
+const props = defineProps<{ value: string; schema?: Record<string, unknown> | null }>();
 const emit = defineEmits<{ (e: 'update:value', v: string): void }>();
 
 const host = ref<HTMLDivElement | null>(null);
 let view: EditorView | null = null;
 const themeCompartment = new Compartment();
+const langCompartment = new Compartment();
+
+// yamlSchema() bundles the yaml() language + linter + completion + hover + schema state, so
+// it REPLACES the plain yaml() language when a schema is present (never add both).
+const langExtension = () => (props.schema ? yamlSchema(props.schema as Parameters<typeof yamlSchema>[0]) : [yaml()]);
 
 // Chrome themed via CSS variables → follows the app's light/dark palette automatically.
 const baseTheme = EditorView.theme({
@@ -76,7 +82,7 @@ function build() {
       doc: props.value,
       extensions: [
         basicSetup,
-        yaml(),
+        langCompartment.of(langExtension()),
         syntaxHighlighting(highlightStyle),
         baseTheme,
         themeCompartment.of(themeFor()),
@@ -103,6 +109,13 @@ watch(
       view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
     }
   },
+);
+
+// The schema is fetched asynchronously — switch the language/schema extension in when it
+// arrives (or back to plain YAML if it's cleared).
+watch(
+  () => props.schema,
+  () => view?.dispatch({ effects: langCompartment.reconfigure(langExtension()) }),
 );
 
 let observer: MutationObserver | null = null;

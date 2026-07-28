@@ -46,13 +46,22 @@ const ns = computed(() => objNs(props.obj) ?? '');
 // The parent mounts Detail via v-if; keep the drawer shown while mounted and route any
 // close (the X, the mask, or Escape) to the `close` emit so the parent tears it down.
 const show = ref(true);
+// True while the YAML tab's pop-out editor is open. The drawer is non-modal and closes on
+// any outside click / Escape — but a click inside the editor (a separate overlay) counts as
+// "outside", which would close the drawer and unmount the editor. Suppress the drawer's
+// close while editing; Escape then closes the editor (its own modal), not the drawer.
+const yamlEditing = ref(false);
 const onShow = (v: boolean) => {
-  if (!v) {
+  if (!v && !yamlEditing.value) {
     emit('close');
   }
 };
 
-useEscapeKey(() => emit('close'));
+useEscapeKey(() => {
+  if (!yamlEditing.value) {
+    emit('close');
+  }
+});
 
 watch(
   () => tab.value,
@@ -110,6 +119,7 @@ watch(
             :initial-edit="initialEdit"
             :authed="authed"
             @auth-expired="emit('auth-expired')"
+            @editing="(v) => (yamlEditing = v)"
           />
         </NTabPane>
         <NTabPane name="events" tab="Events" display-directive="if">

@@ -13,7 +13,12 @@ import { ref } from 'vue';
 import { ApiError, api } from '../api';
 import YamlEditor from './YamlEditor.vue';
 
-const props = defineProps<{ cluster: string; title: string; initialText: string }>();
+const props = defineProps<{
+  cluster: string;
+  title: string;
+  initialText: string;
+  schema?: Record<string, unknown> | null;
+}>();
 const emit = defineEmits<{
   (e: 'applied', text: string): void;
   (e: 'auth-expired'): void;
@@ -60,11 +65,12 @@ const onShow = (v: boolean) => {
     preset="card"
     :title="title"
     :bordered="false"
+    :mask-closable="false"
     class="yaml-editor-modal"
     style="width: min(1100px, 92vw)"
     @update:show="onShow"
   >
-    <YamlEditor v-model:value="draft" class="yaml-edit-cm" />
+    <YamlEditor v-model:value="draft" :schema="schema" class="yaml-edit-cm" />
     <div v-if="msg" :class="'act-msg' + (err ? ' err' : '')">{{ msg }}</div>
     <template #footer>
       <div class="dialog-actions">

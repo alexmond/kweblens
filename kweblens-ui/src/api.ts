@@ -248,6 +248,12 @@ export const api = {
         `?resource=${encodeURIComponent(resourceId)}&name=${encodeURIComponent(name)}` +
         (namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''),
     ),
+  // JSON Schema for a kind (from the cluster's OpenAPI), for editor completion/lint/hover.
+  // Best-effort: returns null when the cluster has no schema for the kind (404) or on error.
+  schema: (cluster: string, resourceId: string): Promise<Record<string, unknown> | null> =>
+    getJson<Record<string, unknown>>(`${clusterBase(cluster)}/schema?resource=${encodeURIComponent(resourceId)}`).catch(
+      () => null,
+    ),
 
   // --- Mutating actions (HTTP Basic auth required) ---
   apply: (cluster: string, manifest: string) =>

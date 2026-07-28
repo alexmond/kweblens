@@ -20,7 +20,10 @@ const props = defineProps<{
   initialEdit: boolean;
   authed: boolean;
 }>();
-const emit = defineEmits<{ (e: 'auth-expired'): void }>();
+// `editing` tells the parent drawer the pop-out editor is open, so it can suppress its
+// close-on-outside-click / Escape (the drawer is non-modal and would otherwise close —
+// and take this editor, its child — the moment you click inside the editor).
+const emit = defineEmits<{ (e: 'auth-expired'): void; (e: 'editing', v: boolean): void }>();
 
 const yaml = ref<string | null>(null);
 const yamlError = ref<string | null>(null);
@@ -28,8 +31,23 @@ const hideManaged = ref(true);
 const copied = ref(false);
 const showEditor = ref(false);
 const draft = ref('');
+const schema = ref<Record<string, unknown> | null>(null);
 const msg = ref<string | null>(null);
 const msgErr = ref(false);
+
+// The kind's JSON Schema (cluster OpenAPI) powers editor completion/lint/hover. Fetched
+// once per resource kind, best-effort — the editor works fine without it.
+watch(
+  () => props.resourceId,
+  (id) => {
+    schema.value = null;
+    api
+      .schema(props.cluster, id)
+      .then((s) => (schema.value = s))
+      .catch(() => undefined);
+  },
+  { immediate: true },
+);
 
 watch(
   () => [props.cluster, props.resourceId, props.name, props.ns],
@@ -53,6 +71,11 @@ const editorTitle = computed(() => `Edit — ${props.name}`);
 const openEditor = () => {
   draft.value = displayYaml.value ?? '';
   showEditor.value = true;
+  emit('editing', true);
+};
+const closeEditor = () => {
+  showEditor.value = false;
+  emit('editing', false);
 };
 
 // Opened via the row "Edit" action → pop the editor open once the manifest loads.
@@ -108,9 +131,10 @@ const copy = () => {
       :cluster="cluster"
       :title="editorTitle"
       :initial-text="draft"
+      :schema="schema"
       @applied="onApplied"
       @auth-expired="emit('auth-expired')"
-      @close="showEditor = false"
+      @close="closeEditor"
     />
   </div>
 </template>
