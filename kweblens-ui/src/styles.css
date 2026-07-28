@@ -63,9 +63,16 @@ html.kw-dark .acc-count {
 
 html,
 body,
-#root {
+#app {
   height: 100%;
   margin: 0;
+}
+
+/* NConfigProvider renders a wrapper div (class app-theme-root) between #app and .app;
+   it must carry the height through, or .app collapses to content and the footer rides
+   up under the table instead of sitting at the bottom of the viewport. */
+.app-theme-root {
+  height: 100%;
 }
 
 body {
