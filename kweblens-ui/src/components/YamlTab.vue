@@ -3,11 +3,12 @@
 //
 // Emits (mirrors the React `onAuthExpired` callback prop):
 //   auth-expired ()   — an apply came back 401/403; the shell must re-prompt for creds
-import { NButton, NInput, NSwitch } from 'naive-ui';
+import { NButton, NSwitch } from 'naive-ui';
 import { computed, ref, watch } from 'vue';
 
 import { ApiError, api } from '../api';
 import { stripManagedFields } from '../kube';
+import YamlEditor from './YamlEditor.vue';
 import YamlView from './YamlView.vue';
 
 const props = defineProps<{
@@ -120,14 +121,7 @@ const applyYaml = async () => {
     <div v-if="yamlError" class="error">{{ yamlError }}</div>
     <div v-if="!yamlError && yaml === null" class="empty">Loading…</div>
     <YamlView v-if="displayYaml !== null && !editing" :text="displayYaml" />
-    <NInput
-      v-if="editing"
-      v-model:value="draft"
-      type="textarea"
-      class="yaml-edit"
-      :autosize="{ minRows: 18 }"
-      :input-props="{ spellcheck: false }"
-    />
+    <YamlEditor v-if="editing" v-model:value="draft" class="yaml-edit-cm" />
     <div v-if="msg" :class="'act-msg' + (msgErr ? ' err' : '')">{{ msg }}</div>
   </div>
 </template>
