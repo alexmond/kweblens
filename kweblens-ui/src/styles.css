@@ -8,6 +8,13 @@
   --border: #dbe1e6;
   --text: #1f2a30;
   --muted: #6b7b85;
+  /* CodeMirror YAML syntax colours (light) — see YamlEditor.vue highlightStyle */
+  --cm-key: #1a56c4;
+  --cm-string: #0a7d33;
+  --cm-number: #b5540a;
+  --cm-atom: #8250df;
+  --cm-comment: #6b7b85;
+  --cm-meta: #7a8791;
 }
 
 /* The detail drawer is a NON-MODAL side panel (no mask): let clicks pass through its
@@ -31,6 +38,13 @@ html.kw-dark {
   --border: #333a42;
   --text: #dfe4e8;
   --muted: #8b959f;
+  /* CodeMirror YAML syntax colours (dark) — readable on the dark panel */
+  --cm-key: #7cc7ff;
+  --cm-string: #9ece6a;
+  --cm-number: #ff9e64;
+  --cm-atom: #bb9af7;
+  --cm-comment: #7f8c98;
+  --cm-meta: #9aa5b0;
 }
 html.kw-dark body {
   background: var(--bg);
