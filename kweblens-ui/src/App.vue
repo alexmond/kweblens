@@ -59,7 +59,16 @@ const toggleTheme = () => {
 };
 document.documentElement.classList.toggle('kw-dark', dark.value);
 
-const { clusters, cluster } = useClusters(setError);
+const { clusters, cluster, refresh: refreshClusters } = useClusters(setError);
+// Closed-mode: the session cookie outlives the in-memory creds. On load, restore an existing
+// session (so write controls appear + data loads after a reload) and re-fetch once authed.
+api
+  .verifySession()
+  .then((r) => {
+    authUser.value = r.user;
+    void refreshClusters();
+  })
+  .catch(() => undefined);
 const { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, helmScope } = useClusterScope(
   cluster,
   namespace,
@@ -134,6 +143,7 @@ const loginSubmit = async (user: string, pass: string): Promise<boolean> => {
     await api.verifySession();
     authUser.value = user;
     showLogin.value = false;
+    void refreshClusters();
     return true;
   } catch {
     auth.clear();
