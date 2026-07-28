@@ -999,7 +999,8 @@ body {
 .drawer-body {
   flex: 1;
   overflow: auto;
-  padding: 14px;
+  /* horizontal gutter comes from NDrawerContent body-content-style; keep vertical rhythm here */
+  padding: 16px 0 22px;
 }
 
 .kv {
@@ -1087,23 +1088,43 @@ body {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
 }
 
 .mini th,
 .mini td {
   text-align: left;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
 
+.mini td {
+  color: var(--text);
+}
+
 .mini th {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--accent) 65%, var(--muted));
   font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.mini tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--panel) 95%, var(--border));
+}
+
+.mini tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .mini tr.warn td {
-  background: #fff6e6;
+  background: color-mix(in srgb, #e0a13a 22%, var(--panel));
 }
 
 .mono {

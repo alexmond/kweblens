@@ -74,7 +74,10 @@ watch(
 <template>
   <NDrawer
     :show="show"
-    :width="500"
+    resizable
+    :default-width="520"
+    :min-width="360"
+    :max-width="900"
     placement="right"
     :show-mask="false"
     :trap-focus="false"
@@ -82,7 +85,7 @@ watch(
     :aria-label="`${kind} ${name}`"
     @update:show="onShow"
   >
-    <NDrawerContent closable body-content-style="padding: 0; display: flex; flex-direction: column;">
+    <NDrawerContent closable body-content-style="padding: 0 20px; display: flex; flex-direction: column;">
       <template #header>
         <div class="drawer-title">
           <span class="drawer-kind">{{ kind }}</span>
