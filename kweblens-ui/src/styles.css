@@ -101,11 +101,21 @@ body {
 .brand {
   font-weight: 600;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 9px;
 }
 
 .brand .logo {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.brand .name {
+  letter-spacing: -0.01em;
+}
+
+.brand .name .accent {
   color: #4bb4e6;
 }
 
