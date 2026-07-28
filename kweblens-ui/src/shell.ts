@@ -68,8 +68,8 @@ export function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
     label: CATEGORY.helm,
     icon: 'bi-hexagon',
     items: [
-      { id: NAV.helmCharts, label: 'Charts', kind: '', namespaced: false },
       { id: NAV.helmReleases, label: 'Releases', kind: '', namespaced: false },
+      { id: NAV.helmCharts, label: 'Charts', kind: '', namespaced: false },
       { id: NAV.helmRepositories, label: 'Repositories', kind: '', namespaced: false },
     ],
   };
