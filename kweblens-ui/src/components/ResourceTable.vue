@@ -65,9 +65,8 @@ const onMenu = (key: string, row: KubeObject) => {
 
 const columns = computed<DataTableColumns<KubeObject>>(() => {
   const cols: DataTableColumns<KubeObject> = [{ type: 'selection' }];
-  if (props.fetchChildren) {
-    cols.push({ type: 'expand', renderExpand: (row) => renderChildren(row) });
-  }
+  // Name is the tree column: when fetchChildren is set, Naive renders the expand
+  // arrow + indent here, so child pods align under this column and every other one.
   cols.push({ title: 'Name', key: 'name', sorter: 'default', render: (row) => objName(row) });
   if (showNs.value) {
     cols.push({
@@ -130,35 +129,32 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
 
 const sortVal = (o: KubeObject, c: TableColumn): string => (c.sortText ? c.sortText(o) : c.render(o));
 
-// child-pod rows for an expanded workload
+// Tree data: expandable workloads carry their child pods as real rows so they line up
+// under every column and are individually clickable. Pods are lazy-loaded on expand and
+// kept in childCache (keyed by objKey) so a live-refresh of `objects` doesn't drop them.
+type TreeRow = KubeObject & { children?: KubeObject[]; isLeaf?: boolean };
 const childCache = ref<Record<string, KubeObject[]>>({});
-const renderChildren = (row: KubeObject) => {
-  const pods = childCache.value[objKey(row)];
-  if (!pods) {
-    return h('div', { class: 'child-msg' }, 'Loading pods…');
+const treeData = computed<TreeRow[]>(() => {
+  if (!props.fetchChildren) {
+    return props.objects;
   }
-  if (pods.length === 0) {
-    return h('div', { class: 'child-msg' }, 'No pods.');
-  }
-  return h(
-    'div',
-    pods.map((p) =>
-      h('div', { class: 'child-pod', key: objKey(p) }, [
-        h('span', { class: 'child-name' }, '↳ ' + objName(p)),
-        h(ContainerSquares, { obj: p }),
-        h('span', { class: 'dim' }, age(p.metadata?.creationTimestamp)),
-      ]),
-    ),
-  );
-};
-const onExpand = (keys: (string | number)[]) => {
-  keys.forEach((k) => {
-    const row = props.objects.find((o) => objKey(o) === k);
-    if (row && props.fetchChildren && !childCache.value[String(k)]) {
-      props.fetchChildren(row).then((pods) => (childCache.value = { ...childCache.value, [String(k)]: pods }));
+  return props.objects.map((o) => {
+    const kids = childCache.value[objKey(o)];
+    const row: TreeRow = { ...o, isLeaf: false };
+    if (kids && kids.length) {
+      row.children = kids;
     }
+    return row;
   });
-};
+});
+// Naive awaits this promise to clear the row's loading spinner; populate the cache so the
+// computed re-derives `children`. Keyed by objKey → Naive won't re-fire it after a refresh.
+const onLoad = (row: KubeObject) =>
+  props.fetchChildren
+    ? props.fetchChildren(row).then((pods) => {
+        childCache.value = { ...childCache.value, [objKey(row)]: pods };
+      })
+    : Promise.resolve();
 
 const checkedKeys = computed(() => [...props.selection]);
 const rowKey = (row: KubeObject) => objKey(row);
@@ -180,13 +176,15 @@ const rowProps = (row: KubeObject) => ({
 <template>
   <NDataTable
     :columns="columns"
-    :data="objects"
+    :data="treeData"
     :loading="loading"
     :row-key="rowKey"
     :checked-row-keys="checkedKeys"
     :row-props="rowProps"
+    :on-load="fetchChildren ? onLoad : undefined"
+    :indent="18"
+    :cascade="false"
     size="small"
     @update:checked-row-keys="(keys) => emit('update:selection', keys as string[])"
-    @update:expanded-row-keys="onExpand"
   />
 </template>
