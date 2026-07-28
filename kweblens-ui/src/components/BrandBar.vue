@@ -33,6 +33,9 @@ const helmOptions = computed(() => [
 ]);
 const helmValue = computed(() => (props.helmRelease ? `${props.helmRelease.namespace}/${props.helmRelease.name}` : ''));
 
+// public/ asset — referenced via BASE_URL (bound src) so Vite serves it instead of bundling it.
+const logoUrl = import.meta.env.BASE_URL + 'favicon.svg';
+
 const onHelm = (v: string) => {
   if (!v) {
     emit('update:helmRelease', null);
@@ -46,8 +49,9 @@ const onHelm = (v: string) => {
 <template>
   <header class="brandbar">
     <div class="brand">
-      <span class="logo">◆</span> kweblens
-      <span class="tag">web Kubernetes IDE · SPA</span>
+      <img class="logo" :src="logoUrl" alt="" width="24" height="24" />
+      <span class="name">kweb<span class="accent">lens</span></span>
+      <span class="tag">web Kubernetes IDE</span>
     </div>
     <div v-if="cluster" class="bar-filters">
       <label class="bar-filter">
