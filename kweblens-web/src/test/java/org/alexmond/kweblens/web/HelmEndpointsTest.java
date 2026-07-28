@@ -21,9 +21,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Helm HTTP endpoints against a mock cluster with <b>no seeded resources</b>. (The crud
- * mock is unreliable for the official io.kubernetes client's Secret list when other kinds
- * are present — it leaks them — so this stays isolated; the real jhelm read path is
- * covered by {@link org.alexmond.kweblens.web.helm.HelmServiceTest}.)
+ * mock leaks other seeded kinds into an all-namespaces Secret list, so this stays
+ * isolated; the real jhelm read path is covered by
+ * {@link org.alexmond.kweblens.web.helm.HelmServiceTest}.)
  */
 @SpringBootTest(properties = "kweblens.load-kubeconfig=false")
 @EnableKubernetesMockClient(crud = true)

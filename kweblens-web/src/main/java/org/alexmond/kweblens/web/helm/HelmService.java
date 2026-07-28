@@ -1,25 +1,12 @@
 package org.alexmond.kweblens.web.helm;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.IOException;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
-import io.fabric8.kubernetes.client.KubernetesClient;
-import io.kubernetes.client.openapi.ApiClient;
-import io.kubernetes.client.util.ClientBuilder;
-import io.kubernetes.client.util.KubeConfig;
-import io.kubernetes.client.util.credentials.AccessTokenAuthentication;
-import io.kubernetes.client.util.credentials.ClientCertificateAuthentication;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.alexmond.jhelm.core.action.HistoryAction;
@@ -39,8 +26,7 @@ import org.alexmond.jhelm.core.model.ChartMetadata;
 import org.alexmond.jhelm.core.model.Release;
 import org.alexmond.jhelm.core.service.Engine;
 import org.alexmond.jhelm.core.service.KubeService;
-import org.alexmond.jhelm.kube.service.internal.HelmKubeService;
-import org.alexmond.jhelm.kube.service.internal.KubeClient;
+import org.alexmond.jhelm.kube.KubeServices;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -52,11 +38,13 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 
 /**
  * Helm releases via the sibling <b>jhelm</b> library (kweblens dogfoods jhelm). Reads
- * Helm's release Secrets — never the {@code helm} binary. jhelm speaks the official
- * {@code io.kubernetes} client, so for each kweblens cluster we build an
- * {@link ApiClient} from that cluster's fabric8 config (base URL + bearer token) and hand
- * it to a per-cluster jhelm {@link KubeService}. This keeps Helm cluster-scoped through
- * the same {@link ClusterRegistry} everything else uses.
+ * Helm's release Secrets — never the {@code helm} binary. jhelm's fabric8 backend lets us
+ * build a fully-decorated per-cluster {@link KubeService} straight from the fabric8
+ * {@code KubernetesClient} the {@link ClusterRegistry} already owns, via the public
+ * {@link KubeServices#fabric8} factory. So Helm shares the exact same authenticated
+ * client as the rest of kweblens — no second (io.kubernetes) client to build or
+ * re-authenticate, which is what previously dropped the in-cluster service-account
+ * credential.
  */
 @Slf4j
 @Service
@@ -273,127 +261,16 @@ public class HelmService {
 		return (value != null) ? value.toString() : null;
 	}
 
+	/**
+	 * Build a decorated jhelm {@link KubeService} for a cluster straight from that
+	 * cluster's fabric8 client (the same one the registry hands every other kweblens
+	 * feature). {@link KubeServices#fabric8} applies jhelm's module-wide decorator chain
+	 * (retry, metrics) — so no ambient jhelm client and no io.kubernetes
+	 * {@code ApiClient} are involved. Cheap to build; kept per-call so a re-registered
+	 * cluster (new client) is always honoured.
+	 */
 	private KubeService kubeService(String clusterId) {
-		return new HelmKubeService(new KubeClient(apiClientFor(clusterId)));
-	}
-
-	/**
-	 * Prefer the official client's own kubeconfig loader — it wires CA +
-	 * client-certificate + exec auth correctly, keyed by context (the cluster id, for
-	 * ambient clusters). Fall back to deriving an ApiClient from the fabric8 config for
-	 * clusters not backed by the ambient kubeconfig.
-	 */
-	private ApiClient apiClientFor(String clusterId) {
-		Path kubeconfig = ambientKubeconfigPath();
-		if (kubeconfig != null && Files.isReadable(kubeconfig)) {
-			try (Reader reader = Files.newBufferedReader(kubeconfig)) {
-				KubeConfig kubeConfig = KubeConfig.loadKubeConfig(reader);
-				if (kubeConfig.setContext(clusterId)) {
-					return ClientBuilder.kubeconfig(kubeConfig).build();
-				}
-			}
-			catch (IOException | RuntimeException ex) {
-				log.warn("Kubeconfig client for '{}' failed ({}); deriving from fabric8 config", clusterId,
-						ex.getMessage());
-			}
-		}
-		return derivedApiClient(clusterId);
-	}
-
-	private ApiClient derivedApiClient(String clusterId) {
-		KubernetesClient fabric8 = clusters.require(clusterId);
-		io.fabric8.kubernetes.client.Config config = fabric8.getConfiguration();
-		ApiClient apiClient = new ApiClient();
-		apiClient.setBasePath(stripTrailingSlash(config.getMasterUrl()));
-		configureTls(apiClient, config);
-		configureAuth(apiClient, config);
-		return apiClient;
-	}
-
-	private Path ambientKubeconfigPath() {
-		String env = System.getenv("KUBECONFIG");
-		if (StringUtils.hasText(env)) {
-			return Path.of(env.split(File.pathSeparator)[0]);
-		}
-		String home = System.getProperty("user.home");
-		return StringUtils.hasText(home) ? Path.of(home, ".kube", "config") : null;
-	}
-
-	/**
-	 * Give the official client the same credentials the cluster's kubeconfig uses: a
-	 * client certificate + key (mTLS) when present, otherwise a bearer token. Without
-	 * this, cert-auth clusters reject Helm's Secret reads even though fabric8 (which has
-	 * the certs) works.
-	 */
-	private void configureAuth(ApiClient apiClient, io.fabric8.kubernetes.client.Config config) {
-		byte[] clientCert = pemMaterial(config.getClientCertData(), config.getClientCertFile());
-		byte[] clientKey = pemMaterial(config.getClientKeyData(), config.getClientKeyFile());
-		if (clientCert != null && clientKey != null) {
-			new ClientCertificateAuthentication(clientCert, clientKey).provide(apiClient);
-			return;
-		}
-		String token = config.getOauthToken();
-		if (StringUtils.hasText(token)) {
-			new AccessTokenAuthentication(token).provide(apiClient);
-		}
-	}
-
-	/**
-	 * Mirror the cluster's fabric8 TLS trust onto the official client: verify by default,
-	 * feed the cluster's CA so self-signed API servers still validate, and only skip
-	 * verification when that cluster explicitly opted in
-	 * ({@code insecure-skip-tls-verify} / fabric8 {@code trustCerts}). TLS verification
-	 * is never disabled as a blanket default.
-	 */
-	private void configureTls(ApiClient apiClient, io.fabric8.kubernetes.client.Config config) {
-		if (config.isTrustCerts()) {
-			apiClient.setVerifyingSsl(false);
-			return;
-		}
-		apiClient.setVerifyingSsl(true);
-		byte[] caCert = caCertBytes(config);
-		if (caCert != null) {
-			apiClient.setSslCaCert(new ByteArrayInputStream(caCert));
-		}
-	}
-
-	private byte[] caCertBytes(io.fabric8.kubernetes.client.Config config) {
-		return pemMaterial(config.getCaCertData(), config.getCaCertFile());
-	}
-
-	/**
-	 * Load PEM bytes from inline data (raw PEM or base64-of-PEM) or, failing that, a file
-	 * path.
-	 */
-	private byte[] pemMaterial(String data, String file) {
-		try {
-			if (StringUtils.hasText(data)) {
-				return pemBytes(data);
-			}
-			if (StringUtils.hasText(file)) {
-				return Files.readAllBytes(Path.of(file));
-			}
-		}
-		catch (IllegalArgumentException | IOException ex) {
-			log.warn("Could not load PEM material for cluster auth/TLS: {}", ex.getMessage());
-		}
-		return null;
-	}
-
-	/**
-	 * Accepts either raw PEM or the base64-of-PEM form kubeconfig uses
-	 * (certificate-authority-data).
-	 */
-	private byte[] pemBytes(String data) {
-		String trimmed = data.trim();
-		if (trimmed.startsWith("-----BEGIN")) {
-			return trimmed.getBytes(StandardCharsets.UTF_8);
-		}
-		return Base64.getDecoder().decode(trimmed);
-	}
-
-	private String stripTrailingSlash(String url) {
-		return (url != null && url.endsWith("/")) ? url.substring(0, url.length() - 1) : url;
+		return KubeServices.fabric8(clusters.require(clusterId));
 	}
 
 	private HelmReleaseSummary toSummary(Release release) {

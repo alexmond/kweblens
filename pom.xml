@@ -69,13 +69,11 @@
              by Boot 4). The BOM aligns the whole client + model + mock-server set. -->
         <fabric8.version>7.3.1</fabric8.version>
 
-        <!-- jhelm: the sibling Helm-in-Java library (dogfood). jhelm-kube pulls jhelm-core + the
-             official io.kubernetes client used to read Helm release Secrets. SNAPSHOT — must be
+        <!-- jhelm: the sibling Helm-in-Java library (dogfood). jhelm-kube brings jhelm-core; its
+             Kubernetes client backend is pluggable/optional and kweblens drives it with fabric8
+             (already on the classpath), so no io.kubernetes client is needed. SNAPSHOT — must be
              resolvable (local ~/.m2 or the jhelm snapshot repo) for the build. -->
         <jhelm.version>1.3.1-SNAPSHOT</jhelm.version>
-        <!-- Matches the io.kubernetes:client-java-api version jhelm-kube pulls; client-java-util adds
-             the credential providers used to give Helm's ApiClient the cluster's real auth. -->
-        <kubernetes-client.version>24.0.0</kubernetes-client.version>
         <!-- jhelm's chart rendering needs snakeyaml-engine with CoreScalarResolver(boolean); Spring
              Boot's BOM otherwise pins 2.9 (no such ctor -> NoSuchMethodError at chart load). Boot uses
              classic org.yaml:snakeyaml, not this engine, so overriding to jhelm's version is safe. -->
