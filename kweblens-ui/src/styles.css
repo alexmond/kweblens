@@ -1324,6 +1324,68 @@ body {
   outline: none;
 }
 
+/* Schema hover + completion-info cards (codemirror-json-schema). Constrain the width
+   (they'd otherwise stretch the viewport), give the content breathing room, and theme
+   them as bordered panels with accent-coloured links that read on light AND dark. */
+.cm-tooltip.cm-tooltip-hover,
+.cm-tooltip .cm-completionInfo {
+  max-width: 460px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  overflow: hidden auto;
+  max-height: 320px;
+}
+.cm6-json-schema-hover,
+.cm-completionInfo {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.cm6-json-schema-hover--code-wrapper {
+  margin-bottom: 6px;
+}
+.cm6-json-schema-hover--code {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--cm-atom) 82%, var(--text));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 1px 7px;
+  border-radius: 5px;
+}
+.cm6-json-schema-hover--description {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cm6-json-schema-hover--description p {
+  margin: 0 0 6px;
+}
+.cm6-json-schema-hover--description p:last-child {
+  margin-bottom: 0;
+}
+/* Links: the default hover link colour is unreadable on the dark panel — use the accent. */
+.cm6-json-schema-hover a,
+.cm-completionInfo a {
+  color: var(--accent);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+.cm6-json-schema-hover a:hover,
+.cm-completionInfo a:hover {
+  text-decoration: none;
+}
+.cm6-json-schema-hover code,
+.cm-completionInfo code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
 .modal.wide {
   width: 660px;
 }
