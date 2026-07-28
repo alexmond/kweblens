@@ -28,13 +28,17 @@ public class LogService {
 	}
 
 	/**
-	 * Follow a pod/container's log. The returned {@link LogWatch} exposes the live output
-	 * via {@link LogWatch#getOutput()}; fabric8 owns that stream (passing our own piped
-	 * stream is rejected by the client), and the caller must close the watch to stop
-	 * following.
+	 * Follow a pod/container's log from <em>now</em> — new lines only, no history replay.
+	 * {@code tailingLines(0)} is {@code kubectl logs --tail=0 --follow}: without it,
+	 * fabric8 streams the pod's <em>entire</em> log from the beginning on connect, which
+	 * floods the browser (a big log can burst tens of thousands of lines instantly) and
+	 * also duplicates the {@link #tail} snapshot the caller already fetched. The returned
+	 * {@link LogWatch} exposes the live output via {@link LogWatch#getOutput()}; fabric8
+	 * owns that stream (passing our own piped stream is rejected by the client), and the
+	 * caller must close the watch to stop following.
 	 */
 	public LogWatch watch(String clusterId, String namespace, String pod, String container) {
-		return loggable(clusterId, namespace, pod, container).watchLog();
+		return loggable(clusterId, namespace, pod, container).tailingLines(0).watchLog();
 	}
 
 	private ContainerResource loggable(String clusterId, String namespace, String pod, String container) {

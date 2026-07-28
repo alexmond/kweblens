@@ -110,12 +110,33 @@ function initTerminal() {
   });
 }
 
-/** Logs lifecycle: tail snapshot (fetch) then follow (SSE); rebuilds on the same deps. */
+const MAX_LOG_LINES = 5000;
+
+/**
+ * Logs lifecycle: tail snapshot (fetch) then follow (SSE); rebuilds on the same deps.
+ *
+ * SSE lines are BUFFERED and flushed at most once per animation frame — never one
+ * reactive update (and full-list re-render) per message. This decouples render rate from
+ * message rate, so a chatty pod (or a connect burst) can't freeze the tab: whatever
+ * arrives in a frame coalesces into a single array update capped at {@link MAX_LOG_LINES}.
+ */
 function initLogs() {
+  let pending: string[] = [];
+  let frame = 0;
+  const flush = () => {
+    frame = 0;
+    if (pending.length === 0) {
+      return;
+    }
+    const next = lines.value.concat(pending);
+    pending = [];
+    lines.value = next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+  };
   watch(
     () => [props.cluster, props.session.namespace, props.session.pod, container.value],
     (_now, _prev, onCleanup) => {
       let cancelled = false;
+      pending = [];
       lines.value = [];
       const base = logBaseUrl(props.cluster, props.session);
       const cq = containerQuery(container.value);
@@ -129,13 +150,22 @@ function initLogs() {
         .catch(() => undefined);
       const es = new EventSource(`${base}/stream?${cq}`);
       es.onmessage = (e) => {
-        if (!cancelled) {
-          lines.value = [...lines.value, e.data].slice(-5000);
+        if (cancelled) {
+          return;
+        }
+        pending.push(e.data);
+        if (frame === 0) {
+          frame = requestAnimationFrame(flush);
         }
       };
       onCleanup(() => {
         cancelled = true;
         es.close();
+        if (frame !== 0) {
+          cancelAnimationFrame(frame);
+          frame = 0;
+        }
+        pending = [];
       });
     },
     { immediate: true },
