@@ -1295,6 +1295,21 @@ body {
   min-height: 340px;
 }
 
+/* CodeMirror 6 YAML editor (drawer edit mode) — fills a tall pane and scrolls internally. */
+.yaml-edit-cm {
+  height: 62vh;
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.yaml-edit-cm .cm-editor {
+  height: 100%;
+}
+.yaml-edit-cm .cm-editor.cm-focused {
+  outline: none;
+}
+
 .modal.wide {
   width: 660px;
 }
