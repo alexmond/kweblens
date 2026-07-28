@@ -12,8 +12,10 @@
  * drop-in swap.
  */
 import { yaml } from '@codemirror/lang-yaml';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { tags as t } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -48,6 +50,19 @@ const baseTheme = EditorView.theme({
   '.cm-foldPlaceholder': { backgroundColor: 'transparent', border: 'none', color: 'var(--muted)' },
 });
 
+// Syntax colours via CSS variables (see .cm-syntax-* in styles.css) so both light and dark
+// themes get readable tokens. The default basicSetup highlight style is tuned for light
+// backgrounds — its dark-navy keys are near-invisible on the app's dark panel — so this
+// overrides it. Added after basicSetup, so it takes precedence.
+const highlightStyle = HighlightStyle.define([
+  { tag: [t.definition(t.propertyName), t.propertyName, t.attributeName], color: 'var(--cm-key)' },
+  { tag: [t.string, t.special(t.string)], color: 'var(--cm-string)' },
+  { tag: [t.number], color: 'var(--cm-number)' },
+  { tag: [t.bool, t.null, t.keyword, t.atom], color: 'var(--cm-atom)' },
+  { tag: [t.comment, t.lineComment, t.blockComment], color: 'var(--cm-comment)', fontStyle: 'italic' },
+  { tag: [t.meta, t.documentMeta, t.punctuation, t.separator], color: 'var(--cm-meta)' },
+]);
+
 const isDark = () => document.documentElement.classList.contains('kw-dark');
 const themeFor = () => EditorView.theme({}, { dark: isDark() });
 
@@ -62,6 +77,7 @@ function build() {
       extensions: [
         basicSetup,
         yaml(),
+        syntaxHighlighting(highlightStyle),
         baseTheme,
         themeCompartment.of(themeFor()),
         EditorView.updateListener.of((u) => {
