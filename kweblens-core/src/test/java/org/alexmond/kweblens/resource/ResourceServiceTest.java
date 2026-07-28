@@ -191,6 +191,31 @@ class ResourceServiceTest {
 		assertThat(service.getYaml("mock", nodes, null, "node-x")).contains("unschedulable: true");
 	}
 
+	@Test
+	void mergePatchSetsAndDeletesFields() {
+		client.configMaps()
+			.resource(new io.fabric8.kubernetes.api.model.ConfigMapBuilder().withNewMetadata()
+				.withName("cm-patch")
+				.withNamespace("default")
+				.addToLabels("keep", "yes")
+				.addToLabels("drop", "old")
+				.endMetadata()
+				.addToData("a", "1")
+				.build())
+			.create();
+		ResourceService service = serviceFor("mock");
+
+		// Add a label, null out another (delete on a real API server), and change data —
+		// all in one merge patch. (The crud mock records null rather than removing the
+		// key;
+		// null-as-delete is exercised against a live cluster, not here.)
+		service.patch("mock", CONFIG_MAPS, "default", "cm-patch",
+				"{\"metadata\":{\"labels\":{\"drop\":null,\"team\":\"platform\"}},\"data\":{\"a\":\"2\"}}");
+
+		String yaml = service.getYaml("mock", CONFIG_MAPS, "default", "cm-patch");
+		assertThat(yaml).contains("team: \"platform\"").contains("keep: \"yes\"").contains("a: \"2\"");
+	}
+
 	private CronJob newCronJob(String name) {
 		return new CronJobBuilder().withNewMetadata()
 			.withName(name)

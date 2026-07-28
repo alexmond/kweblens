@@ -38,7 +38,9 @@ public class SchemaService {
 
 	private final ObjectMapper mapper = new ObjectMapper();
 
-	/** Rewritten {@code definitions} maps, keyed by {@code clusterId|group-version-path}. */
+	/**
+	 * Rewritten {@code definitions} maps, keyed by {@code clusterId|group-version-path}.
+	 */
 	private final Map<String, Map<String, Object>> cache = new ConcurrentHashMap<>();
 
 	public SchemaService(ClusterRegistry clusters) {

@@ -173,6 +173,20 @@ public class ResourceService {
 		return new ResourceSummary(applied.getKind(), namespace(applied), name(applied), null, "-");
 	}
 
+	/**
+	 * Apply a JSON Merge Patch (RFC 7386) to a single resource. Fields present in the
+	 * patch are set; a key mapped to {@code null} is deleted. Used by the structured
+	 * (form) editor for targeted edits — labels, annotations, ConfigMap/Secret data —
+	 * without touching anything else on the object.
+	 */
+	public ResourceSummary patch(String clusterId, ResourceDescriptor descriptor, String namespace, String name,
+			String jsonMergePatch) {
+		PatchContext context = new PatchContext.Builder().withPatchType(PatchType.JSON_MERGE).build();
+		GenericKubernetesResource patched = resource(clusterId, descriptor, namespace, name).patch(context,
+				jsonMergePatch);
+		return new ResourceSummary(patched.getKind(), namespace(patched), name(patched), null, "-");
+	}
+
 	/** Delete a single resource. */
 	public void delete(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
 		delete(clusterId, descriptor, namespace, name, false);
