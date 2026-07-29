@@ -184,6 +184,7 @@ const rowProps = (row: KubeObject) => ({
     :on-load="fetchChildren ? onLoad : undefined"
     :indent="18"
     :cascade="false"
+    flex-height
     size="small"
     @update:checked-row-keys="(keys) => emit('update:selection', keys as string[])"
   />

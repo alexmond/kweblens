@@ -1337,6 +1337,13 @@ body {
   outline: none;
 }
 
+/* The resource table fills the flex-column list view and scrolls its own body (flex-height),
+   pinning the header. Global (not scoped) so it reliably reaches the NDataTable root. */
+.list-table {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 /* Structured (form) editor tab. */
 .form-tab {
   display: flex;
@@ -1511,20 +1518,29 @@ body {
   background: var(--panel);
   color: var(--text);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-  overflow: hidden auto;
-  max-height: 320px;
 }
+/* Scroll (only when tall) is on the CONTENT, not the tooltip box: the box also contains
+   CodeMirror's .cm-tooltip-arrow pointer, which would overflow the box and force a
+   scrollbar at ANY size. The inner content has no arrow, so a short doc sizes exactly. */
 .cm6-json-schema-hover,
 .cm-completionInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px 14px;
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: 1.5;
+  max-height: 340px;
+  overflow-y: auto;
 }
-.cm6-json-schema-hover--code-wrapper {
-  margin-bottom: 6px;
+.cm6-json-schema-hover > *,
+.cm6-json-schema-hover p,
+.cm-completionInfo > *,
+.cm-completionInfo p {
+  margin: 0;
 }
 .cm6-json-schema-hover--code {
-  display: inline-block;
+  align-self: flex-start;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   color: color-mix(in srgb, var(--cm-atom) 82%, var(--text));
@@ -1533,14 +1549,7 @@ body {
   border-radius: 5px;
 }
 .cm6-json-schema-hover--description {
-  margin: 0;
   overflow-wrap: anywhere;
-}
-.cm6-json-schema-hover--description p {
-  margin: 0 0 6px;
-}
-.cm6-json-schema-hover--description p:last-child {
-  margin-bottom: 0;
 }
 /* Links: the default hover link colour is unreadable on the dark panel — use the accent. */
 .cm6-json-schema-hover a,
