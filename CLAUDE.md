@@ -22,11 +22,24 @@ scripts/dev-verify.sh                 # format + whole-reactor verify — green 
 scripts/dev-test.sh <selector>        # targeted -Dtest run (last arg = selector); e.g.
 scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
 ./mvnw spring-javaformat:apply        # auto-format (run before committing)
+
+# UI performance (see "Performance testing" below)
+NODE_PATH=$HOME/.local/lib/playwright/node_modules node scripts/perf-sweep.mjs   # on-demand hang/long-load sweep
 ```
 
 - `dev-verify.sh` / `dev-test.sh` are the intended entry points (allowlist them in
   `.claude/settings.json` to run without prompts).
 - CI (`.github/workflows/ci.yml`) runs `./mvnw -B verify` on JDK 21 — same gates as `dev-verify`.
+- **Performance testing (two layers).** (1) *Regression guard, in the gate:* a Vitest test
+  (`kweblens-ui/src/composables/useResourceData.test.ts`) asserts the resource-list watch
+  coalesces a burst of N events into ≤1 `objects` update per animation frame — the invariant
+  that prevents the "large-list watch flood" freeze from returning (runs in `npm run check` /
+  `dev-verify`, no browser/cluster). (2) *Site-wide sweep, on-demand:* `scripts/perf-sweep.mjs`
+  (Playwright) walks every nav leaf against a running instance and fails if any page's
+  time-to-first-row or max main-thread block (a hang) exceeds budget (`LOAD_MS`/`BLOCK_MS`).
+  Needs the app up + a cluster with data, so it's not a per-commit gate — run before releases
+  or after big UI changes. **When you add a live-updated list, add its watch to the batching
+  pattern** (buffer + flush per rAF) so it can't flood.
 - Tests are **hermetic**: no live cluster. The fabric8 `kubernetes-server-mock`
   (`@EnableKubernetesMockClient(crud = true)`) serves an in-JVM API server; web tests set
   `kweblens.load-kubeconfig=false` so the registry starts empty and the test seeds its own client.
