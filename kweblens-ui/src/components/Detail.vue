@@ -16,7 +16,6 @@ import { useEscapeKey } from '../composables/useEscapeKey';
 import { objName, objNs } from '../kube';
 import type { EventSummary, KubeObject } from '../types';
 import EventsPane from './EventsPane.vue';
-import FormTab from './FormTab.vue';
 import MetricChart from './MetricChart.vue';
 import Overview from './Overview.vue';
 import YamlTab from './YamlTab.vue';
@@ -35,7 +34,7 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-type Tab = 'overview' | 'form' | 'yaml' | 'events' | 'metrics';
+type Tab = 'overview' | 'yaml' | 'events' | 'metrics';
 const tab = ref<Tab>(props.initialEdit ? 'yaml' : 'overview');
 const events = ref<EventSummary[] | null>(null);
 const eventsError = ref<string | null>(null);
@@ -109,15 +108,6 @@ watch(
             :obj="obj"
             @navigate="(k, n) => emit('navigate', k, n)"
             @helm-release="(nsp, nm) => emit('helm-release', nsp, nm)"
-          />
-        </NTabPane>
-        <NTabPane v-if="authed" name="form" tab="Form" display-directive="if">
-          <FormTab
-            :cluster="cluster"
-            :resource-id="resourceId"
-            :obj="obj"
-            :authed="authed"
-            @auth-expired="emit('auth-expired')"
           />
         </NTabPane>
         <NTabPane name="yaml" tab="YAML" display-directive="if">
