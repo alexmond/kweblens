@@ -12,10 +12,11 @@
  * Ports React `TerminalSession` + `LogsSession` from kweblens-ui/src/dock.tsx. Vue's onMounted
  * runs once (no StrictMode double-mount), so no double-mount guard is needed.
  */
-import { shallowRef, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import type { DockSession } from '../dock';
-import { containerQuery, execSocketUrl, logBaseUrl } from '../dock';
+import { execSocketUrl } from '../dock';
+import { useMultiLogs } from '../composables/useMultiLogs';
 
 const props = defineProps<{ cluster: string; session: DockSession; visible: boolean }>();
 
@@ -26,8 +27,9 @@ const termHost = ref<HTMLDivElement | null>(null);
 let fit: { fit: () => void } | null = null;
 
 // --- logs state ---
-const lines = shallowRef<string[]>([]);
 const wrap = ref(false);
+const paused = ref(false);
+const showLegend = ref(true);
 const logBody = ref<HTMLDivElement | null>(null);
 
 /**
@@ -110,83 +112,49 @@ function initTerminal() {
   });
 }
 
-const MAX_LOG_LINES = 5000;
-
 /**
- * Logs lifecycle: tail snapshot (fetch) then follow (SSE); rebuilds on the same deps.
- *
- * SSE lines are BUFFERED and flushed at most once per animation frame — never one
- * reactive update (and full-list re-render) per message. This decouples render rate from
- * message rate, so a chatty pod (or a connect burst) can't freeze the tab: whatever
- * arrives in a frame coalesces into a single array update capped at {@link MAX_LOG_LINES}.
+ * Logs: one multiplexed stream (a container, a whole pod, or a whole workload). All the SSE
+ * wiring, the rAF batching and the source registry live in the composable; this component
+ * only renders and owns the toolbar state.
  */
-function initLogs() {
-  let pending: string[] = [];
-  let frame = 0;
-  const flush = () => {
-    frame = 0;
-    if (pending.length === 0) {
-      return;
-    }
-    const next = lines.value.concat(pending);
-    pending = [];
-    lines.value = next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
-  };
+const logs =
+  props.session.kind === 'logs'
+    ? useMultiLogs(
+        () => props.cluster,
+        () => props.session,
+        () => container.value,
+        () => paused.value,
+      )
+    : null;
+
+/** Follow the tail — but never fight the user's scroll while they are reading history. */
+const followTail = ref(true);
+const onLogScroll = () => {
+  const el = logBody.value;
+  if (el) {
+    followTail.value = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  }
+};
+
+const copyLogs = () => {
+  if (logs) {
+    navigator.clipboard?.writeText(logs.asText()).catch(() => undefined);
+  }
+};
+
+if (props.session.kind === 'terminal') {
+  initTerminal();
+} else if (logs) {
   watch(
-    () => [props.cluster, props.session.namespace, props.session.pod, container.value],
-    (_now, _prev, onCleanup) => {
-      let cancelled = false;
-      pending = [];
-      lines.value = [];
-      const base = logBaseUrl(props.cluster, props.session);
-      const cq = containerQuery(container.value);
-      fetch(`${base}?${cq}tailLines=500`)
-        .then((r) => r.text())
-        .then((t) => {
-          if (!cancelled) {
-            lines.value = t ? t.replace(/\n$/, '').split('\n') : [];
-          }
-        })
-        .catch(() => undefined);
-      const es = new EventSource(`${base}/stream?${cq}`);
-      es.onmessage = (e) => {
-        if (cancelled) {
-          return;
-        }
-        pending.push(e.data);
-        if (frame === 0) {
-          frame = requestAnimationFrame(flush);
-        }
-      };
-      onCleanup(() => {
-        cancelled = true;
-        es.close();
-        if (frame !== 0) {
-          cancelAnimationFrame(frame);
-          frame = 0;
-        }
-        pending = [];
-      });
-    },
-    { immediate: true },
-  );
-  // Keep the viewport pinned to the newest line.
-  watch(
-    lines,
+    logs.visibleLines,
     () => {
       const el = logBody.value;
-      if (el) {
+      if (el && followTail.value) {
         el.scrollTop = el.scrollHeight;
       }
     },
     { flush: 'post' },
   );
-}
-
-if (props.session.kind === 'terminal') {
-  initTerminal();
-} else {
-  initLogs();
 }
 </script>
 
@@ -201,16 +169,63 @@ if (props.session.kind === 'terminal') {
       <div ref="termHost" class="term-body" />
     </div>
 
-    <div v-else class="dock-session">
+    <div v-else-if="logs" class="dock-session">
       <div class="dock-toolbar">
-        <select v-if="session.containers.length > 1" v-model="container" class="dock-select">
+        <!-- The container dropdown only makes sense when following exactly one container;
+             in pod/workload scope every container is already in the stream and the legend
+             is how you narrow it. -->
+        <select
+          v-if="(session.logScope ?? 'container') === 'container' && session.containers.length > 1"
+          v-model="container"
+          class="dock-select"
+        >
           <option v-for="c in session.containers" :key="c" :value="c">{{ c }}</option>
         </select>
+        <input v-model="logs.filter.value" class="dock-input" type="search" placeholder="filter…" />
         <label class="dock-toggle"> <input v-model="wrap" type="checkbox" /> wrap </label>
+        <label class="dock-toggle"> <input v-model="paused" type="checkbox" /> pause </label>
+        <button v-if="logs.sources.value.length > 1" class="dock-btn" type="button" @click="showLegend = !showLegend">
+          {{ showLegend ? 'hide' : 'show' }} sources ({{ logs.sources.value.length }})
+        </button>
+        <button class="dock-btn" type="button" title="Copy visible lines" @click="copyLogs">copy</button>
+        <span v-if="!followTail" class="dock-note">paused at scroll position</span>
       </div>
-      <div ref="logBody" class="term-body log-body" :class="{ wrap }">
-        <div v-if="lines.length === 0" class="log-line dim">(no output yet)</div>
-        <div v-for="(l, i) in lines" :key="i" class="log-line">{{ l }}</div>
+
+      <!-- Source legend: colour key, per-source show/hide, and where a single failing
+           container reports itself without blanking the rest of the view. -->
+      <div v-if="showLegend && logs.sources.value.length > 1" class="log-legend">
+        <button class="log-legend-all" type="button" @click="logs.showAll()">all</button>
+        <button
+          v-for="s in logs.sources.value"
+          :key="s.id"
+          class="log-src"
+          :class="{ off: !s.visible, failed: !!s.error }"
+          type="button"
+          :title="s.error ? `${s.id} — ${s.error}` : `${s.id} (click to toggle, double-click to isolate)`"
+          @click="logs.setVisible(s.id, !s.visible)"
+          @dblclick="logs.showOnly(s.id)"
+        >
+          <span class="log-src-dot" :style="{ background: s.colour }" />
+          {{ s.label }}
+        </button>
+      </div>
+
+      <div v-if="logs.truncated.value" class="log-warning">
+        Following {{ logs.truncated.value.shown }} of {{ logs.truncated.value.totalFound }} matching containers — the
+        rest are not being streamed.
+      </div>
+
+      <div ref="logBody" class="term-body log-body" :class="{ wrap }" @scroll="onLogScroll">
+        <div v-if="logs.error.value" class="log-line error">{{ logs.error.value }}</div>
+        <div v-else-if="logs.visibleLines.value.length === 0" class="log-line dim">
+          {{ logs.lines.value.length > 0 ? '(no lines match the current filter)' : '(no output yet)' }}
+        </div>
+        <div v-for="(l, i) in logs.visibleLines.value" :key="i" class="log-line">
+          <span v-if="logs.showPrefix.value" class="log-src-tag" :style="{ color: logs.colourOf(l.source) }">{{
+            logs.labelOf(l.source)
+          }}</span>
+          <span>{{ l.text }}</span>
+        </div>
       </div>
     </div>
   </div>

@@ -1,10 +1,12 @@
 package org.alexmond.kweblens.log;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.ContainerResource;
 import io.fabric8.kubernetes.client.dsl.LogWatch;
 import io.fabric8.kubernetes.client.dsl.PodResource;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -16,6 +18,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
  * that returns a {@link LogWatch} the web layer reads from and bridges to SSE. A blank
  * container selects the pod's default container.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class LogService {
@@ -39,6 +42,48 @@ public class LogService {
 	 */
 	public LogWatch watch(String clusterId, String namespace, String pod, String container) {
 		return loggable(clusterId, namespace, pod, container).tailingLines(0).watchLog();
+	}
+
+	/**
+	 * Follow a log from now with Kubernetes-supplied timestamps on every line
+	 * ({@code kubectl logs --timestamps --tail=0 --follow}).
+	 *
+	 * <p>
+	 * Multi-source following needs this: independent streams arrive interleaved by
+	 * network timing, so without a per-line time there is nothing to order them by. The
+	 * DSL requires {@code usingTimestamps()} <em>before</em> {@code tailingLines(…)} —
+	 * the builder narrows at each step and the timestamp option is gone from the returned
+	 * type afterwards.
+	 */
+	public LogWatch watchWithTimestamps(String clusterId, String namespace, String pod, String container) {
+		return loggable(clusterId, namespace, pod, container).usingTimestamps().tailingLines(0).watchLog();
+	}
+
+	/**
+	 * The last {@code tailLines} lines of a pod/container's log, with timestamps — the
+	 * snapshot a multi-source view sorts and shows before live following starts.
+	 */
+	public String tailWithTimestamps(String clusterId, String namespace, String pod, String container, int tailLines) {
+		return loggable(clusterId, namespace, pod, container).usingTimestamps().tailingLines(tailLines).getLog();
+	}
+
+	/**
+	 * The log of the container's <em>previous</em> run ({@code kubectl logs --previous}).
+	 *
+	 * <p>
+	 * This is the crashloop diagnostic: once a container has restarted, the current log
+	 * starts from the new process and the output that explains the crash lives only in
+	 * the terminated instance's log. Returns null when there is no previous run (the API
+	 * server 400s rather than returning empty, which is not an error worth propagating).
+	 */
+	public String previous(String clusterId, String namespace, String pod, String container, int tailLines) {
+		try {
+			return loggable(clusterId, namespace, pod, container).terminated().tailingLines(tailLines).getLog();
+		}
+		catch (KubernetesClientException ex) {
+			log.debug("No previous log for {}/{} container {}: {}", namespace, pod, container, ex.getMessage());
+			return null;
+		}
 	}
 
 	private ContainerResource loggable(String clusterId, String namespace, String pod, String container) {

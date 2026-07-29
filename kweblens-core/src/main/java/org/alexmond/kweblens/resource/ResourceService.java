@@ -157,7 +157,13 @@ public class ResourceService {
 				age(resource), labels));
 	}
 
-	private GenericKubernetesResource getRaw(String clusterId, ResourceDescriptor descriptor, String namespace,
+	/**
+	 * A single resource of any kind as a raw {@link GenericKubernetesResource}, or null
+	 * if it does not exist. Public because callers outside the projection path need
+	 * fields the {@link ResourceSummary} does not carry — e.g. the log layer reads a
+	 * workload's {@code spec.selector.matchLabels} to find the pods to follow.
+	 */
+	public GenericKubernetesResource getRaw(String clusterId, ResourceDescriptor descriptor, String namespace,
 			String name) {
 		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
 		return descriptor.namespaced() ? op.inNamespace(namespace).withName(name).get() : op.withName(name).get();
