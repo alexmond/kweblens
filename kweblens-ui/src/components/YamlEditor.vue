@@ -10,18 +10,39 @@
  * `v-model:value` contract.
  */
 import { yaml } from '@codemirror/lang-yaml';
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { syntaxHighlighting } from '@codemirror/language';
+import { forEachDiagnostic } from '@codemirror/lint';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { tags as t } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { yamlSchema } from 'codemirror-json-schema/yaml';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
+import { editorChrome, themeVariant, yamlHighlightStyle } from '../editor-theme';
+import type { EditorDiagnostic } from '../types';
+
 // `schema` (a JSON Schema for the object's kind, from the cluster's OpenAPI) turns on
 // schema-aware completion, lint and hover; without it the editor is plain YAML.
 const props = defineProps<{ value: string; schema?: Record<string, unknown> | null }>();
-const emit = defineEmits<{ (e: 'update:value', v: string): void }>();
+const emit = defineEmits<{
+  (e: 'update:value', v: string): void;
+  (e: 'diagnostics', d: EditorDiagnostic[]): void;
+}>();
+
+// The schema linter runs asynchronously; surface its diagnostics (for the Warnings tab)
+// whenever they change, de-duped so cursor moves don't re-emit.
+let lastSig = '';
+const emitDiagnostics = (v: EditorView) => {
+  const list: EditorDiagnostic[] = [];
+  forEachDiagnostic(v.state, (d, from) => {
+    list.push({ severity: d.severity, message: d.message, line: v.state.doc.lineAt(from).number, from });
+  });
+  const sig = JSON.stringify(list);
+  if (sig !== lastSig) {
+    lastSig = sig;
+    emit('diagnostics', list);
+  }
+};
 
 const host = ref<HTMLDivElement | null>(null);
 let view: EditorView | null = null;
@@ -31,46 +52,6 @@ const langCompartment = new Compartment();
 // yamlSchema() bundles the yaml() language + linter + completion + hover + schema state, so
 // it REPLACES the plain yaml() language when a schema is present (never add both).
 const langExtension = () => (props.schema ? yamlSchema(props.schema as Parameters<typeof yamlSchema>[0]) : [yaml()]);
-
-// Chrome themed via CSS variables → follows the app's light/dark palette automatically.
-const baseTheme = EditorView.theme({
-  '&': { backgroundColor: 'var(--panel)', color: 'var(--text)', height: '100%' },
-  '.cm-scroller': {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: '12.5px',
-    lineHeight: '1.55',
-    overflow: 'auto',
-  },
-  '.cm-gutters': {
-    backgroundColor: 'var(--panel)',
-    color: 'var(--muted)',
-    border: 'none',
-    borderRight: '1px solid var(--border)',
-  },
-  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--accent) 7%, transparent)' },
-  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text)' },
-  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
-  },
-  '.cm-cursor': { borderLeftColor: 'var(--text)' },
-  '.cm-foldPlaceholder': { backgroundColor: 'transparent', border: 'none', color: 'var(--muted)' },
-});
-
-// Syntax colours via CSS variables (see .cm-syntax-* in styles.css) so both light and dark
-// themes get readable tokens. The default basicSetup highlight style is tuned for light
-// backgrounds — its dark-navy keys are near-invisible on the app's dark panel — so this
-// overrides it. Added after basicSetup, so it takes precedence.
-const highlightStyle = HighlightStyle.define([
-  { tag: [t.definition(t.propertyName), t.propertyName, t.attributeName], color: 'var(--cm-key)' },
-  { tag: [t.string, t.special(t.string)], color: 'var(--cm-string)' },
-  { tag: [t.number], color: 'var(--cm-number)' },
-  { tag: [t.bool, t.null, t.keyword, t.atom], color: 'var(--cm-atom)' },
-  { tag: [t.comment, t.lineComment, t.blockComment], color: 'var(--cm-comment)', fontStyle: 'italic' },
-  { tag: [t.meta, t.documentMeta, t.punctuation, t.separator], color: 'var(--cm-meta)' },
-]);
-
-const isDark = () => document.documentElement.classList.contains('kw-dark');
-const themeFor = () => EditorView.theme({}, { dark: isDark() });
 
 function build() {
   if (!host.value) {
@@ -83,13 +64,14 @@ function build() {
       extensions: [
         basicSetup,
         langCompartment.of(langExtension()),
-        syntaxHighlighting(highlightStyle),
-        baseTheme,
-        themeCompartment.of(themeFor()),
+        syntaxHighlighting(yamlHighlightStyle),
+        editorChrome,
+        themeCompartment.of(themeVariant()),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) {
             emit('update:value', u.state.doc.toString());
           }
+          emitDiagnostics(u.view);
         }),
       ],
     }),
@@ -121,7 +103,7 @@ watch(
 let observer: MutationObserver | null = null;
 onMounted(() => {
   build();
-  observer = new MutationObserver(() => view?.dispatch({ effects: themeCompartment.reconfigure(themeFor()) }));
+  observer = new MutationObserver(() => view?.dispatch({ effects: themeCompartment.reconfigure(themeVariant()) }));
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 });
 onBeforeUnmount(() => {

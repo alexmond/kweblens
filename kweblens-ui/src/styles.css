@@ -1362,6 +1362,130 @@ body {
   color: var(--muted);
   font-size: 12px;
 }
+.form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 8px 2px 14px;
+}
+.form-parse-error {
+  color: #e5484d;
+  font-size: 13px;
+  padding: 8px 2px;
+}
+
+/* Editor dialog: tab panes share one height; the editor/diff fill it, form/warnings scroll. */
+.editor-dialog-pane {
+  height: 62vh;
+  min-height: 340px;
+}
+.editor-dialog-pane .cm-yaml,
+.editor-dialog-pane .cm-editor {
+  height: 100%;
+}
+.dialog-scroll {
+  height: 100%;
+  overflow: auto;
+  padding: 4px 6px 4px 2px;
+}
+.warn-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+}
+.warn-badge.err {
+  background: color-mix(in srgb, #e5484d 22%, transparent);
+  color: #e5484d;
+}
+.warnings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.warnings-ok {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 2px;
+}
+.warning-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.warning-row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+.warning-row.error {
+  border-left-color: #e5484d;
+}
+.warning-row.warning {
+  border-left-color: #d98a00;
+}
+.warning-loc {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.warning-msg {
+  overflow-wrap: anywhere;
+}
+/* Diff (review) view */
+.diff-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 6px;
+}
+.diff-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.diff-legend .diff-old::before {
+  content: '−';
+  color: #e5484d;
+  margin-right: 4px;
+}
+.diff-legend .diff-new::before {
+  content: '+';
+  color: #2ea043;
+  margin-right: 4px;
+}
+.diff-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 2px;
+}
+.diff-host {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.diff-host .cm-mergeView,
+.diff-host .cm-mergeView .cm-editor {
+  height: 100%;
+}
 
 /* Schema hover + completion-info cards (codemirror-json-schema). Constrain the width
    (they'd otherwise stretch the viewport), give the content breathing room, and theme

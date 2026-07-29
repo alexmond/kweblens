@@ -1,16 +1,22 @@
 <script setup lang="ts">
-// The pop-out YAML editor window. The drawer's YAML tab shows the manifest read-only
-// (embedded); clicking Edit opens this large NModal with the CodeMirror editor so editing
-// gets a full-size surface instead of the narrow drawer.
+// The pop-out editor dialog. One document (the YAML draft) edited through tabs:
+//   Editor          — the CodeMirror YAML editor (schema completion/lint/hover)
+//   Form            — a visual key/value editor for labels/annotations/data, synced to the YAML
+//   Warnings        — the schema linter's findings as a list (badge shows the count)
+//   Review Changes  — a read-only diff of the original vs the edited YAML, a last check before Apply
+// Apply is a single server-side apply of the draft.
 //
 // Emits:
-//   applied (text)   — server-side apply succeeded; the parent refreshes its embedded view
+//   applied (text)   — apply succeeded; the parent refreshes its embedded view
 //   auth-expired ()  — apply returned 401/403; the shell must re-prompt for creds
 //   close ()         — dismissed, or apply succeeded (after a brief confirmation)
-import { NButton, NModal } from 'naive-ui';
-import { ref } from 'vue';
+import { NButton, NModal, NTabPane, NTabs } from 'naive-ui';
+import { computed, ref } from 'vue';
 
 import { ApiError, api } from '../api';
+import type { EditorDiagnostic } from '../types';
+import DiffView from './DiffView.vue';
+import FormFields from './FormFields.vue';
 import YamlEditor from './YamlEditor.vue';
 
 const props = defineProps<{
@@ -25,10 +31,15 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
+const original = props.initialText;
 const draft = ref(props.initialText);
+const tab = ref<'editor' | 'form' | 'warnings' | 'review'>('editor');
+const warnings = ref<EditorDiagnostic[]>([]);
 const busy = ref(false);
 const msg = ref<string | null>(null);
 const err = ref(false);
+
+const errorCount = computed(() => warnings.value.filter((w) => w.severity === 'error').length);
 
 const apply = async () => {
   busy.value = true;
@@ -70,10 +81,43 @@ const onShow = (v: boolean) => {
     style="width: min(1100px, 92vw)"
     @update:show="onShow"
   >
-    <YamlEditor v-model:value="draft" :schema="schema" class="yaml-edit-cm" />
+    <NTabs v-model:value="tab" type="line" size="small" pane-class="editor-dialog-pane">
+      <NTabPane name="editor" tab="Editor" display-directive="show">
+        <YamlEditor v-model:value="draft" :schema="schema" @diagnostics="(d) => (warnings = d)" />
+      </NTabPane>
+      <NTabPane name="form" tab="Form" display-directive="if">
+        <div class="dialog-scroll"><FormFields v-model="draft" /></div>
+      </NTabPane>
+      <NTabPane name="warnings" display-directive="if">
+        <template #tab>
+          Warnings
+          <span v-if="warnings.length" class="warn-badge" :class="{ err: errorCount }">{{ warnings.length }}</span>
+        </template>
+        <div class="dialog-scroll warnings-list">
+          <div v-if="!warnings.length" class="warnings-ok">No schema warnings.</div>
+          <button
+            v-for="(w, i) in warnings"
+            :key="i"
+            type="button"
+            class="warning-row"
+            :class="w.severity"
+            @click="tab = 'editor'"
+          >
+            <span class="warning-loc">Line {{ w.line }}</span>
+            <span class="warning-msg">{{ w.message }}</span>
+          </button>
+        </div>
+      </NTabPane>
+      <NTabPane name="review" tab="Review Changes" display-directive="if">
+        <DiffView :original="original" :modified="draft" />
+      </NTabPane>
+    </NTabs>
     <div v-if="msg" :class="'act-msg' + (err ? ' err' : '')">{{ msg }}</div>
     <template #footer>
       <div class="dialog-actions">
+        <span v-if="errorCount" class="dialog-warn-hint"
+          >{{ errorCount }} schema error(s) — review before applying</span
+        >
         <NButton :disabled="busy" @click="emit('close')">Cancel</NButton>
         <NButton type="primary" :loading="busy" @click="apply">Apply</NButton>
       </div>
@@ -85,6 +129,12 @@ const onShow = (v: boolean) => {
 .dialog-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
   justify-content: flex-end;
+}
+.dialog-warn-hint {
+  margin-right: auto;
+  color: var(--warn, #d98a00);
+  font-size: 12px;
 }
 </style>

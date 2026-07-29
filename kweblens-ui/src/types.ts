@@ -49,6 +49,14 @@ export interface KubeObject {
   [k: string]: unknown;
 }
 
+/** A schema-validation diagnostic surfaced by the editor's linter (for the Warnings tab). */
+export interface EditorDiagnostic {
+  severity: string;
+  message: string;
+  line: number;
+  from: number;
+}
+
 export interface EventSummary {
   type: string;
   reason: string;
