@@ -139,6 +139,9 @@ export interface OverviewSection {
   body: (o: KubeObject) => OvBody;
 }
 
+/** Defensive stringify (cluster objects vary; undefined/null render as empty). */
+const str = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
+
 const plain = (s: string): OvCell => ({ text: s });
 const mono = (s: string): OvCell => ({ text: s, mono: true });
 
@@ -247,6 +250,113 @@ function taintsBody(o: KubeObject): OvBody {
   return { type: 'table', headers: ['Key', 'Value', 'Effect'], rows };
 }
 
+/**
+ * Container environment: every container's `env` entries plus its whole-map `envFrom`
+ * imports. Debugging a pod almost always needs this and it was previously only reachable by
+ * reading the YAML.
+ *
+ * Values sourced via `valueFrom` are shown as the REFERENCE (e.g. `secret my-creds/password`)
+ * — kweblens never resolves a secret's value here. Literal values ARE shown, deliberately:
+ * they live in the pod spec, which the YAML tab already displays in full, so masking them
+ * here would be theatre rather than protection. (Secret OBJECT values stay masked behind
+ * Reveal in the Secret drawer, where the value really is the secret.)
+ */
+function envBody(o: KubeObject): OvBody {
+  const rows: OvCell[][] = [];
+  for (const cc of envContainers(o)) {
+    const cname = str(cc.name);
+    for (const e of ovArr(cc.env)) {
+      rows.push([plain(cname), mono(str(e.name)), envValueCell(e)]);
+    }
+    for (const f of ovArr(cc.envFrom)) {
+      const ref = envFromRef(f);
+      if (ref) {
+        rows.push([plain(cname), mono('(all keys)'), plain(ref)]);
+      }
+    }
+  }
+  return { type: 'table', headers: ['Container', 'Name', 'Value / Source'], rows };
+}
+
+/** Containers whose env we surface: regular + init + ephemeral, in that order. */
+function envContainers(o: KubeObject): Record<string, unknown>[] {
+  return [...ovArr(ovSpec(o).containers), ...ovArr(ovSpec(o).initContainers), ...ovArr(ovSpec(o).ephemeralContainers)];
+}
+
+function envValueCell(e: Record<string, unknown>): OvCell {
+  if (e.value !== undefined) {
+    return mono(str(e.value));
+  }
+  const from = e.valueFrom as Record<string, unknown> | undefined;
+  if (!from) {
+    return plain('—');
+  }
+  const keyRef = (k: string, label: string) => {
+    const r = from[k] as Record<string, unknown> | undefined;
+    return r ? `${label} ${str(r.name)}/${str(r.key)}` : null;
+  };
+  const fieldRef = (from.fieldRef as Record<string, unknown> | undefined)?.fieldPath;
+  const resRef = from.resourceFieldRef as Record<string, unknown> | undefined;
+  return plain(
+    keyRef('secretKeyRef', 'secret') ??
+      keyRef('configMapKeyRef', 'configMap') ??
+      (fieldRef ? `field ${str(fieldRef)}` : null) ??
+      (resRef ? `resource ${str(resRef.resource)}` : null) ??
+      '—',
+  );
+}
+
+function envFromRef(f: Record<string, unknown>): string | null {
+  const cm = f.configMapRef as Record<string, unknown> | undefined;
+  const sec = f.secretRef as Record<string, unknown> | undefined;
+  if (cm) {
+    return `configMap ${str(cm.name)}`;
+  }
+  return sec ? `secret ${str(sec.name)}` : null;
+}
+
+/**
+ * Per-container runtime state — the "why did it die" section. lastState.terminated carries
+ * the reason and EXIT CODE of the previous run, which is the first thing you want for a
+ * CrashLoopBackOff and is not visible anywhere else in the UI.
+ */
+function containerStateBody(o: KubeObject): OvBody {
+  const rows: OvCell[][] = [];
+  const all = [...ovArr(ovStatus(o).containerStatuses), ...ovArr(ovStatus(o).initContainerStatuses)];
+  for (const cs of all) {
+    rows.push([
+      plain(str(cs.name)),
+      plain(cs.ready ? 'Yes' : 'No'),
+      plain(String(cs.restartCount ?? 0)),
+      plain(stateText(cs.state)),
+      plain(stateText(cs.lastState)),
+    ]);
+  }
+  return { type: 'table', headers: ['Container', 'Ready', 'Restarts', 'State', 'Last State'], rows };
+}
+
+/** "Running since …", or "Terminated: OOMKilled (exit 137)" — the diagnostic bit. */
+function stateText(state: unknown): string {
+  const st = state as Record<string, unknown> | undefined;
+  if (!st) {
+    return '—';
+  }
+  const term = st.terminated as Record<string, unknown> | undefined;
+  if (term) {
+    const reason = str(term.reason) || 'Terminated';
+    return `${reason} (exit ${str(term.exitCode)})`;
+  }
+  const waiting = st.waiting as Record<string, unknown> | undefined;
+  if (waiting) {
+    return str(waiting.reason) || 'Waiting';
+  }
+  const running = st.running as Record<string, unknown> | undefined;
+  if (running) {
+    return running.startedAt ? `Running since ${str(running.startedAt)}` : 'Running';
+  }
+  return '—';
+}
+
 function nodeInfoBody(o: KubeObject): OvBody {
   const nodeInfo = (ovStatus(o).nodeInfo as Record<string, string> | undefined) ?? {};
   const pairs = (
@@ -301,6 +411,19 @@ export const OVERVIEW_SECTIONS: OverviewSection[] = [
     applies: (o) => ovArr(ovSpec(o).containers).length > 0,
     count: (o) => ovArr(ovSpec(o).containers).length,
     body: containersBody,
+  },
+  {
+    title: 'Environment',
+    applies: (o) => envContainers(o).some((c) => ovArr(c.env).length > 0 || ovArr(c.envFrom).length > 0),
+    count: (o) => envContainers(o).reduce((n, c) => n + ovArr(c.env).length + ovArr(c.envFrom).length, 0),
+    body: envBody,
+  },
+  {
+    title: 'Container Status',
+    applies: (o) =>
+      ovArr(ovStatus(o).containerStatuses).length > 0 || ovArr(ovStatus(o).initContainerStatuses).length > 0,
+    count: (o) => ovArr(ovStatus(o).containerStatuses).length + ovArr(ovStatus(o).initContainerStatuses).length,
+    body: containerStateBody,
   },
   {
     title: 'Ports',
