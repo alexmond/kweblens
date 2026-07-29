@@ -1324,6 +1324,45 @@ body {
   outline: none;
 }
 
+/* Structured (form) editor tab. */
+.form-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 6px 0 14px;
+}
+.form-section h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color-mix(in srgb, var(--accent) 62%, var(--muted));
+}
+.kv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(140px, 1.5fr) auto;
+  gap: 6px;
+  width: 100%;
+  align-items: center;
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* Schema hover + completion-info cards (codemirror-json-schema). Constrain the width
    (they'd otherwise stretch the viewport), give the content breathing room, and theme
    them as bordered panels with accent-coloured links that read on light AND dark. */

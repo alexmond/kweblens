@@ -53,6 +53,18 @@ async function postBody<T>(url: string, body: string, contentType: string): Prom
   return (await res.json()) as T;
 }
 
+async function patchBody<T>(url: string, body: string): Promise<T> {
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { ...auth.header(), Accept: 'application/json', 'Content-Type': 'application/merge-patch+json' },
+    body,
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
 async function postNoContent(url: string, body?: string, contentType?: string): Promise<void> {
   const headers: Record<string, string> = { ...auth.header() };
   if (contentType) {
@@ -258,6 +270,20 @@ export const api = {
   // --- Mutating actions (HTTP Basic auth required) ---
   apply: (cluster: string, manifest: string) =>
     postBody<ResourceRow>(`${clusterBase(cluster)}/apply`, manifest, 'application/yaml'),
+  // JSON Merge Patch (RFC 7386) for the structured (form) editor: set fields, or delete a
+  // key by sending it as null. Only changed sections are sent, so nothing else is clobbered.
+  patch: (
+    cluster: string,
+    resourceId: string,
+    namespace: string | undefined,
+    name: string,
+    mergePatch: Record<string, unknown>,
+  ) =>
+    patchBody<ResourceRow>(
+      `${clusterBase(cluster)}/patch?resource=${encodeURIComponent(resourceId)}&name=${encodeURIComponent(name)}` +
+        (namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''),
+      JSON.stringify(mergePatch),
+    ),
   del: (cluster: string, resourceId: string, namespace: string, name: string, force = false) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'delete') + (force ? '?force=true' : '')),
   scale: (cluster: string, resourceId: string, namespace: string, name: string, replicas: number) =>
