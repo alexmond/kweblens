@@ -24,6 +24,9 @@ const props = defineProps<{
   title: string;
   initialText: string;
   schema?: Record<string, unknown> | null;
+  // Read-only viewer (opened when signed out): the Editor tab is read-only, and the
+  // editing tabs (Form / Warnings / Review) + Apply are hidden — just a big YAML viewer.
+  readonly?: boolean;
 }>();
 const emit = defineEmits<{
   (e: 'applied', text: string): void;
@@ -83,12 +86,12 @@ const onShow = (v: boolean) => {
   >
     <NTabs v-model:value="tab" type="line" size="small" pane-class="editor-dialog-pane">
       <NTabPane name="editor" tab="Editor" display-directive="show">
-        <YamlEditor v-model:value="draft" :schema="schema" @diagnostics="(d) => (warnings = d)" />
+        <YamlEditor v-model:value="draft" :schema="schema" :readonly="readonly" @diagnostics="(d) => (warnings = d)" />
       </NTabPane>
-      <NTabPane name="form" tab="Form" display-directive="if">
+      <NTabPane v-if="!readonly" name="form" tab="Form" display-directive="if">
         <div class="dialog-scroll"><FormFields v-model="draft" /></div>
       </NTabPane>
-      <NTabPane name="warnings" display-directive="if">
+      <NTabPane v-if="!readonly" name="warnings" display-directive="if">
         <template #tab>
           Warnings
           <span v-if="warnings.length" class="warn-badge" :class="{ err: errorCount }">{{ warnings.length }}</span>
@@ -108,7 +111,7 @@ const onShow = (v: boolean) => {
           </button>
         </div>
       </NTabPane>
-      <NTabPane name="review" tab="Review Changes" display-directive="if">
+      <NTabPane v-if="!readonly" name="review" tab="Review Changes" display-directive="if">
         <DiffView :original="original" :modified="draft" />
       </NTabPane>
     </NTabs>
@@ -118,8 +121,8 @@ const onShow = (v: boolean) => {
         <span v-if="errorCount" class="dialog-warn-hint"
           >{{ errorCount }} schema error(s) — review before applying</span
         >
-        <NButton :disabled="busy" @click="emit('close')">Cancel</NButton>
-        <NButton type="primary" :loading="busy" @click="apply">Apply</NButton>
+        <NButton :disabled="busy" @click="emit('close')">{{ readonly ? 'Close' : 'Cancel' }}</NButton>
+        <NButton v-if="!readonly" type="primary" :loading="busy" @click="apply">Apply</NButton>
       </div>
     </template>
   </NModal>
