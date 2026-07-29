@@ -39,5 +39,11 @@ export default tseslint.config(
       'no-undef': 'off',
     },
   },
+  {
+    // Test fixtures legitimately contain literal addresses; they use the RFC 5737
+    // documentation ranges (192.0.2.0/24, 198.51.100.0/24), never real or lab addresses.
+    files: ['**/*.test.ts'],
+    rules: { 'sonarjs/no-hardcoded-ip': 'off' },
+  },
   prettier,
 );

@@ -1,4 +1,4 @@
-import { objSpec as spec, objStatus as status, toNum as num } from './kube';
+import { gib, objSpec as spec, objStatus as status, parseMemBytes, toNum as num } from './kube';
 import type { KubeObject, PrinterColumn } from './types';
 
 // A kind-specific column: the "middle" columns between Name/Namespace and Age
@@ -11,6 +11,26 @@ export interface ColumnDef {
   header: string;
   render: (o: KubeObject) => string;
   sortText?: (o: KubeObject) => string;
+  /** Fixed pixel width for columns whose values are always short (counts, flags, versions). */
+  width?: number;
+  /**
+   * Start hidden (still listed in the Columns ▾ picker). For detail-rich kinds like Nodes
+   * that offer more columns than fit comfortably — the same default other Kubernetes IDEs
+   * use, showing the common set and leaving the rest opt-in.
+   */
+  defaultHidden?: boolean;
+}
+
+/** Keys a kind's table starts with hidden — seeds the list view's hidden-column set. */
+export function defaultHiddenCols(resourceId: string | undefined): Set<string> {
+  if (!resourceId) {
+    return new Set();
+  }
+  return new Set(
+    columnsFor(resourceId)
+      .filter((c) => c.defaultHidden)
+      .map((c) => c.key),
+  );
 }
 
 // ---- small accessors (defensive: cluster objects vary) ----
@@ -153,11 +173,48 @@ function nodeReady(o: KubeObject): string {
   const ready = conds.find((c) => (c as Any).type === 'Ready');
   return ready ? ((ready as Any).status === 'True' ? 'Ready' : 'NotReady') : '—';
 }
-function nodeInternalIp(o: KubeObject): string {
+function nodeAddress(o: KubeObject, type: string): string {
   const addrs = (status(o).addresses as Any[]) ?? [];
-  const ip = addrs.find((a) => (a as Any).type === 'InternalIP');
-  return ip ? str((ip as Any).address) : '—';
+  const hit = addrs.find((a) => (a as Any).type === type);
+  return hit ? str((hit as Any).address) : '—';
 }
+function nodeInternalIp(o: KubeObject): string {
+  return nodeAddress(o, 'InternalIP');
+}
+function nodeExternalIp(o: KubeObject): string {
+  return nodeAddress(o, 'ExternalIP');
+}
+/** Taint count (0 when none) — the at-a-glance "is anything repelling pods here". */
+function nodeTaints(o: KubeObject): string {
+  return String(((spec(o).taints as Any[]) ?? []).length);
+}
+/** Every condition currently True (Ready, EtcdIsVoter, …) — pressure conditions show here too. */
+function nodeConditions(o: KubeObject): string {
+  const conds = (status(o).conditions as Any[]) ?? [];
+  return dash(
+    conds
+      .filter((c) => str((c as Any).status) === 'True')
+      .map((c) => str((c as Any).type))
+      .join(', '),
+  );
+}
+/** kubectl's "SchedulingDisabled": spec.unschedulable is what cordon flips. */
+function nodeSchedulable(o: KubeObject): string {
+  return spec(o).unschedulable ? 'False' : 'True';
+}
+function nodeInfo(o: KubeObject, field: string): string {
+  return dash(str(((status(o).nodeInfo as Any) ?? {})[field]));
+}
+function nodeLabel(o: KubeObject, ...names: string[]): string {
+  const labels = o.metadata?.labels ?? {};
+  for (const n of names) {
+    if (labels[n]) {
+      return labels[n];
+    }
+  }
+  return '—';
+}
+const nodeCapacity = (o: KubeObject): Record<string, string> => (status(o).capacity as Record<string, string>) ?? {};
 function keys(o: KubeObject): string {
   const data = (o.data as Any) ?? {};
   return String(Object.keys(data).length);
@@ -170,9 +227,9 @@ function involvedObject(o: KubeObject): string {
 // resourceId -> the kind-specific middle columns
 const COLUMNS: Record<string, ColumnDef[]> = {
   pods: [
-    { key: 'ready', header: 'Ready', render: podReady },
+    { key: 'ready', header: 'Ready', render: podReady, width: 90 },
     { key: 'status', header: 'Status', render: (o) => dash(str(status(o).phase)) },
-    { key: 'restarts', header: 'Restarts', render: podRestarts },
+    { key: 'restarts', header: 'Restarts', render: podRestarts, width: 100 },
     { key: 'node', header: 'Node', render: (o) => dash(str(spec(o).nodeName)) },
   ],
   deployments: [
@@ -211,11 +268,55 @@ const COLUMNS: Record<string, ColumnDef[]> = {
     { key: 'active', header: 'Active', render: (o) => String(((status(o).active as Any[]) ?? []).length) },
     { key: 'last', header: 'Last schedule', render: (o) => age(str(status(o).lastScheduleTime) || undefined) },
   ],
+  // Nodes carry far more useful detail than fits at once, so the common set is shown and the
+  // rest is opt-in via the Columns ▾ picker (defaultHidden) — the CPU/Memory/Disk usage bars
+  // are appended separately in table.ts from live metrics.
   nodes: [
-    { key: 'status', header: 'Status', render: nodeReady },
+    { key: 'status', header: 'Status', render: nodeReady, width: 110 },
     { key: 'roles', header: 'Roles', render: nodeRoles },
+    { key: 'taints', header: 'Taints', render: nodeTaints, width: 90 },
     { key: 'version', header: 'Version', render: (o) => dash(str((status(o).nodeInfo as Any)?.kubeletVersion)) },
     { key: 'ip', header: 'Internal IP', render: nodeInternalIp },
+    { key: 'schedulable', header: 'Schedulable', render: nodeSchedulable, width: 120 },
+    { key: 'conditions', header: 'Conditions', render: nodeConditions },
+    { key: 'ext-ip', header: 'External IP', render: nodeExternalIp, defaultHidden: true },
+    {
+      key: 'pod-capacity',
+      header: 'Pod Capacity',
+      render: (o) => dash(str(nodeCapacity(o).pods)),
+      defaultHidden: true,
+    },
+    {
+      key: 'capacity',
+      header: 'Capacity',
+      render: (o) => {
+        const cap = nodeCapacity(o);
+        const mem = parseMemBytes(cap.memory);
+        return dash([cap.cpu ? `${cap.cpu} CPU` : '', mem ? gib(mem) : ''].filter(Boolean).join(', '));
+      },
+      defaultHidden: true,
+    },
+    {
+      key: 'instance-type',
+      header: 'Instance Type',
+      render: (o) => nodeLabel(o, 'node.kubernetes.io/instance-type', 'beta.kubernetes.io/instance-type'),
+      defaultHidden: true,
+    },
+    {
+      key: 'zone',
+      header: 'Zone',
+      render: (o) => nodeLabel(o, 'topology.kubernetes.io/zone', 'failure-domain.beta.kubernetes.io/zone'),
+      defaultHidden: true,
+    },
+    { key: 'os-image', header: 'OS Image', render: (o) => nodeInfo(o, 'osImage'), defaultHidden: true },
+    { key: 'kernel', header: 'Kernel', render: (o) => nodeInfo(o, 'kernelVersion'), defaultHidden: true },
+    {
+      key: 'runtime',
+      header: 'Container Runtime',
+      render: (o) => nodeInfo(o, 'containerRuntimeVersion'),
+      defaultHidden: true,
+    },
+    { key: 'arch', header: 'Architecture', render: (o) => nodeInfo(o, 'architecture'), defaultHidden: true },
   ],
   services: [
     { key: 'type', header: 'Type', render: (o) => dash(str(spec(o).type)) },
