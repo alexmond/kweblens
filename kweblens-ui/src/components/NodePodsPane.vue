@@ -33,17 +33,48 @@ const requested = (o: KubeObject, key: 'cpu' | 'memory'): string[] =>
 const cpuRequested = (o: KubeObject) => requested(o, 'cpu').reduce((n, q) => n + parseCpuCores(q), 0);
 const memRequested = (o: KubeObject) => requested(o, 'memory').reduce((n, q) => n + parseMemBytes(q), 0);
 
+// Live usage for a pod, as NUMBERS — the perf columns sort on these, never on the formatted
+// text ("0.9" would otherwise sort above "10", and "900Mi" above "2.0Gi").
+const cpuUsed = (o: KubeObject) => parseCpuCores(usage.value[objKey(o)]?.cpu);
+const memUsed = (o: KubeObject) => parseMemBytes(usage.value[objKey(o)]?.memory);
+const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
 const columns = computed<DataTableColumns<KubeObject>>(() => [
   // Sized to fit the drawer at its DEFAULT width: name/namespace flex and ellipsize while
   // the perf columns keep fixed room, so CPU/Memory are visible without expanding or
   // scrolling. (Expanding the drawer just gives the name more room.)
-  { title: 'Name', key: 'name', minWidth: 120, ellipsis: { tooltip: true }, render: (o) => objName(o) },
-  { title: 'Namespace', key: 'ns', minWidth: 90, ellipsis: { tooltip: true }, render: (o) => objNs(o) ?? '—' },
-  { title: 'Status', key: 'status', width: 84, render: (o) => h(StatusBadge, { text: podPhase(o) }) },
+  // Default sort is name-ascending on purpose: usage refreshes every 15s, so defaulting to a
+  // metric column would make rows jump under the cursor. Sorting by CPU/Memory is one click
+  // away, and there the live re-ordering is what you asked for.
+  {
+    title: 'Name',
+    key: 'name',
+    minWidth: 120,
+    ellipsis: { tooltip: true },
+    sorter: (a, b) => byText(objName(a), objName(b)),
+    defaultSortOrder: 'ascend',
+    render: (o) => objName(o),
+  },
+  {
+    title: 'Namespace',
+    key: 'ns',
+    minWidth: 90,
+    ellipsis: { tooltip: true },
+    sorter: (a, b) => byText(objNs(a) ?? '', objNs(b) ?? ''),
+    render: (o) => objNs(o) ?? '—',
+  },
+  {
+    title: 'Status',
+    key: 'status',
+    width: 84,
+    sorter: (a, b) => byText(podPhase(a), podPhase(b)),
+    render: (o) => h(StatusBadge, { text: podPhase(o) }),
+  },
   {
     title: 'CPU',
     key: 'cpu',
     width: 104,
+    sorter: (a, b) => cpuUsed(a) - cpuUsed(b),
     render: (o) => {
       const u = usage.value[objKey(o)];
       if (!u) {
@@ -62,6 +93,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => [
     title: 'Memory',
     key: 'mem',
     width: 104,
+    sorter: (a, b) => memUsed(a) - memUsed(b),
     render: (o) => {
       const u = usage.value[objKey(o)];
       if (!u) {
