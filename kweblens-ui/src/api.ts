@@ -146,6 +146,9 @@ export const api = {
     getJson<KubeObject[]>(
       `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}/objects` + nsQuery(namespace),
     ),
+  // Pods scheduled on a node (field-selected server-side) — backs the node detail Pods tab.
+  nodePods: (cluster: string, node: string) =>
+    getJson<KubeObject[]>(`${clusterBase(cluster)}/nodes/${encodeURIComponent(node)}/pods`),
   printerColumns: (cluster: string, resourceId: string) =>
     getJson<PrinterColumn[]>(`${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}/columns`),
   events: (cluster: string, namespace?: string) =>

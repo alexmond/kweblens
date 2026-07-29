@@ -105,4 +105,34 @@ class PrometheusMetricServiceTest {
 		assertThat(serviceFor("c1").nodeDiskUsage("c1")).isEmpty();
 	}
 
+	@Test
+	void nodeInstanceSelectorDoubleEscapesTheIpDots() {
+		client.nodes()
+			.resource(new NodeBuilder().withNewMetadata()
+				.withName("worker-9")
+				.endMetadata()
+				.withNewStatus()
+				.addNewAddress()
+				.withType("InternalIP")
+				.withAddress("192.0.2.10")
+				.endAddress()
+				.endStatus()
+				.build())
+			.create();
+
+		// TWO backslashes per dot: the matcher value is a PromQL string literal, so `\\.`
+		// in
+		// the query text unescapes to `\.` for the regex engine. A single backslash is
+		// not a
+		// valid string escape and strict backends (VictoriaMetrics) reject the query with
+		// 422.
+		assertThat(serviceFor("c1").nodeInstanceSelector("c1", "worker-9"))
+			.contains("instance=~\"192\\\\.0\\\\.2\\\\.10:.*\"");
+	}
+
+	@Test
+	void nodeInstanceSelectorIsEmptyForAnUnknownNode() {
+		assertThat(serviceFor("c1").nodeInstanceSelector("c1", "absent")).isEmpty();
+	}
+
 }
