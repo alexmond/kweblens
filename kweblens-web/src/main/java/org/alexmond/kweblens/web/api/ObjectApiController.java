@@ -50,6 +50,15 @@ public class ObjectApiController {
 	}
 
 	/**
+	 * The pods scheduled on a node, as a JSON array — backs the Pods tab of a node's
+	 * detail. Field-selected server-side, so only that node's pods are fetched.
+	 */
+	@GetMapping(value = "/api/v1/clusters/{clusterId}/nodes/{node}/pods", produces = MediaType.APPLICATION_JSON_VALUE)
+	public String podsOnNode(@PathVariable String clusterId, @PathVariable String node) {
+		return Serialization.asJson(resources.listPodsOnNode(clusterId, node));
+	}
+
+	/**
 	 * The full objects of a kind as a JSON array (namespaced kinds honour the filter).
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/objects",

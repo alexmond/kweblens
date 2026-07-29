@@ -124,6 +124,12 @@ const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDele
   setAuthUser: (v) => (authUser.value = v),
 });
 
+// A pod clicked in a node's Pods tab: swap the drawer to that pod's detail. `pods` is the
+// nav id for the Pod kind, so the YAML/actions in the drawer resolve against the right kind.
+const openPodDetail = (obj: KubeObject) => {
+  detail.value = { resourceId: 'pods', obj };
+};
+
 const activeCluster = computed(() => clusters.value.find((c) => c.id === cluster.value) ?? null);
 const filtered = computed(() => filterObjects(objects.value, query.value, helmScope.value));
 const tableCols = computed(() => buildResourceColumns(selected.value?.id, cols.value, usage.value, nodeDisk.value));
@@ -273,6 +279,7 @@ const onForwardStarted = () => {
           @navigate="navigateToKind"
           @helm-release="navigateToHelmRelease"
           @auth-expired="signOut"
+          @open-object="openPodDetail"
           @close="detail = null"
         />
       </div>

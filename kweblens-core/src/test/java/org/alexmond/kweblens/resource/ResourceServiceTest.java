@@ -192,6 +192,26 @@ class ResourceServiceTest {
 	}
 
 	@Test
+	void listsPodsScheduledOnANode() {
+		client.pods()
+			.resource(new PodBuilder().withNewMetadata()
+				.withName("on-node-a")
+				.withNamespace("default")
+				.endMetadata()
+				.withNewSpec()
+				.withNodeName("node-a")
+				.endSpec()
+				.build())
+			.create();
+		ResourceService service = serviceFor("mock");
+
+		var pods = service.listPodsOnNode("mock", "node-a");
+
+		assertThat(pods).isNotNull();
+		assertThat(pods).allSatisfy((p) -> assertThat(p.getKind()).isEqualTo("Pod"));
+	}
+
+	@Test
 	void mergePatchSetsAndDeletesFields() {
 		client.configMaps()
 			.resource(new io.fabric8.kubernetes.api.model.ConfigMapBuilder().withNewMetadata()

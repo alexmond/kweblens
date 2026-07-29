@@ -81,6 +81,34 @@ public class MetricApiController {
 				promql = "sum(container_memory_working_set_bytes{namespace=\"" + ns + "\",pod=\"" + nm + "\"})";
 				unit = "bytes";
 			}
+			case "node-cpu" -> {
+				String sel = nodeSelector(clusterId, nm);
+				if (sel == null) {
+					return MetricSeries.unavailable();
+				}
+				promql = "sum(rate(node_cpu_seconds_total{mode!=\"idle\"," + sel + "}[2m]))";
+				unit = "cores";
+			}
+			case "node-mem" -> {
+				String sel = nodeSelector(clusterId, nm);
+				if (sel == null) {
+					return MetricSeries.unavailable();
+				}
+				promql = "sum(node_memory_MemTotal_bytes{" + sel + "} - node_memory_MemAvailable_bytes{" + sel + "})";
+				unit = "bytes";
+			}
+			case "node-disk" -> {
+				String sel = nodeSelector(clusterId, nm);
+				if (sel == null) {
+					return MetricSeries.unavailable();
+				}
+				// Same real-filesystem filter (and per-device dedupe) the Disk column
+				// uses.
+				String fs = "{fstype!~\"tmpfs|ramfs|overlay|squashfs|iso9660|devtmpfs|nsfs|fuse.*\"," + sel + "}";
+				promql = "sum(max by (device) (node_filesystem_size_bytes" + fs + " - node_filesystem_avail_bytes" + fs
+						+ "))";
+				unit = "bytes";
+			}
 			case "cluster-cpu" -> {
 				promql = "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[2m]))";
 				unit = "cores";
@@ -94,6 +122,13 @@ public class MetricApiController {
 			}
 		}
 		return prometheus.queryRange(clusterId, promql, unit, minutes);
+	}
+
+	/**
+	 * The node's node-exporter label matcher, or null when the node can't be resolved.
+	 */
+	private String nodeSelector(String clusterId, String nodeName) {
+		return prometheus.nodeInstanceSelector(clusterId, nodeName).orElse(null);
 	}
 
 	private String sanitize(String value) {

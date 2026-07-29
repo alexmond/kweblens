@@ -159,6 +159,27 @@ public class PrometheusMetricService {
 		return out;
 	}
 
+	/**
+	 * A PromQL label matcher selecting a node's node-exporter series, or empty when the
+	 * node is unknown. node-exporter labels series by {@code instance = <ip>:<port>}, so
+	 * the node name is resolved to its InternalIP here (server-side, never from the
+	 * client).
+	 *
+	 * <p>
+	 * The dots are escaped with a DOUBLE backslash on purpose: the matcher value is a
+	 * PromQL <em>string literal</em>, so {@code \\.} in the query text unescapes to
+	 * {@code \.} for the regex engine. A single backslash is not a valid string escape
+	 * and strict backends (VictoriaMetrics) reject the whole query with a 422.
+	 */
+	public Optional<String> nodeInstanceSelector(String clusterId, String nodeName) {
+		return nodeInternalIps(clusterId).entrySet()
+			.stream()
+			.filter((e) -> e.getValue().equals(nodeName))
+			.map(Map.Entry::getKey)
+			.findFirst()
+			.map((ip) -> "instance=~\"" + ip.replace(".", "\\\\.") + ":.*\"");
+	}
+
 	Map<String, String> nodeInternalIps(String clusterId) {
 		Map<String, String> map = new HashMap<>();
 		try {

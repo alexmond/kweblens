@@ -123,6 +123,20 @@ public class ResourceService {
 	}
 
 	/**
+	 * Pods scheduled on a node, across all namespaces. The field selector is applied
+	 * server-side (as {@code kubectl get pods --field-selector spec.nodeName=…} does), so
+	 * only the node's own pods come back rather than the whole cluster's.
+	 */
+	public List<GenericKubernetesResource> listPodsOnNode(String clusterId, String nodeName) {
+		return clusters.require(clusterId)
+			.genericKubernetesResources(contextFor(WellKnownKinds.PODS))
+			.inAnyNamespace()
+			.withField("spec.nodeName", nodeName)
+			.list()
+			.getItems();
+	}
+
+	/**
 	 * The YAML of a single resource, or null if it does not exist.
 	 */
 	public String getYaml(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {

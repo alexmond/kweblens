@@ -17,6 +17,7 @@ import { objName, objNs } from '../kube';
 import type { EventSummary, KubeObject } from '../types';
 import EventsPane from './EventsPane.vue';
 import MetricChart from './MetricChart.vue';
+import NodePodsPane from './NodePodsPane.vue';
 import Overview from './Overview.vue';
 import YamlTab from './YamlTab.vue';
 
@@ -31,15 +32,17 @@ const emit = defineEmits<{
   (e: 'navigate', kind: string, ns?: string): void;
   (e: 'helm-release', namespace: string, name: string): void;
   (e: 'auth-expired'): void;
+  (e: 'open-object', obj: KubeObject): void;
   (e: 'close'): void;
 }>();
 
-type Tab = 'overview' | 'yaml' | 'events' | 'metrics';
+type Tab = 'overview' | 'pods' | 'yaml' | 'events' | 'metrics';
 const tab = ref<Tab>(props.initialEdit ? 'yaml' : 'overview');
 const events = shallowRef<EventSummary[] | null>(null);
 const eventsError = ref<string | null>(null);
 
 const kind = computed(() => props.obj.kind ?? '');
+const isNode = computed(() => kind.value === 'Node');
 const name = computed(() => objName(props.obj));
 const ns = computed(() => objNs(props.obj) ?? '');
 
@@ -128,6 +131,9 @@ watch(
             @helm-release="(nsp, nm) => emit('helm-release', nsp, nm)"
           />
         </NTabPane>
+        <NTabPane v-if="isNode" name="pods" tab="Pods" display-directive="if">
+          <NodePodsPane :cluster="cluster" :node="name" @open="(o) => emit('open-object', o)" />
+        </NTabPane>
         <NTabPane name="yaml" tab="YAML" display-directive="if">
           <YamlTab
             :cluster="cluster"
@@ -147,6 +153,13 @@ watch(
           <div class="charts vertical">
             <MetricChart :cluster="cluster" target="pod-cpu" :namespace="ns" :name="name" label="CPU (cores)" />
             <MetricChart :cluster="cluster" target="pod-mem" :namespace="ns" :name="name" label="Memory" />
+          </div>
+        </NTabPane>
+        <NTabPane v-if="isNode" name="metrics" tab="Metrics" display-directive="if">
+          <div class="charts vertical">
+            <MetricChart :cluster="cluster" target="node-cpu" :name="name" label="CPU (cores)" />
+            <MetricChart :cluster="cluster" target="node-mem" :name="name" label="Memory" />
+            <MetricChart :cluster="cluster" target="node-disk" :name="name" label="Disk" />
           </div>
         </NTabPane>
       </NTabs>
