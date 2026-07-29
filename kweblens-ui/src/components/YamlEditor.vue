@@ -24,7 +24,7 @@ import type { EditorDiagnostic } from '../types';
 // `schema` (a JSON Schema for the object's kind, from the cluster's OpenAPI) turns on
 // schema-aware completion, lint and hover; without it the editor is plain YAML.
 const value = defineModel<string>('value', { required: true });
-const props = defineProps<{ schema?: Record<string, unknown> | null }>();
+const props = defineProps<{ schema?: Record<string, unknown> | null; readonly?: boolean }>();
 const emit = defineEmits<{
   (e: 'diagnostics', d: EditorDiagnostic[]): void;
 }>();
@@ -67,6 +67,7 @@ function build() {
         syntaxHighlighting(yamlHighlightStyle),
         editorChrome,
         themeCompartment.of(themeVariant()),
+        ...(props.readonly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) {
             value.value = u.state.doc.toString();

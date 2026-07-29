@@ -66,7 +66,7 @@ const displayYaml = computed(() =>
   yaml.value === null ? null : hideManaged.value ? stripManagedFields(yaml.value) : yaml.value,
 );
 
-const editorTitle = computed(() => `Edit — ${props.name}`);
+const editorTitle = computed(() => `${props.authed ? 'Edit' : 'View'} — ${props.name}`);
 
 const openEditor = () => {
   draft.value = displayYaml.value ?? '';
@@ -115,7 +115,7 @@ const copy = () => {
   <div class="yaml-pane">
     <div class="yaml-toolbar">
       <NButton size="small" :disabled="!yaml" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</NButton>
-      <NButton v-if="authed" size="small" :disabled="!yaml" @click="openEditor">Edit</NButton>
+      <NButton size="small" :disabled="!yaml" @click="openEditor">{{ authed ? 'Edit ⤢' : 'View ⤢' }}</NButton>
       <label class="yaml-toggle" title="Hide the verbose metadata.managedFields block">
         <NSwitch v-model:value="hideManaged" size="small" />
         Hide Managed Fields
@@ -132,6 +132,7 @@ const copy = () => {
       :title="editorTitle"
       :initial-text="draft"
       :schema="schema"
+      :readonly="!authed"
       @applied="onApplied"
       @auth-expired="emit('auth-expired')"
       @close="closeEditor"
