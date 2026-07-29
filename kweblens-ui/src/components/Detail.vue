@@ -43,6 +43,13 @@ const kind = computed(() => props.obj.kind ?? '');
 const name = computed(() => objName(props.obj));
 const ns = computed(() => objNs(props.obj) ?? '');
 
+// Expand-to-fill: the drawer is mounted into the content column (see `to` below), so 100%
+// is exactly the area the table occupies — no header/footer/sidebar overlap either way.
+// `width` tracks the user's own resizing so collapsing restores their chosen width.
+const expanded = ref(false);
+const width = ref(520);
+const drawerWidth = computed<number | string>(() => (expanded.value ? '100%' : width.value));
+
 // The parent mounts Detail via v-if; keep the drawer shown while mounted and route any
 // close (the X, the mask, or Escape) to the `close` emit so the parent tears it down.
 const show = ref(true);
@@ -83,22 +90,33 @@ watch(
 <template>
   <NDrawer
     :show="show"
-    resizable
-    :default-width="520"
+    :resizable="!expanded"
+    :width="drawerWidth"
     :min-width="360"
-    :max-width="900"
+    :max-width="1400"
     placement="right"
+    to=".content-col"
     :show-mask="false"
     :trap-focus="false"
     :block-scroll="false"
     :aria-label="`${kind} ${name}`"
     @update:show="onShow"
+    @update:width="(w) => (width = w)"
   >
     <NDrawerContent closable body-content-style="padding: 0 20px; display: flex; flex-direction: column;">
       <template #header>
         <div class="drawer-title">
           <span class="drawer-kind">{{ kind }}</span>
           <span class="drawer-name">{{ name }}</span>
+          <button
+            type="button"
+            class="drawer-expand"
+            :title="expanded ? 'Restore panel width' : 'Expand to fill'"
+            :aria-label="expanded ? 'Restore panel width' : 'Expand to fill'"
+            @click="expanded = !expanded"
+          >
+            {{ expanded ? '⤡' : '⤢' }}
+          </button>
         </div>
       </template>
 

@@ -974,6 +974,23 @@ body {
   min-width: 0;
 }
 
+/* Expand-to-fill toggle, next to the title (the close X is the drawer's own control). */
+.drawer-expand {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 7px;
+}
+.drawer-expand:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .drawer-kind {
   font-size: 11px;
   text-transform: uppercase;
@@ -1589,6 +1606,10 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Positioning context for the detail drawer: NDrawer mounted here (to=".content-col")
+     renders an absolutely-positioned container filling THIS column, so the panel sits in
+     the table area instead of overlaying the brand bar, footer and sidebar. */
+  position: relative;
 }
 
 /* Dockable pane at the bottom of the content column (NOT over the nav). */

@@ -10,6 +10,7 @@ import { useClusters } from './composables/useClusters';
 import { useDock } from './composables/useDock';
 import { useNavigation } from './composables/useNavigation';
 import { useResourceData } from './composables/useResourceData';
+import { defaultHiddenCols } from './columns';
 import { useDialog } from './dialog';
 import { objKey } from './kube';
 import { HELM_VIEW_IDS, NAV, filterObjects, isSynthetic } from './shell';
@@ -92,7 +93,9 @@ watch(cluster, () => {
 watch([selected, namespace], () => {
   detail.value = null;
   query.value = '';
-  hiddenCols.value = new Set();
+  // Seed from the kind's defaultHidden columns (e.g. Nodes offers more than fits — the extras
+  // stay available in the Columns ▾ picker).
+  hiddenCols.value = defaultHiddenCols(selected.value?.id);
   selection.value = new Set();
 });
 

@@ -63,15 +63,38 @@ const onMenu = (key: string, row: KubeObject) => {
   emit('row-action', id as RowAction, row, container);
 };
 
+// Column sizing. Without hints Naive spreads width evenly, so short columns (Taints "0",
+// Age "7d") hog space while long names wrap over several lines. Give Name a generous
+// min-width + ellipsis (truncate with a tooltip, never wrap), keep other columns above a
+// readable floor, and let the table scroll horizontally when the total exceeds the viewport.
+const NAME_MIN_WIDTH = 260;
+const NS_MIN_WIDTH = 150;
+const DATA_MIN_WIDTH = 110;
+const AGE_WIDTH = 80;
+const MENU_WIDTH = 44;
+const SELECT_WIDTH = 40;
+const EXPAND_EXTRA = 34;
+
 const columns = computed<DataTableColumns<KubeObject>>(() => {
-  const cols: DataTableColumns<KubeObject> = [{ type: 'selection' }];
+  const cols: DataTableColumns<KubeObject> = [{ type: 'selection', width: SELECT_WIDTH }];
   // Name is the tree column: when fetchChildren is set, Naive renders the expand
   // arrow + indent here, so child pods align under this column and every other one.
-  cols.push({ title: 'Name', key: 'name', sorter: 'default', render: (row) => objName(row) });
+  cols.push({
+    title: 'Name',
+    key: 'name',
+    sorter: 'default',
+    // Explicit width (not minWidth): with scroll-x set, Naive honours widths — a bare
+    // minWidth collapsed Name to ~130px and over-truncated names.
+    width: NAME_MIN_WIDTH + (props.fetchChildren ? EXPAND_EXTRA : 0),
+    ellipsis: { tooltip: true },
+    render: (row) => objName(row),
+  });
   if (showNs.value) {
     cols.push({
       title: 'Namespace',
       key: 'namespace',
+      width: NS_MIN_WIDTH,
+      ellipsis: { tooltip: true },
       sorter: (a, b) => (objNs(a) ?? '').localeCompare(objNs(b) ?? ''),
       render: (row) =>
         objNs(row)
@@ -93,6 +116,9 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
     cols.push({
       title: c.header,
       key: c.key,
+      // A column's own `width` (short values like Taints) wins; otherwise a readable floor.
+      width: c.width ?? DATA_MIN_WIDTH,
+      ellipsis: { tooltip: true },
       sorter: (a, b) => sortVal(a, c).localeCompare(sortVal(b, c), undefined, { numeric: true }),
       render: (row) =>
         c.cell
@@ -104,6 +130,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
     cols.push({
       title: 'Age',
       key: 'age',
+      width: AGE_WIDTH,
       sorter: (a, b) =>
         (Date.parse(a.metadata?.creationTimestamp ?? '') || 0) - (Date.parse(b.metadata?.creationTimestamp ?? '') || 0),
       render: (row) => age(row.metadata?.creationTimestamp),
@@ -112,7 +139,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
   cols.push({
     title: '',
     key: '_menu',
-    width: 44,
+    width: MENU_WIDTH,
     // Stop the click bubbling to the row (which opens the detail drawer), so the kebab
     // dropdown actually opens instead of being pre-empted / overlapped by the drawer.
     render: (row) =>
@@ -128,6 +155,21 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
 });
 
 const sortVal = (o: KubeObject, c: TableColumn): string => (c.sortText ? c.sortText(o) : c.render(o));
+
+// Total width the columns want. Handed to NDataTable as scroll-x so a wide column set
+// scrolls horizontally instead of being squeezed (which is what forced text to wrap).
+const scrollX = computed(() => {
+  const dataWidth = props.columns.reduce((sum, c) => sum + (c.width ?? DATA_MIN_WIDTH), 0);
+  return (
+    SELECT_WIDTH +
+    NAME_MIN_WIDTH +
+    (props.fetchChildren ? EXPAND_EXTRA : 0) +
+    (showNs.value ? NS_MIN_WIDTH : 0) +
+    dataWidth +
+    (showAge.value ? AGE_WIDTH : 0) +
+    MENU_WIDTH
+  );
+});
 
 // Tree data: expandable workloads carry their child pods as real rows so they line up
 // under every column and are individually clickable. Pods are lazy-loaded on expand and
@@ -184,6 +226,7 @@ const rowProps = (row: KubeObject) => ({
     :on-load="fetchChildren ? onLoad : undefined"
     :indent="18"
     :cascade="false"
+    :scroll-x="scrollX"
     flex-height
     size="small"
     @update:checked-row-keys="(keys) => emit('update:selection', keys as string[])"
