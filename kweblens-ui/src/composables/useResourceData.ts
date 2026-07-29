@@ -127,30 +127,48 @@ export function useResourceData(
         `${clusterBase(c)}/resources/${encodeURIComponent(sel.id)}/objects/watch` +
         (ns ? `?namespace=${encodeURIComponent(ns)}` : '');
       const es = new EventSource(url);
-      const upsert = (e: MessageEvent) => {
-        const obj = JSON.parse(e.data) as KubeObject;
-        const key = objKey(obj);
-        const idx = objects.value.findIndex((o) => objKey(o) === key);
-        if (idx === -1) {
-          objects.value = [...objects.value, obj];
-        } else {
-          const next = objects.value.slice();
-          next[idx] = obj;
-          objects.value = next;
+      // Watch events are BUFFERED and applied at most once per animation frame — never one
+      // reassignment (and full table re-render) per object. On connect a watch replays the
+      // whole list (e.g. 157 ReplicaSets) as an ADDED burst; without batching that froze the
+      // tab before first paint. All pending events coalesce into a single objects update.
+      let pending: { del: boolean; obj: KubeObject }[] = [];
+      let frame = 0;
+      const flush = () => {
+        frame = 0;
+        if (!pending.length) {
+          return;
+        }
+        const byKey = new Map(objects.value.map((o) => [objKey(o), o]));
+        for (const { del, obj } of pending) {
+          const k = objKey(obj);
+          if (del) {
+            byKey.delete(k);
+          } else {
+            byKey.set(k, obj);
+          }
+        }
+        pending = [];
+        objects.value = [...byKey.values()];
+      };
+      const enqueue = (del: boolean) => (e: MessageEvent) => {
+        pending.push({ del, obj: JSON.parse(e.data) as KubeObject });
+        if (frame === 0) {
+          frame = requestAnimationFrame(flush);
         }
       };
-      const remove = (e: MessageEvent) => {
-        const obj = JSON.parse(e.data) as KubeObject;
-        objects.value = objects.value.filter((o) => objKey(o) !== objKey(obj));
-      };
+      const upsert = enqueue(false);
       es.addEventListener('ADDED', upsert as EventListener);
       es.addEventListener('MODIFIED', upsert as EventListener);
-      es.addEventListener('DELETED', remove as EventListener);
+      es.addEventListener('DELETED', enqueue(true) as EventListener);
       es.onopen = () => (live.value = true);
       es.onerror = () => (live.value = false);
       onCleanup(() => {
         live.value = false;
         es.close();
+        if (frame !== 0) {
+          cancelAnimationFrame(frame);
+        }
+        pending = [];
       });
     },
     { immediate: true },

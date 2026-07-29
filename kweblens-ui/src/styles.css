@@ -82,6 +82,19 @@ body,
   margin: 0;
 }
 
+/* Chrome/Safari paint autofilled inputs with an opaque white/yellow background that ignores
+   the theme (e.g. the Sign-in password field on dark). Cover it with the panel colour via an
+   inset box-shadow and keep the text themed; the long transition defers the browser repaint. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--panel) inset;
+  caret-color: var(--text);
+  transition: background-color 100000s ease-in-out 0s;
+}
+
 /* NConfigProvider renders a wrapper div (class app-theme-root) between #app and .app;
    it must carry the height through, or .app collapses to content and the footer rides
    up under the table instead of sitting at the bottom of the viewport. */
