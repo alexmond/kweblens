@@ -1,4 +1,4 @@
-package org.alexmond.kweblens.web.ui;
+package org.alexmond.kweblens.web.api;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ResponseStatus;

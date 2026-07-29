@@ -66,10 +66,6 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-thymeleaf</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
         <dependency>
@@ -112,34 +108,6 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
-        <!-- Front-end assets served in-jar via WebJars (no CDN for the self-hosted app). -->
-        <dependency>
-            <groupId>org.webjars</groupId>
-            <artifactId>bootstrap</artifactId>
-            <version>${bootstrap.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.webjars.npm</groupId>
-            <artifactId>htmx.org</artifactId>
-            <version>${htmx.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.webjars.npm</groupId>
-            <artifactId>bootstrap-icons</artifactId>
-            <version>${bootstrap-icons.version}</version>
-        </dependency>
-        <!-- xterm.js terminal emulator for the in-browser pod exec (served in-jar). -->
-        <dependency>
-            <groupId>org.webjars.npm</groupId>
-            <artifactId>xterm</artifactId>
-            <version>${xterm.version}</version>
-        </dependency>
-        <!-- One base layout (head/topbar/footer) for every page. -->
-        <dependency>
-            <groupId>nz.net.ultraq.thymeleaf</groupId>
-            <artifactId>thymeleaf-layout-dialect</artifactId>
-            <version>${thymeleaf-layout-dialect.version}</version>
-        </dependency>
 
         <dependency>
             <groupId>org.projectlombok</groupId>

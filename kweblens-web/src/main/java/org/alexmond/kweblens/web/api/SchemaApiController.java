@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.schema.SchemaService;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
-import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
  * JSON Schema API: serves the schema for a resource kind (by its nav {@code resource} id)

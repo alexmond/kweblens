@@ -20,7 +20,6 @@ import org.alexmond.kweblens.resource.PrinterColumn;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
-import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
  * Raw Kubernetes objects for a kind, so the UI can render kind-specific columns (and,

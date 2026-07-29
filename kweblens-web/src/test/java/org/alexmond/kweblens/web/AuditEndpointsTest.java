@@ -13,9 +13,7 @@ import org.alexmond.kweblens.web.security.AuditService;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 /**
  * The audit trail surfaces recorded actions at {@code /audit} (page) and
@@ -36,14 +34,6 @@ class AuditEndpointsTest {
 	void setUp() {
 		mvc = MockMvcBuilders.webAppContextSetup(context).build();
 		audit.record("prod", "delete", "Pod/web/nginx");
-	}
-
-	@Test
-	void pageRendersRecordedActions() throws Exception {
-		mvc.perform(get("/audit"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("audit"))
-			.andExpect(model().attributeExists("entries"));
 	}
 
 	@Test

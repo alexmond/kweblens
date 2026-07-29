@@ -82,7 +82,6 @@ const onHelm = (v: string) => {
         <button class="linkbtn" @click="emit('sign-out')">Sign out</button>
       </span>
       <button v-else class="linkbtn" @click="emit('sign-in')">Sign in</button>
-      <a class="switch" href="/">Classic UI ↗</a>
     </div>
   </header>
 </template>
