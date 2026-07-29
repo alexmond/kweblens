@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NDataTable, NInput } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, ref, watch } from 'vue';
+import { shallowRef, computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
 import KebabMenu from './KebabMenu.vue';
@@ -16,7 +16,7 @@ import type { HelmChart } from '../types';
 const props = defineProps<{ cluster: string }>();
 const emit = defineEmits<{ (e: 'action', a: HelmAction): void }>();
 
-const charts = ref<HelmChart[] | null>(null);
+const charts = shallowRef<HelmChart[] | null>(null);
 const error = ref<string | null>(null);
 const query = ref('');
 

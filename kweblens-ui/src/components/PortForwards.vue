@@ -4,7 +4,7 @@
 // Emits: require-auth () — a Stop was attempted without being signed in; shell prompts login
 import { NButton, NDataTable, NTag } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, ref, watch } from 'vue';
+import { shallowRef, computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
 import type { PortForward } from '../types';
@@ -12,7 +12,7 @@ import type { PortForward } from '../types';
 const props = defineProps<{ cluster: string; authed: boolean }>();
 const emit = defineEmits<{ (e: 'require-auth'): void }>();
 
-const forwards = ref<PortForward[] | null>(null);
+const forwards = shallowRef<PortForward[] | null>(null);
 const error = ref<string | null>(null);
 const busy = ref<string | null>(null);
 

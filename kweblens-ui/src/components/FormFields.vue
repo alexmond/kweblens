@@ -9,8 +9,7 @@ import { parseDocument } from 'yaml';
 
 import KeyValueEditor from './KeyValueEditor.vue';
 
-const props = defineProps<{ modelValue: string }>();
-const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
+const model = defineModel<string>({ required: true });
 
 const parseError = ref<string | null>(null);
 const kind = ref('');
@@ -64,7 +63,7 @@ const parse = (text: string) => {
   }
 };
 
-watch(() => props.modelValue, parse, { immediate: true });
+watch(model, parse, { immediate: true });
 
 // Set a map at a path (deleting the key when empty), then re-serialise and emit.
 const setMap = (doc: ReturnType<typeof parseDocument>, path: string[], obj: Record<string, string>) => {
@@ -78,7 +77,7 @@ const setMap = (doc: ReturnType<typeof parseDocument>, path: string[], obj: Reco
 // original formatting (and don't show up as spurious changes in the diff).
 const writeBack = (which: 'labels' | 'annotations' | 'data') => {
   try {
-    const doc = parseDocument(props.modelValue);
+    const doc = parseDocument(model.value);
     if (doc.errors.length) {
       return;
     }
@@ -89,7 +88,7 @@ const writeBack = (which: 'labels' | 'annotations' | 'data') => {
     } else {
       setMap(doc, ['data'], isSecret.value ? mapValues(data.value, encodeB64) : data.value);
     }
-    emit('update:modelValue', String(doc));
+    model.value = String(doc);
   } catch {
     // keep the last good document
   }

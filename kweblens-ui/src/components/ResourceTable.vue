@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NDropdown } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, ref } from 'vue';
+import { shallowRef, computed, h } from 'vue';
 
 import { age } from '../columns';
 import { containerNames, objKey, objName, objNs } from '../kube';
@@ -133,7 +133,7 @@ const sortVal = (o: KubeObject, c: TableColumn): string => (c.sortText ? c.sortT
 // under every column and are individually clickable. Pods are lazy-loaded on expand and
 // kept in childCache (keyed by objKey) so a live-refresh of `objects` doesn't drop them.
 type TreeRow = KubeObject & { children?: KubeObject[]; isLeaf?: boolean };
-const childCache = ref<Record<string, KubeObject[]>>({});
+const childCache = shallowRef<Record<string, KubeObject[]>>({});
 const treeData = computed<TreeRow[]>(() => {
   if (!props.fetchChildren) {
     return props.objects;

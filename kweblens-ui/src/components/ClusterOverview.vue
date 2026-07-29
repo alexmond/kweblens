@@ -4,7 +4,7 @@
 // Emits nothing — purely presentational (data is fetched internally per cluster).
 import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, ref, watch } from 'vue';
+import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { ageToSeconds } from '../kube';
@@ -14,8 +14,8 @@ import StatCard from './StatCard.vue';
 
 const props = defineProps<{ cluster: string; name: string; masterUrl?: string; namespaceCount: number }>();
 
-const nodes = ref<KubeObject[] | null>(null);
-const warnings = ref<EventSummary[] | null>(null);
+const nodes = shallowRef<KubeObject[] | null>(null);
+const warnings = shallowRef<EventSummary[] | null>(null);
 const err = ref<string | null>(null);
 
 let reqId = 0;

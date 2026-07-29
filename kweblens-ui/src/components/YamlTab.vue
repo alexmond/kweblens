@@ -5,7 +5,7 @@
 // Emits (mirrors the React `onAuthExpired` callback prop):
 //   auth-expired ()   — an apply came back 401/403; the shell must re-prompt for creds
 import { NButton, NSwitch } from 'naive-ui';
-import { computed, ref, watch } from 'vue';
+import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { stripManagedFields } from '../kube';
@@ -31,7 +31,7 @@ const hideManaged = ref(true);
 const copied = ref(false);
 const showEditor = ref(false);
 const draft = ref('');
-const schema = ref<Record<string, unknown> | null>(null);
+const schema = shallowRef<Record<string, unknown> | null>(null);
 const msg = ref<string | null>(null);
 const msgErr = ref(false);
 

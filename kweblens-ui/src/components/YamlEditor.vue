@@ -23,9 +23,9 @@ import type { EditorDiagnostic } from '../types';
 
 // `schema` (a JSON Schema for the object's kind, from the cluster's OpenAPI) turns on
 // schema-aware completion, lint and hover; without it the editor is plain YAML.
-const props = defineProps<{ value: string; schema?: Record<string, unknown> | null }>();
+const value = defineModel<string>('value', { required: true });
+const props = defineProps<{ schema?: Record<string, unknown> | null }>();
 const emit = defineEmits<{
-  (e: 'update:value', v: string): void;
   (e: 'diagnostics', d: EditorDiagnostic[]): void;
 }>();
 
@@ -60,7 +60,7 @@ function build() {
   view = new EditorView({
     parent: host.value,
     state: EditorState.create({
-      doc: props.value,
+      doc: value.value,
       extensions: [
         basicSetup,
         langCompartment.of(langExtension()),
@@ -69,7 +69,7 @@ function build() {
         themeCompartment.of(themeVariant()),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) {
-            emit('update:value', u.state.doc.toString());
+            value.value = u.state.doc.toString();
           }
           emitDiagnostics(u.view);
         }),
@@ -80,18 +80,15 @@ function build() {
 
 // Reflect an external value change (e.g. Cancel/reset, reload) without wiping the cursor
 // on echoes of our own edits.
-watch(
-  () => props.value,
-  (next) => {
-    if (!view) {
-      return;
-    }
-    const current = view.state.doc.toString();
-    if (next !== current) {
-      view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
-    }
-  },
-);
+watch(value, (next) => {
+  if (!view) {
+    return;
+  }
+  const current = view.state.doc.toString();
+  if (next !== current) {
+    view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
+  }
+});
 
 // The schema is fetched asynchronously — switch the language/schema extension in when it
 // arrives (or back to plain YAML if it's cleared).

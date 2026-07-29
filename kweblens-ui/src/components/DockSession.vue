@@ -12,7 +12,7 @@
  * Ports React `TerminalSession` + `LogsSession` from kweblens-ui/src/dock.tsx. Vue's onMounted
  * runs once (no StrictMode double-mount), so no double-mount guard is needed.
  */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { shallowRef, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import type { DockSession } from '../dock';
 import { containerQuery, execSocketUrl, logBaseUrl } from '../dock';
@@ -26,7 +26,7 @@ const termHost = ref<HTMLDivElement | null>(null);
 let fit: { fit: () => void } | null = null;
 
 // --- logs state ---
-const lines = ref<string[]>([]);
+const lines = shallowRef<string[]>([]);
 const wrap = ref(false);
 const logBody = ref<HTMLDivElement | null>(null);
 

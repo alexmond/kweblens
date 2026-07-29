@@ -2,7 +2,7 @@
 // The workloads dashboard: a StatCard grid over WORKLOAD_KINDS (total + ready per kind,
 // danger-flagged when unhealthy) plus a recent-events pane.
 // Emits nothing — purely presentational (data is fetched internally per cluster).
-import { computed, ref, watch } from 'vue';
+import { shallowRef, computed, watch } from 'vue';
 
 import { api } from '../api';
 import { objSpec, objStatus, toNum } from '../kube';
@@ -32,8 +32,8 @@ const WORKLOAD_KINDS: { id: string; label: string; healthy: (o: KubeObject) => b
 
 const props = defineProps<{ cluster: string }>();
 
-const counts = ref<Record<string, { total: number; ready: number }>>({});
-const events = ref<EventSummary[] | null>(null);
+const counts = shallowRef<Record<string, { total: number; ready: number }>>({});
+const events = shallowRef<EventSummary[] | null>(null);
 
 let reqId = 0;
 watch(

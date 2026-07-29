@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal } from 'naive-ui';
-import { onMounted, ref } from 'vue';
+import { shallowRef, onMounted, ref } from 'vue';
 
 import { ApiError, api } from '../api';
 import HelmValuesEditor from './HelmValuesEditor.vue';
@@ -49,7 +49,7 @@ const repository = ref(init.repository);
 const chart = ref(init.chart);
 const version = ref(init.version);
 const valuesYaml = ref('');
-const savedValues = ref<string[]>([]);
+const savedValues = shallowRef<string[]>([]);
 const revision = ref(init.revision);
 const createNamespace = ref(false);
 // Advanced options (map to jhelm InstallOptions / UpgradeOptions).

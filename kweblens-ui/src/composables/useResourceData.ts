@@ -1,5 +1,5 @@
 import type { Ref } from 'vue';
-import { ref, watch } from 'vue';
+import { shallowRef, ref, watch } from 'vue';
 
 import { api, clusterBase } from '../api';
 import type { ColumnDef } from '../columns';
@@ -15,12 +15,12 @@ export function useResourceData(
   namespace: Ref<string | null>,
   setError: (e: string | null) => void,
 ) {
-  const objects = ref<KubeObject[]>([]);
+  const objects = shallowRef<KubeObject[]>([]);
   const loading = ref(false);
   const live = ref(false);
-  const cols = ref<ColumnDef[]>([]);
-  const usage = ref<Record<string, UsageSummary>>({});
-  const nodeDisk = ref<Record<string, NodeDiskUsage>>({});
+  const cols = shallowRef<ColumnDef[]>([]);
+  const usage = shallowRef<Record<string, UsageSummary>>({});
+  const nodeDisk = shallowRef<Record<string, NodeDiskUsage>>({});
 
   const setObjects = (updater: (prev: KubeObject[]) => KubeObject[]) => {
     objects.value = updater(objects.value);

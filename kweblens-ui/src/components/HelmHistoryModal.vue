@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NModal } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, ref, watch } from 'vue';
+import { shallowRef, computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { age } from '../columns';
@@ -15,7 +15,7 @@ import type { HelmRelease } from '../types';
 const props = defineProps<{ cluster: string; namespace: string; name: string }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
-const history = ref<HelmRelease[] | null>(null);
+const history = shallowRef<HelmRelease[] | null>(null);
 const error = ref<string | null>(null);
 
 watch(

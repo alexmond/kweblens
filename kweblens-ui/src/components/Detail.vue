@@ -9,7 +9,7 @@
 //   auth-expired ()                                   — a YAML apply came back 401/403
 //   close        ()                                   — close the drawer (X or Escape)
 import { NDrawer, NDrawerContent, NTabPane, NTabs } from 'naive-ui';
-import { computed, ref, watch } from 'vue';
+import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { useEscapeKey } from '../composables/useEscapeKey';
@@ -36,7 +36,7 @@ const emit = defineEmits<{
 
 type Tab = 'overview' | 'yaml' | 'events' | 'metrics';
 const tab = ref<Tab>(props.initialEdit ? 'yaml' : 'overview');
-const events = ref<EventSummary[] | null>(null);
+const events = shallowRef<EventSummary[] | null>(null);
 const eventsError = ref<string | null>(null);
 
 const kind = computed(() => props.obj.kind ?? '');

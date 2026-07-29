@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NModal } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, ref, watch } from 'vue';
+import { shallowRef, computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
 import type { HelmResourceRef } from '../types';
@@ -14,7 +14,7 @@ import type { HelmResourceRef } from '../types';
 const props = defineProps<{ cluster: string; namespace: string; name: string }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'open', kind: string, namespace: string): void }>();
 
-const resources = ref<HelmResourceRef[] | null>(null);
+const resources = shallowRef<HelmResourceRef[] | null>(null);
 const error = ref<string | null>(null);
 
 watch(
