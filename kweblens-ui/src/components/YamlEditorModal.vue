@@ -44,6 +44,14 @@ const err = ref(false);
 
 const errorCount = computed(() => warnings.value.filter((w) => w.severity === 'error').length);
 
+// Size: a normal dialog, an expand-to-fill toggle, and drag-resize (CSS `resize` on the
+// card — see .yaml-editor-modal in styles.css). Vue only patches style keys that actually
+// change, so a size the user dragged sticks until they toggle expand.
+const expanded = ref(false);
+const modalStyle = computed(() =>
+  expanded.value ? { width: '96vw', height: '94vh' } : { width: 'min(1100px, 92vw)', height: '72vh' },
+);
+
 const apply = async () => {
   busy.value = true;
   msg.value = null;
@@ -81,9 +89,20 @@ const onShow = (v: boolean) => {
     :bordered="false"
     :mask-closable="false"
     class="yaml-editor-modal"
-    style="width: min(1100px, 92vw)"
+    :style="modalStyle"
     @update:show="onShow"
   >
+    <template #header-extra>
+      <button
+        type="button"
+        class="drawer-expand"
+        :title="expanded ? 'Restore window size' : 'Expand to fill'"
+        :aria-label="expanded ? 'Restore window size' : 'Expand to fill'"
+        @click="expanded = !expanded"
+      >
+        {{ expanded ? '⤡' : '⤢' }}
+      </button>
+    </template>
     <NTabs v-model:value="tab" type="line" size="small" pane-class="editor-dialog-pane">
       <NTabPane name="editor" tab="Editor" display-directive="show">
         <YamlEditor v-model:value="draft" :schema="schema" :readonly="readonly" @diagnostics="(d) => (warnings = d)" />
