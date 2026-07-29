@@ -194,16 +194,6 @@ body {
   color: #1f2a30;
 }
 
-.switch {
-  color: #9fb3bf;
-  text-decoration: none;
-  font-size: 13px;
-}
-
-.switch:hover {
-  color: var(--bar-fg);
-}
-
 .authbox {
   display: inline-flex;
   align-items: center;

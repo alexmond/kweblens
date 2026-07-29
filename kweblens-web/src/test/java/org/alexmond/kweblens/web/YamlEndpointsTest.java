@@ -1,7 +1,6 @@
 package org.alexmond.kweblens.web;
 
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
-import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
@@ -20,9 +19,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 /**
  * YAML view + apply endpoints. Security is not applied to this MockMvc (the auth gate is
@@ -89,44 +86,6 @@ class YamlEndpointsTest {
 		mvc.perform(post("/api/v1/clusters/test/apply").contentType("application/yaml").content(yaml))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.name").value("my-config"));
-	}
-
-	@Test
-	void detailPageRenders() throws Exception {
-		// Assert on rendered content so the Thymeleaf template is actually executed —
-		// asserting the view name alone never renders it, which is how earlier
-		// template bugs slipped through.
-		mvc.perform(get("/clusters/test/detail").param("resource", "configmaps")
-			.param("namespace", "default")
-			.param("name", "cm1"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("detail"))
-			.andExpect(model().attributeExists("detail", "events"))
-			.andExpect(content().string(org.hamcrest.Matchers.containsString("Delete")))
-			.andExpect(content().string(org.hamcrest.Matchers.containsString("kw-skinpicker")));
-	}
-
-	@Test
-	void nodeDetailRendersCordonWriteActions() throws Exception {
-		// The Node branch renders the cordon/uncordon forms — a th:action form path that
-		// a ConfigMap never exercises. Force a full render to prove it doesn't blow up.
-		client.nodes().resource(new NodeBuilder().withNewMetadata().withName("node-a").endMetadata().build()).create();
-
-		mvc.perform(get("/clusters/test/detail").param("resource", "nodes").param("name", "node-a"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("detail"))
-			.andExpect(content().string(org.hamcrest.Matchers.containsString("Cordon")))
-			.andExpect(content().string(org.hamcrest.Matchers.containsString("Uncordon")));
-	}
-
-	@Test
-	void yamlPageRenders() throws Exception {
-		mvc.perform(get("/clusters/test/yaml").param("resource", "configmaps")
-			.param("namespace", "default")
-			.param("name", "cm1"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("yaml"))
-			.andExpect(model().attributeExists("yaml", "descriptor"));
 	}
 
 }

@@ -16,7 +16,6 @@ import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.ResourceSummary;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
 import org.alexmond.kweblens.web.security.AuditService;
-import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
  * YAML API: fetch a single resource's manifest, and apply (server-side) a manifest. Apply

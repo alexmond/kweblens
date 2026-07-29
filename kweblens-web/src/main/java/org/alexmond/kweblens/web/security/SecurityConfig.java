@@ -69,8 +69,7 @@ public class SecurityConfig {
 		SecurityContextRepository contextRepository = new DelegatingSecurityContextRepository(
 				new RequestAttributeSecurityContextRepository(), new HttpSessionSecurityContextRepository());
 		http.authorizeHttpRequests((auth) -> {
-			auth.requestMatchers("/actuator/health/**", "/actuator/info", "/login", "/error", "/css/**", "/webjars/**",
-					"/ui", "/ui/**")
+			auth.requestMatchers("/actuator/health/**", "/actuator/info", "/login", "/error", "/", "/ui", "/ui/**")
 				.permitAll();
 			// Pod exec is privileged: the WebSocket handshake always requires auth, even
 			// in open-mode.

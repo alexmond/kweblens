@@ -15,9 +15,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 /**
  * Helm HTTP endpoints against a mock cluster with <b>no seeded resources</b>. (The crud
@@ -50,15 +48,6 @@ class HelmEndpointsTest {
 		mvc.perform(get("/api/v1/clusters/test/helm/releases").param("namespace", "default"))
 			.andExpect(status().isOk())
 			.andExpect(content().json("[]"));
-	}
-
-	@Test
-	void dashboardHelmPageRenders() throws Exception {
-		mvc.perform(get("/clusters/test/helm").param("namespace", "default"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("helm"))
-			.andExpect(model().attribute("selectedId", "helm"))
-			.andExpect(model().attributeExists("releases"));
 	}
 
 }

@@ -16,7 +16,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
-import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
  * Live resource-table updates over Server-Sent Events. Bridges a fabric8 watch to an

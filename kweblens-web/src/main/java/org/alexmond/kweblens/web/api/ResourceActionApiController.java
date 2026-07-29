@@ -14,7 +14,6 @@ import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
 import org.alexmond.kweblens.web.security.AuditService;
-import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
  * Mutating resource actions — delete, scale, and rolling restart. All are POSTs, so they

@@ -25,9 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 @SpringBootTest(properties = "kweblens.load-kubeconfig=false")
 @EnableKubernetesMockClient(crud = true)
@@ -119,14 +117,6 @@ class ClusterEndpointsTest {
 	}
 
 	@Test
-	void dashboardHomeRendersClustersView() throws Exception {
-		mvc.perform(get("/"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("clusters"))
-			.andExpect(model().attributeExists("clusters"));
-	}
-
-	@Test
 	void apiListsResourcesGenerically() throws Exception {
 		mvc.perform(get("/api/v1/clusters/test/resources/deployments").param("namespace", "web"))
 			.andExpect(status().isOk())
@@ -140,20 +130,6 @@ class ClusterEndpointsTest {
 	}
 
 	@Test
-	void dashboardResourcePageRendersShell() throws Exception {
-		mvc.perform(get("/clusters/test/r/pods"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("resource"))
-			.andExpect(model().attribute("selectedId", "pods"))
-			.andExpect(model().attributeExists("categories", "descriptor", "rows"));
-	}
-
-	@Test
-	void dashboardClusterRootRedirects() throws Exception {
-		mvc.perform(get("/clusters/test")).andExpect(status().is3xxRedirection());
-	}
-
-	@Test
 	void apiListsEvents() throws Exception {
 		mvc.perform(get("/api/v1/clusters/test/events").param("namespace", "web"))
 			.andExpect(status().isOk())
@@ -162,54 +138,10 @@ class ClusterEndpointsTest {
 	}
 
 	@Test
-	void dashboardEventsPageRenders() throws Exception {
-		mvc.perform(get("/clusters/test/events"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("events"))
-			.andExpect(model().attribute("selectedId", "events"))
-			.andExpect(model().attributeExists("events", "categories"));
-	}
-
-	@Test
-	void dashboardLogsPageRenders() throws Exception {
-		mvc.perform(get("/clusters/test/pods/web/nginx/logs"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("logs"))
-			.andExpect(model().attribute("pod", "nginx"))
-			.andExpect(model().attribute("namespace", "web"));
-	}
-
-	@Test
-	void dashboardMetricsPageRenders() throws Exception {
-		// No metrics-server in the mock -> the page still renders with empty usage
-		// tables.
-		mvc.perform(get("/clusters/test/metrics"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("metrics"))
-			.andExpect(model().attributeExists("nodeUsage", "podUsage"));
-	}
-
-	@Test
 	void apiMetricsDegradesToEmptyWhenAbsent() throws Exception {
 		mvc.perform(get("/api/v1/clusters/test/metrics/nodes"))
 			.andExpect(status().isOk())
 			.andExpect(content().json("[]"));
-	}
-
-	@Test
-	void dashboardDiagnosePageRenders() throws Exception {
-		mvc.perform(get("/clusters/test/diagnose").param("namespace", "web"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("diagnose"))
-			.andExpect(model().attributeExists("diagnosis"));
-	}
-
-	@Test
-	void dashboardExecPageRenders() throws Exception {
-		mvc.perform(get("/clusters/test/pods/web/nginx/exec"))
-			.andExpect(status().isOk())
-			.andExpect(view().name("exec"))
-			.andExpect(model().attribute("pod", "nginx"));
 	}
 
 	@Test

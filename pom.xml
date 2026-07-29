@@ -84,12 +84,6 @@
         <!-- Boot-4.0-aligned train — for the optional config-server client. -->
         <spring-cloud.version>2025.1.2</spring-cloud.version>
 
-        <!-- Front-end assets served in-jar via WebJars (no CDN for the self-hosted app). -->
-        <bootstrap.version>5.3.8</bootstrap.version>
-        <bootstrap-icons.version>1.11.3</bootstrap-icons.version>
-        <htmx.version>2.0.4</htmx.version>
-        <thymeleaf-layout-dialect.version>3.4.0</thymeleaf-layout-dialect.version>
-        <xterm.version>5.3.0</xterm.version>
         <picocli.version>4.7.7</picocli.version>
 
         <!-- SonarQube analysis scope. The CLI is a console app whose stdout IS its output

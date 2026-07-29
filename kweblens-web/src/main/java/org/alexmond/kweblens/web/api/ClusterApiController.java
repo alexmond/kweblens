@@ -16,7 +16,6 @@ import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.ResourceSummary;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
-import org.alexmond.kweblens.web.ui.UnknownResourceException;
 
 /**
  * Read-only JSON API over the registered clusters. Mirrors the dashboard's data so the
