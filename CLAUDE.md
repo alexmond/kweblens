@@ -143,11 +143,17 @@ method on a bean wired into `McpConfig`'s `MethodToolCallbackProvider`.
 
 - **Helm — use jhelm, not shelling out to the `helm` binary.** Freelens has a Helm-releases view;
   kweblens's Helm slice MUST be built on the sibling **jhelm** library
-  (`org.alexmond:jhelm-core`, currently `1.3.1-SNAPSHOT`) — kweblens is also a **dogfood** of
+  (`org.alexmond:jhelm-core`, currently `1.5.0`) — kweblens is also a **dogfood** of
   jhelm. `jhelm-core` is Spring-Boot-autoconfigured (`JhelmCoreAutoConfiguration`) and exposes an
   `action/` API (`StatusAction`, `HistoryAction`, `ListAction`, `CreateAction`/upgrade, etc.);
   wrap those in a `HelmService` in core and a `web/helm/` slice. Pin the version via a
   `jhelm.version` property (BOM-align with the Boot line). Do **not** add a `helm` CLI dependency.
+  **Keep `jhelm.version` a RELEASED version — never a `-SNAPSHOT`.** jhelm publishes releases to
+  Maven Central but **no snapshots**, so a `-SNAPSHOT` pin resolves only from whatever happens to
+  be in the local `~/.m2` and CI goes red on every build (this bit us: `1.3.1-SNAPSHOT` was green
+  locally and unresolvable everywhere else). Note Maven Central's *search* index does not return
+  the `org.alexmond:jhelm-*` releases — check `repo1.maven.org/maven2/org/alexmond/<artifact>/`
+  directly before concluding a version isn't published.
 - **AI troubleshooting agent** (issues #10/#11): a Spring AI `ChatClient` that **tool-calls the
   existing cluster access layer** (`ClusterTools` + read tools) to validate/diagnose, then
   proposes guarded fixes. Model-configurable (default Anthropic Claude, inert without a key),

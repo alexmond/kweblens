@@ -71,9 +71,11 @@
 
         <!-- jhelm: the sibling Helm-in-Java library (dogfood). jhelm-kube brings jhelm-core; its
              Kubernetes client backend is pluggable/optional and kweblens drives it with fabric8
-             (already on the classpath), so no io.kubernetes client is needed. SNAPSHOT — must be
-             resolvable (local ~/.m2 or the jhelm snapshot repo) for the build. -->
-        <jhelm.version>1.3.1-SNAPSHOT</jhelm.version>
+             (already on the classpath), so no io.kubernetes client is needed.
+             Keep this a RELEASED version — it must resolve from Maven Central. A -SNAPSHOT here
+             only ever exists in a local ~/.m2 (jhelm publishes no snapshots), so CI cannot resolve
+             it and the whole build goes red. The fabric8 backend landed in 1.5.0. -->
+        <jhelm.version>1.5.0</jhelm.version>
         <!-- jhelm's chart rendering needs snakeyaml-engine with CoreScalarResolver(boolean); Spring
              Boot's BOM otherwise pins 2.9 (no such ctor -> NoSuchMethodError at chart load). Boot uses
              classic org.yaml:snakeyaml, not this engine, so overriding to jhelm's version is safe. -->
