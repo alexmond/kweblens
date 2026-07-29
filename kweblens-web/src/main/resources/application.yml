@@ -61,6 +61,13 @@ server:
 kweblens:
   load-kubeconfig: ${KWEBLENS_LOAD_KUBECONFIG:true}
   clusters: []
+  # Built-in cluster simulator (dev / CI / performance testing) — generates an in-JVM "sim"
+  # cluster with configurable object counts, no real cluster. Enable and pair with
+  # KWEBLENS_LOAD_KUBECONFIG=false so the simulator is the only cluster. See web/sim/*.
+  simulator:
+    enabled: ${KWEBLENS_SIMULATOR_ENABLED:false}
+    size: ${KWEBLENS_SIMULATOR_SIZE:200}
+    namespaces: ${KWEBLENS_SIMULATOR_NAMESPACES:3}
   # AI diagnosis (#10). Deterministic validators always run; LLM enrichment only when enabled
   # AND an Anthropic API key is configured.
   ai:

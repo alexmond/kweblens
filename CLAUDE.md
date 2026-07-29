@@ -37,9 +37,12 @@ NODE_PATH=$HOME/.local/lib/playwright/node_modules node scripts/perf-sweep.mjs  
   `dev-verify`, no browser/cluster). (2) *Site-wide sweep, on-demand:* `scripts/perf-sweep.mjs`
   (Playwright) walks every nav leaf against a running instance and fails if any page's
   time-to-first-row or max main-thread block (a hang) exceeds budget (`LOAD_MS`/`BLOCK_MS`).
-  Needs the app up + a cluster with data, so it's not a per-commit gate — run before releases
-  or after big UI changes. **When you add a live-updated list, add its watch to the batching
-  pattern** (buffer + flush per rAF) so it can't flood.
+  Run it against the **built-in simulator** for a headless, cluster-free run at configurable
+  scale — start the app with `KWEBLENS_SIMULATOR_ENABLED=true KWEBLENS_LOAD_KUBECONFIG=false
+  KWEBLENS_SIMULATOR_SIZE=200` (registers a generated `sim` cluster; see `web/sim/`), then
+  `node scripts/perf-sweep.mjs`. On-demand, not a per-commit gate. **When you add a
+  live-updated list, add its watch to the batching pattern** (buffer + flush per rAF) so it
+  can't flood.
 - Tests are **hermetic**: no live cluster. The fabric8 `kubernetes-server-mock`
   (`@EnableKubernetesMockClient(crud = true)`) serves an in-JVM API server; web tests set
   `kweblens.load-kubeconfig=false` so the registry starts empty and the test seeds its own client.

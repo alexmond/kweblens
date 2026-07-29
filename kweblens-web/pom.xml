@@ -165,11 +165,12 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- In-JVM Kubernetes API server double for controller/service tests without a cluster. -->
+        <!-- In-JVM Kubernetes API server double. Used by controller/service tests, and (runtime)
+             by the built-in simulator (kweblens.simulator.enabled) to back a generated "sim"
+             cluster with configurable object counts — inert unless the simulator is turned on. -->
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-server-mock</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 
