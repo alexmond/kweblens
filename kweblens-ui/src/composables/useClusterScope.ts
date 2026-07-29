@@ -1,5 +1,5 @@
 import type { Ref } from 'vue';
-import { ref, watch } from 'vue';
+import { shallowRef, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { NAV, allNavItems, loadFavorites, withSyntheticNav } from '../shell';
@@ -12,12 +12,12 @@ export function useClusterScope(
   helmRelease: Ref<{ namespace: string; name: string } | null>,
   setError: (e: string | null) => void,
 ) {
-  const nav = ref<NavCategory[]>([]);
-  const counts = ref<Record<string, number>>({});
-  const helmCounts = ref<Record<string, number>>({});
-  const namespaces = ref<string[]>([]);
-  const helmReleaseList = ref<HelmRelease[]>([]);
-  const favorites = ref<string[]>([]);
+  const nav = shallowRef<NavCategory[]>([]);
+  const counts = shallowRef<Record<string, number>>({});
+  const helmCounts = shallowRef<Record<string, number>>({});
+  const namespaces = shallowRef<string[]>([]);
+  const helmReleaseList = shallowRef<HelmRelease[]>([]);
+  const favorites = shallowRef<string[]>([]);
   const helmScope = ref<Set<string> | null>(null);
 
   watch(

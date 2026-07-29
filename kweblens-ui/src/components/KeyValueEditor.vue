@@ -5,13 +5,12 @@ import { ref, watch } from 'vue';
 // A key/value grid: edit, add and remove entries. v-model is a Record<string, string>.
 // Internally it holds an ordered row list so keys can be edited freely (including transient
 // blank/duplicate keys) and emits the reconstructed record (blank keys dropped, last wins).
-const props = defineProps<{
-  modelValue: Record<string, string>;
+const model = defineModel<Record<string, string>>({ required: true });
+defineProps<{
   keyPlaceholder?: string;
   valuePlaceholder?: string;
   secret?: boolean;
 }>();
-const emit = defineEmits<{ (e: 'update:modelValue', v: Record<string, string>): void }>();
 
 interface Row {
   k: string;
@@ -32,16 +31,16 @@ const asRecord = (): Record<string, string> => {
 // Re-seed the rows only when the model structurally differs from what they represent, so a
 // parent re-render (or our own echoed emit) doesn't wipe an in-progress edit.
 watch(
-  () => props.modelValue,
-  (model) => {
-    if (JSON.stringify(asRecord()) !== JSON.stringify(model ?? {})) {
-      rows.value = Object.entries(model ?? {}).map(([k, v]) => ({ k, v }));
+  model,
+  (next) => {
+    if (JSON.stringify(asRecord()) !== JSON.stringify(next ?? {})) {
+      rows.value = Object.entries(next ?? {}).map(([k, v]) => ({ k, v }));
     }
   },
   { immediate: true, deep: true },
 );
 
-const publish = () => emit('update:modelValue', asRecord());
+const publish = () => (model.value = asRecord());
 const addRow = () => rows.value.push({ k: '', v: '' });
 const removeRow = (i: number) => {
   rows.value.splice(i, 1);

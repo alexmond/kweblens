@@ -1,11 +1,11 @@
-import { ref } from 'vue';
+import { shallowRef, ref } from 'vue';
 
 import type { DockSession } from '../dock';
 import type { DockKind } from '../types';
 
 /** Terminal/log dock sessions: open, close, and pop out into floating windows. */
 export function useDock() {
-  const sessions = ref<DockSession[]>([]);
+  const sessions = shallowRef<DockSession[]>([]);
   const active = ref<string | null>(null);
   let seq = 0;
 

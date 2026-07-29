@@ -11,7 +11,7 @@
 //   auth-expired ()  — apply returned 401/403; the shell must re-prompt for creds
 //   close ()         — dismissed, or apply succeeded (after a brief confirmation)
 import { NButton, NModal, NTabPane, NTabs } from 'naive-ui';
-import { computed, ref } from 'vue';
+import { shallowRef, computed, ref } from 'vue';
 
 import { ApiError, api } from '../api';
 import type { EditorDiagnostic } from '../types';
@@ -34,7 +34,7 @@ const emit = defineEmits<{
 const original = props.initialText;
 const draft = ref(props.initialText);
 const tab = ref<'editor' | 'form' | 'warnings' | 'review'>('editor');
-const warnings = ref<EditorDiagnostic[]>([]);
+const warnings = shallowRef<EditorDiagnostic[]>([]);
 const busy = ref(false);
 const msg = ref<string | null>(null);
 const err = ref(false);

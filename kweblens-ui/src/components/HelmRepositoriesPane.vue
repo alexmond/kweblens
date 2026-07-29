@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NInput } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, ref, watch } from 'vue';
+import { shallowRef, computed, h, ref, watch } from 'vue';
 
 import { ApiError, api } from '../api';
 import { useDialog } from '../dialog';
@@ -18,7 +18,7 @@ const props = defineProps<{ authed: boolean }>();
 const emit = defineEmits<{ (e: 'require-auth'): void; (e: 'auth-expired'): void }>();
 
 const dialog = useDialog();
-const repos = ref<{ name: string; url: string }[] | null>(null);
+const repos = shallowRef<{ name: string; url: string }[] | null>(null);
 const error = ref<string | null>(null);
 const name = ref('');
 const url = ref('');
