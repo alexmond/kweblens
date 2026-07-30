@@ -2080,41 +2080,58 @@ body.row-resizing {
   display: inline-block;
 }
 
+/* Each tone sets a colour variable; the shapes below decide how it is used (filled for app
+   containers, outlined for init/ephemeral). Keeping the colour in one place is what lets the
+   two shapes stay in step. */
 .csq-ok {
-  background: #22a352;
+  --csq: #22a352;
 }
 
 .csq-warn {
-  background: #e0a800;
+  --csq: #e0a800;
 }
 
 .csq-err {
-  background: #d64545;
+  --csq: #d64545;
 }
 
 .csq-done {
-  background: #94a3b8;
+  --csq: #94a3b8;
+}
+
+.csq-wait {
+  --csq: #c3ccd2;
+}
+
+.csq {
+  background: var(--csq);
 }
 
 .csq-wait {
   background: #fff;
-  border: 1px solid #c3ccd2;
+  border: 1px solid var(--csq);
 }
 
 /* Init and ephemeral containers must be TELLABLE APART from app containers, not just present.
    A healthy init container has terminated with exit 0, which renders in the muted 'done' tone —
    so without a shape difference a normal pod would show a "finished" square beside running ones
-   and look broken. Narrower bars read as a preliminary phase; the tone still carries the state. */
+   and look broken.
+
+   They are OUTLINED rather than narrower. An earlier version used 5px slivers, which read as a
+   stray line or a rendering glitch rather than a deliberate element — worst for the pale 'done'
+   tone, which is also the most common case. A full-size hollow square is unmistakably "a
+   container, of a different kind", and because the distinction is a border rather than a fill it
+   holds on both the light and dark backgrounds. */
 .csq-init,
 .csq-ephemeral {
-  width: 5px;
-  border-radius: 1px;
+  background: transparent;
+  border: 2px solid var(--csq);
 }
 
-/* Ephemeral (debug) containers are transient attachments, so they are outlined rather than
-   solid — present and noticeable, but visibly not part of the pod's steady state. */
+/* Ephemeral (debug) containers are transient attachments: same outline, dashed, so they read as
+   "attached" rather than "part of the pod's steady state". */
 .csq-ephemeral {
-  opacity: 0.75;
+  border-style: dashed;
 }
 
 /* Separates the init phase from the app containers. */
