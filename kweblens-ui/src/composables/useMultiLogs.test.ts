@@ -57,6 +57,10 @@ const SESSION: DockSession = {
 const POD_A = 'ns/web-a/app';
 const POD_B = 'ns/web-b/app';
 
+// Realistic replica names: a long shared generated prefix, differing only in the suffix.
+const REPLICA_A = 'demo/podinfo-6fb65cb78-6gn6z/podinfo';
+const REPLICA_B = 'demo/podinfo-6fb65cb78-t9mht/podinfo';
+
 function start(session: DockSession = SESSION) {
   const scope = effectScope();
   let logs!: ReturnType<typeof useMultiLogs>;
@@ -133,6 +137,30 @@ describe('useMultiLogs sources and filtering', () => {
     expect(logs.sources.value.map((s) => s.label)).toEqual(['web-a/app', 'web-b/app']);
     expect(logs.colourOf(POD_A)).not.toBe(logs.colourOf(POD_B));
     expect(logs.showPrefix.value).toBe(true);
+
+    scope.stop();
+  });
+
+  it('strips the shared replica prefix so the gutter labels differ where it is truncated', () => {
+    // Without this, both labels render as "podinfo-6fb65cb7…" in the fixed-width gutter and
+    // colour becomes the ONLY way to tell two replicas apart.
+    const { scope, logs, es } = start();
+    es.emit('sources', { sources: [REPLICA_A, REPLICA_B], truncated: false, totalFound: 2 });
+
+    expect(logs.sources.value.map((s) => s.label)).toEqual(['6gn6z/podinfo', 't9mht/podinfo']);
+    // Distinct within the first few characters, which is all the gutter shows.
+    const [a, b] = logs.sources.value.map((s) => s.label.slice(0, 4));
+    expect(a).not.toBe(b);
+
+    scope.stop();
+  });
+
+  it('keeps the full pod name when there is nothing shared to strip', () => {
+    const { scope, logs, es } = start();
+    es.emit('sources', { sources: [REPLICA_A], truncated: false, totalFound: 1 });
+
+    // A single source has no shared prefix to remove — trimming would leave nothing.
+    expect(logs.sources.value[0].label).toBe('podinfo-6fb65cb78-6gn6z/podinfo');
 
     scope.stop();
   });

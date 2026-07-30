@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 
 import type { DockSession, LogScope } from '../dock';
-import { multiLogStreamUrl, sourceLabel } from '../dock';
+import { multiLogStreamUrl, sourceLabels } from '../dock';
 
 /** One rendered log line, already attributed to the source that produced it. */
 export type MultiLogLine = {
@@ -129,9 +129,12 @@ export function useMultiLogs(
           truncated: boolean;
           totalFound: number;
         };
+        // Labels are computed for the set, not per id: telling replicas apart needs to know
+        // what prefix they all share.
+        const labels = sourceLabels(data.sources, scope());
         sources.value = data.sources.map((id, i) => ({
           id,
-          label: sourceLabel(id, scope()),
+          label: labels[i],
           colour: PALETTE[i % PALETTE.length],
           visible: true,
         }));

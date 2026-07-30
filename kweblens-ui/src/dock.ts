@@ -79,13 +79,46 @@ export function multiLogStreamUrl(cluster: string, session: DockSession, contain
   return `${clusterBase(cluster)}/logs/stream?${params.toString()}`;
 }
 
-/** A short, readable label for a source id (`ns/pod/container`) in the gutter. */
-export function sourceLabel(sourceId: string, scope: LogScope | undefined): string {
-  const [, pod, container] = sourceId.split('/');
-  if (scope === 'workload') {
-    // Across pods the pod name is what distinguishes lines; keep the container too when
-    // the pod runs more than one, since otherwise sidecar output looks like app output.
-    return `${pod}/${container}`;
+/**
+ * Gutter labels for a whole set of source ids (`ns/pod/container`), computed together so
+ * they are actually distinguishable.
+ *
+ * Replica pod names share a long generated prefix and differ only in the SUFFIX
+ * (`podinfo-6fb65cb78-6gn6z` vs `…-t9mht`). A fixed-width gutter truncates the end, so the
+ * naive `pod/container` label renders identically for every replica and colour becomes the
+ * only way to tell them apart — which it must never be. So in workload scope the shared
+ * prefix is stripped, leaving the part that carries the information.
+ *
+ * The full id is still shown on hover, and the prefix is only stripped when doing so leaves
+ * every source with a distinct, non-trivial label.
+ */
+export function sourceLabels(ids: string[], scope: LogScope | undefined): string[] {
+  const parts = ids.map((id) => id.split('/'));
+  if (scope !== 'workload') {
+    return parts.map((p, i) => p[2] ?? ids[i]);
   }
-  return container ?? sourceId;
+  const pods = parts.map((p) => p[1] ?? '');
+  const shared = commonPrefix(pods);
+  const trimmed = pods.map((p) => p.slice(shared.length).replace(/^-+/, ''));
+  const usable = trimmed.every((t) => t.length >= 3) && new Set(trimmed).size === pods.length;
+  return parts.map((p, i) => `${usable ? trimmed[i] : pods[i]}/${p[2]}`);
+}
+
+/** The longest string every input starts with (empty when they share nothing). */
+function commonPrefix(values: string[]): string {
+  if (values.length < 2) {
+    return '';
+  }
+  let prefix = values[0];
+  for (const value of values.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < value.length && prefix[i] === value[i]) {
+      i += 1;
+    }
+    prefix = prefix.slice(0, i);
+    if (prefix === '') {
+      break;
+    }
+  }
+  return prefix;
 }
