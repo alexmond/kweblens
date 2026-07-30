@@ -1,49 +1,57 @@
 <script setup lang="ts">
-// The workloads dashboard.
+// One dashboard for every category — Workloads, Network, Storage, Config.
 //
-// Leads with what NEEDS ATTENTION and names the objects, then shows the totals — a count is
-// only interesting when it is unexpected, and "one of your 52 Deployments is unhealthy" without
-// saying which one just moves the hunt one step later.
+// Leads with what NEEDS ATTENTION and names the objects, then shows the totals: a count is only
+// interesting when it is unexpected, and "one of your 52 Services is broken" without saying which
+// one just moves the hunt one step later.
 //
-// Health is computed SERVER-SIDE (/workload-health). The browser used to fetch every object of
-// seven kinds to produce seven numbers; it now receives a summary plus the named offenders, and
-// the same rules serve a future TUI and the agent instead of each reimplementing them.
+// The checks are computed SERVER-SIDE (/overview/<category>) and they differ completely per
+// category — a workload verdict, a Service-to-Endpoints join, a PVC phase, a reverse reference
+// scan — but they all answer the same shape of question, so one component renders all of them and
+// the same summaries can serve a future TUI and the agent.
 import { shallowRef, computed, watch } from 'vue';
 
 import { api } from '../api';
 import type { EventSummary, KindHealth } from '../types';
 import EventsPane from './EventsPane.vue';
 import StatCard from './StatCard.vue';
+import { OVERVIEW_CATEGORIES } from './overviewCategories';
 
-const props = defineProps<{ cluster: string; namespace?: string | null }>();
+const props = defineProps<{ cluster: string; category: string; namespace?: string | null }>();
 
-// Emitted with the kind (and namespace, for a named object) the user asked to see. The shell
-// owns navigation; the overview only says where it wants to go.
+// Emitted with the kind (and namespace, for a named object) the user asked to see. The shell owns
+// navigation; the overview only says where it wants to go.
 const emit = defineEmits<{ (e: 'navigate', kind: string, namespace?: string): void }>();
 
 const health = shallowRef<KindHealth[] | null>(null);
 const events = shallowRef<EventSummary[] | null>(null);
 const error = shallowRef<string | null>(null);
 
+const copy = computed(() => OVERVIEW_CATEGORIES[props.category]);
+/** Events are about workloads; on a storage or config page they would be noise. */
+const showEvents = computed(() => props.category === 'workloads');
+
 let reqId = 0;
 watch(
   // Re-fetch on namespace as well as cluster: the filter is in the header the whole time this
   // page is open, so ignoring it here made it look broken rather than inapplicable.
-  () => [props.cluster, props.namespace] as const,
-  ([cluster, namespace]) => {
+  () => [props.cluster, props.category, props.namespace] as const,
+  ([cluster, category, namespace]) => {
     const my = ++reqId;
     health.value = null;
     events.value = null;
     error.value = null;
     const ns = namespace ?? undefined;
     api
-      .workloadHealth(cluster, ns)
+      .overview(cluster, category, ns)
       .then((h) => my === reqId && (health.value = h))
       .catch((e) => my === reqId && (error.value = String(e)));
-    api
-      .events(cluster, ns)
-      .then((e) => my === reqId && (events.value = e))
-      .catch(() => my === reqId && (events.value = []));
+    if (showEvents.value) {
+      api
+        .events(cluster, ns)
+        .then((e) => my === reqId && (events.value = e))
+        .catch(() => my === reqId && (events.value = []));
+    }
   },
   { immediate: true },
 );
@@ -51,13 +59,13 @@ watch(
 const cards = computed(() =>
   (health.value ?? []).map((k) => {
     if (k.error) {
-      // "Could not check" must never render as a healthy zero. Still clickable: the list page
-      // is where the actual error is reported, so it is the useful next step.
+      // "Could not check" must never render as a healthy zero. Still clickable: the list page is
+      // where the actual error is reported, so it is the useful next step.
       return { id: k.id, kind: k.kind, value: '—', label: `${k.label} · unavailable`, danger: false };
     }
     const parts = [`${k.ok} ok`];
     if (k.attention > 0) {
-      parts.push(`${k.attention} need attention`);
+      parts.push(copy.value.advisory ? `${k.attention} unreferenced` : `${k.attention} need attention`);
     }
     if (k.suspended > 0) {
       parts.push(`${k.suspended} suspended`);
@@ -67,7 +75,8 @@ const cards = computed(() =>
       kind: k.kind,
       value: k.total,
       label: `${k.label} · ${parts.join(' · ')}`,
-      danger: k.attention > 0,
+      // Advisory findings are candidates for review, not faults — see OVERVIEW_CATEGORIES.
+      danger: k.attention > 0 && !copy.value.advisory,
     };
   }),
 );
@@ -84,7 +93,7 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
 
 <template>
   <div class="overview">
-    <h1 class="ov-title">Workloads</h1>
+    <h1 class="ov-title">{{ copy.title }}</h1>
     <!-- Name the scope. A filtered page that looks identical to an unfiltered one is how a
          reading gets trusted for the wrong cluster slice. -->
     <div class="ov-scope-note">{{ namespace ? `Namespace: ${namespace}` : 'All namespaces' }}</div>
@@ -93,8 +102,8 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
 
     <!-- Needs attention FIRST. This is the question the page exists to answer. -->
     <section v-if="health" class="ov-sec">
-      <h3>Needs attention</h3>
-      <div v-if="attention.length === 0" class="empty">Everything is healthy.</div>
+      <h3>{{ copy.attention }}</h3>
+      <div v-if="attention.length === 0" class="empty">{{ copy.clean }}</div>
       <template v-else>
         <table class="mini attention-table">
           <thead>
@@ -128,6 +137,10 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
       <div v-if="unavailable.length > 0" class="ov-truncated">
         Could not check: {{ unavailable.map((k) => k.label).join(', ') }}.
       </div>
+      <!-- What the check does NOT cover, next to the result rather than out of sight. -->
+      <ul v-if="copy.notes" class="ov-notes">
+        <li v-for="(note, i) in copy.notes" :key="i">{{ note }}</li>
+      </ul>
     </section>
 
     <div class="ov-cards">
@@ -142,7 +155,7 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
       />
     </div>
 
-    <section class="ov-sec">
+    <section v-if="showEvents" class="ov-sec">
       <h3>Recent Events</h3>
       <div v-if="eventsTruncated" class="ov-truncated">
         Showing the {{ EVENT_LIMIT }} most recent of {{ events?.length }} events.

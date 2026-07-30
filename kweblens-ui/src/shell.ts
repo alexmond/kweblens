@@ -21,7 +21,18 @@ export const NAV = {
 } as const;
 
 const SYNTHETIC_PREFIXES = ['overview:', 'helm:', 'portforward:'] as const;
-const CATEGORY = { cluster: 'Cluster', workloads: 'Workloads', network: 'Network', helm: 'Helm' } as const;
+const CATEGORY = { cluster: 'Cluster', network: 'Network', helm: 'Helm' } as const;
+
+/**
+ * Categories that have a dashboard, mapped to the id the shell renders it under. Driven by a map
+ * rather than a branch per category so adding one is a line here plus a server-side check.
+ */
+const OVERVIEW_CATEGORIES: Record<string, string> = {
+  Workloads: NAV.overviewWorkloads,
+  Config: 'overview:config',
+  Network: 'overview:network',
+  Storage: 'overview:storage',
+};
 export const HELM_VIEW_IDS: string[] = [NAV.helmCharts, NAV.helmReleases, NAV.helmRepositories];
 
 export const isSynthetic = (id: string): boolean => SYNTHETIC_PREFIXES.some((prefix) => id.startsWith(prefix));
@@ -51,19 +62,15 @@ export function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
     if (c.label === CATEGORY.cluster) {
       return { ...c, items: [{ id: NAV.overviewCluster, label: 'Overview', kind: '', namespaced: false }, ...c.items] };
     }
-    if (c.label === CATEGORY.workloads) {
-      return {
-        ...c,
-        items: [{ id: NAV.overviewWorkloads, label: 'Overview', kind: '', namespaced: false }, ...c.items],
-      };
-    }
+    let items = c.items;
     if (c.label === CATEGORY.network) {
-      return {
-        ...c,
-        items: [...c.items, { id: NAV.portForwards, label: 'Port Forwards', kind: '', namespaced: false }],
-      };
+      items = [...items, { id: NAV.portForwards, label: 'Port Forwards', kind: '', namespaced: false }];
     }
-    return c;
+    const overview = OVERVIEW_CATEGORIES[c.label];
+    if (overview) {
+      items = [{ id: overview, label: 'Overview', kind: '', namespaced: false }, ...items];
+    }
+    return items === c.items ? c : { ...c, items };
   });
   const helm: NavCategory = {
     label: CATEGORY.helm,

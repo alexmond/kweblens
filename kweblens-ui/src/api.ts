@@ -142,8 +142,9 @@ export const api = {
   about: () => getJson<AboutInfo>('/api/v1/about'),
   // Per-kind workload health, computed server-side (GH#153/#155): tallies plus the NAMED
   // objects needing attention, so the browser no longer fetches whole collections to count.
-  workloadHealth: (cluster: string, namespace?: string) =>
-    getJson<KindHealth[]>(`${clusterBase(cluster)}/workload-health` + nsQuery(namespace)),
+  /** A category dashboard: per-kind tallies plus the named objects needing attention. */
+  overview: (cluster: string, category: string, namespace?: string) =>
+    getJson<KindHealth[]>(`${clusterBase(cluster)}/overview/${category}` + nsQuery(namespace)),
   // One object plus its resolved relations (GH#136) — one request rather than N per drawer.
   detail: (cluster: string, resourceId: string, namespace: string, name: string) =>
     getJson<ObjectDetail>(

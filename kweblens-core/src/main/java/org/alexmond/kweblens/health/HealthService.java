@@ -9,7 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.stereotype.Service;
 
-import org.alexmond.kweblens.health.KindHealth.UnhealthyItem;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 
@@ -33,12 +32,6 @@ import org.alexmond.kweblens.resource.ResourceService;
 @RequiredArgsConstructor
 public class HealthService {
 
-	/**
-	 * Cap on named unhealthy objects per kind. A namespace-wide outage should produce a
-	 * usable list, not a thousand rows — and the cap is reported, never silently applied.
-	 */
-	private static final int MAX_NAMED = 25;
-
 	private final ResourceService resources;
 
 	/**
@@ -58,25 +51,16 @@ public class HealthService {
 		String kind = descriptor.kind();
 		try {
 			List<GenericKubernetesResource> objects = this.resources.listRaw(clusterId, descriptor, namespace);
-			int ok = 0;
-			int attention = 0;
-			int suspended = 0;
-			List<UnhealthyItem> named = new ArrayList<>();
+			Tally tally = new Tally(descriptor.id(), descriptor.label(), kind);
 			for (GenericKubernetesResource o : objects) {
 				WorkloadHealth.Verdict verdict = WorkloadHealth.verdict(kind, o);
 				switch (verdict.state()) {
-					case ATTENTION -> {
-						attention++;
-						if (named.size() < MAX_NAMED) {
-							named.add(item(kind, o, verdict.reason()));
-						}
-					}
-					case SUSPENDED -> suspended++;
-					default -> ok++;
+					case ATTENTION -> tally.attention(namespaceOf(o), nameOf(o), verdict.reason());
+					case SUSPENDED -> tally.suspended();
+					default -> tally.ok();
 				}
 			}
-			return new KindHealth(descriptor.id(), descriptor.label(), kind, objects.size(), ok, attention, suspended,
-					List.copyOf(named), attention > named.size(), null);
+			return tally.toKindHealth();
 		}
 		catch (RuntimeException ex) {
 			log.debug("Health summary failed for '{}': {}", descriptor.id(), ex.getMessage());
@@ -84,10 +68,12 @@ public class HealthService {
 		}
 	}
 
-	private UnhealthyItem item(String kind, GenericKubernetesResource o, String reason) {
-		String namespace = (o.getMetadata() != null) ? o.getMetadata().getNamespace() : null;
-		String name = (o.getMetadata() != null) ? o.getMetadata().getName() : "";
-		return new UnhealthyItem(kind, namespace, name, reason);
+	private String namespaceOf(GenericKubernetesResource o) {
+		return (o.getMetadata() != null) ? o.getMetadata().getNamespace() : null;
+	}
+
+	private String nameOf(GenericKubernetesResource o) {
+		return (o.getMetadata() != null) ? o.getMetadata().getName() : "";
 	}
 
 }

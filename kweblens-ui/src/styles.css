@@ -2714,3 +2714,13 @@ body.dragging {
   color: #94a3b8;
   margin-bottom: 6px;
 }
+
+/* Caveats that qualify an overview's result. Deliberately in the flow, not a tooltip: a claim
+   about the cluster should carry its bounds where it is read. */
+.ov-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #94a3b8;
+}
