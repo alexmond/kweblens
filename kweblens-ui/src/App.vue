@@ -20,10 +20,12 @@ import type { KubeObject, NavItem } from './types';
 
 import AppFooter from './components/AppFooter.vue';
 import BrandBar from './components/BrandBar.vue';
+import CategoryOverview from './components/CategoryOverview.vue';
 import ClusterOverview from './components/ClusterOverview.vue';
 import CreateModal from './components/CreateModal.vue';
 import Detail from './components/Detail.vue';
 import DiagnosticsModal from './components/DiagnosticsModal.vue';
+import { overviewCategoryOf } from './components/overviewCategories';
 import DialogHost from './components/DialogHost.vue';
 import DockArea from './components/DockArea.vue';
 import ForwardModal from './components/ForwardModal.vue';
@@ -32,7 +34,6 @@ import LoginModal from './components/LoginModal.vue';
 import PortForwards from './components/PortForwards.vue';
 import ResourceListView from './components/ResourceListView.vue';
 import Sidebar from './components/Sidebar.vue';
-import WorkloadsOverview from './components/WorkloadsOverview.vue';
 
 // --- UI state (the shell owns selection/detail/query/auth/modals; data comes from composables) ---
 const error = ref<string | null>(null);
@@ -159,6 +160,8 @@ const mergedCounts = computed(() => ({ ...counts.value, ...helmCounts.value }));
 
 const id = computed(() => selected.value?.id);
 const showClusterOverview = computed(() => (!selected.value || id.value === NAV.overviewCluster) && !error.value);
+/** Which category dashboard to render, if the selected nav item is one. */
+const overviewCategory = computed(() => overviewCategoryOf(id.value));
 const showHelm = computed(() => id.value !== undefined && HELM_VIEW_IDS.includes(id.value));
 const helmViewName = computed(() =>
   id.value === NAV.helmCharts ? 'charts' : id.value === NAV.helmRepositories ? 'repositories' : 'releases',
@@ -239,9 +242,10 @@ const onForwardStarted = () => {
                 :knows-kind="knowsKind"
                 @navigate="navigateToKind"
               />
-              <WorkloadsOverview
-                v-else-if="id === NAV.overviewWorkloads"
+              <CategoryOverview
+                v-else-if="overviewCategory"
                 :cluster="cluster"
+                :category="overviewCategory"
                 :namespace="namespace"
                 @navigate="navigateToKind"
               />
