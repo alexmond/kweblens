@@ -116,6 +116,10 @@ function podUsageColumns(cols: TableColumn[], usage: Record<string, UsageSummary
   const containersCol: TableColumn = {
     key: 'containers',
     header: 'Containers',
+    // Sorts on READY APP containers only, deliberately. The squares themselves also show init
+    // and ephemeral containers, but "ready" is not a meaningful state for those: a healthy init
+    // container has terminated (ready: false), so folding them in here would add zeros and make
+    // the sort say less, not more.
     sortText: (o) =>
       String(
         (((o.status as Record<string, unknown>)?.containerStatuses as { ready?: boolean }[]) ?? []).filter(
