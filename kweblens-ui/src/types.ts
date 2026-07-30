@@ -215,3 +215,29 @@ export interface ObjectDetail {
   object: KubeObject;
   relations: Record<string, Relation>;
 }
+
+/** One object needing attention, with the reason — from the workload-health endpoint. */
+interface UnhealthyItem {
+  kind: string;
+  namespace: string | null;
+  name: string;
+  reason: string;
+}
+
+/**
+ * Per-kind health summary. Computed server-side so the browser receives a summary instead of
+ * every object — and so the same rules serve a future TUI and the agent.
+ */
+export interface KindHealth {
+  id: string;
+  label: string;
+  kind: string;
+  total: number;
+  ok: number;
+  attention: number;
+  suspended: number;
+  needsAttention: UnhealthyItem[];
+  truncated: boolean;
+  /** Absent on success. Set when the kind could not be listed — never conflate with "zero". */
+  error?: string | null;
+}
