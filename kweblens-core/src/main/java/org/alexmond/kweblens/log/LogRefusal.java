@@ -26,11 +26,26 @@ public final class LogRefusal {
 	private LogRefusal() {
 	}
 
+	/**
+	 * The kubelet's own refusal, which is <b>not</b> a Status envelope — it is a plain
+	 * sentence returned with HTTP 200. Seen when a terminated container's logs have been
+	 * garbage-collected, so asking for the previous run answers
+	 * {@code unable to retrieve container logs for containerd://…}.
+	 *
+	 * <p>
+	 * There are two wire formats for the same idea because two components refuse: the API
+	 * server answers with a Status object, the kubelet with prose.
+	 */
+	private static final String KUBELET_REFUSAL = "unable to retrieve container logs for ";
+
 	public static boolean isRefusal(String body) {
 		if (body == null) {
 			return false;
 		}
 		String head = body.stripLeading();
+		if (head.startsWith(KUBELET_REFUSAL)) {
+			return true;
+		}
 		return head.startsWith("{\"kind\":\"Status\"") && head.contains("\"status\":\"Failure\"");
 	}
 
@@ -44,6 +59,12 @@ public final class LogRefusal {
 	 * that is exactly what naive string scanning gets wrong.
 	 */
 	public static String message(String body) {
+		String head = (body != null) ? body.stripLeading() : "";
+		if (head.startsWith(KUBELET_REFUSAL)) {
+			// Already a sentence; the container id it names is noise to a reader, but the
+			// sentence itself is the diagnosis ("the logs are gone").
+			return head.lines().findFirst().orElse(head).trim();
+		}
 		try {
 			Status status = Serialization.unmarshal(body.stripLeading(), Status.class);
 			return StringUtils.hasText(status.getMessage()) ? status.getMessage() : "the log is not available";

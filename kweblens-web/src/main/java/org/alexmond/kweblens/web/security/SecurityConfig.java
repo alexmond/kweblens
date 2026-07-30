@@ -94,7 +94,17 @@ public class SecurityConfig {
 			// then shows its own "Invalid credentials" instead of freezing.
 			.httpBasic((basic) -> basic.securityContextRepository(contextRepository)
 				.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
-			.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**"))
+			// CSRF guards cookie-authenticated BROWSER form posts. The JSON API and the
+			// MCP
+			// endpoint are neither: they are called by non-browser clients that
+			// authenticate
+			// per request, and they cannot obtain a token. Without /mcp/** here every
+			// tool
+			// call is rejected 403 — the MCP server accepts the SSE handshake and then
+			// refuses every JSON-RPC message sent back to it, so the tool surface exists
+			// but
+			// is unreachable.
+			.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**", "/mcp/**"))
 			// Materialise the CSRF token before view rendering commits the response.
 			.addFilterAfter(new CsrfTokenEagerFilter(), CsrfFilter.class)
 			// The JSON API and WebSocket answer unauthenticated calls with 401, not a
