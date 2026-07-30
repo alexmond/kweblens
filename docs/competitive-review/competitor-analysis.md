@@ -311,11 +311,25 @@ cache and true per-user RBAC. The three observed resolutions:
 - **Headlamp** solved it — a shared server-side cache **plus per-request `SelfSubjectAccessReview`
   gating in front of it**, both in the backend and in the UI.
 
-**This is directly load-bearing for kweblens.** `ClusterRegistry` holds one long-lived fabric8 client
-per cluster id and watches with that identity — architecturally the Octant model. The P0 auth epic
-(§6.1–6.2) is therefore *not* "add a login page": it is choosing deliberately between
-per-user clients (correct, loses the shared cache) and shared watch + SSAR gating (Headlamp's answer,
-keeps performance). **Decide this before building OIDC, not after.**
+**This is directly load-bearing for kweblens** — but see the correction below before acting on it.
+`ClusterRegistry` holds one long-lived fabric8 client per cluster id and watches with that identity.
+
+> **CORRECTED 2026-07-30 (ADR-001, GH#135).** This section originally called that "architecturally
+> the Octant model" and concluded that per-user clients would "lose the shared cache". That
+> inference was **wrong**, and it overstated the cost of per-user identity. kweblens shares the
+> *credential*, not a cache: it has **no informers** (verified — none in `kweblens-core` or
+> `kweblens-web`), and `ResourceService.watchRaw()` opens a **fresh watch per SSE connection**. So
+> there is no shared cache to lose, and Octant's specific constraint — informers requiring one
+> identity — does not apply here.
+>
+> The general finding above stands and is well sourced; only the kweblens-specific consequence
+> changed. Because the cost of per-user identity is much lower than assumed, **ADR-001 recommends
+> API-server-enforced identity (token pass-through, impersonation as fallback) rather than
+> Headlamp's SSAR gating** — SSAR-as-enforcement fails open, whereas a missed check under
+> impersonation fails closed. See `docs/design/adr-001-identity-model.md`.
+
+The auth work is therefore still *not* "add a login page" — it is choosing the identity model
+deliberately. **Decide it before building OIDC, not after.**
 
 ### Freelens — **the design reference, and the reason to exist**
 `freelensapp/freelens`, MIT, **v1.10.3 (2026-07-07)**, ~5.3k stars, Electron desktop only, forked from
