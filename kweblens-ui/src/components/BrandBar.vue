@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'sign-in'): void;
   (e: 'sign-out'): void;
   (e: 'toggle-theme'): void;
+  (e: 'show-diagnostics'): void;
 }>();
 
 const nsOptions = computed(() => [
@@ -76,6 +77,13 @@ const onHelm = (v: string) => {
         @click="emit('toggle-theme')"
       >
         {{ dark ? '☀' : '☾' }}
+      </button>
+      <button
+        class="linkbtn"
+        title="Diagnostics — detected capabilities and effective config"
+        @click="emit('show-diagnostics')"
+      >
+        ⓘ
       </button>
       <span v-if="authUser" class="authbox">
         <i class="user-dot" /> {{ authUser }}

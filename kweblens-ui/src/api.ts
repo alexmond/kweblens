@@ -1,5 +1,7 @@
 import { auth } from './auth';
 import type {
+  AboutInfo,
+  ClusterDiagnostics,
   ClusterInfo,
   EventSummary,
   HelmChart,
@@ -133,6 +135,9 @@ export const api = {
   // Validates HTTP Basic creds and establishes the session cookie the exec WebSocket rides.
   verifySession: () => postJson<{ user: string }>('/api/v1/auth/session'),
   clusters: () => getJson<ClusterInfo[]>(CLUSTERS),
+  // Read-only diagnostics (#27): what a cluster supports, and how this instance is configured.
+  clusterDiagnostics: (cluster: string) => getJson<ClusterDiagnostics>(`${clusterBase(cluster)}/diagnostics`),
+  about: () => getJson<AboutInfo>('/api/v1/about'),
   // Build/version metadata from Actuator (public). build.version + build.time when present.
   info: () =>
     getJson<{ build?: { version?: string; time?: string; name?: string }; git?: { commit?: { id?: string } } }>(

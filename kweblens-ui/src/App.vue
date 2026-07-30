@@ -13,6 +13,7 @@ import { useResourceData } from './composables/useResourceData';
 import { defaultHiddenCols } from './columns';
 import { useDialog } from './dialog';
 import { objKey } from './kube';
+import { loadDark, loadHiddenCols, loadNamespace, saveCluster, saveDark, saveNamespace } from './prefs';
 import { HELM_VIEW_IDS, NAV, filterObjects, isSynthetic } from './shell';
 import { buildResourceColumns } from './table';
 import type { KubeObject, NavItem } from './types';
@@ -22,6 +23,7 @@ import BrandBar from './components/BrandBar.vue';
 import ClusterOverview from './components/ClusterOverview.vue';
 import CreateModal from './components/CreateModal.vue';
 import Detail from './components/Detail.vue';
+import DiagnosticsModal from './components/DiagnosticsModal.vue';
 import DialogHost from './components/DialogHost.vue';
 import DockArea from './components/DockArea.vue';
 import ForwardModal from './components/ForwardModal.vue';
@@ -44,6 +46,7 @@ const query = ref('');
 const authUser = ref<string | null>(null);
 const showLogin = ref(false);
 const showCreate = ref(false);
+const showDiagnostics = ref(false);
 const forward = ref<{ kind: string; namespace: string; name: string; ports: number[] } | null>(null);
 const helmTarget = ref<{ namespace: string; name: string } | null>(null);
 
@@ -51,11 +54,11 @@ const setError = (e: string | null) => (error.value = e);
 const dialog = useDialog();
 
 // Theme: Naive UI light/dark, toggled from the brand bar and persisted.
-const dark = ref(localStorage.getItem('kw-theme') !== 'light');
+const dark = ref(loadDark());
 const theme = computed(() => (dark.value ? darkTheme : null));
 const toggleTheme = () => {
   dark.value = !dark.value;
-  localStorage.setItem('kw-theme', dark.value ? 'dark' : 'light');
+  saveDark(dark.value);
   document.documentElement.classList.toggle('kw-dark', dark.value);
 };
 document.documentElement.classList.toggle('kw-dark', dark.value);
@@ -93,18 +96,26 @@ const {
 } = useDock();
 
 // Reset the view when the active cluster, or the selected kind/namespace, changes.
-watch(cluster, () => {
+watch(cluster, (id) => {
   selected.value = null;
-  namespace.value = null;
   helmRelease.value = null;
+  // Namespace is remembered PER CLUSTER: namespaces are cluster-local, so carrying one over
+  // would filter on a namespace that may not exist here and silently show an empty list.
+  namespace.value = id ? loadNamespace(id) : null;
+  saveCluster(id);
 });
 watch([selected, namespace], () => {
   detail.value = null;
   query.value = '';
-  // Seed from the kind's defaultHidden columns (e.g. Nodes offers more than fits — the extras
-  // stay available in the Columns ▾ picker).
-  hiddenCols.value = defaultHiddenCols(selected.value?.id);
+  // Restore this kind's saved column choice, falling back to its defaults (e.g. Nodes offers
+  // more columns than fit — the extras stay available in the Columns ▾ picker). Previously
+  // this always re-seeded from the defaults, so enabling an opt-in column was lost on the
+  // next navigation.
+  hiddenCols.value = loadHiddenCols(selected.value?.id, defaultHiddenCols(selected.value?.id));
   selection.value = new Set();
+  if (cluster.value && namespace.value !== undefined) {
+    saveNamespace(cluster.value, namespace.value);
+  }
 });
 
 const { navigateToKind, navigateToPortForwards, navigateToHelmRelease } = useNavigation(nav, {
@@ -195,7 +206,9 @@ const onForwardStarted = () => {
         @sign-in="showLogin = true"
         @sign-out="signOut"
         @toggle-theme="toggleTheme"
+        @show-diagnostics="showDiagnostics = true"
       />
+      <DiagnosticsModal v-model="showDiagnostics" :cluster="cluster" />
 
       <div class="body">
         <Sidebar

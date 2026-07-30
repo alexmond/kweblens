@@ -155,3 +155,38 @@ export interface HelmMutationResult {
 
 /** A dock pane is either an exec terminal or a log follow. */
 export type DockKind = 'terminal' | 'logs';
+
+/**
+ * One probed capability from the read-only diagnostics panel (#27). `detail` is the important
+ * field: it explains what was looked for and what was found, so "why is this chart empty?"
+ * has an answer in the UI instead of only in the server log.
+ */
+interface Capability {
+  name: string;
+  available: boolean;
+  detail: string;
+}
+
+export interface ClusterDiagnostics {
+  clusterId: string;
+  kubernetesVersion: string;
+  capabilities: Capability[];
+}
+
+/** Effective, non-secret configuration of this kweblens instance. */
+export interface AboutInfo {
+  version: string;
+  buildTime: string | null;
+  clusterCount: number;
+  loadKubeconfig: boolean;
+  configuredClusters: number;
+  security: {
+    mode: string;
+    adminUsername: string;
+    adminPasswordConfigured: boolean;
+    perUserIdentity: boolean;
+    rbacAware: boolean;
+  };
+  aiEnabled: boolean;
+  simulator: { enabled: boolean; clusterId?: string; size?: number; namespaces?: number };
+}
