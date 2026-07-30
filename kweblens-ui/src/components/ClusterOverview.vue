@@ -1,18 +1,32 @@
 <script setup lang="ts">
 // The cluster dashboard: node/namespace/warnings stat cards, API-server line, cluster
 // CPU + memory metric charts, and a warnings table built from the cluster's events.
-// Emits nothing — purely presentational (data is fetched internally per cluster).
+//
+// Cards and warning rows navigate; the shell owns where to (this only names a kind). Note the
+// split scope: warnings follow the namespace filter, while nodes and the cluster metric charts
+// are cluster-scoped and CANNOT — so they say so instead of quietly showing unfiltered numbers
+// beside filtered ones.
 import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { ageToSeconds } from '../kube';
+import { ageToSeconds, eventObjectKind } from '../kube';
 import type { EventSummary, KubeObject } from '../types';
 import MetricChart from './MetricChart.vue';
 import StatCard from './StatCard.vue';
 
-const props = defineProps<{ cluster: string; name: string; masterUrl?: string; namespaceCount: number }>();
+const props = defineProps<{
+  cluster: string;
+  name: string;
+  masterUrl?: string;
+  namespaceCount: number;
+  namespace?: string | null;
+  /** Whether the shell can navigate to a kind — a row with nowhere to go must not look clickable. */
+  knowsKind?: (kind: string) => boolean;
+}>();
+
+const emit = defineEmits<{ (e: 'navigate', kind: string, namespace?: string): void }>();
 
 const nodes = shallowRef<KubeObject[] | null>(null);
 const warnings = shallowRef<EventSummary[] | null>(null);
@@ -20,8 +34,8 @@ const err = ref<string | null>(null);
 
 let reqId = 0;
 watch(
-  () => props.cluster,
-  (cluster) => {
+  () => [props.cluster, props.namespace] as const,
+  ([cluster, namespace]) => {
     const my = ++reqId;
     nodes.value = null;
     warnings.value = null;
@@ -31,12 +45,27 @@ watch(
       .then((n) => my === reqId && (nodes.value = n))
       .catch((e) => my === reqId && (err.value = String(e)));
     api
-      .events(cluster)
+      .events(cluster, namespace ?? undefined)
       .then((ev) => my === reqId && (warnings.value = ev.filter((x) => x.type === 'Warning')))
       .catch(() => my === reqId && (warnings.value = []));
   },
   { immediate: true },
 );
+
+/** The kind a warning row would open, or null when it has nowhere to go. */
+const rowKind = (w: EventSummary): string | null => {
+  const kind = eventObjectKind(w.object);
+  return kind && (!props.knowsKind || props.knowsKind(kind)) ? kind : null;
+};
+
+const rowProps = (w: EventSummary) => {
+  const kind = rowKind(w);
+  if (!kind) {
+    return {};
+  }
+  const go = () => emit('navigate', kind, w.namespace ?? undefined);
+  return { class: 'row-link', style: { cursor: 'pointer' }, onClick: go };
+};
 
 const nodeReady = (o: KubeObject): boolean => {
   const conds = ((o.status as Record<string, unknown>)?.conditions as Record<string, unknown>[]) ?? [];
@@ -61,15 +90,24 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
 <template>
   <div class="overview">
     <h1 class="ov-title">{{ name }}</h1>
+    <div class="ov-scope-note">{{ namespace ? `Namespace: ${namespace}` : 'All namespaces' }}</div>
     <div class="ov-cards">
-      <StatCard :value="nodes ? nodes.length : '…'" :label="`Nodes${nodes ? ` · ${readyNodes} ready` : ''}`" />
-      <StatCard :value="namespaceCount" label="Namespaces" />
+      <StatCard
+        :value="nodes ? nodes.length : '…'"
+        :label="`Nodes${nodes ? ` · ${readyNodes} ready` : ''}`"
+        clickable
+        @select="emit('navigate', 'Node')"
+      />
+      <StatCard :value="namespaceCount" label="Namespaces" clickable @select="emit('navigate', 'Namespace')" />
       <StatCard
         :value="warnings ? warnings.length : '…'"
         label="Warnings"
         :danger="!!(warnings && warnings.length > 0)"
       />
     </div>
+    <!-- Nodes and the charts below are cluster-scoped. Saying so is the honest alternative to
+         either ignoring the filter silently or pretending these can be narrowed. -->
+    <div v-if="namespace" class="ov-scope-note">Nodes and cluster metrics are cluster-wide and ignore this filter.</div>
     <div v-if="masterUrl" class="ov-api">
       API server: <span class="mono">{{ masterUrl }}</span>
     </div>
@@ -90,6 +128,7 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
         :data="warnRows"
         :loading="warnings === null"
         :row-key="(w) => `${w.object}/${w.reason}/${w.age}`"
+        :row-props="rowProps"
         size="small"
       />
     </section>

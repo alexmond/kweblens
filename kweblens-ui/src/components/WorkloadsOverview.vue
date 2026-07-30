@@ -15,7 +15,11 @@ import type { EventSummary, KindHealth } from '../types';
 import EventsPane from './EventsPane.vue';
 import StatCard from './StatCard.vue';
 
-const props = defineProps<{ cluster: string }>();
+const props = defineProps<{ cluster: string; namespace?: string | null }>();
+
+// Emitted with the kind (and namespace, for a named object) the user asked to see. The shell
+// owns navigation; the overview only says where it wants to go.
+const emit = defineEmits<{ (e: 'navigate', kind: string, namespace?: string): void }>();
 
 const health = shallowRef<KindHealth[] | null>(null);
 const events = shallowRef<EventSummary[] | null>(null);
@@ -23,18 +27,21 @@ const error = shallowRef<string | null>(null);
 
 let reqId = 0;
 watch(
-  () => props.cluster,
-  (cluster) => {
+  // Re-fetch on namespace as well as cluster: the filter is in the header the whole time this
+  // page is open, so ignoring it here made it look broken rather than inapplicable.
+  () => [props.cluster, props.namespace] as const,
+  ([cluster, namespace]) => {
     const my = ++reqId;
     health.value = null;
     events.value = null;
     error.value = null;
+    const ns = namespace ?? undefined;
     api
-      .workloadHealth(cluster)
+      .workloadHealth(cluster, ns)
       .then((h) => my === reqId && (health.value = h))
       .catch((e) => my === reqId && (error.value = String(e)));
     api
-      .events(cluster)
+      .events(cluster, ns)
       .then((e) => my === reqId && (events.value = e))
       .catch(() => my === reqId && (events.value = []));
   },
@@ -44,8 +51,9 @@ watch(
 const cards = computed(() =>
   (health.value ?? []).map((k) => {
     if (k.error) {
-      // "Could not check" must never render as a healthy zero.
-      return { id: k.id, value: '—', label: `${k.label} · unavailable`, danger: false };
+      // "Could not check" must never render as a healthy zero. Still clickable: the list page
+      // is where the actual error is reported, so it is the useful next step.
+      return { id: k.id, kind: k.kind, value: '—', label: `${k.label} · unavailable`, danger: false };
     }
     const parts = [`${k.ok} ok`];
     if (k.attention > 0) {
@@ -54,7 +62,13 @@ const cards = computed(() =>
     if (k.suspended > 0) {
       parts.push(`${k.suspended} suspended`);
     }
-    return { id: k.id, value: k.total, label: `${k.label} · ${parts.join(' · ')}`, danger: k.attention > 0 };
+    return {
+      id: k.id,
+      kind: k.kind,
+      value: k.total,
+      label: `${k.label} · ${parts.join(' · ')}`,
+      danger: k.attention > 0,
+    };
   }),
 );
 
@@ -71,6 +85,9 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
 <template>
   <div class="overview">
     <h1 class="ov-title">Workloads</h1>
+    <!-- Name the scope. A filtered page that looks identical to an unfiltered one is how a
+         reading gets trusted for the wrong cluster slice. -->
+    <div class="ov-scope-note">{{ namespace ? `Namespace: ${namespace}` : 'All namespaces' }}</div>
 
     <div v-if="error" class="error">{{ error }}</div>
 
@@ -89,7 +106,14 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(it, i) in attention" :key="i">
+            <tr
+              v-for="(it, i) in attention"
+              :key="i"
+              tabindex="0"
+              :title="`Show ${it.kind} in ${it.namespace ?? 'this cluster'}`"
+              @click="emit('navigate', it.kind, it.namespace ?? undefined)"
+              @keydown.enter="emit('navigate', it.kind, it.namespace ?? undefined)"
+            >
               <td>{{ it.kind }}</td>
               <td>{{ it.namespace ?? '—' }}</td>
               <td>{{ it.name }}</td>
@@ -107,7 +131,15 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
     </section>
 
     <div class="ov-cards">
-      <StatCard v-for="c in cards" :key="c.id" :value="c.value" :label="c.label" :danger="c.danger" />
+      <StatCard
+        v-for="c in cards"
+        :key="c.id"
+        :value="c.value"
+        :label="c.label"
+        :danger="c.danger"
+        clickable
+        @select="emit('navigate', c.kind)"
+      />
     </div>
 
     <section class="ov-sec">
