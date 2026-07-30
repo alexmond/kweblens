@@ -6,15 +6,18 @@
 //   navigate     (kind: string, ns?: string)         — open another kind/object list
 //   helm-release (namespace: string, name: string)   — open a Helm release's resources
 import { NTag } from 'naive-ui';
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 
-import type { KubeObject } from '../types';
+import { api } from '../api';
+import { objName, objNs } from '../kube';
+import type { KubeObject, Relation } from '../types';
 import Accordion from './Accordion.vue';
 import Chips from './Chips.vue';
 import SecretData from './SecretData.vue';
 import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS } from './overview';
+import { relationSections } from './relations';
 
-const props = defineProps<{ obj: KubeObject }>();
+const props = defineProps<{ obj: KubeObject; cluster?: string; resourceId?: string }>();
 const emit = defineEmits<{
   (e: 'navigate', kind: string, ns?: string): void;
   (e: 'helm-release', namespace: string, name: string): void;
@@ -31,6 +34,36 @@ const sections = computed(() =>
     body: s.body(props.obj),
   })),
 );
+
+// ---- Relations (GH#136) ----
+// Fetched rather than derived, because they need a second object: which pods back this
+// Service, what mounts this Secret, which pods the selector matches. One request to the
+// detail endpoint, which does the joins server-side and bounds their cost.
+const relations = ref<Record<string, Relation> | undefined>(undefined);
+const relationsLoading = ref(false);
+const relationsError = ref<string | null>(null);
+
+watch(
+  // Namespaced objects only: the relations resolved today are all namespace-scoped, and the
+  // endpoint's path requires a namespace.
+  () => [props.cluster, props.resourceId, objNs(props.obj), objName(props.obj)],
+  ([cluster, resourceId, namespace, name]) => {
+    relations.value = undefined;
+    relationsError.value = null;
+    if (!cluster || !resourceId || !namespace || !name) {
+      return;
+    }
+    relationsLoading.value = true;
+    api
+      .detail(cluster, resourceId, namespace, name)
+      .then((d) => (relations.value = d.relations))
+      .catch((e) => (relationsError.value = String(e)))
+      .finally(() => (relationsLoading.value = false));
+  },
+  { immediate: true },
+);
+
+const relSections = computed(() => relationSections(relations.value));
 
 const clip = (v: string) => (v.length > 48 ? v.slice(0, 48) + '…' : v);
 </script>
@@ -105,5 +138,43 @@ const clip = (v: string) => (v.length > 48 ? v.slice(0, 48) + '…' : v);
         </div>
       </template>
     </Accordion>
+
+    <!-- Relation-backed sections. Each carries its own state, so one unreadable kind degrades
+         to a message in its own section instead of blanking the drawer. -->
+    <Accordion
+      v-for="rel in relSections"
+      :key="'rel:' + rel.title"
+      :title="rel.title"
+      :count="rel.count"
+      :default-open="true"
+    >
+      <div v-if="rel.message" :class="rel.notPermitted ? 'rel-note rel-denied' : 'rel-note rel-error'">
+        {{ rel.message }}
+      </div>
+      <template v-else-if="rel.rows.length === 0">
+        <div class="rel-note dim">None.</div>
+      </template>
+      <template v-else>
+        <table class="mini">
+          <thead>
+            <tr>
+              <th v-for="h in rel.headers" :key="h">{{ h }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in rel.rows" :key="ri">
+              <td v-for="(cell, ci) in row" :key="ci" :class="cell.mono ? 'mono' : undefined">{{ cell.text }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="rel.truncated" class="rel-note rel-error">
+          Showing the first {{ rel.rows.length }} only — there are more.
+        </div>
+      </template>
+    </Accordion>
+    <!-- The joins cost a round trip, so say the view is still filling in rather than briefly
+         implying an object has no relations. -->
+    <div v-if="relationsLoading" class="rel-note dim">Loading related objects…</div>
+    <div v-if="relationsError" class="rel-note rel-error">Could not load related objects: {{ relationsError }}</div>
   </div>
 </template>

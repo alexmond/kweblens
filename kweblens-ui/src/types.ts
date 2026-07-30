@@ -190,3 +190,28 @@ export interface AboutInfo {
   aiEnabled: boolean;
   simulator: { enabled: boolean; clusterId?: string; size?: number; namespaces?: number };
 }
+
+/**
+ * One resolved relation from the per-kind detail endpoint (GH#136).
+ *
+ * Three-state by design: items, OR an error, OR `notPermitted`. A relation that failed must
+ * never render as an empty list — "there are none" is a factual claim about the cluster, and
+ * asserting it wrongly sends the reader after the wrong problem.
+ */
+export interface Relation {
+  items: KubeObject[];
+  /** True when the server capped the result, so the UI can say so instead of implying completeness. */
+  truncated: boolean;
+  /**
+   * ABSENT (not null) when the relation resolved — fabric8's serializer omits nulls, so this
+   * key simply is not present on success. Declared optional so the type matches the wire.
+   */
+  error?: string | null;
+  /** The credential kweblens used was refused (403) — expected under least-privilege, not a bug. */
+  notPermitted: boolean;
+}
+
+export interface ObjectDetail {
+  object: KubeObject;
+  relations: Record<string, Relation>;
+}

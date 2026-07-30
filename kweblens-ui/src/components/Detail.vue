@@ -127,6 +127,8 @@ watch(
         <NTabPane name="overview" tab="Overview" display-directive="if">
           <Overview
             :obj="obj"
+            :cluster="cluster"
+            :resource-id="resourceId"
             @navigate="(k, n) => emit('navigate', k, n)"
             @helm-release="(nsp, nm) => emit('helm-release', nsp, nm)"
           />
