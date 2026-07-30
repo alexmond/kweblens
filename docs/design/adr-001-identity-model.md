@@ -1,7 +1,8 @@
 # ADR-001: Identity model — how kweblens acts on behalf of a user
 
-- **Status: PROPOSED** — needs sign-off. This is an architecture decision with long-lived
-  consequences, so it should not be treated as settled by the person who wrote it.
+- **Status: ACCEPTED** (2026-07-30) — signed off with the answers in
+  [Sign-off](#sign-off-2026-07-30), which **narrow** what was originally proposed. Read that
+  section before the Decision below: it changes which option is the target.
 - Issue: GH#135. Constrains GH#141 (cluster config), GH#136 (detail endpoint), GH#140
   (file browser), GH#142 (agent tools), GH#144 (metrics).
 - Date: 2026-07-30
@@ -150,11 +151,61 @@ SSAR still earns its place — just as a UX hint, where being wrong is cosmetic.
 - **(c) Per-user clients without impersonation** (a client object per user) — unnecessary once
   impersonation exists; it multiplies connections for no additional correctness.
 
-## Open questions for sign-off
+## Sign-off (2026-07-30)
 
-1. Is multi-tenancy actually a goal, or is this about *not being embarrassing* in a shared
-   homelab/team context? The answer changes how much of the "does not provide" list matters.
-2. OIDC provider: is there one to integrate with today, or should header trust behind an
-   existing auth proxy be the first (and possibly only) implementation?
-3. Is granting `impersonate` acceptable in this cluster, or should token pass-through be the
-   only supported mode?
+The three open questions were answered as follows.
+
+1. **Is multi-tenancy a goal?** — **No. Single trusted operator.** kweblens is a tool one
+   admin runs; authentication exists to stop drive-by writes, not to separate people.
+2. **Where do identities come from?** — **Deferred.** No OIDC provider and no header-trust
+   integration is to be built while (1) holds.
+3. **Is `impersonate` acceptable?** — **Yes.** When identity does arrive, impersonation is the
+   sanctioned mechanism; token pass-through is not required.
+
+### What that changes in this ADR
+
+**This reverses the ADR's own ranking, and the body above is left as written rather than
+quietly edited to match.** As drafted, this document rejected alternative (a) — "stay
+single-identity, document it" — as the *target*, and preferred token pass-through over
+impersonation. Both of those are now overridden:
+
+- **(a) is the accepted position for the current phase**, not a rejected alternative. The
+  argument against it was that the competitive review ranked identity the #1 disqualifier —
+  true for a product competing with Rancher and Headlamp, and not decisive for a
+  single-operator tool. That was a judgement about what kweblens is for, which is the owner's
+  to make, not the ADR author's.
+- **Impersonation is promoted from fallback to the intended mechanism**, so the token
+  pass-through / OIDC work in "Recommended sequencing" steps 1 and 3 is **not** scheduled.
+  Step 2 (threading identity through the access layer) still stands as the prerequisite
+  whenever this is picked up.
+
+### What must remain true while this holds
+
+Single-operator is a legitimate answer, but it is only honest if the product says so:
+
+- The diagnostics panel keeps stating plainly that kweblens runs as one shared identity. That
+  row is now a **deliberate, signed-off** disclosure, not a temporary embarrassment awaiting a
+  fix.
+- **GH#140 (file browser) stays off by default.** The reasoning is unchanged and does not
+  depend on multi-tenancy: it reads mounted Secrets off disk, so it widens what a single
+  compromised session yields.
+- **GH#142 write-capable agent tools stay behind the existing admin auth** and the
+  suggest → approve → apply flow. "One trusted operator" is a statement about *people*, not
+  about autonomous processes.
+- The audit log records actions but cannot attribute them to a person. That is acceptable
+  under this decision and should be stated where it could otherwise be assumed otherwise.
+
+### What is unblocked
+
+The fork this ADR existed to resolve is closed, so the tickets it was constraining — GH#141
+(cluster config), GH#142 (agent tools), GH#144 (metrics) — can proceed on the shared-credential
+model without inheriting an unanswered architectural question. Notably GH#144's
+apiserver-service-proxy path, called out above as inherently single-identity, is no longer a
+problem to design around: it matches the accepted model.
+
+### Revisit when
+
+Any of: a second person needs their own view of a cluster; kweblens is exposed beyond a trusted
+network; or a feature needs to attribute an action to a human. At that point steps 2 and the
+impersonation half of step 3 are the path, and this ADR does not need re-litigating — only
+re-opening.
