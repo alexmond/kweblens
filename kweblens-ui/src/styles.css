@@ -2617,3 +2617,31 @@ body.dragging {
   margin: 8px 0 0;
   font-size: 11px;
 }
+
+/* Relation-backed detail sections (GH#136). A failed relation shows a MESSAGE, never an empty
+   table — "there are none" is a claim about the cluster, and the UI must not make it when the
+   fetch failed. */
+.rel-note {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.rel-note.dim {
+  color: #94a3b8;
+  padding-left: 0;
+}
+
+/* An expected least-privilege refusal, not a malfunction — amber, not red. */
+.rel-denied {
+  color: #fbbf24;
+  background: #291d05;
+  border: 1px solid #b45309;
+}
+
+.rel-error {
+  color: #f87171;
+  background: #2a1215;
+  border: 1px solid #7f1d1d;
+}

@@ -1,6 +1,7 @@
 import { auth } from './auth';
 import type {
   AboutInfo,
+  ObjectDetail,
   ClusterDiagnostics,
   ClusterInfo,
   EventSummary,
@@ -138,6 +139,11 @@ export const api = {
   // Read-only diagnostics (#27): what a cluster supports, and how this instance is configured.
   clusterDiagnostics: (cluster: string) => getJson<ClusterDiagnostics>(`${clusterBase(cluster)}/diagnostics`),
   about: () => getJson<AboutInfo>('/api/v1/about'),
+  // One object plus its resolved relations (GH#136) — one request rather than N per drawer.
+  detail: (cluster: string, resourceId: string, namespace: string, name: string) =>
+    getJson<ObjectDetail>(
+      `${clusterBase(cluster)}/detail/${encodeURIComponent(resourceId)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    ),
   // Build/version metadata from Actuator (public). build.version + build.time when present.
   info: () =>
     getJson<{ build?: { version?: string; time?: string; name?: string }; git?: { commit?: { id?: string } } }>(

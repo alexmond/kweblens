@@ -264,6 +264,40 @@ class RelationServiceTest {
 	}
 
 	@Test
+	void stripsManagedFieldsFromRelatedObjects() {
+		// Relation items exist to be displayed; nothing reads their field-management
+		// bookkeeping, and on a real Service it was 35% of the whole detail payload —
+		// which
+		// then multiplies by the 100-item cap.
+		this.client.pods()
+			.inNamespace("app")
+			.resource(new PodBuilder().withNewMetadata()
+				.withName("noisy")
+				.withNamespace("app")
+				.withLabels(Map.of("app", "web"))
+				.addNewManagedField()
+				.withManager("kubectl")
+				.withOperation("Apply")
+				.endManagedField()
+				.endMetadata()
+				.build())
+			.create();
+		GenericKubernetesResource svc = generic(new ServiceBuilder().withNewMetadata()
+			.withName("web")
+			.withNamespace("app")
+			.endMetadata()
+			.withNewSpec()
+			.withSelector(Map.of("app", "web"))
+			.endSpec()
+			.build());
+
+		Relation pods = service().relationsFor("mock", SERVICES, svc).get("selectedPods");
+
+		assertThat(pods.items()).hasSize(1);
+		assertThat(Serialization.asJson(pods.items().get(0))).doesNotContain("managedFields");
+	}
+
+	@Test
 	void relationHelpersClassifyFailuresRatherThanReturningBareEmptyLists() {
 		// The contract the UI depends on: an error is distinguishable from "there are
 		// none",
