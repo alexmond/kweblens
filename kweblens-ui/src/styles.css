@@ -2653,3 +2653,13 @@ body.dragging {
   color: #94a3b8;
   margin-bottom: 6px;
 }
+
+/* "Needs attention" table on the Workloads overview. Leads the page, so it is allowed to be
+   denser than the stat cards below it. */
+.attention-table {
+  width: 100%;
+}
+
+.attention-reason {
+  color: #fbbf24;
+}

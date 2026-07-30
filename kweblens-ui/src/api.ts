@@ -1,6 +1,7 @@
 import { auth } from './auth';
 import type {
   AboutInfo,
+  KindHealth,
   ObjectDetail,
   ClusterDiagnostics,
   ClusterInfo,
@@ -139,6 +140,10 @@ export const api = {
   // Read-only diagnostics (#27): what a cluster supports, and how this instance is configured.
   clusterDiagnostics: (cluster: string) => getJson<ClusterDiagnostics>(`${clusterBase(cluster)}/diagnostics`),
   about: () => getJson<AboutInfo>('/api/v1/about'),
+  // Per-kind workload health, computed server-side (GH#153/#155): tallies plus the NAMED
+  // objects needing attention, so the browser no longer fetches whole collections to count.
+  workloadHealth: (cluster: string, namespace?: string) =>
+    getJson<KindHealth[]>(`${clusterBase(cluster)}/workload-health` + nsQuery(namespace)),
   // One object plus its resolved relations (GH#136) — one request rather than N per drawer.
   detail: (cluster: string, resourceId: string, namespace: string, name: string) =>
     getJson<ObjectDetail>(

@@ -1,40 +1,38 @@
 <script setup lang="ts">
-// The workloads dashboard: a StatCard grid over WORKLOAD_KINDS (total, plus ok / needing
-// attention / suspended per kind) and a recent-events pane. Health predicates live in
-// workloadHealth.ts so they can be tested without a DOM.
-// Emits nothing — purely presentational (data is fetched internally per cluster).
+// The workloads dashboard.
+//
+// Leads with what NEEDS ATTENTION and names the objects, then shows the totals — a count is
+// only interesting when it is unexpected, and "one of your 52 Deployments is unhealthy" without
+// saying which one just moves the hunt one step later.
+//
+// Health is computed SERVER-SIDE (/workload-health). The browser used to fetch every object of
+// seven kinds to produce seven numbers; it now receives a summary plus the named offenders, and
+// the same rules serve a future TUI and the agent instead of each reimplementing them.
 import { shallowRef, computed, watch } from 'vue';
 
 import { api } from '../api';
-import type { EventSummary } from '../types';
+import type { EventSummary, KindHealth } from '../types';
 import EventsPane from './EventsPane.vue';
 import StatCard from './StatCard.vue';
-import { WORKLOAD_KINDS, tally } from './workloadHealth';
-import type { KindTally } from './workloadHealth';
 
 const props = defineProps<{ cluster: string }>();
 
-const counts = shallowRef<Record<string, KindTally>>({});
+const health = shallowRef<KindHealth[] | null>(null);
 const events = shallowRef<EventSummary[] | null>(null);
+const error = shallowRef<string | null>(null);
 
 let reqId = 0;
 watch(
   () => props.cluster,
   (cluster) => {
     const my = ++reqId;
-    counts.value = {};
+    health.value = null;
     events.value = null;
-    WORKLOAD_KINDS.forEach((k) => {
-      api
-        .objects(cluster, k.id)
-        .then((objs) => {
-          if (my !== reqId) {
-            return;
-          }
-          counts.value = { ...counts.value, [k.id]: tally(objs, k) };
-        })
-        .catch(() => undefined);
-    });
+    error.value = null;
+    api
+      .workloadHealth(cluster)
+      .then((h) => my === reqId && (health.value = h))
+      .catch((e) => my === reqId && (error.value = String(e)));
     api
       .events(cluster)
       .then((e) => my === reqId && (events.value = e))
@@ -44,27 +42,27 @@ watch(
 );
 
 const cards = computed(() =>
-  WORKLOAD_KINDS.map((k) => {
-    const c = counts.value[k.id];
-    if (!c) {
-      return { id: k.id, value: '…', label: k.label, danger: false };
+  (health.value ?? []).map((k) => {
+    if (k.error) {
+      // "Could not check" must never render as a healthy zero.
+      return { id: k.id, value: '—', label: `${k.label} · unavailable`, danger: false };
     }
-    // Suspended is reported separately from attention: a suspended CronJob is a deliberate
-    // choice, and colouring it red alongside real failures is how a health signal earns its
-    // way into being ignored.
-    const parts = [`${c.ok} ok`];
-    if (c.attention > 0) {
-      parts.push(`${c.attention} need attention`);
+    const parts = [`${k.ok} ok`];
+    if (k.attention > 0) {
+      parts.push(`${k.attention} need attention`);
     }
-    if (c.suspended > 0) {
-      parts.push(`${c.suspended} suspended`);
+    if (k.suspended > 0) {
+      parts.push(`${k.suspended} suspended`);
     }
-    return { id: k.id, value: c.total, label: `${k.label} · ${parts.join(' · ')}`, danger: c.attention > 0 };
+    return { id: k.id, value: k.total, label: `${k.label} · ${parts.join(' · ')}`, danger: k.attention > 0 };
   }),
 );
 
-// Events are capped for rendering, but the cap is REPORTED rather than silently applied —
-// showing a subset without saying so is a factual claim about the cluster that is wrong.
+/** Everything needing attention, across kinds — the thing the page should open with. */
+const attention = computed(() => (health.value ?? []).flatMap((k) => k.needsAttention));
+const attentionTruncated = computed(() => (health.value ?? []).some((k) => k.truncated));
+const unavailable = computed(() => (health.value ?? []).filter((k) => k.error));
+
 const EVENT_LIMIT = 25;
 const recentEvents = computed(() => (events.value ? events.value.slice(0, EVENT_LIMIT) : null));
 const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT);
@@ -73,9 +71,45 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
 <template>
   <div class="overview">
     <h1 class="ov-title">Workloads</h1>
+
+    <div v-if="error" class="error">{{ error }}</div>
+
+    <!-- Needs attention FIRST. This is the question the page exists to answer. -->
+    <section v-if="health" class="ov-sec">
+      <h3>Needs attention</h3>
+      <div v-if="attention.length === 0" class="empty">Everything is healthy.</div>
+      <template v-else>
+        <table class="mini attention-table">
+          <thead>
+            <tr>
+              <th>Kind</th>
+              <th>Namespace</th>
+              <th>Name</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(it, i) in attention" :key="i">
+              <td>{{ it.kind }}</td>
+              <td>{{ it.namespace ?? '—' }}</td>
+              <td>{{ it.name }}</td>
+              <td class="attention-reason">{{ it.reason }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="attentionTruncated" class="ov-truncated">Some kinds have more affected objects than shown.</div>
+      </template>
+      <!-- A kind that could not be listed is called out, because a missing check must not be
+           mistaken for a clean bill of health. -->
+      <div v-if="unavailable.length > 0" class="ov-truncated">
+        Could not check: {{ unavailable.map((k) => k.label).join(', ') }}.
+      </div>
+    </section>
+
     <div class="ov-cards">
       <StatCard v-for="c in cards" :key="c.id" :value="c.value" :label="c.label" :danger="c.danger" />
     </div>
+
     <section class="ov-sec">
       <h3>Recent Events</h3>
       <div v-if="eventsTruncated" class="ov-truncated">
