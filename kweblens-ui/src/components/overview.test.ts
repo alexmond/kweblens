@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { KubeObject } from '../types';
-import { OVERVIEW_SECTIONS } from './overview';
+import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS } from './overview';
 
 // The Environment section encodes a SECURITY decision, so it is pinned here: a value sourced
 // from a Secret is rendered as a REFERENCE (secret <name>/<key>) and the secret's value is
@@ -91,5 +91,208 @@ describe('Container Status section', () => {
 
   it('includes init containers and renders terminated state', () => {
     expect(rowsOf('Container Status', pod)).toContainEqual(['migrate', 'Yes', '0', 'Completed (exit 0)', '—']);
+  });
+});
+
+// ---- #24 audit: pod-template resolution + the new diagnostic sections ----
+
+const pairsOf = (title: string, o: KubeObject): Record<string, string> => {
+  const body = section(title).body(o);
+  if (body.type !== 'kv') {
+    throw new Error('expected a kv body');
+  }
+  return Object.fromEntries(body.pairs);
+};
+
+/** A Deployment: containers live under spec.template.spec, NOT spec. */
+const deployment: KubeObject = {
+  kind: 'Deployment',
+  metadata: { name: 'web', namespace: 'app' },
+  spec: {
+    replicas: 3,
+    strategy: { type: 'RollingUpdate', rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } },
+    template: {
+      spec: {
+        serviceAccountName: 'web-sa',
+        restartPolicy: 'Always',
+        nodeSelector: { tier: 'front' },
+        volumes: [{ name: 'cfg', configMap: { name: 'app-config' } }],
+        containers: [
+          {
+            name: 'nginx',
+            image: 'nginx:1.27',
+            resources: { requests: { cpu: '100m', memory: '128Mi' }, limits: { memory: '256Mi' } },
+            readinessProbe: { httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 10, failureThreshold: 3 },
+            volumeMounts: [{ name: 'cfg', mountPath: '/etc/nginx/conf.d', readOnly: true }],
+          },
+        ],
+        initContainers: [{ name: 'migrate', image: 'migrate:1' }],
+      },
+    },
+  },
+  status: { replicas: 3, readyReplicas: 2, updatedReplicas: 3, unavailableReplicas: 1 },
+};
+
+describe('pod-template resolution', () => {
+  // The bug this guards: every container/volume section read spec.* directly, which is only
+  // right for a Pod — so a Deployment's detail drawer was almost entirely empty.
+  it('finds a Deployment’s containers through spec.template.spec', () => {
+    expect(section('Containers').applies(deployment)).toBe(true);
+    expect(rowsOf('Containers', deployment)[0][0]).toBe('nginx');
+  });
+
+  it('finds template-level volumes, node selector and service account', () => {
+    expect(section('Volumes').applies(deployment)).toBe(true);
+    expect(section('Node Selector').applies(deployment)).toBe(true);
+    const sa = OVERVIEW_FIELDS.find((f) => f.label === 'Service Account')?.get(deployment);
+    expect(sa).toMatchObject({ text: 'web-sa', navKind: 'ServiceAccount', navNs: 'app' });
+  });
+
+  it('reaches through a CronJob’s extra jobTemplate level', () => {
+    const cronJob: KubeObject = {
+      kind: 'CronJob',
+      metadata: { name: 'nightly' },
+      spec: {
+        schedule: '0 2 * * *',
+        suspend: false,
+        jobTemplate: { spec: { template: { spec: { containers: [{ name: 'backup', image: 'backup:2' }] } } } },
+      },
+    };
+    expect(rowsOf('Containers', cronJob)[0][0]).toBe('backup');
+    expect(pairsOf('Schedule & Runs', cronJob)).toMatchObject({ Schedule: '0 2 * * *', Suspended: 'No' });
+  });
+});
+
+describe('Resources section', () => {
+  it('shows requests and limits side by side, with a dash for what is unset', () => {
+    // The gap between request and limit is the point: memory has a limit, cpu does not.
+    expect(rowsOf('Resources', deployment)).toEqual([
+      ['nginx', '100m', '—', '128Mi', '256Mi'],
+      ['migrate (init)', '—', '—', '—', '—'],
+    ]);
+  });
+
+  it('hides itself when no container declares any resources', () => {
+    const bare: KubeObject = { kind: 'Pod', metadata: { name: 'p' }, spec: { containers: [{ name: 'c' }] } };
+    expect(section('Resources').applies(bare)).toBe(false);
+  });
+});
+
+describe('Probes section', () => {
+  it('renders the target and the thresholds, not just the path', () => {
+    // An over-aggressive liveness probe looks like an app crash, so timing is load-bearing.
+    expect(rowsOf('Probes', deployment)).toEqual([
+      ['nginx', 'readiness', 'http://:8080/healthz', 'every 10s, fail x3'],
+    ]);
+  });
+
+  it('handles exec and tcp probes', () => {
+    const p: KubeObject = {
+      kind: 'Pod',
+      metadata: { name: 'p' },
+      spec: {
+        containers: [
+          {
+            name: 'c',
+            livenessProbe: { exec: { command: ['sh', '-c', 'true'] } },
+            startupProbe: { tcpSocket: { port: 5432 } },
+          },
+        ],
+      },
+    };
+    expect(rowsOf('Probes', p)).toEqual([
+      ['c', 'liveness', 'sh -c true', '—'],
+      ['c', 'startup', 'tcp :5432', '—'],
+    ]);
+  });
+});
+
+describe('Volume Mounts section', () => {
+  it('joins each mount to the volume source it resolves to', () => {
+    // A path alone says nothing; "/etc/nginx/conf.d -> configMap app-config" is the answer.
+    expect(rowsOf('Volume Mounts', deployment)).toEqual([['nginx', '/etc/nginx/conf.d', 'ro', 'configMap app-config']]);
+  });
+});
+
+describe('Rollout section', () => {
+  it('summarises strategy plus the replica breakdown', () => {
+    expect(pairsOf('Rollout', deployment)).toMatchObject({
+      Strategy: 'RollingUpdate',
+      'Max surge': '1',
+      'Max unavailable': '0',
+      Desired: '3',
+      Ready: '2',
+      Unavailable: '1',
+    });
+  });
+
+  it('applies only to rollout kinds', () => {
+    expect(section('Rollout').applies(deployment)).toBe(true);
+    expect(section('Rollout').applies({ kind: 'Pod', metadata: {}, spec: {} })).toBe(false);
+  });
+});
+
+describe('Storage section', () => {
+  it('shows the binding, class, modes and capacity for a PVC', () => {
+    const pvc: KubeObject = {
+      kind: 'PersistentVolumeClaim',
+      metadata: { name: 'data' },
+      spec: {
+        storageClassName: 'nfs',
+        accessModes: ['ReadWriteOnce'],
+        volumeName: 'pv-123',
+        resources: { requests: { storage: '10Gi' } },
+      },
+      status: { phase: 'Bound', capacity: { storage: '10Gi' } },
+    };
+    expect(pairsOf('Storage', pvc)).toMatchObject({
+      Phase: 'Bound',
+      'Storage class': 'nfs',
+      'Access modes': 'ReadWriteOnce',
+      Requested: '10Gi',
+      Capacity: '10Gi',
+      'Bound volume': 'pv-123',
+    });
+  });
+});
+
+describe('RBAC sections', () => {
+  it('renders Role rules from the TOP-LEVEL rules field', () => {
+    // Roles carry `rules` at the top level, not under spec — which is why the Ingress-shaped
+    // Rules section never matched them and RBAC detail used to be blank.
+    const role = {
+      kind: 'Role',
+      metadata: { name: 'reader' },
+      rules: [{ apiGroups: [''], resources: ['pods'], verbs: ['get', 'list'] }],
+    } as unknown as KubeObject;
+    expect(section('RBAC Rules').applies(role)).toBe(true);
+    expect(rowsOf('RBAC Rules', role)).toEqual([['core', 'pods', 'get, list']]);
+  });
+
+  it('leads a binding with the role it grants, then its subjects', () => {
+    const binding = {
+      kind: 'RoleBinding',
+      metadata: { name: 'reader-binding' },
+      roleRef: { kind: 'Role', name: 'reader' },
+      subjects: [{ kind: 'ServiceAccount', name: 'app-sa', namespace: 'app' }],
+    } as unknown as KubeObject;
+    expect(rowsOf('Subjects', binding)).toEqual([
+      ['→ Role', 'reader', '—'],
+      ['ServiceAccount', 'app-sa', 'app'],
+    ]);
+  });
+});
+
+describe('Service fields', () => {
+  it('reports a LoadBalancer address and hides a "None" session affinity', () => {
+    const svc: KubeObject = {
+      kind: 'Service',
+      metadata: { name: 'web' },
+      spec: { type: 'LoadBalancer', sessionAffinity: 'None' },
+      status: { loadBalancer: { ingress: [{ ip: '192.0.2.77' }] } },
+    };
+    const field = (label: string) => OVERVIEW_FIELDS.find((f) => f.label === label)?.get(svc);
+    expect(field('External')).toMatchObject({ text: '192.0.2.77' });
+    expect(field('Session Affinity')).toBeNull();
   });
 });

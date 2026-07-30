@@ -42,8 +42,12 @@ export default tseslint.config(
   {
     // Test fixtures legitimately contain literal addresses; they use the RFC 5737
     // documentation ranges (192.0.2.0/24, 198.51.100.0/24), never real or lab addresses.
+    //
+    // no-clear-text-protocols is off here for the same reason: an `http://…` in a fixture is
+    // an EXPECTED RENDERING (a probe target label, built from the probe's own `scheme`), not
+    // a request this code makes. The rule cannot tell a displayed string from a connection.
     files: ['**/*.test.ts'],
-    rules: { 'sonarjs/no-hardcoded-ip': 'off' },
+    rules: { 'sonarjs/no-hardcoded-ip': 'off', 'sonarjs/no-clear-text-protocols': 'off' },
   },
   prettier,
 );
