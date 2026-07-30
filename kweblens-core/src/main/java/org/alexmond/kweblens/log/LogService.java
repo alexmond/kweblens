@@ -92,7 +92,13 @@ public class LogService {
 	 */
 	public String previous(String clusterId, String namespace, String pod, String container, int tailLines) {
 		try {
-			return loggable(clusterId, namespace, pod, container).terminated().tailingLines(tailLines).getLog();
+			String body = loggable(clusterId, namespace, pod, container).terminated().tailingLines(tailLines).getLog();
+			// Same trap as the timestamped tail: when there is no terminated instance the
+			// API server refuses, and fabric8 may hand that refusal back as the log
+			// rather
+			// than throwing. Returning it would present a Kubernetes error object as the
+			// crash output — the one thing a reader of THIS method is trying to see.
+			return LogRefusal.isRefusal(body) ? null : body;
 		}
 		catch (KubernetesClientException ex) {
 			log.debug("No previous log for {}/{} container {}: {}", namespace, pod, container, ex.getMessage());

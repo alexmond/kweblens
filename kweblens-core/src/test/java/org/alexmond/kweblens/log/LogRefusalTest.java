@@ -56,4 +56,21 @@ class LogRefusalTest {
 			.isEqualTo("the log is not available");
 	}
 
+	@Test
+	void recognisesTheKubeletsPlainTextRefusalToo() {
+		// A SECOND wire format for the same idea: when a terminated container's logs have
+		// been garbage-collected the kubelet answers with a sentence and HTTP 200, not a
+		// Status object. Found on a live cluster after the JSON form was already handled
+		// —
+		// the crashloop tool returned this prose as though the container had printed it.
+		String body = "unable to retrieve container logs for containerd://7b141e76485288a1327a3f90942a0555";
+		assertThat(LogRefusal.isRefusal(body)).isTrue();
+		assertThat(LogRefusal.message(body)).startsWith("unable to retrieve container logs");
+	}
+
+	@Test
+	void doesNotClaimALineThatMerelyMentionsRetrievingLogs() {
+		assertThat(LogRefusal.isRefusal("WARN could not retrieve container logs for the sidecar")).isFalse();
+	}
+
 }
