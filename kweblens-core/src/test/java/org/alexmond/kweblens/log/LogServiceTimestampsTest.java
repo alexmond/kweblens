@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The timestamped and previous-run log reads that multi-source following depends on. Both
@@ -64,6 +65,41 @@ class LogServiceTimestampsTest {
 			.always();
 
 		assertThat(serviceFor("c1").previous("c1", "web", "fresh", null, 5)).isNull();
+	}
+
+	@Test
+	void treatsARefusedLogAsAFailureRatherThanAsOutput() {
+		// The API server answers 400 with a Status body when a container has not started,
+		// and fabric8 hands that JSON back as though the container had PRINTED it. During
+		// a
+		// rollout that happens for every new pod, so left alone the workload appears to
+		// log
+		// a Kubernetes error object — a fabricated line attributed to the user's app.
+		server.expect()
+			.get()
+			.withPath("/api/v1/namespaces/web/pods/starting/log?pretty=false&container=app&tailLines=5&timestamps=true")
+			.andReturn(200, """
+					{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure",\
+					"message":"container \\"app\\" in pod \\"starting\\" is waiting to start: ContainerCreating",\
+					"reason":"BadRequest","code":400}""")
+			.always();
+
+		assertThatThrownBy(() -> serviceFor("c1").tailWithTimestamps("c1", "web", "starting", "app", 5))
+			.isInstanceOf(LogUnavailableException.class)
+			.hasMessageContaining("waiting to start");
+	}
+
+	@Test
+	void doesNotMistakeAnAppsOwnJsonLoggingForAFailure() {
+		// Plenty of apps log structured JSON. Only a Status/Failure envelope is a
+		// refusal.
+		server.expect()
+			.get()
+			.withPath("/api/v1/namespaces/web/pods/json/log?pretty=false&container=app&tailLines=1&timestamps=true")
+			.andReturn(200, "2026-07-29T12:00:00Z {\"level\":\"info\",\"status\":\"Failure\",\"msg\":\"retrying\"}")
+			.always();
+
+		assertThat(serviceFor("c1").tailWithTimestamps("c1", "web", "json", "app", 1)).contains("retrying");
 	}
 
 }

@@ -20,6 +20,12 @@ export type MultiLogSource = {
   visible: boolean;
   /** Set when this source alone could not be followed. */
   error?: string;
+  /**
+   * The stream is no longer following this source — its pod is gone, typically replaced by a
+   * rollout. Kept in the registry rather than removed, because its lines are still in the
+   * buffer and need their colour, label and visibility toggle.
+   */
+  gone?: boolean;
 };
 
 /**
@@ -112,6 +118,9 @@ export function useMultiLogs(
     () => [cluster(), session().namespace, session().pod, scope(), session().workload?.name, container()],
     (_now, _prev, onCleanup) => {
       let cancelled = false;
+      // Monotonic across the connection so a source that joins later never takes a colour
+      // still in use by one already on screen.
+      let colourCursor = 0;
       pending = [];
       lines.value = [];
       sources.value = [];
@@ -129,15 +138,29 @@ export function useMultiLogs(
           truncated: boolean;
           totalFound: number;
         };
-        // Labels are computed for the set, not per id: telling replicas apart needs to know
-        // what prefix they all share.
-        const labels = sourceLabels(data.sources, scope());
-        sources.value = data.sources.map((id, i) => ({
-          id,
-          label: labels[i],
-          colour: PALETTE[i % PALETTE.length],
-          visible: true,
-        }));
+        // The set CHANGES mid-stream — a rollout replaces every pod behind a workload — so
+        // this is a UNION, not a rebuild.
+        //
+        // A source already known keeps its colour, visibility and error: reassigning colours
+        // would recolour lines already on screen, and would silently undo a source the user
+        // had hidden. A source that has GONE is kept too, marked `gone`, because its lines
+        // are still in the buffer — dropping it would leave them grey and unfilterable
+        // during a rollout, which is exactly when both halves need reading together.
+        const live = new Set(data.sources);
+        const known = new Set(sources.value.map((s) => s.id));
+        const merged: MultiLogSource[] = sources.value.map((s) => ({ ...s, gone: !live.has(s.id) }));
+        for (const id of data.sources) {
+          if (!known.has(id)) {
+            merged.push({ id, label: id, colour: PALETTE[colourCursor++ % PALETTE.length], visible: true });
+          }
+        }
+        // Labels are relative to the whole set, not per id — telling replicas apart needs to
+        // know what prefix they share — so they are recomputed whenever the set changes.
+        const labels = sourceLabels(
+          merged.map((s) => s.id),
+          scope(),
+        );
+        sources.value = merged.map((s, i) => ({ ...s, label: labels[i] }));
         truncated.value = data.truncated ? { shown: data.sources.length, totalFound: data.totalFound } : null;
       });
 
@@ -159,6 +182,17 @@ export function useMultiLogs(
         }
         const data = JSON.parse((e as MessageEvent).data) as { source: string; message: string };
         sources.value = sources.value.map((s) => (s.id === data.source ? { ...s, error: data.message } : s));
+      });
+
+      // A source that failed and later attached — a pod that had not finished starting. The
+      // error is cleared rather than left behind, so the legend does not keep accusing a
+      // source that is streaming perfectly well.
+      es.addEventListener('source-recovered', (e) => {
+        if (cancelled) {
+          return;
+        }
+        const data = JSON.parse((e as MessageEvent).data) as { source: string };
+        sources.value = sources.value.map((s) => (s.id === data.source ? { ...s, error: undefined } : s));
       });
 
       es.onerror = () => {

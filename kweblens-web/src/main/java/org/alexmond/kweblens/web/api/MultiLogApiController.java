@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -74,10 +75,12 @@ public class MultiLogApiController {
 	 * or {@code resourceId} + {@code name} (all pods behind that workload).
 	 *
 	 * <p>
-	 * Events: {@code sources} (the resolved set, plus whether it was truncated) once up
-	 * front so the client can assign stable per-source colours; {@code line} per log line
-	 * ({@code source}, {@code timestamp}, {@code text}); {@code source-error} when one
-	 * source cannot be followed but the rest can.
+	 * Events: {@code sources} (the resolved set, plus whether it was truncated) up front
+	 * and again <b>whenever the set changes</b>, so pods created by a rollout join a
+	 * stream already in flight; {@code line} per log line ({@code source},
+	 * {@code timestamp}, {@code text}); {@code source-error} when one source cannot be
+	 * followed but the rest can, and {@code source-recovered} when a previously failing
+	 * source starts streaming.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/logs/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public SseEmitter stream(@PathVariable String clusterId, @RequestParam String namespace,
@@ -85,9 +88,15 @@ public class MultiLogApiController {
 			@RequestParam(required = false) String name, @RequestParam(defaultValue = "false") boolean initContainers,
 			@RequestParam(defaultValue = "200") int tailLines) {
 		SseEmitter emitter = new SseEmitter(0L);
+		// Resolved through a supplier, not once: the stream re-runs this every few
+		// seconds so
+		// pods created by a rollout join it. Called once here so a bad request (unknown
+		// workload, no selector) still fails immediately with a useful error rather than
+		// opening a stream that silently never produces anything.
+		Supplier<List<LogSource>> resolver = () -> resolve(clusterId, namespace, pod, resourceId, name, initContainers);
 		List<LogSource> resolved;
 		try {
-			resolved = resolve(clusterId, namespace, pod, resourceId, name, initContainers);
+			resolved = resolver.get();
 		}
 		catch (RuntimeException ex) {
 			emitter.completeWithError(ex);
@@ -97,20 +106,17 @@ public class MultiLogApiController {
 			emitter.completeWithError(new IllegalArgumentException("No log sources matched the request"));
 			return emitter;
 		}
-		int totalFound = resolved.size();
-		boolean truncated = totalFound > MAX_SOURCES;
-		List<LogSource> sources = truncated ? resolved.subList(0, MAX_SOURCES) : resolved;
-		if (truncated) {
-			log.info("Multi-log request matched {} sources; following the first {}", totalFound, MAX_SOURCES);
+		if (resolved.size() > MAX_SOURCES) {
+			log.info("Multi-log request matched {} sources; following the first {}", resolved.size(), MAX_SOURCES);
 		}
-		MultiLogStream stream = new MultiLogStream(this.logs, emitter, clusterId, this.executor);
+		MultiLogStream stream = new MultiLogStream(this.logs, emitter, clusterId, this.executor, resolver, MAX_SOURCES);
 		emitter.onCompletion(stream::close);
 		emitter.onTimeout(() -> {
 			stream.close();
 			emitter.complete();
 		});
 		emitter.onError((ex) -> stream.close());
-		stream.start(sources, tailLines, truncated, totalFound);
+		stream.start(tailLines);
 		return emitter;
 	}
 

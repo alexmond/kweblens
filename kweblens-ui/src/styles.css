@@ -2724,3 +2724,10 @@ body.dragging {
   line-height: 1.5;
   color: #94a3b8;
 }
+
+/* A log source whose pod is gone — usually replaced by a rollout. Kept in the legend, dimmed:
+   its lines are still in the buffer, so removing it would strand them without a colour key. */
+.log-src.gone {
+  opacity: 0.55;
+  font-style: italic;
+}

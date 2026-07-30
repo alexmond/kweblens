@@ -199,9 +199,15 @@ if (props.session.kind === 'terminal') {
           v-for="s in logs.sources.value"
           :key="s.id"
           class="log-src"
-          :class="{ off: !s.visible, failed: !!s.error }"
+          :class="{ off: !s.visible, failed: !!s.error, gone: !!s.gone }"
           type="button"
-          :title="s.error ? `${s.id} — ${s.error}` : `${s.id} (click to toggle, double-click to isolate)`"
+          :title="
+            s.error
+              ? `${s.id} — ${s.error}`
+              : s.gone
+                ? `${s.id} — no longer running; its earlier output is still shown`
+                : `${s.id} (click to toggle, double-click to isolate)`
+          "
           @click="logs.setVisible(s.id, !s.visible)"
           @dblclick="logs.showOnly(s.id)"
         >

@@ -98,13 +98,17 @@ public class LogSourceResolver {
 	private List<LogSource> sourcesFor(Pod pod, boolean includeInitContainers) {
 		String namespace = pod.getMetadata().getNamespace();
 		String name = pod.getMetadata().getName();
+		// The uid distinguishes a RECREATED pod from the one it replaced. A StatefulSet
+		// rollout reuses the name, so without it a follower would believe it is already
+		// watching web-0 and never attach to the new one.
+		String uid = pod.getMetadata().getUid();
 		List<LogSource> sources = new ArrayList<>();
 		for (Container container : pod.getSpec().getContainers()) {
-			sources.add(new LogSource(namespace, name, container.getName()));
+			sources.add(new LogSource(namespace, name, container.getName(), uid));
 		}
 		if (includeInitContainers && pod.getSpec().getInitContainers() != null) {
 			for (Container container : pod.getSpec().getInitContainers()) {
-				sources.add(new LogSource(namespace, name, container.getName()));
+				sources.add(new LogSource(namespace, name, container.getName(), uid));
 			}
 		}
 		return sources;
