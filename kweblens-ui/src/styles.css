@@ -2101,6 +2101,27 @@ body.row-resizing {
   border: 1px solid #c3ccd2;
 }
 
+/* Init and ephemeral containers must be TELLABLE APART from app containers, not just present.
+   A healthy init container has terminated with exit 0, which renders in the muted 'done' tone —
+   so without a shape difference a normal pod would show a "finished" square beside running ones
+   and look broken. Narrower bars read as a preliminary phase; the tone still carries the state. */
+.csq-init,
+.csq-ephemeral {
+  width: 5px;
+  border-radius: 1px;
+}
+
+/* Ephemeral (debug) containers are transient attachments, so they are outlined rather than
+   solid — present and noticeable, but visibly not part of the pod's steady state. */
+.csq-ephemeral {
+  opacity: 0.75;
+}
+
+/* Separates the init phase from the app containers. */
+.csq-gap {
+  margin-right: 5px;
+}
+
 /* status pills — green/amber/red by component health */
 .status-pill {
   display: inline-block;
