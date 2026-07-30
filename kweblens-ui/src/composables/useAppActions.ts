@@ -4,6 +4,7 @@ import { auth } from '../auth';
 import type { DialogApi } from '../dialog';
 import type { LogScope } from '../dock';
 import type { RowAction } from '../rowActions';
+import { saveHiddenCols } from '../prefs';
 import { dispatchRowAction, fetchWorkloadPods, runBulkDelete, saveFavorites, toggleInSet } from '../shell';
 import type { DockKind, KubeObject, NavItem } from '../types';
 
@@ -68,7 +69,12 @@ export function useAppActions(a: {
     }
   };
 
-  const toggleCol = (key: string) => (a.hiddenCols.value = toggleInSet(a.hiddenCols.value, key));
+  // Persist as well as apply: a column choice that vanishes on the next navigation is the
+  // papercut #27 set out to fix.
+  const toggleCol = (key: string) => {
+    a.hiddenCols.value = toggleInSet(a.hiddenCols.value, key);
+    saveHiddenCols(a.selected.value?.id, a.hiddenCols.value);
+  };
   const toggleRow = (key: string) => (a.selection.value = toggleInSet(a.selection.value, key));
   const toggleAll = (keys: string[]) => {
     a.selection.value = a.selection.value.size >= keys.length && keys.length > 0 ? new Set() : new Set(keys);
