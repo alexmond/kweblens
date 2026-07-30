@@ -12,8 +12,9 @@ read-only cluster view to AI assistants over **MCP**.
 
 Built with **Spring Boot 4.0.6 / Java 21**, a multi-module Maven build
 (`org.alexmond:kweblens-parent`, version `0.1.0-SNAPSHOT`). Cluster access is via the
-**fabric8 Kubernetes client**; the dashboard is **Thymeleaf + htmx + Bootstrap** (all assets
-served in-jar via WebJars — no CDN).
+**fabric8 Kubernetes client**; the UI is a **Vue 3 + Vite + TypeScript SPA** (Naive UI, dark
+theme) in `kweblens-ui`, built into the jar and served at `/`. The old Thymeleaf/htmx "classic"
+UI was **deleted** (PR #124) — if you find a reference to it, it's stale.
 
 ## Build, Test & Verify
 
@@ -53,12 +54,16 @@ NODE_PATH=$HOME/.local/lib/playwright/node_modules node scripts/perf-sweep.mjs  
   `ClusterRegistry` that owns one fabric8 `KubernetesClient` per cluster id + the `ClusterInfo`
   view), `resource/` (`ResourceService` projects Kubernetes objects into kind-agnostic
   `ResourceSummary` rows), `config/` (`KweblensProperties`). **Published** to Maven Central.
-- **`kweblens-web`** — the runnable Spring Boot app. `web/api/` (read-only JSON API +
-  `ProblemDetail` error mapping), `web/ui/` (`DashboardController` + Thymeleaf `templates/`),
-  `web/security/` (`SecurityConfig` — open by default, see gotchas), `web/mcp/` (`ClusterTools`
-  `@Tool` methods + `McpConfig` provider), `web/config/` (`ClusterBootstrap` seeds the ambient
-  kubeconfig as cluster `default` on startup). `/actuator/{health,info,metrics,prometheus}`
-  exposed. **Not published** — ships as a container image.
+- **`kweblens-web`** — the runnable Spring Boot app. Slices: `web/api/` (JSON API +
+  `ProblemDetail` error mapping), `web/ui/` (`SpaController` — serves the built Vue SPA),
+  `web/security/` (`SecurityConfig` + `AuditService` — see the security gotcha), `web/mcp/`
+  (`ClusterTools` `@Tool` methods + `McpConfig` provider), `web/nav/` (`NavCatalog` — the
+  categories→kinds registry, 39 built-in kinds + discovered CRDs), `web/helm/` (jhelm-backed
+  release surface), `web/exec/` (exec-over-WebSocket), `web/ai/` (`DiagnoseService` +
+  `RemediationService`, inert unless `kweblens.ai.enabled` and a key are set), `web/sim/` (the
+  in-JVM cluster simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as
+  cluster `default` on startup). `/actuator/{health,info,metrics,prometheus}` exposed.
+  **Not published** — ships as a container image.
 - **`kweblens-cli`** — a dependency-light cluster inspector (picocli). Prints the cluster the
   ambient kubeconfig points at. **Published**; runnable fat jar is the `exec` classifier.
 - **`kweblens-it`** — on-demand operational tasks (connectivity/health) tagged `it`, excluded
@@ -101,9 +106,17 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
   the mock `client` into the autowired `ClusterRegistry` in `@BeforeEach`.
 - **Spring Boot 4 moved packages.** Actuator health is `org.springframework.boot.health.*`;
   autoconfigure is split per-module. Verify imports against the jars, not Boot 3 memory.
-- **Security is open by default.** `SecurityConfig` permits every request and disables CSRF on
-  `/api/**` so the scaffold is immediately usable. kweblens surfaces cluster data (and will add
-  mutating actions) — real deployments MUST put auth in front. Tighten as write endpoints land.
+- **Security: reads are open, writes are authenticated.** `SecurityConfig` has two modes.
+  In **`open-mode` (the default)** `GET` endpoints are public so the dashboard and CI work out of
+  the box, while **every non-`GET`** (apply, patch, exec, port-forward, Helm) requires the admin
+  login; with `kweblens.security.open-mode=false` everything but health and the login page needs
+  auth. There is **one in-memory admin** (`kweblens.security.admin-username`/`admin-password`); if
+  no password is set one is **generated at startup and logged** — never bake a default password
+  into the source. The authenticated context is persisted to the `HttpSession` as well as the
+  request, because the SPA's one-shot Basic login must establish a `JSESSIONID` for the exec
+  WebSocket (a browser cannot attach Basic auth to a WS handshake). Still **missing**: OIDC /
+  per-user identity, and RBAC-awareness (no `SelfSubjectAccessReview`), so the UI can offer
+  actions that then 403.
 - **fabric8 version is BOM-pinned.** `kubernetes-client-bom` (`${fabric8.version}`) aligns
   client + model + mock-server; bump the one property, never individual fabric8 artifacts.
 - **kubeconfigs are secrets.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig`, `.kube/` — never
