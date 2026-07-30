@@ -51,7 +51,11 @@ const warnColumns: DataTableColumns<EventSummary> = [
   { title: 'Message', key: 'message', sorter: 'default' },
   { title: 'Age', key: 'age', sorter: (a, b) => ageToSeconds(a.age) - ageToSeconds(b.age), defaultSortOrder: 'ascend' },
 ];
-const warnRows = computed(() => (warnings.value ?? []).slice(0, 30));
+// Capped for rendering, but the cap is REPORTED. Previously the stat card showed the true
+// total while the table showed 30, so the page contradicted itself.
+const WARNING_LIMIT = 30;
+const warnRows = computed(() => (warnings.value ?? []).slice(0, WARNING_LIMIT));
+const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING_LIMIT);
 </script>
 
 <template>
@@ -76,6 +80,9 @@ const warnRows = computed(() => (warnings.value ?? []).slice(0, 30));
     </div>
     <section class="ov-sec">
       <h3>Warnings</h3>
+      <div v-if="warningsTruncated" class="ov-truncated">
+        Showing the {{ WARNING_LIMIT }} most recent of {{ warnings?.length }} warnings.
+      </div>
       <div v-if="warnings && warnings.length === 0" class="empty">No warnings.</div>
       <NDataTable
         v-else
