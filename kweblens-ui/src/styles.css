@@ -1831,6 +1831,119 @@ body.row-resizing {
   color: #64748b;
 }
 
+.log-body .log-line.error {
+  color: #f87171;
+}
+
+/* Multi-source logs: toolbar extras, the source legend, and the per-line source tag. */
+.dock-input {
+  margin-left: 8px;
+  font-size: 12px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 1px 6px;
+  width: 130px;
+}
+
+.dock-btn {
+  margin-left: 10px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.dock-btn:hover {
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+.dock-note {
+  margin-left: 10px;
+  font-size: 11px;
+  color: #d29922;
+}
+
+.log-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 10px;
+  background: #0f172a;
+  border-top: 1px solid #1e293b;
+  flex: 0 0 auto;
+  max-height: 76px;
+  overflow-y: auto;
+}
+
+.log-src,
+.log-legend-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  color: #cbd5e1;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.log-src:hover,
+.log-legend-all:hover {
+  border-color: #475569;
+}
+
+/* A hidden source stays readable but clearly inactive — greyed, not removed, so you can
+   always find it again to turn it back on. */
+.log-src.off {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.log-src.failed {
+  border-color: #b45309;
+  color: #fbbf24;
+}
+
+.log-src-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.log-warning {
+  padding: 3px 10px;
+  font-size: 11px;
+  color: #fbbf24;
+  background: #291d05;
+  border-top: 1px solid #b45309;
+  flex: 0 0 auto;
+}
+
+/* The gutter tag. A fixed width keeps message text aligned down the pane, which is what
+   makes an interleaved multi-pod stream readable rather than ragged. */
+.log-src-tag {
+  display: inline-block;
+  width: 18ch;
+  min-width: 18ch;
+  margin-right: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  opacity: 0.85;
+}
+
 /* Port-forward status pills */
 .pf-status {
   display: inline-block;

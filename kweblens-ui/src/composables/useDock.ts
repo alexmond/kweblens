@@ -1,6 +1,6 @@
 import { shallowRef, ref } from 'vue';
 
-import type { DockSession } from '../dock';
+import type { DockSession, LogScope } from '../dock';
 import type { DockKind } from '../types';
 
 /** Terminal/log dock sessions: open, close, and pop out into floating windows. */
@@ -15,6 +15,25 @@ export function useDock() {
     seq += 1;
     const id = `${kind}:${namespace}/${pod}#${seq}`;
     sessions.value = [...sessions.value, { id, kind, namespace, pod, containers, attach }];
+    active.value = id;
+  };
+
+  /**
+   * Open a log session with an explicit scope: one container, every container of a pod, or
+   * every pod behind a workload. Separate from `openDock` so the terminal call sites keep
+   * their simple signature and log-only options don't leak into them.
+   */
+  const openLogs = (
+    namespace: string,
+    pod: string,
+    containers: string[],
+    logScope: LogScope,
+    workload?: { resourceId: string; name: string },
+  ) => {
+    seq += 1;
+    const target = logScope === 'workload' && workload ? workload.name : pod;
+    const id = `logs:${namespace}/${target}#${seq}`;
+    sessions.value = [...sessions.value, { id, kind: 'logs', namespace, pod, containers, logScope, workload }];
     active.value = id;
   };
 
@@ -44,5 +63,5 @@ export function useDock() {
     }
   };
 
-  return { sessions, active, setActive, openDock, closeDock, toggleFloat };
+  return { sessions, active, setActive, openDock, openLogs, closeDock, toggleFloat };
 }

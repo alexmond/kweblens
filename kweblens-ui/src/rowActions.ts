@@ -1,5 +1,6 @@
 import { api } from './api';
 import type { DialogApi } from './dialog';
+import type { LogScope } from './dock';
 import { objectPorts } from './kube';
 import type { DockKind, KubeObject } from './types';
 
@@ -10,9 +11,15 @@ import type { DockKind, KubeObject } from './types';
 const SCALABLE = ['Deployment', 'StatefulSet', 'ReplicaSet'];
 const RESTARTABLE = ['Deployment', 'StatefulSet', 'DaemonSet'];
 const ROLLBACKABLE = ['Deployment', 'StatefulSet'];
+// Kinds whose pods can be resolved from a spec.selector, so "Logs" can mean every replica.
+const POD_OWNERS = ['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'Job'];
+
+/** The sentinel the container submenu uses for "every container", vs. one container's name. */
+export const ALL_CONTAINERS = '*';
 
 export type RowAction =
   | 'logs'
+  | 'logsAll'
   | 'terminal'
   | 'attach'
   | 'forward'
@@ -41,6 +48,13 @@ interface RowActionCtx {
   container?: string;
   dialog: DialogApi;
   openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  openLogs: (
+    ns: string,
+    pod: string,
+    containers: string[],
+    scope: LogScope,
+    workload?: { resourceId: string; name: string },
+  ) => void;
   setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
   setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean }) => void;
   setError: (msg: string) => void;
@@ -111,6 +125,19 @@ function scaleAction(c: RowActionCtx) {
     });
 }
 
+/**
+ * Pod "Logs". Picking a specific container from the submenu follows just that one; choosing
+ * "All containers" (or a single-container pod, where there is no submenu) follows every
+ * container interleaved.
+ */
+function podLogsAction(c: RowActionCtx) {
+  if (c.container && c.container !== ALL_CONTAINERS) {
+    c.openLogs(c.ns, c.name, [c.container], 'container');
+    return;
+  }
+  c.openLogs(c.ns, c.name, c.containers, c.containers.length > 1 ? 'pod' : 'container');
+}
+
 export const ROW_ACTIONS: RowActionDef[] = [
   {
     id: 'attach',
@@ -135,7 +162,20 @@ export const ROW_ACTIONS: RowActionDef[] = [
     requiresAuth: false,
     section: 'main',
     applies: (c) => c.kind === 'Pod',
-    run: (c) => c.openDock('logs', c.ns, c.name, scopedContainers(c)),
+    run: podLogsAction,
+  },
+  {
+    // A distinct id, not a second 'logs' entry: the shell dispatches with
+    // ROW_ACTIONS.find(a => a.id === action), so a duplicate id would always resolve to the
+    // pod action and the workload one would be unreachable.
+    id: 'logsAll',
+    label: 'Logs (all pods)',
+    requiresAuth: false,
+    section: 'main',
+    applies: (c) => POD_OWNERS.includes(c.kind),
+    // The whole point of the ticket: one view over every replica's output, so a rollout or
+    // an intermittent failure can be read across pods instead of one pod at a time.
+    run: (c) => c.openLogs(c.ns, c.name, [], 'workload', { resourceId: c.resourceId, name: c.name }),
   },
   {
     id: 'forward',

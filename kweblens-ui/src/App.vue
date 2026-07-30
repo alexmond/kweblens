@@ -82,7 +82,15 @@ const { objects, setObjects, loading, live, cols, usage, nodeDisk } = useResourc
   namespace,
   setError,
 );
-const { sessions: dockSessions, active: activeSession, setActive, openDock, closeDock, toggleFloat } = useDock();
+const {
+  sessions: dockSessions,
+  active: activeSession,
+  setActive,
+  openDock,
+  openLogs,
+  closeDock,
+  toggleFloat,
+} = useDock();
 
 // Reset the view when the active cluster, or the selected kind/namespace, changes.
 watch(cluster, () => {
@@ -116,6 +124,7 @@ const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDele
   favorites,
   dialog,
   openDock,
+  openLogs,
   setForward: (f) => (forward.value = f),
   setDetail: (d) => (detail.value = d),
   setError,

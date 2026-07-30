@@ -2,6 +2,7 @@ import type { Ref } from 'vue';
 
 import { auth } from '../auth';
 import type { DialogApi } from '../dialog';
+import type { LogScope } from '../dock';
 import type { RowAction } from '../rowActions';
 import { dispatchRowAction, fetchWorkloadPods, runBulkDelete, saveFavorites, toggleInSet } from '../shell';
 import type { DockKind, KubeObject, NavItem } from '../types';
@@ -17,6 +18,13 @@ export function useAppActions(a: {
   favorites: Ref<string[]>;
   dialog: DialogApi;
   openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  openLogs: (
+    ns: string,
+    pod: string,
+    containers: string[],
+    scope: LogScope,
+    workload?: { resourceId: string; name: string },
+  ) => void;
   setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
   setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean } | null) => void;
   setError: (e: string) => void;
@@ -41,6 +49,7 @@ export function useAppActions(a: {
       authUser: a.authUser.value,
       dialog: a.dialog,
       openDock: a.openDock,
+      openLogs: a.openLogs,
       setForward: a.setForward,
       setDetail: a.setDetail,
       setError: a.setError,

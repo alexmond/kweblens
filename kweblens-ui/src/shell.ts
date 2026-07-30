@@ -1,5 +1,6 @@
 import { ApiError, api } from './api';
 import type { DialogApi } from './dialog';
+import type { LogScope } from './dock';
 import { containerNames, objKey, objName, objNs } from './kube';
 import type { RowAction } from './rowActions';
 import { ROW_ACTIONS } from './rowActions';
@@ -129,6 +130,13 @@ export interface RowActionDeps {
   authUser: string | null;
   dialog: DialogApi;
   openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
+  openLogs: (
+    ns: string,
+    pod: string,
+    containers: string[],
+    scope: LogScope,
+    workload?: { resourceId: string; name: string },
+  ) => void;
   setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
   setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean }) => void;
   setError: (e: string) => void;
@@ -176,6 +184,7 @@ export function dispatchRowAction(
     container,
     dialog: deps.dialog,
     openDock: deps.openDock,
+    openLogs: deps.openLogs,
     setForward: deps.setForward,
     setDetail: deps.setDetail,
     setError: deps.setError,

@@ -41,4 +41,19 @@ public class ApiExceptionHandler {
 		return problem;
 	}
 
+	/**
+	 * Bad input from the caller — an unresolvable log target, a workload with no
+	 * selector, a pod that does not exist. Without this mapping these surfaced as 500s,
+	 * which told the client "kweblens broke" when the truth was "that request cannot be
+	 * satisfied", and hid the (deliberately explanatory) message behind a generic error
+	 * page.
+	 */
+	@ExceptionHandler(IllegalArgumentException.class)
+	public ProblemDetail badRequest(IllegalArgumentException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+		problem.setTitle("Invalid request");
+		problem.setProperties(Map.of("code", "invalid-request"));
+		return problem;
+	}
+
 }
