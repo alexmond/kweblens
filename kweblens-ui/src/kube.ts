@@ -132,3 +132,15 @@ export function stripManagedFields(yaml: string): string {
   }
   return out.join('\n');
 }
+
+/**
+ * The kind out of an event's `involvedObject` string, which the server formats as `Kind/name`.
+ *
+ * Returns null when there is no usable kind rather than guessing: an event about an object the
+ * nav does not model (or a malformed value) should leave the row inert, not navigate somewhere
+ * arbitrary. A name may itself contain slashes, so only the FIRST segment is the kind.
+ */
+export function eventObjectKind(object: string | null | undefined): string | null {
+  const kind = (object ?? '').split('/')[0].trim();
+  return kind.length > 0 ? kind : null;
+}

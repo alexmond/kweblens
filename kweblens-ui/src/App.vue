@@ -118,11 +118,12 @@ watch([selected, namespace], () => {
   }
 });
 
-const { navigateToKind, navigateToPortForwards, navigateToHelmRelease } = useNavigation(nav, {
+const { navigateToKind, navigateToPortForwards, navigateToHelmRelease, knowsKind } = useNavigation(nav, {
   setSelected: (i) => (selected.value = i),
   setDetail: (d) => (detail.value = d),
   setNamespace: (ns) => (namespace.value = ns),
   setHelmTarget: (t) => (helmTarget.value = t),
+  currentNamespace: () => namespace.value,
 });
 
 const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDelete } = useAppActions({
@@ -234,8 +235,16 @@ const onForwardStarted = () => {
                 :name="activeCluster?.name ?? cluster"
                 :master-url="activeCluster?.masterUrl"
                 :namespace-count="namespaces.length"
+                :namespace="namespace"
+                :knows-kind="knowsKind"
+                @navigate="navigateToKind"
               />
-              <WorkloadsOverview v-else-if="id === NAV.overviewWorkloads" :cluster="cluster" />
+              <WorkloadsOverview
+                v-else-if="id === NAV.overviewWorkloads"
+                :cluster="cluster"
+                :namespace="namespace"
+                @navigate="navigateToKind"
+              />
               <HelmView
                 v-else-if="showHelm"
                 :cluster="cluster"

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ageToSeconds,
   containerNames,
+  eventObjectKind,
   gib,
   initials,
   objKey,
@@ -110,5 +111,22 @@ describe('kube accessors', () => {
     expect(out).not.toContain('manager: a');
     expect(out).toContain('name: x');
     expect(out).toContain('spec:');
+  });
+});
+
+describe('eventObjectKind', () => {
+  it('takes the kind from the leading segment', () => {
+    expect(eventObjectKind('Pod/web-7d9f')).toBe('Pod');
+  });
+
+  it('keeps the first segment when the name itself contains a slash', () => {
+    expect(eventObjectKind('Ingress/team/site')).toBe('Ingress');
+  });
+
+  it('returns null rather than guessing when there is no kind', () => {
+    // An inert row is better than one that navigates somewhere arbitrary.
+    expect(eventObjectKind('')).toBeNull();
+    expect(eventObjectKind('/orphan')).toBeNull();
+    expect(eventObjectKind(null)).toBeNull();
   });
 });

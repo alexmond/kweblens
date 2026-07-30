@@ -2680,3 +2680,37 @@ body.dragging {
 .attention-reason {
   color: #fbbf24;
 }
+
+/* A stat card that navigates. Only cards with a destination get this — a card that merely looks
+   clickable and does nothing is worse than one that plainly does not. */
+.ov-card-link {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.ov-card-link:hover {
+  border-color: #93c5fd;
+}
+
+.ov-card-link:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Rows in the Needs-attention table open the object's kind. */
+.attention-table tbody tr {
+  cursor: pointer;
+}
+
+.attention-table tbody tr:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+/* Panels that cannot follow the namespace filter say so, rather than silently ignoring it. */
+.ov-scope-note {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
