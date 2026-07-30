@@ -64,7 +64,21 @@ public class LogService {
 	 * snapshot a multi-source view sorts and shows before live following starts.
 	 */
 	public String tailWithTimestamps(String clusterId, String namespace, String pod, String container, int tailLines) {
-		return loggable(clusterId, namespace, pod, container).usingTimestamps().tailingLines(tailLines).getLog();
+		return requireLog(
+				loggable(clusterId, namespace, pod, container).usingTimestamps().tailingLines(tailLines).getLog(),
+				namespace, pod, container);
+	}
+
+	/**
+	 * Turn an API-server refusal into an exception, because fabric8 hands it back as
+	 * <em>log text</em> — see {@link LogRefusal}.
+	 */
+	private String requireLog(String body, String namespace, String pod, String container) {
+		if (LogRefusal.isRefusal(body)) {
+			log.debug("Log request for {}/{} container {} refused: {}", namespace, pod, container, body);
+			throw new LogUnavailableException(LogRefusal.message(body));
+		}
+		return body;
 	}
 
 	/**

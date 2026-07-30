@@ -235,3 +235,67 @@ describe('useMultiLogs sources and filtering', () => {
     many.scope.stop();
   });
 });
+
+// The rollout case (GH#138). The server re-resolves the workload's pods while the stream is
+// open and re-sends `sources`, so the client has to absorb a set that changes underneath it.
+// Getting this wrong is visible: recoloured lines, a hidden source silently re-shown, or the
+// old replica's output stranded without a colour key.
+describe('useMultiLogs source-set changes', () => {
+  it('keeps the colour of a source that was already on screen', () => {
+    const { scope, logs, es } = start();
+    es.emit('sources', { sources: [REPLICA_A], truncated: false, totalFound: 1 });
+    const before = logs.colourOf(REPLICA_A);
+
+    es.emit('sources', { sources: [REPLICA_A, REPLICA_B], truncated: false, totalFound: 2 });
+    expect(logs.colourOf(REPLICA_A)).toBe(before);
+    expect(logs.colourOf(REPLICA_B)).not.toBe(before);
+
+    scope.stop();
+  });
+
+  it('keeps a departed source in the legend so its lines stay attributed', () => {
+    // A rollout replaces the pod. Its lines are still in the buffer — dropping the source
+    // would leave them grey and impossible to filter, at the moment you most want to compare
+    // old output against new.
+    const { scope, logs, es } = start();
+    es.emit('sources', { sources: [REPLICA_A], truncated: false, totalFound: 1 });
+    const colour = logs.colourOf(REPLICA_A);
+    es.emit('line', line(REPLICA_A, 'from the old replica'));
+    flushFrame();
+
+    es.emit('sources', { sources: [REPLICA_B], truncated: false, totalFound: 1 });
+
+    expect(logs.sources.value.map((s) => s.id)).toEqual([REPLICA_A, REPLICA_B]);
+    expect(logs.sources.value.find((s) => s.id === REPLICA_A)?.gone).toBe(true);
+    expect(logs.sources.value.find((s) => s.id === REPLICA_B)?.gone).toBeFalsy();
+    expect(logs.colourOf(REPLICA_A)).toBe(colour);
+    expect(logs.visibleLines.value).toHaveLength(1);
+
+    scope.stop();
+  });
+
+  it('does not re-show a source the user had hidden', () => {
+    const { scope, logs, es } = start();
+    es.emit('sources', { sources: [REPLICA_A, REPLICA_B], truncated: false, totalFound: 2 });
+    logs.setVisible(REPLICA_A, false);
+
+    es.emit('sources', { sources: [REPLICA_A, REPLICA_B], truncated: false, totalFound: 2 });
+    expect(logs.sources.value.find((s) => s.id === REPLICA_A)?.visible).toBe(false);
+
+    scope.stop();
+  });
+
+  it('clears a source error when that source recovers', () => {
+    // A pod that had not finished starting fails to attach, then succeeds. Leaving the error
+    // behind would have the legend accusing a source that is streaming fine.
+    const { scope, logs, es } = start();
+    es.emit('sources', { sources: [REPLICA_A], truncated: false, totalFound: 1 });
+    es.emit('source-error', { source: REPLICA_A, message: 'container is waiting to start' });
+    expect(logs.sources.value[0].error).toBe('container is waiting to start');
+
+    es.emit('source-recovered', { source: REPLICA_A });
+    expect(logs.sources.value[0].error).toBeUndefined();
+
+    scope.stop();
+  });
+});
