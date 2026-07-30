@@ -2645,3 +2645,11 @@ body.dragging {
   background: #2a1215;
   border: 1px solid #7f1d1d;
 }
+
+/* Overview truncation notice. The tables cap what they render; saying so keeps the page from
+   contradicting its own stat card, which shows the true total. */
+.ov-truncated {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}

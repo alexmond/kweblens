@@ -1,38 +1,20 @@
 <script setup lang="ts">
-// The workloads dashboard: a StatCard grid over WORKLOAD_KINDS (total + ready per kind,
-// danger-flagged when unhealthy) plus a recent-events pane.
+// The workloads dashboard: a StatCard grid over WORKLOAD_KINDS (total, plus ok / needing
+// attention / suspended per kind) and a recent-events pane. Health predicates live in
+// workloadHealth.ts so they can be tested without a DOM.
 // Emits nothing — purely presentational (data is fetched internally per cluster).
 import { shallowRef, computed, watch } from 'vue';
 
 import { api } from '../api';
-import { objSpec, objStatus, toNum } from '../kube';
-import type { EventSummary, KubeObject } from '../types';
+import type { EventSummary } from '../types';
 import EventsPane from './EventsPane.vue';
 import StatCard from './StatCard.vue';
-
-const numOf = toNum;
-// Scaled-to-zero counts as healthy (intentionally scaled down, not failing).
-const replicasReady = (o: KubeObject): boolean => numOf(objStatus(o).readyReplicas) === numOf(objSpec(o).replicas);
-
-// The Workloads overview cards. Each entry carries its own health predicate, so adding a
-// workload kind is one entry here (no separate switch to keep in sync).
-const WORKLOAD_KINDS: { id: string; label: string; healthy: (o: KubeObject) => boolean }[] = [
-  { id: 'pods', label: 'Pods', healthy: (o) => objStatus(o).phase === 'Running' || objStatus(o).phase === 'Succeeded' },
-  { id: 'deployments', label: 'Deployments', healthy: replicasReady },
-  { id: 'statefulsets', label: 'Stateful Sets', healthy: replicasReady },
-  {
-    id: 'daemonsets',
-    label: 'Daemon Sets',
-    healthy: (o) => numOf(objStatus(o).numberReady) === numOf(objStatus(o).desiredNumberScheduled),
-  },
-  { id: 'replicasets', label: 'Replica Sets', healthy: replicasReady },
-  { id: 'jobs', label: 'Jobs', healthy: (o) => numOf(objStatus(o).succeeded) > 0 },
-  { id: 'cronjobs', label: 'Cron Jobs', healthy: () => true },
-];
+import { WORKLOAD_KINDS, tally } from './workloadHealth';
+import type { KindTally } from './workloadHealth';
 
 const props = defineProps<{ cluster: string }>();
 
-const counts = shallowRef<Record<string, { total: number; ready: number }>>({});
+const counts = shallowRef<Record<string, KindTally>>({});
 const events = shallowRef<EventSummary[] | null>(null);
 
 let reqId = 0;
@@ -49,10 +31,7 @@ watch(
           if (my !== reqId) {
             return;
           }
-          counts.value = {
-            ...counts.value,
-            [k.id]: { total: objs.length, ready: objs.filter((o) => k.healthy(o)).length },
-          };
+          counts.value = { ...counts.value, [k.id]: tally(objs, k) };
         })
         .catch(() => undefined);
     });
@@ -67,16 +46,28 @@ watch(
 const cards = computed(() =>
   WORKLOAD_KINDS.map((k) => {
     const c = counts.value[k.id];
-    return {
-      id: k.id,
-      value: c ? c.total : '…',
-      label: k.label + (c ? ` · ${c.ready} ready` : ''),
-      danger: c ? c.total - c.ready > 0 : false,
-    };
+    if (!c) {
+      return { id: k.id, value: '…', label: k.label, danger: false };
+    }
+    // Suspended is reported separately from attention: a suspended CronJob is a deliberate
+    // choice, and colouring it red alongside real failures is how a health signal earns its
+    // way into being ignored.
+    const parts = [`${c.ok} ok`];
+    if (c.attention > 0) {
+      parts.push(`${c.attention} need attention`);
+    }
+    if (c.suspended > 0) {
+      parts.push(`${c.suspended} suspended`);
+    }
+    return { id: k.id, value: c.total, label: `${k.label} · ${parts.join(' · ')}`, danger: c.attention > 0 };
   }),
 );
 
-const recentEvents = computed(() => (events.value ? events.value.slice(0, 25) : null));
+// Events are capped for rendering, but the cap is REPORTED rather than silently applied —
+// showing a subset without saying so is a factual claim about the cluster that is wrong.
+const EVENT_LIMIT = 25;
+const recentEvents = computed(() => (events.value ? events.value.slice(0, EVENT_LIMIT) : null));
+const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT);
 </script>
 
 <template>
@@ -87,6 +78,9 @@ const recentEvents = computed(() => (events.value ? events.value.slice(0, 25) : 
     </div>
     <section class="ov-sec">
       <h3>Recent Events</h3>
+      <div v-if="eventsTruncated" class="ov-truncated">
+        Showing the {{ EVENT_LIMIT }} most recent of {{ events?.length }} events.
+      </div>
       <EventsPane :events="recentEvents" :error="null" />
     </section>
   </div>
