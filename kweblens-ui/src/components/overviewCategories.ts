@@ -46,8 +46,10 @@ export const OVERVIEW_CATEGORIES: Record<string, OverviewCategory> = {
     attention: 'Claims that are not bound',
     clean: 'Every claim is bound.',
     notes: [
-      // Naming the gap beats leaving a reader to assume capacity was checked and found fine.
-      'Capacity is not checked: how full a volume is comes from a metrics source, not from the Kubernetes API.',
+      // The gap is now narrower but still real, so it is still named: silence here would let a
+      // reader assume every volume was measured.
+      'Capacity is checked only where the provisioner reports per-volume usage. Where kubelet reports the whole backing disk instead — common for hostPath, local-path and plain NFS — the claim is not flagged on a figure that is not about it.',
+      'Needs a Prometheus-compatible metrics backend; without one, only binding is checked.',
     ],
   },
   config: {

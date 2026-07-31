@@ -26,7 +26,9 @@ describe('category copy', () => {
     // A claim about the cluster without its bounds is the failure this copy exists to prevent —
     // "not referenced" must not be read as "safe to delete".
     expect(OVERVIEW_CATEGORIES.config.notes?.join(' ')).toContain('Not evidence that an object is unused');
-    expect(OVERVIEW_CATEGORIES.storage.notes?.join(' ')).toContain('Capacity is not checked');
+    // Capacity IS checked now, but only where the reading is about the claim — the bound
+    // still has to be stated, or a reader assumes every volume was measured.
+    expect(OVERVIEW_CATEGORIES.storage.notes?.join(' ')).toContain('only where the provisioner reports per-volume');
     expect(OVERVIEW_CATEGORIES.network.notes?.join(' ')).toContain('ExternalName');
   });
 

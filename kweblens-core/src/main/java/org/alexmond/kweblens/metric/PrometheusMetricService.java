@@ -125,6 +125,73 @@ public class PrometheusMetricService {
 		return out;
 	}
 
+	/**
+	 * Per-PVC volume usage from kubelet's stats, keyed {@code namespace/claim}.
+	 *
+	 * <p>
+	 * These series exist wherever kubelet is scraped, which is the same backend already
+	 * serving the charts — so this needs no new source and no new credentials. What it
+	 * does need is care at the point of display: see {@link VolumeUsage} for why the
+	 * reported capacity is often the backing filesystem rather than the claim.
+	 */
+	public Map<String, VolumeUsage> volumeUsage(String clusterId) {
+		Optional<String> address = endpoint(clusterId);
+		if (address.isEmpty()) {
+			return Map.of();
+		}
+		Map<String, Double> capacity = instantByPvc(clusterId, address.get(), "kubelet_volume_stats_capacity_bytes");
+		if (capacity.isEmpty()) {
+			return Map.of();
+		}
+		Map<String, Double> used = instantByPvc(clusterId, address.get(), "kubelet_volume_stats_used_bytes");
+		Map<String, VolumeUsage> out = new HashMap<>();
+		capacity.forEach((key, capacityBytes) -> {
+			int slash = key.indexOf('/');
+			if (slash > 0) {
+				out.put(key, new VolumeUsage(key.substring(0, slash), key.substring(slash + 1),
+						Math.round(used.getOrDefault(key, 0.0)), Math.round(capacityBytes)));
+			}
+		});
+		return out;
+	}
+
+	private Map<String, Double> instantByPvc(String clusterId, String address, String promql) {
+		try {
+			String body = clusters.require(clusterId).raw(proxyBase(address) + "/api/v1/query?query=" + enc(promql));
+			return parseInstantByPvc(body);
+		}
+		catch (RuntimeException ex) {
+			log.warn("Volume-usage query failed on cluster '{}': {}", clusterId, ex.getMessage());
+			return Map.of();
+		}
+	}
+
+	/**
+	 * Like {@link #parseInstant} but keyed on TWO labels, because a claim name is only
+	 * unique within its namespace.
+	 */
+	Map<String, Double> parseInstantByPvc(String body) {
+		Map<String, Double> out = new HashMap<>();
+		if (body == null || body.isBlank()) {
+			return out;
+		}
+		try {
+			for (JsonNode series : mapper.readTree(body).path("data").path("result")) {
+				JsonNode metric = series.path("metric");
+				String namespace = metric.path("namespace").asText("");
+				String claim = metric.path("persistentvolumeclaim").asText("");
+				JsonNode value = series.path("value");
+				if (!namespace.isEmpty() && !claim.isEmpty() && value.isArray() && value.size() == 2) {
+					out.put(namespace + "/" + claim, value.get(1).asDouble());
+				}
+			}
+		}
+		catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+			log.debug("Unparsable instant-query response: {}", ex.getMessage());
+		}
+		return out;
+	}
+
 	private Map<String, Double> instantByLabel(String clusterId, String address, String promql, String label) {
 		try {
 			String body = clusters.require(clusterId).raw(proxyBase(address) + "/api/v1/query?query=" + enc(promql));
