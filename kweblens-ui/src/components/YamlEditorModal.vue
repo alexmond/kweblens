@@ -108,7 +108,7 @@ const onShow = (v: boolean) => {
         <YamlEditor v-model:value="draft" :schema="schema" :readonly="readonly" @diagnostics="(d) => (warnings = d)" />
       </NTabPane>
       <NTabPane v-if="!readonly" name="form" tab="Form" display-directive="if">
-        <div class="dialog-scroll"><FormFields v-model="draft" /></div>
+        <div class="dialog-scroll"><FormFields v-model="draft" :schema="schema" /></div>
       </NTabPane>
       <NTabPane v-if="!readonly" name="warnings" display-directive="if">
         <template #tab>

@@ -2781,3 +2781,30 @@ body.dragging {
 .n-data-table-th.kw-num {
   font-variant-numeric: tabular-nums;
 }
+
+/* Schema-generated form fields: label + hint on the left, control on the right. */
+.form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 40%) 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.form-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
