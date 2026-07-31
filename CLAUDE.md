@@ -24,12 +24,28 @@ scripts/dev-test.sh <selector>        # targeted -Dtest run (last arg = selector
 scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
 ./mvnw spring-javaformat:apply        # auto-format (run before committing)
 
-# UI performance (see "Performance testing" below)
-NODE_PATH=$HOME/.local/lib/playwright/node_modules node scripts/perf-sweep.mjs   # on-demand hang/long-load sweep
+scripts/dev-run.sh                    # run locally on :8080, login admin/admin (--sim, --port, --stop)
+scripts/pr-watch.sh <pr> [--merge]    # wait on CI; exit 1 on any failure
+
+# UI checks — both drive a RUNNING instance (see "Performance testing" below)
+export NODE_PATH=$HOME/.local/lib/playwright/node_modules
+node scripts/perf-sweep.mjs           # on-demand hang/long-load sweep
+node scripts/contrast-check.mjs       # WCAG contrast of rendered UI, BOTH themes; exits 1 on failure
 ```
+
+Full descriptions: [`scripts/README.md`](scripts/README.md).
 
 - `dev-verify.sh` / `dev-test.sh` are the intended entry points (allowlist them in
   `.claude/settings.json` to run without prompts).
+- **Start the app with `scripts/dev-run.sh`, not `java -jar`.** With no admin password set,
+  `SecurityConfig` generates one per run and only logs it — so `admin`/`admin` silently stops
+  working. The script always passes the dev credentials and fails loudly if one is generated
+  anyway. Never move those credentials into `application.yml`.
+- **Colour is measured, not eyeballed.** `contrast-check.mjs` exists because this has been got
+  wrong repeatedly (a 1.93:1 badge in #169; the command palette's first two stylings at 3.02:1
+  and 3.80:1 in #200, both of which looked fine). Run it against any change to `styles.css`. A
+  selector that is not on screen reports `not present` rather than passing — use `PREPARE` to
+  open it, and treat a screenful of `not present` as a failed run.
 - CI (`.github/workflows/ci.yml`) runs `./mvnw -B verify` on JDK 21 — same gates as `dev-verify`.
 - **Performance testing (two layers).** (1) *Regression guard, in the gate:* a Vitest test
   (`kweblens-ui/src/composables/useResourceData.test.ts`) asserts the resource-list watch
