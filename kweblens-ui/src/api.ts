@@ -3,6 +3,8 @@ import type {
   AboutInfo,
   KindHealth,
   ObjectDetail,
+  ClusterConfigView,
+  ClusterDefinition,
   ClusterDiagnostics,
   ClusterInfo,
   EventSummary,
@@ -75,6 +77,18 @@ async function deleteReq(url: string): Promise<void> {
   }
 }
 
+async function putJson<T>(url: string, body: string): Promise<T> {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { ...auth.header(), Accept: 'application/json', 'Content-Type': 'application/json' },
+    body,
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
 async function putText(url: string, body: string): Promise<void> {
   const res = await fetch(url, {
     method: 'PUT',
@@ -137,6 +151,19 @@ export const api = {
   // Validates HTTP Basic creds and establishes the session cookie the exec WebSocket rides.
   verifySession: () => postJson<{ user: string }>('/api/v1/auth/session'),
   clusters: () => getJson<ClusterInfo[]>(CLUSTERS),
+  // Runtime cluster management (#198). Every one of these is a non-GET, so it requires the
+  // admin login in both security modes. The kubeconfig travels one way only: it is sent on
+  // add/update and never comes back — clusterConfig reports `kubeconfigStored` as a
+  // boolean, so a stored credential can be shown as present without being exposed.
+  addCluster: (definition: ClusterDefinition) =>
+    postBody<ClusterInfo>(CLUSTERS, JSON.stringify(definition), 'application/json'),
+  updateCluster: (id: string, definition: ClusterDefinition) =>
+    putJson<ClusterInfo>(`${CLUSTERS}/${encodeURIComponent(id)}`, JSON.stringify(definition)),
+  removeCluster: (id: string) => deleteReq(`${CLUSTERS}/${encodeURIComponent(id)}`),
+  clusterConfig: (id: string) => getJson<ClusterConfigView>(`${CLUSTERS}/${encodeURIComponent(id)}/config`),
+  /** The contexts in a kubeconfig the user is about to submit. Stores nothing. */
+  kubeconfigContexts: (kubeconfig: string) =>
+    postBody<string[]>(`${CLUSTERS}/contexts`, JSON.stringify({ kubeconfig }), 'application/json'),
   // Read-only diagnostics (#27): what a cluster supports, and how this instance is configured.
   clusterDiagnostics: (cluster: string) => getJson<ClusterDiagnostics>(`${clusterBase(cluster)}/diagnostics`),
   about: () => getJson<AboutInfo>('/api/v1/about'),

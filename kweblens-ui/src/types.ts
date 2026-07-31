@@ -9,6 +9,30 @@ export interface ClusterInfo {
   origin?: 'STATIC' | 'RUNTIME';
 }
 
+/** Body sent when adding or updating a cluster. The kubeconfig is write-only: the server
+ *  never returns it, so it is optional on update (omit to keep the stored one). */
+export interface ClusterDefinition {
+  id: string;
+  name: string;
+  context: string | null;
+  kubeconfig?: string;
+}
+
+/** How a cluster is configured. Reports whether a credential is stored, never its value. */
+export interface ClusterConfigView {
+  id: string;
+  name: string;
+  origin: 'STATIC' | 'RUNTIME';
+  masterUrl: string;
+  context: string | null;
+  contexts: string[];
+  kubeconfigStored: boolean;
+  /** Human description of the backing store, e.g. "Secret" or a data directory. */
+  storage: string;
+  /** Whether the stored definition survives a restart. */
+  persistent: boolean;
+}
+
 export interface NavItem {
   id: string;
   label: string;
