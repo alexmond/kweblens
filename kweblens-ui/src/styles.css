@@ -7,7 +7,9 @@
   --panel: #ffffff;
   --border: #dbe1e6;
   --text: #1f2a30;
-  --muted: #6b7b85;
+  /* Darkened in #201: the old #6b7b85 measured 4.38:1 on the panel and 3.72:1 on the
+     nav badge's tint, both under the 4.5:1 floor. This clears both. */
+  --muted: #566670;
   /* CodeMirror YAML syntax colours (light) — see YamlEditor.vue highlightStyle */
   --cm-key: #1a56c4;
   --cm-string: #0a7d33;
@@ -54,7 +56,8 @@ html.kw-dark {
   --panel: #1f242a;
   --border: #333a42;
   --text: #dfe4e8;
-  --muted: #8b959f;
+  /* Lightened in #201: #8b959f measured 4.20:1 on the nav badge's tint. */
+  --muted: #9aa5b0;
   /* CodeMirror YAML syntax colours (dark) — readable on the dark panel */
   --cm-key: #7cc7ff;
   --cm-string: #9ece6a;
@@ -103,9 +106,21 @@ html.kw-dark .group > summary:hover,
 html.kw-dark .leaf:hover {
   background: rgba(255, 255, 255, 0.06);
 }
+/* All three are the same "count in a pill" and all three hardcode a light background, so
+   they must be overridden together. `.count` was missing here, which is why the "N items"
+   chip rendered as a light box in dark mode — its muted text measured 2.13:1 against it,
+   i.e. nearly invisible. Adding a fourth pill later means adding it here too. */
 html.kw-dark .nav-badge,
-html.kw-dark .acc-count {
+html.kw-dark .acc-count,
+html.kw-dark .count {
   background: #2c333b;
+}
+
+/* The plain YAML block hardcodes a light page-like surface; without this it is a white
+   sheet in a dark UI. Found by the same sweep as .count. */
+html.kw-dark .yaml {
+  background: #12161a;
+  color: var(--text);
 }
 
 * {
@@ -467,7 +482,7 @@ body {
 
 .leaf.active .nav-badge {
   background: rgba(10, 122, 194, 0.18);
-  color: var(--accent);
+  color: var(--text);
 }
 
 /* Nested items with an indentation guide */
@@ -571,10 +586,13 @@ body {
   background: #f0f4f7;
 }
 
-/* Full-width selection bar (vCenter-style) */
+/* Full-width selection bar (vCenter-style).
+
+   Selection is carried by the tint, the inset bar and the weight — NOT by colouring the
+   label with the accent, which measured 3.80:1 over its own tint (#201). Normal text over
+   the tint measures ~12:1. This is the same conclusion .palette-row.active reached in #200. */
 .leaf.active {
   background: rgba(10, 122, 194, 0.14);
-  color: var(--accent);
   font-weight: 600;
   box-shadow: inset 3px 0 0 var(--accent);
 }

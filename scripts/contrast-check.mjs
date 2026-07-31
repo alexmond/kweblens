@@ -45,6 +45,11 @@ const DEFAULT_SELECTORS = [
   '.ov-card.warn',
   '.badge',
   '.nav-badge',
+  // The count pills all hardcode a light background and need a dark override each. `.count`
+  // was missing one and rendered at 2.13:1 in dark mode; the other two are here so the next
+  // omission is caught by the tool rather than by a person noticing.
+  '.count',
+  '.acc-count',
 ];
 
 const selectors = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_SELECTORS;
