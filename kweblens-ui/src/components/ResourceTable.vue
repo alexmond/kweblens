@@ -43,7 +43,7 @@ const renderCell = (spec: CellSpec, row: KubeObject) => {
   if (spec.type === 'containers') {
     return h(ContainerSquares, { obj: row });
   }
-  return spec.tone ? h(StatusBadge, { text: spec.text }) : spec.text;
+  return spec.tone ? h(StatusBadge, { text: spec.text, tone: spec.tone }) : spec.text;
 };
 
 const menuOptions = (row: KubeObject) => {
@@ -126,6 +126,8 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
       key: c.key,
       // A column's own `width` (short values like Taints) wins; otherwise a readable floor.
       width: c.width ?? DATA_MIN_WIDTH,
+      align: c.numeric ? 'right' : undefined,
+      className: c.numeric ? 'kw-num' : undefined,
       ellipsis: { tooltip: true },
       sorter: (a, b) => sortVal(a, c).localeCompare(sortVal(b, c), undefined, { numeric: true }),
       render: (row) =>

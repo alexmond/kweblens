@@ -1207,7 +1207,7 @@ body {
 }
 
 .mini tr.warn td {
-  background: color-mix(in srgb, #e0a13a 22%, var(--panel));
+  background: var(--warn-tint);
 }
 
 .mono {
@@ -1438,7 +1438,7 @@ body {
   padding: 8px 2px 14px;
 }
 .form-parse-error {
-  color: #e5484d;
+  color: var(--danger-fg);
   font-size: 13px;
   padding: 8px 2px;
 }
@@ -1501,8 +1501,8 @@ body {
   color: var(--accent);
 }
 .warn-badge.err {
-  background: color-mix(in srgb, #e5484d 22%, transparent);
-  color: #e5484d;
+  background: var(--danger-tint);
+  color: var(--danger-fg);
 }
 .warnings-list {
   display: flex;
@@ -1533,10 +1533,10 @@ body {
   background: color-mix(in srgb, var(--accent) 6%, var(--panel));
 }
 .warning-row.error {
-  border-left-color: #e5484d;
+  border-left-color: var(--danger-fg);
 }
 .warning-row.warning {
-  border-left-color: #d98a00;
+  border-left-color: var(--warn-fg);
 }
 .warning-loc {
   color: var(--muted);
@@ -1562,7 +1562,7 @@ body {
 }
 .diff-legend .diff-old::before {
   content: '−';
-  color: #e5484d;
+  color: var(--danger-fg);
   margin-right: 4px;
 }
 .diff-legend .diff-new::before {
@@ -2772,4 +2772,12 @@ body.dragging {
 .log-src.gone {
   opacity: 0.55;
   font-style: italic;
+}
+
+/* Columns of magnitudes rather than labels (event repeat counts, restarts). Tabular figures
+   line the digits up by place value, so a 1625 among a column of 5s reads as large without
+   needing a colour or an invented "high" threshold. */
+.n-data-table-td.kw-num,
+.n-data-table-th.kw-num {
+  font-variant-numeric: tabular-nums;
 }

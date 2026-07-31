@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { age, columnsFor, defaultHiddenCols, printerColumnDefs, readyTone, statusTone } from './columns';
+import { age, columnsFor, defaultHiddenCols, eventTypeTone, printerColumnDefs, readyTone, statusTone } from './columns';
+import { toneFor } from './table';
 import type { KubeObject, PrinterColumn } from './types';
 
 describe('statusTone', () => {
@@ -169,5 +170,44 @@ describe('node columns', () => {
     expect(hidden.has('conditions')).toBe(false);
     expect(defaultHiddenCols('pods').size).toBe(0);
     expect(defaultHiddenCols(undefined).size).toBe(0);
+  });
+});
+
+describe('eventTypeTone', () => {
+  it('colours a Warning amber, not red', () => {
+    // A Warning means "something notable happened", and many are routine. Red would put the
+    // loudest tone on the most common non-Normal row, which is how a list stops being scannable.
+    expect(eventTypeTone('Warning')).toBe('warn');
+  });
+
+  it('gives Normal no tone at all', () => {
+    // Nearly every row on a busy cluster is Normal; colouring it would decorate the whole table
+    // and leave the warnings no more visible than before.
+    expect(eventTypeTone('Normal')).toBe('');
+    expect(eventTypeTone('')).toBe('');
+  });
+});
+
+describe('toneFor', () => {
+  it('does not colour the Type column of other kinds', () => {
+    // `type` is also a column on Services and Secrets, and toneFor sees only the column key —
+    // not the kind. Matching the exact word is what keeps ClusterIP and Opaque uncoloured.
+    expect(toneFor('type', 'ClusterIP')).toBe('');
+    expect(toneFor('type', 'LoadBalancer')).toBe('');
+    expect(toneFor('type', 'kubernetes.io/tls')).toBe('');
+    expect(toneFor('type', 'Warning')).toBe('warn');
+  });
+
+  it('classifies a ready ratio, which is not keyword-based', () => {
+    // This tone is the one that used to be computed and then thrown away: StatusBadge
+    // re-derived colour from the TEXT, and '1/3' matches no status keyword, so the Ready
+    // column was badged and rendered plain.
+    expect(toneFor('ready', '3/3')).toBe('ok');
+    expect(toneFor('ready', '1/3')).toBe('warn');
+    expect(toneFor('ready', '0/3')).toBe('err');
+  });
+
+  it('gives an unclassified column no tone', () => {
+    expect(toneFor('message', 'anything')).toBe('');
   });
 });
