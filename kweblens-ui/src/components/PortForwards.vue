@@ -106,7 +106,7 @@ const columns = computed<DataTableColumns<PortForward>>(() => [
     <NDataTable
       :columns="columns"
       :data="forwards ?? []"
-      :loading="forwards === null"
+      :loading="forwards === null && !error"
       :row-key="(f) => f.id"
       size="small"
     />

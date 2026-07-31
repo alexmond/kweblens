@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NInput } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { shallowRef, computed, h, ref, watch } from 'vue';
+import { computed, h, ref } from 'vue';
 
 import { ApiError, api } from '../api';
+import { useAsyncData } from '../composables/useAsyncData';
 import { useDialog } from '../dialog';
+import ErrorNotice from './ErrorNotice.vue';
 import KebabMenu from './KebabMenu.vue';
 import type { KebabItem } from './helm-types';
 
@@ -18,27 +20,21 @@ const props = defineProps<{ authed: boolean }>();
 const emit = defineEmits<{ (e: 'require-auth'): void; (e: 'auth-expired'): void }>();
 
 const dialog = useDialog();
-const repos = shallowRef<{ name: string; url: string }[] | null>(null);
-const error = ref<string | null>(null);
+const refreshKey = ref(0);
+// Three states, not two: `loading` stops whether the request succeeds or fails, so an error
+// can never be shown over a spinner that never stops.
+const {
+  data: repos,
+  loading,
+  error,
+  reload,
+} = useAsyncData(
+  () => refreshKey.value,
+  () => api.helmRepos(),
+);
 const name = ref('');
 const url = ref('');
 const busy = ref(false);
-const refreshKey = ref(0);
-
-watch(
-  () => refreshKey.value,
-  (_v, _o, onCleanup) => {
-    let cancelled = false;
-    onCleanup(() => (cancelled = true));
-    repos.value = null;
-    error.value = null;
-    api
-      .helmRepos()
-      .then((r) => !cancelled && (repos.value = r))
-      .catch((e) => !cancelled && (error.value = String(e)));
-  },
-  { immediate: true },
-);
 
 const fail = (e: unknown) => {
   if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
@@ -156,15 +152,15 @@ const rowKey = (r: { name: string; url: string }) => r.name;
   <div class="content-head">
     <span class="count">{{ repos ? `${repos.length} repositories` : '' }}</span>
   </div>
-  <div v-if="error" class="error">{{ error }}</div>
+  <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
   <div v-if="authed" class="repo-add">
     <NInput v-model:value="name" placeholder="name" :disabled="busy" style="max-width: 200px" />
     <NInput v-model:value="url" placeholder="https://charts.example.com" :disabled="busy" class="repo-url" />
     <NButton type="primary" :disabled="busy || !name.trim() || !url.trim()" @click="add">Add repository</NButton>
   </div>
-  <NDataTable :columns="columns" :data="repos ?? []" :row-key="rowKey" :loading="repos === null" size="small">
+  <NDataTable :columns="columns" :data="repos ?? []" :row-key="rowKey" :loading="loading" size="small">
     <template #empty>
-      {{ repos === null ? 'Loading…' : 'No repositories. Add one above.' }}
+      {{ loading ? 'Loading…' : error ? 'Could not load repositories.' : 'No repositories. Add one above.' }}
     </template>
   </NDataTable>
 </template>
