@@ -2,8 +2,8 @@ package org.alexmond.kweblens.web.ai;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
@@ -15,6 +15,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import org.alexmond.kweblens.event.EventService;
+import org.alexmond.kweblens.health.KindHealth;
+import org.alexmond.kweblens.health.NetworkHealthService;
+import org.alexmond.kweblens.health.StorageHealthService;
 import org.alexmond.kweblens.event.EventSummary;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.WellKnownKinds;
@@ -41,9 +44,18 @@ public class DiagnoseService {
 
 	private static final Comparator<Finding> BY_SEVERITY = Comparator.comparingInt((Finding f) -> severityRank(f));
 
+	/**
+	 * Cap on event-derived findings, so one noisy namespace cannot bury everything else.
+	 */
+	private static final int MAX_EVENT_FINDINGS = 15;
+
 	private final ResourceService resources;
 
 	private final EventService events;
+
+	private final NetworkHealthService network;
+
+	private final StorageHealthService storage;
 
 	private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
@@ -52,7 +64,10 @@ public class DiagnoseService {
 	public DiagnoseResult diagnose(String clusterId, String namespace) {
 		List<Finding> findings = new ArrayList<>();
 		findings.addAll(checkPods(clusterId, namespace));
-		findings.addAll(checkEvents(clusterId, namespace));
+		findings.addAll(checkRelational(clusterId, namespace));
+		// Events last, and told what the checks above already explained, so they add
+		// evidence rather than repeat it.
+		findings.addAll(checkEvents(clusterId, namespace, findings));
 		findings.sort(BY_SEVERITY);
 
 		String summary = null;
@@ -70,40 +85,89 @@ public class DiagnoseService {
 	private List<Finding> checkPods(String clusterId, String namespace) {
 		List<Finding> findings = new ArrayList<>();
 		for (GenericKubernetesResource pod : resources.listRaw(clusterId, PODS, namespace)) {
-			String name = objectName(pod);
-			Map<String, Object> status = asMap(pod.getAdditionalProperties().get("status"));
-			String phase = str(status.get("phase"));
-			if (phase != null && !HEALTHY_PHASES.contains(phase)) {
-				findings.add(new Finding("warning", "Pod not running", "Pod/" + name, "phase=" + phase,
-						"Check the pod's events and describe output.", "validator"));
-			}
-			findings.addAll(checkContainerStatuses(name, status));
+			findings.addAll(PodDiagnosis.forPod(pod));
 		}
 		return findings;
 	}
 
-	private List<Finding> checkContainerStatuses(String podName, Map<String, Object> status) {
+	/**
+	 * The relational failures a pod-by-pod scan cannot see, from the same checks the
+	 * dashboard renders.
+	 *
+	 * <p>
+	 * A Service with no ready endpoints and an unbound claim are both invisible on any
+	 * one object — the answer needs a second one. Reusing the overview's services rather
+	 * than reimplementing the joins also means a diagnosis and the Network/Storage pages
+	 * cannot disagree about whether something is broken.
+	 */
+	private List<Finding> checkRelational(String clusterId, String namespace) {
 		List<Finding> findings = new ArrayList<>();
-		for (Object container : asList(status.get("containerStatuses"))) {
-			Map<String, Object> waiting = asMap(asMap(asMap(container).get("state")).get("waiting"));
-			String reason = str(waiting.get("reason"));
-			if (reason != null && CRITICAL_WAIT_REASONS.contains(reason)) {
-				findings.add(new Finding("critical", reason, "Pod/" + podName, str(waiting.get("message")),
-						suggestFor(reason), "validator"));
+		for (KindHealth kind : this.network.summarise(clusterId, namespace)) {
+			for (KindHealth.UnhealthyItem item : kind.needsAttention()) {
+				findings.add(new Finding("critical", "Service has nothing behind it", item.kind() + "/" + item.name(),
+						item.reason(),
+						"no endpoints".equals(item.reason())
+								? "Check the Service's selector against the pod labels it is meant to match."
+								: "The pods exist but are not ready — check their readiness probe and logs.",
+						"validator"));
+			}
+		}
+		for (KindHealth kind : this.storage.summarise(clusterId, namespace)) {
+			for (KindHealth.UnhealthyItem item : kind.needsAttention()) {
+				findings.add(new Finding("warning", "Volume claim needs attention", item.kind() + "/" + item.name(),
+						item.reason(),
+						item.reason().startsWith("Pending")
+								? "The claim is not bound — check that its StorageClass exists and has a provisioner."
+								: "The volume is nearly full — free space or expand the claim.",
+						"validator"));
 			}
 		}
 		return findings;
 	}
 
-	private List<Finding> checkEvents(String clusterId, String namespace) {
+	/**
+	 * Warning events, deduplicated and filtered to the ones that add something.
+	 *
+	 * <p>
+	 * Every warning event used to become a finding. On a real namespace that is the same
+	 * probe failure repeated dozens of times, plus a BackOff event for the crashloop the
+	 * container check already explained in more detail — so the findings the reader needs
+	 * end up buried under restatements. Events stay because for some failures they are
+	 * the ONLY evidence (a claim's provisioning error lives nowhere else); they are just
+	 * no longer allowed to drown it.
+	 */
+	private List<Finding> checkEvents(String clusterId, String namespace, List<Finding> already) {
+		Set<String> explained = new HashSet<>();
+		for (Finding finding : already) {
+			explained.add(objectKey(finding.object()));
+		}
+		Set<String> seen = new HashSet<>();
 		List<Finding> findings = new ArrayList<>();
 		for (EventSummary event : events.list(clusterId, namespace)) {
-			if ("Warning".equals(event.type())) {
-				findings.add(new Finding("warning", event.reason(), event.object(), event.message(),
-						"Investigate the object referenced by this warning event.", "validator"));
+			if (!"Warning".equals(event.type()) || explained.contains(objectKey(event.object()))) {
+				continue;
 			}
+			// One row per object+reason: the same probe failing 1600 times is one
+			// problem.
+			if (!seen.add(event.object() + "/" + event.reason()) || findings.size() >= MAX_EVENT_FINDINGS) {
+				continue;
+			}
+			findings.add(new Finding("warning", event.reason(), event.object(), event.message(),
+					"This event is the only record of the problem — start from the object it names.", "validator"));
 		}
 		return findings;
+	}
+
+	/**
+	 * Objects are named "Kind/name" by events and "Pod/name container x" by the pod
+	 * checks.
+	 */
+	private String objectKey(String object) {
+		if (object == null) {
+			return "";
+		}
+		int space = object.indexOf(' ');
+		return (space > 0) ? object.substring(0, space) : object;
 	}
 
 	private String summarize(ChatClient.Builder builder, List<Finding> findings) {
@@ -135,38 +199,12 @@ public class DiagnoseService {
 		}
 	}
 
-	private String suggestFor(String reason) {
-		return switch (reason) {
-			case "CrashLoopBackOff" -> "Inspect container logs (previous run) and the exit code; fix the crash cause.";
-			case "ImagePullBackOff", "ErrImagePull" -> "Verify the image name/tag and pull credentials.";
-			case "CreateContainerConfigError" -> "Check referenced ConfigMaps/Secrets exist and keys match.";
-			default -> "Describe the pod and inspect its container state.";
-		};
-	}
-
 	private static int severityRank(Finding finding) {
 		return switch (finding.severity()) {
 			case "critical" -> 0;
 			case "warning" -> 1;
 			default -> 2;
 		};
-	}
-
-	private String objectName(GenericKubernetesResource resource) {
-		return (resource.getMetadata() != null) ? resource.getMetadata().getName() : "?";
-	}
-
-	@SuppressWarnings("unchecked")
-	private Map<String, Object> asMap(Object value) {
-		return (value instanceof Map) ? (Map<String, Object>) value : Map.of();
-	}
-
-	private List<?> asList(Object value) {
-		return (value instanceof List) ? (List<?>) value : List.of();
-	}
-
-	private String str(Object value) {
-		return (value != null) ? value.toString() : null;
 	}
 
 }

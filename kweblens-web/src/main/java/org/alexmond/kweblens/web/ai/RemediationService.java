@@ -38,7 +38,7 @@ public class RemediationService {
 		List<RemediationProposal> proposals = new ArrayList<>();
 		for (Finding finding : diagnose.diagnose(clusterId, namespace).findings()) {
 			if (isRestartable(finding)) {
-				String pod = finding.object().substring("Pod/".length());
+				String pod = podName(finding.object());
 				proposals.add(new RemediationProposal(RESTART_POD, namespace, pod,
 						"Delete pod '" + pod + "' so its controller recreates it (clears a stuck/crashed pod).",
 						"dry-run: pod '" + pod + "' in '" + namespace
@@ -65,9 +65,35 @@ public class RemediationService {
 		return "Deleted pod '" + target + "'; its controller will recreate it.";
 	}
 
+	/**
+	 * The pod out of a finding's object string.
+	 *
+	 * <p>
+	 * A finding names the container when it knows it — "Pod/web container app" — because
+	 * that is what a reader needs. Restarting is a pod-level action, so anything after
+	 * the name is dropped rather than being pasted into a delete call.
+	 */
+	private String podName(String object) {
+		String rest = object.substring("Pod/".length());
+		int space = rest.indexOf(' ');
+		return (space > 0) ? rest.substring(0, space) : rest;
+	}
+
+	/**
+	 * Titles worth offering a restart for.
+	 *
+	 * <p>
+	 * Deliberately narrow. A restart clears a stuck process; it does nothing for a bad
+	 * image name, a missing ConfigMap, an unschedulable pod or a container the kernel is
+	 * killing for memory — proposing one there would be a suggestion that cannot work,
+	 * which is worse than no suggestion.
+	 */
 	private boolean isRestartable(Finding finding) {
-		return finding.object() != null && finding.object().startsWith("Pod/")
-				&& ("CrashLoopBackOff".equals(finding.title()) || "Pod not running".equals(finding.title()));
+		if (finding.object() == null || !finding.object().startsWith("Pod/")) {
+			return false;
+		}
+		String title = finding.title();
+		return "CrashLoopBackOff".equals(title) || "Pod not running".equals(title);
 	}
 
 }
