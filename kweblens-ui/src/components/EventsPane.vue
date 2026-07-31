@@ -1,13 +1,19 @@
 <script setup lang="ts">
 // The reusable events table (also used outside the drawer). NDataTable with sortable
-// columns; Warning rows are highlighted (a red NTag on Type + a `warn` row class).
+// columns; Warning rows are highlighted (an amber badge on Type + a `warn` row class).
+//
+// Amber rather than red, and matching the Events LIST exactly: an event is read the same way
+// wherever it appears, so a Warning must not look more severe in the drawer than in the list.
+// See eventTypeTone for why a Warning is not an error.
 // Emits nothing — purely presentational.
-import { NDataTable, NTag } from 'naive-ui';
+import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { computed, h } from 'vue';
 
+import { eventTypeTone } from '../columns';
 import { ageToSeconds } from '../kube';
 import type { EventSummary } from '../types';
+import StatusBadge from './StatusBadge.vue';
 
 const props = defineProps<{ events: EventSummary[] | null; error: string | null }>();
 
@@ -16,8 +22,7 @@ const columns = computed<DataTableColumns<EventSummary>>(() => [
     title: 'Type',
     key: 'type',
     sorter: (a, b) => (a.type ?? '').localeCompare(b.type ?? ''),
-    render: (row) =>
-      h(NTag, { size: 'small', type: row.type === 'Warning' ? 'error' : 'default', bordered: false }, () => row.type),
+    render: (row) => h(StatusBadge, { text: String(row.type ?? ''), tone: eventTypeTone(row.type) }),
   },
   {
     title: 'Reason',

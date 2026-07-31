@@ -1,5 +1,5 @@
 import type { ColumnDef, StatusTone } from './columns';
-import { readyTone, statusTone } from './columns';
+import { eventTypeTone, readyTone, statusTone } from './columns';
 import { gib, objKey, objName, parseCpuCores, parseMemBytes } from './kube';
 import type { KubeObject, NodeDiskUsage, UsageSummary } from './types';
 
@@ -25,6 +25,9 @@ export function toneFor(key: string, text: string): StatusTone {
   }
   if (key === 'ready') {
     return readyTone(text);
+  }
+  if (key === 'type') {
+    return eventTypeTone(text);
   }
   return '';
 }

@@ -14,6 +14,12 @@ export interface ColumnDef {
   /** Fixed pixel width for columns whose values are always short (counts, flags, versions). */
   width?: number;
   /**
+   * Right-align with tabular figures. For columns of magnitudes rather than labels: digits
+   * then line up by place value, so 1625 among a column of 5s reads as large at a glance
+   * instead of being just another string.
+   */
+  numeric?: boolean;
+  /**
    * Start hidden (still listed in the Columns ▾ picker). For detail-rich kinds like Nodes
    * that offer more columns than fit comfortably — the same default other Kubernetes IDEs
    * use, showing the common set and leaving the rest opt-in.
@@ -110,6 +116,22 @@ export function statusTone(value: string): StatusTone {
 
 // Colour a "ready/total" readiness value: all ready → green, none → red, partial → amber,
 // scaled-to-zero (0/0) and non-ratio values → neutral (no pill).
+/**
+ * Tone for a Kubernetes event's `type`, which has exactly two values.
+ *
+ * A Warning is amber, not red: it means "something notable happened", and plenty of them are
+ * routine (an image pull backing off once, a probe failing during startup). Colouring them as
+ * errors would put the loudest tone on the most common non-Normal row, which is how a list
+ * stops being scannable.
+ *
+ * Normal returns no tone deliberately. On a busy cluster nearly every row is Normal, so giving
+ * it a colour would decorate the whole table and leave the warnings no more visible than before
+ * — the problem this is meant to solve.
+ */
+export function eventTypeTone(value: string): StatusTone {
+  return value.trim().toLowerCase() === 'warning' ? 'warn' : '';
+}
+
 export function readyTone(value: string): StatusTone {
   const m = /^(\d+)\s*\/\s*(\d+)$/.exec(value.trim());
   if (!m) {
@@ -418,7 +440,7 @@ const COLUMNS: Record<string, ColumnDef[]> = {
     { key: 'reason', header: 'Reason', render: (o) => dash(str(o.reason)) },
     { key: 'object', header: 'Object', render: involvedObject },
     { key: 'message', header: 'Message', render: (o) => dash(str(o.message)) },
-    { key: 'count', header: 'Count', render: (o) => str(o.count) || '—' },
+    { key: 'count', header: 'Count', render: (o) => str(o.count) || '—', numeric: true, width: 90 },
   ],
 };
 
