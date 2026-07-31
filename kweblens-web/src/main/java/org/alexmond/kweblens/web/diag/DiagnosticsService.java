@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.VersionInfo;
@@ -128,12 +127,30 @@ public class DiagnosticsService {
 	private Capability prometheusBackend(String clusterId) {
 		String name = "Prometheus-compatible metrics";
 		try {
-			Optional<String> endpoint = this.prometheus.endpoint(clusterId);
-			return endpoint
-				.map((e) -> Capability.yes(name, "discovered " + e + " (queried via the kube-apiserver service proxy)"))
-				.orElseGet(() -> Capability.no(name,
+			PrometheusMetricService.Resolution resolution = this.prometheus.resolve(clusterId);
+			return switch (resolution.origin()) {
+				case CONFIGURED -> Capability.yes(name,
+						"configured: " + resolution.value() + " (queried via the kube-apiserver service proxy)");
+				case DISCOVERED -> Capability.yes(name,
+						"discovered " + resolution.value() + " (queried via the kube-apiserver service proxy)");
+				// The ambiguous case is the whole reason the count is reported. Discovery
+				// picks by API ordering, so with several valid backends of different
+				// scope —
+				// a global Thanos beside a local Prometheus — the charts can be correct
+				// looking and scoped to the wrong thing. Naming the alternatives is what
+				// makes that visible without the user reading logs.
+				case AMBIGUOUS -> Capability.yes(name,
+						"picked " + resolution.value() + " from " + resolution.candidates().size()
+								+ " matching services (" + String.join(", ", resolution.candidates())
+								+ ") — set kweblens.metrics.prometheus-service to choose");
+				case UNSUPPORTED_URL -> Capability.no(name,
+						"kweblens.metrics.prometheus-service is a URL; only an in-cluster "
+								+ "namespace/service:port is supported, because queries go through the "
+								+ "kube-apiserver service proxy");
+				default -> Capability.no(name,
 						"no Prometheus/VictoriaMetrics/Thanos service found by name — node CPU/memory/disk charts "
-								+ "will show 'unavailable'"));
+								+ "will show 'unavailable'; set kweblens.metrics.prometheus-service to name one");
+			};
 		}
 		catch (RuntimeException ex) {
 			return Capability.no(name, "discovery failed: " + ex.getMessage());

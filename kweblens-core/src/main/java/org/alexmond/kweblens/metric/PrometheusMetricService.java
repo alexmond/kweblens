@@ -39,14 +39,44 @@ public class PrometheusMetricService {
 
 	private final ClusterRegistry clusters;
 
+	private final MetricsProperties properties;
+
 	private final ObjectMapper mapper = new ObjectMapper();
 
-	public PrometheusMetricService(ClusterRegistry clusters) {
+	public PrometheusMetricService(ClusterRegistry clusters, MetricsProperties properties) {
 		this.clusters = clusters;
+		this.properties = properties;
 	}
 
-	/** The discovered backend as {@code namespace/service:port}, or empty if none. */
+	/**
+	 * The backend to query as {@code namespace/service:port}, or empty if there is none.
+	 */
 	public Optional<String> endpoint(String clusterId) {
+		return resolve(clusterId).address();
+	}
+
+	/**
+	 * How the backend was chosen, not just which one — the diagnostics panel needs to say
+	 * "picked one of three" rather than only naming the pick, because that is exactly
+	 * when the pick is a guess and the user is looking for why the charts are empty.
+	 */
+	public Resolution resolve(String clusterId) {
+		if (this.properties.isExternalUrl()) {
+			return new Resolution(Origin.UNSUPPORTED_URL, null, List.of());
+		}
+		if (this.properties.hasUsableService()) {
+			return new Resolution(Origin.CONFIGURED, this.properties.getPrometheusService().trim(), List.of());
+		}
+		List<String> candidates = candidates(clusterId);
+		if (candidates.isEmpty()) {
+			return new Resolution(Origin.NONE, null, candidates);
+		}
+		Origin origin = (candidates.size() == 1) ? Origin.DISCOVERED : Origin.AMBIGUOUS;
+		return new Resolution(origin, candidates.get(0), candidates);
+	}
+
+	/** Every Service that looks like a query API, in API order. */
+	public List<String> candidates(String clusterId) {
 		try {
 			return clusters.require(clusterId)
 				.services()
@@ -57,11 +87,11 @@ public class PrometheusMetricService {
 				.filter(PrometheusMetricService::isPromLike)
 				.map(PrometheusMetricService::toAddress)
 				.filter((a) -> a != null)
-				.findFirst();
+				.toList();
 		}
 		catch (RuntimeException ex) {
 			log.warn("Prometheus discovery failed for cluster '{}': {}", clusterId, ex.getMessage());
-			return Optional.empty();
+			return List.of();
 		}
 	}
 
@@ -325,6 +355,43 @@ public class PrometheusMetricService {
 
 	private static String enc(String s) {
 		return URLEncoder.encode(s, StandardCharsets.UTF_8);
+	}
+
+	// Nested types last (Checkstyle InnerTypeLast).
+
+	/** How the backend was chosen. */
+	public enum Origin {
+
+		/** Named in configuration; discovery was not consulted. */
+		CONFIGURED,
+		/** Exactly one candidate matched, so the guess was not really a guess. */
+		DISCOVERED,
+		/**
+		 * Several matched and the first was taken — the case configuration exists for.
+		 */
+		AMBIGUOUS,
+		/** Nothing matched. */
+		NONE,
+		/**
+		 * Configured with a URL, which needs the direct-access auth work that is not
+		 * built.
+		 */
+		UNSUPPORTED_URL
+
+	}
+
+	/**
+	 * The chosen backend and how it was chosen.
+	 *
+	 * @param candidates every match, so the panel can say how many there were; empty when
+	 * the value came from configuration
+	 */
+	public record Resolution(Origin origin, String value, List<String> candidates) {
+
+		public Optional<String> address() {
+			return Optional.ofNullable(this.value);
+		}
+
 	}
 
 }
