@@ -55,9 +55,10 @@ public class HealthService {
 			for (GenericKubernetesResource o : objects) {
 				WorkloadHealth.Verdict verdict = WorkloadHealth.verdict(kind, o);
 				switch (verdict.state()) {
-					case ATTENTION -> tally.attention(namespaceOf(o), nameOf(o), verdict.reason());
-					case SUSPENDED -> tally.suspended();
-					default -> tally.ok();
+					case ATTENTION ->
+						tally.attention(namespaceOf(o), nameOf(o), verdict.reason(), verdict.label(), verdict.tone());
+					case SUSPENDED -> tally.suspended(verdict.label(), verdict.tone());
+					default -> tally.ok(verdict.label(), verdict.tone());
 				}
 			}
 			return tally.toKindHealth();

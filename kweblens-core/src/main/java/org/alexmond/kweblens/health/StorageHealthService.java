@@ -74,15 +74,15 @@ public class StorageHealthService {
 			for (PersistentVolumeClaim claim : claims) {
 				String phase = phase(claim);
 				if (!"Bound".equals(phase)) {
-					tally.attention(claim, reason(claim, phase));
+					tally.attention(claim, reason(claim, phase), (phase != null) ? phase : "Unknown", StateCount.ERR);
 					continue;
 				}
 				String full = fullnessReason(claim, usage);
 				if (full != null) {
-					tally.attention(claim, full);
+					tally.attention(claim, full, "Nearly full", StateCount.WARN);
 				}
 				else {
-					tally.ok();
+					tally.ok("Bound", StateCount.OK);
 				}
 			}
 			return List.of(tally.toKindHealth());
