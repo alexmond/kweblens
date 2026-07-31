@@ -23,6 +23,7 @@ import AppFooter from './components/AppFooter.vue';
 import BrandBar from './components/BrandBar.vue';
 import CategoryOverview from './components/CategoryOverview.vue';
 import ClusterOverview from './components/ClusterOverview.vue';
+import ClustersPage from './components/ClustersPage.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import CreateModal from './components/CreateModal.vue';
 import Detail from './components/Detail.vue';
@@ -199,6 +200,14 @@ const onPaletteKey = (e: KeyboardEvent) => {
 onMounted(() => window.addEventListener('keydown', onPaletteKey));
 onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey));
 
+// The Clusters page (GH#141 W1) spans every cluster rather than sitting inside one, so it
+// is reached from the rail rather than the per-cluster nav tree.
+const showClusters = ref(false);
+const openClusterFromPage = (id: string) => {
+  cluster.value = id;
+  showClusters.value = false;
+};
+
 const runCommand = (command: Command) => {
   paletteOpen.value = false;
   if (command.kind === 'cluster') {
@@ -290,7 +299,14 @@ const onForwardStarted = () => {
           :counts="mergedCounts"
           :favorites="favorites"
           :selected="selected"
-          @set-cluster="(idv) => (cluster = idv)"
+          @set-cluster="
+            (idv) => {
+              cluster = idv;
+              showClusters = false;
+            }
+          "
+          :clusters-page-open="showClusters"
+          @show-clusters="showClusters = true"
           @select="(i) => (selected = i)"
           @toggle-favorite="toggleFavorite"
         />
@@ -299,8 +315,16 @@ const onForwardStarted = () => {
           <main class="content">
             <div v-if="error" class="error">{{ error }}</div>
             <template v-if="cluster">
+              <ClustersPage
+                v-if="showClusters"
+                :clusters="clusters"
+                :current="cluster"
+                :can-write="!!authUser"
+                @select="openClusterFromPage"
+                @changed="refreshClusters"
+              />
               <ClusterOverview
-                v-if="showClusterOverview"
+                v-else-if="showClusterOverview"
                 :cluster="cluster"
                 :name="activeCluster?.name ?? cluster"
                 :master-url="activeCluster?.masterUrl"

@@ -3023,3 +3023,151 @@ body.dragging {
   margin: 12px 2px 0;
   color: var(--muted);
 }
+
+/* Clusters page (GH#141 W1) — the surface that replaces growing the rail.
+   Colours come from tokens so both themes follow; text stays at full strength rather than
+   accent-on-tint, which measured under the 4.5:1 floor when the palette tried it (#200). */
+.clusters-page {
+  padding: 4px 2px;
+}
+
+.cp-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.cp-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.cp-sub {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cp-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.cp-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cp-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cp-table th {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.cp-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cp-row.current {
+  background: rgba(10, 122, 194, 0.08);
+}
+
+.cp-right {
+  text-align: right;
+}
+
+.cp-right .n-button {
+  margin-left: 6px;
+}
+
+.cp-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+/* The API server can be long; let it shrink rather than pushing the actions off-screen. */
+.cp-url {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cp-link {
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.cp-link:hover {
+  text-decoration: underline;
+}
+
+.cp-current-tag {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cp-locked,
+.cp-empty {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cp-empty {
+  padding: 18px 10px;
+  text-align: center;
+}
+
+/* The rail's overflow button. Distinguished from a cluster tile so it does not read as one
+   more cluster whose name happens to be dots. */
+.tile-more {
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border-style: dashed;
+}
+
+.cem-context {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.cem-note {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cem-error {
+  margin: 4px 0 0;
+  color: var(--danger-fg);
+}
+
+.cem-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
