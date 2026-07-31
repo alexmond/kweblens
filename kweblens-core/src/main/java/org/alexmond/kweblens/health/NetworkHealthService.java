@@ -48,10 +48,15 @@ public class NetworkHealthService {
 			for (Service service : services) {
 				String reason = problem(service, endpoints);
 				if (reason == null) {
-					tally.ok();
+					tally.ok("Serving", StateCount.OK);
 				}
 				else {
-					tally.attention(service, reason);
+					// The two causes are different states, not one: a wrong selector and
+					// a
+					// failing readiness probe need different fixes, so a card that merges
+					// them hides which one you have.
+					String label = "no endpoints".equals(reason) ? "No endpoints" : "Not ready";
+					tally.attention(service, reason, label, StateCount.ERR);
 				}
 			}
 			return List.of(tally.toKindHealth());

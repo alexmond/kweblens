@@ -804,18 +804,30 @@ body {
   margin: 0 0 14px;
 }
 
+/* Cards stretch to a common height so a row reads as one band, and their contents are
+   TOP-aligned so the kind name and the bar sit on the same line across every card. Left to
+   its default the flex box centres each card's contents, which puts the bar at a different
+   height in every card and makes the row look ragged. */
 .ov-cards {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  align-items: stretch;
 }
 
 .ov-card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 14px 18px;
-  min-width: 130px;
+  padding: 14px 16px;
+  min-width: 190px;
+  max-width: 260px;
+  flex: 1 1 190px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
 /* The wash LAYERS over the panel rather than replacing it: `background: <tint>` would let
@@ -829,7 +841,7 @@ body {
 }
 
 .ov-num {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
 }
 
@@ -2818,5 +2830,92 @@ body.dragging {
 .form-hint {
   font-size: 11px;
   line-height: 1.4;
+  color: var(--muted);
+}
+
+/* Overview card: kind + total, a proportional state bar, then the states named.
+   The bar carries the shape of the kind at a glance; the list carries the detail. */
+.ov-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.ov-kind {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ov-bar {
+  display: flex;
+  flex: 0 0 auto;
+  height: 8px;
+  margin: 10px 0 12px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.ov-seg {
+  height: 100%;
+}
+
+/* Tones are shared by the bar segments and the state labels, so a segment and its line in
+   the list are unmistakably the same thing. */
+.ov-seg.tone-ok {
+  background: var(--ok-fg);
+}
+.ov-seg.tone-warn {
+  background: var(--warn-fg);
+}
+.ov-seg.tone-err {
+  background: var(--danger-fg);
+}
+.ov-seg.tone-idle,
+.ov-seg.tone-empty {
+  background: var(--border);
+}
+
+.ov-states {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ov-state {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Tabular figures so the counts line up down the column rather than wandering. */
+.ov-state-n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 2.2em;
+  text-align: right;
+}
+
+.ov-state.tone-ok .ov-state-n,
+.ov-state.tone-ok .ov-state-l {
+  color: var(--ok-fg);
+}
+.ov-state.tone-warn .ov-state-n,
+.ov-state.tone-warn .ov-state-l {
+  color: var(--warn-fg);
+}
+.ov-state.tone-err .ov-state-n,
+.ov-state.tone-err .ov-state-l {
+  color: var(--danger-fg);
+}
+/* A zero-ish or finished state stays legible but recedes — it is context, not news. */
+.ov-state.tone-idle .ov-state-n,
+.ov-state.tone-idle .ov-state-l {
   color: var(--muted);
 }

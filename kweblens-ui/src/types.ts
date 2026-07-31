@@ -228,6 +228,14 @@ interface UnhealthyItem {
  * Per-kind health summary. Computed server-side so the browser receives a summary instead of
  * every object — and so the same rules serve a future TUI and the agent.
  */
+/** One state of a kind, with how many objects are in it and how to colour it. */
+export interface StateCount {
+  label: string;
+  count: number;
+  /** 'ok' | 'warn' | 'err' | 'idle' — a display decision the server makes per kind. */
+  tone: string;
+}
+
 export interface KindHealth {
   id: string;
   label: string;
@@ -236,6 +244,8 @@ export interface KindHealth {
   ok: number;
   attention: number;
   suspended: number;
+  /** Per-state breakdown in the kind's own vocabulary, most populous first. */
+  states: StateCount[];
   needsAttention: UnhealthyItem[];
   truncated: boolean;
   /** Absent on success. Set when the kind could not be listed — never conflate with "zero". */

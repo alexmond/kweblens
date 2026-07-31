@@ -38,7 +38,7 @@ public final class WorkloadHealth {
 			case "DaemonSet" -> daemonSet(o);
 			case "Job" -> job(o);
 			case "CronJob" -> cronJob(o);
-			default -> Verdict.ok();
+			default -> Verdict.ok("OK");
 		};
 	}
 
@@ -49,14 +49,24 @@ public final class WorkloadHealth {
 	 */
 	private static Verdict pod(GenericKubernetesResource o) {
 		String phase = str(get(o, "status", "phase"));
-		if ("Running".equals(phase) || "Succeeded".equals(phase)) {
-			return Verdict.ok();
+		if ("Running".equals(phase)) {
+			return Verdict.ok("Running");
+		}
+		// A finished pod is not healthy-and-running; grouping it under Running would
+		// overstate how much is actually serving.
+		if ("Succeeded".equals(phase)) {
+			return Verdict.idle("Completed");
 		}
 		String waiting = firstWaitingReason(o);
 		if (waiting != null) {
-			return Verdict.attention(waiting);
+			// The waiting reason IS the state name — CrashLoopBackOff and
+			// ImagePullBackOff
+			// are what someone scans a card for.
+			return Verdict.attention(waiting, waiting);
 		}
-		return Verdict.attention(phase.isEmpty() ? "not running" : phase);
+		String label = phase.isEmpty() ? "not running" : phase;
+		// Pending with no failing container is scheduling, not breakage.
+		return "Pending".equals(label) ? Verdict.attentionSoft(label, label) : Verdict.attention(label, label);
 	}
 
 	/**
@@ -86,13 +96,21 @@ public final class WorkloadHealth {
 	private static Verdict replicas(GenericKubernetesResource o) {
 		int desired = num(get(o, "spec", "replicas"));
 		int ready = num(get(o, "status", "readyReplicas"));
-		return (ready == desired) ? Verdict.ok() : Verdict.attention(ready + "/" + desired + " ready");
+		if (desired == 0) {
+			return Verdict.idle("Idle");
+		}
+		return (ready == desired) ? Verdict.ok("Healthy")
+				: Verdict.attention("Unavailable", ready + "/" + desired + " ready");
 	}
 
 	private static Verdict daemonSet(GenericKubernetesResource o) {
 		int desired = num(get(o, "status", "desiredNumberScheduled"));
 		int ready = num(get(o, "status", "numberReady"));
-		return (ready == desired) ? Verdict.ok() : Verdict.attention(ready + "/" + desired + " ready");
+		if (desired == 0) {
+			return Verdict.idle("Idle");
+		}
+		return (ready == desired) ? Verdict.ok("Ready")
+				: Verdict.attention("Unavailable", ready + "/" + desired + " ready");
 	}
 
 	/**
@@ -105,9 +123,12 @@ public final class WorkloadHealth {
 	 */
 	private static Verdict job(GenericKubernetesResource o) {
 		if (conditionTrue(o, "Failed")) {
-			return Verdict.attention("failed");
+			return Verdict.attention("Failed", "failed");
 		}
-		return Verdict.ok();
+		if (conditionTrue(o, "Complete")) {
+			return Verdict.idle("Succeeded");
+		}
+		return Verdict.ok("Active");
 	}
 
 	/**
@@ -122,7 +143,8 @@ public final class WorkloadHealth {
 	 * that knows it.
 	 */
 	private static Verdict cronJob(GenericKubernetesResource o) {
-		return Boolean.TRUE.equals(get(o, "spec", "suspend")) ? Verdict.suspended("suspended") : Verdict.ok();
+		return Boolean.TRUE.equals(get(o, "spec", "suspend")) ? Verdict.suspended("Suspended", "suspended")
+				: Verdict.ok("Scheduled");
 	}
 
 	private static boolean conditionTrue(GenericKubernetesResource o, String type) {
@@ -165,23 +187,56 @@ public final class WorkloadHealth {
 	 */
 	public enum State {
 
-		OK, ATTENTION, SUSPENDED
+		OK, ATTENTION, SUSPENDED,
+		/**
+		 * Neither healthy nor broken — a workload scaled to zero, a pod that has
+		 * finished. Separate from OK so a card does not report "everything is fine" about
+		 * objects that are simply not doing anything.
+		 */
+		IDLE
 
 	}
 
-	/** The state of an object, plus a human reason when it needs attention. */
-	public record Verdict(State state, String reason) {
+	/**
+	 * The state of an object, its name in the kind's own vocabulary, and a human reason
+	 * when it needs attention.
+	 *
+	 * @param label what to call this state on a card — "Running", "Unavailable", "Idle".
+	 * Distinct from {@code reason}, which is the specific detail for ONE object ("2/3
+	 * ready"); a label has to be shared by every object in the same state or it cannot be
+	 * counted.
+	 */
+	public record Verdict(State state, String reason, String label, String tone) {
 
-		static Verdict ok() {
-			return new Verdict(State.OK, null);
+		static Verdict ok(String label) {
+			return new Verdict(State.OK, null, label, StateCount.OK);
 		}
 
-		static Verdict attention(String reason) {
-			return new Verdict(State.ATTENTION, reason);
+		/** Not a fault: scaled to zero, finished. Counted apart from healthy. */
+		static Verdict idle(String label) {
+			return new Verdict(State.IDLE, null, label, StateCount.IDLE);
 		}
 
-		static Verdict suspended(String reason) {
-			return new Verdict(State.SUSPENDED, reason);
+		static Verdict attention(String label, String reason) {
+			return new Verdict(State.ATTENTION, reason, label, StateCount.ERR);
+		}
+
+		/**
+		 * Needs attention, but shown amber rather than red.
+		 *
+		 * <p>
+		 * Severity and colour are not the same axis. A Pending pod is worth surfacing —
+		 * it is not serving — but most Pending pods are simply being scheduled, and
+		 * painting them the same red as a CrashLoopBackOff on every card would make
+		 * normal startup look like failure and dull the colour that means something is
+		 * broken.
+		 */
+		static Verdict attentionSoft(String label, String reason) {
+			return new Verdict(State.ATTENTION, reason, label, StateCount.WARN);
+		}
+
+		static Verdict suspended(String label, String reason) {
+			return new Verdict(State.SUSPENDED, reason, label, StateCount.WARN);
 		}
 
 	}

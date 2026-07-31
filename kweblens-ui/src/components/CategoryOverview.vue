@@ -60,27 +60,25 @@ watch(
   { immediate: true },
 );
 
+// No danger wash on a category card any more: the bar and the state list already say what
+// is wrong and in what proportion, so tinting the whole card as well painted most of a row
+// red without adding information. The Cluster overview's Warnings card keeps it — it has no
+// breakdown to carry the signal.
 const cards = computed(() =>
   (health.value ?? []).map((k) => {
     if (k.error) {
       // "Could not check" must never render as a healthy zero. Still clickable: the list page is
       // where the actual error is reported, so it is the useful next step.
-      return { id: k.id, kind: k.kind, value: '—', label: `${k.label} · unavailable`, danger: false };
+      return { id: k.id, kind: k.kind, value: '—', label: `${k.label} · unavailable`, states: [] };
     }
-    const parts = [`${k.ok} ok`];
-    if (k.attention > 0) {
-      parts.push(copy.value.advisory ? `${k.attention} unreferenced` : `${k.attention} need attention`);
-    }
-    if (k.suspended > 0) {
-      parts.push(`${k.suspended} suspended`);
-    }
+    // The label is now just the kind: the breakdown that used to be crammed into it is a
+    // list of its own, which is legible past two states where a run-on line was not.
     return {
       id: k.id,
       kind: k.kind,
       value: k.total,
-      label: `${k.label} · ${parts.join(' · ')}`,
-      // Advisory findings are candidates for review, not faults — see OVERVIEW_CATEGORIES.
-      danger: k.attention > 0 && !copy.value.advisory,
+      label: k.label,
+      states: k.states ?? [],
     };
   }),
 );
@@ -112,7 +110,7 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
         :key="c.id"
         :value="c.value"
         :label="c.label"
-        :danger="c.danger"
+        :states="c.states"
         clickable
         @select="emit('navigate', c.kind)"
       />

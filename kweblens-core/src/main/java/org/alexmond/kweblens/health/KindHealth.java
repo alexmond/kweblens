@@ -12,6 +12,9 @@ import java.util.List;
  * collection anyway to say which objects are unhealthy, which is exactly the transfer
  * this exists to avoid.
  *
+ * @param states the per-state breakdown, in the kind's own vocabulary — what a card shows
+ * instead of a single total. Ordered most-populous first, so the shape of the kind reads
+ * before any individual number does.
  * @param needsAttention bounded list of what is wrong, each with a reason
  * @param truncated true when {@code needsAttention} was capped, so the UI can say so
  * rather than implying it is the complete list
@@ -20,10 +23,10 @@ import java.util.List;
  * health screen
  */
 public record KindHealth(String id, String label, String kind, int total, int ok, int attention, int suspended,
-		List<UnhealthyItem> needsAttention, boolean truncated, String error) {
+		List<StateCount> states, List<UnhealthyItem> needsAttention, boolean truncated, String error) {
 
 	public static KindHealth failed(String id, String label, String kind, String error) {
-		return new KindHealth(id, label, kind, 0, 0, 0, 0, List.of(), false, error);
+		return new KindHealth(id, label, kind, 0, 0, 0, 0, List.of(), List.of(), false, error);
 	}
 
 	/** One object needing attention, and why. */

@@ -145,9 +145,11 @@ class WorkloadHealthTest {
 	}
 
 	@Test
-	void treatsScaledToZeroAsOkDeliberately() {
-		// Intentionally scaled down is not failing; flagging it would light up every idle
-		// workload.
+	void treatsScaledToZeroAsIdleRatherThanHealthy() {
+		// Intentionally scaled down is not failing — flagging it would light up every
+		// idle
+		// workload — but it is not "3 of 3 ready" either. IDLE keeps it out of the
+		// attention count while stopping a card from claiming it is serving.
 		var verdict = WorkloadHealth.verdict("Deployment", obj("""
 				apiVersion: apps/v1
 				kind: Deployment
@@ -155,7 +157,66 @@ class WorkloadHealthTest {
 				spec: {replicas: 0}
 				status: {}
 				"""));
-		assertThat(verdict.state()).isEqualTo(WorkloadHealth.State.OK);
+		assertThat(verdict.state()).isEqualTo(WorkloadHealth.State.IDLE);
+		assertThat(verdict.state()).isNotEqualTo(WorkloadHealth.State.ATTENTION);
+		assertThat(verdict.label()).isEqualTo("Idle");
+		assertThat(verdict.tone()).isEqualTo(StateCount.IDLE);
+	}
+
+	@Test
+	void namesEachStateInTheKindsOwnVocabulary() {
+		// A card counts by label, so every object in the same state must produce the SAME
+		// word — and the word has to be the one that kind's users say. A deployment is
+		// "Unavailable", a daemonset is "Ready", a pod is "Running".
+		assertThat(WorkloadHealth.verdict("Deployment", obj("""
+				apiVersion: apps/v1
+				kind: Deployment
+				metadata: {name: d}
+				spec: {replicas: 3}
+				status: {readyReplicas: 3}
+				""")).label()).isEqualTo("Healthy");
+		assertThat(WorkloadHealth.verdict("Deployment", obj("""
+				apiVersion: apps/v1
+				kind: Deployment
+				metadata: {name: d}
+				spec: {replicas: 3}
+				status: {readyReplicas: 1}
+				""")).label()).isEqualTo("Unavailable");
+		assertThat(WorkloadHealth.verdict("DaemonSet", obj("""
+				apiVersion: apps/v1
+				kind: DaemonSet
+				metadata: {name: ds}
+				status: {desiredNumberScheduled: 2, numberReady: 2}
+				""")).label()).isEqualTo("Ready");
+	}
+
+	@Test
+	void usesTheWaitingReasonAsThePodsStateName() {
+		// The state a card should show for a broken pod is the reason itself —
+		// "CrashLoopBackOff" is what someone scans for, not "attention".
+		var verdict = WorkloadHealth.verdict("Pod", obj("""
+				apiVersion: v1
+				kind: Pod
+				metadata: {name: p}
+				status:
+				  phase: Pending
+				  containerStatuses: [{name: c, state: {waiting: {reason: ImagePullBackOff}}}]
+				"""));
+		assertThat(verdict.label()).isEqualTo("ImagePullBackOff");
+		assertThat(verdict.tone()).isEqualTo(StateCount.ERR);
+	}
+
+	@Test
+	void separatesAFinishedPodFromARunningOne() {
+		// Grouping Completed under Running would overstate how much is actually serving.
+		var verdict = WorkloadHealth.verdict("Pod", obj("""
+				apiVersion: v1
+				kind: Pod
+				metadata: {name: p}
+				status: {phase: Succeeded}
+				"""));
+		assertThat(verdict.label()).isEqualTo("Completed");
+		assertThat(verdict.tone()).isEqualTo(StateCount.IDLE);
 	}
 
 	@Test

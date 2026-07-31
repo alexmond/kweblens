@@ -95,10 +95,11 @@ public class ConfigUsageService {
 			Tally tally = new Tally("configmaps", "Config Maps", "ConfigMap");
 			for (ConfigMap configMap : all) {
 				if (references.referencesConfigMap(name(configMap.getMetadata()))) {
-					tally.ok();
+					tally.ok("Referenced", StateCount.OK);
 				}
 				else {
-					tally.attention(configMap, UNREFERENCED);
+					// Advisory, so amber rather than red — see OVERVIEW_CATEGORIES.
+					tally.attention(configMap, UNREFERENCED, "Not referenced", StateCount.WARN);
 				}
 			}
 			return tally.toKindHealth();
@@ -121,13 +122,13 @@ public class ConfigUsageService {
 			Tally tally = new Tally("secrets", "Secrets", "Secret");
 			for (Secret secret : all) {
 				if (managedByTheCluster(secret)) {
-					tally.ok();
+					tally.ok("Cluster-managed", StateCount.IDLE);
 				}
 				else if (references.referencesSecret(name(secret.getMetadata()))) {
-					tally.ok();
+					tally.ok("Referenced", StateCount.OK);
 				}
 				else {
-					tally.attention(secret, UNREFERENCED);
+					tally.attention(secret, UNREFERENCED, "Not referenced", StateCount.WARN);
 				}
 			}
 			return tally.toKindHealth();
