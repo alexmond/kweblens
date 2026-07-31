@@ -57,6 +57,30 @@ const dialog = useDialog();
 // Theme: Naive UI light/dark, toggled from the brand bar and persisted.
 const dark = ref(loadDark());
 const theme = computed(() => (dark.value ? darkTheme : null));
+/**
+ * Point Naive's primary at the app's accent.
+ *
+ * Naive's default primary is GREEN, which made the drawer's active tab, focus rings and
+ * switches read as a different product from the blue shell — and collided with meaning,
+ * since green is the "healthy" tone in the semantic palette. Setting it once here fixes
+ * every Naive control rather than restyling them one at a time.
+ *
+ * The values match --accent / a darker press state per theme; they cannot be `var(--accent)`
+ * because Naive derives shades from the value and needs a real colour.
+ */
+const themeOverrides = computed(() => {
+  const accent = dark.value ? '#3d9be0' : '#0a7ac2';
+  const hover = dark.value ? '#57abe8' : '#1a8ad2';
+  const pressed = dark.value ? '#2f89cc' : '#086aab';
+  return {
+    common: {
+      primaryColor: accent,
+      primaryColorHover: hover,
+      primaryColorPressed: pressed,
+      primaryColorSuppl: hover,
+    },
+  };
+});
 const toggleTheme = () => {
   dark.value = !dark.value;
   saveDark(dark.value);
@@ -209,7 +233,7 @@ const onForwardStarted = () => {
 </script>
 
 <template>
-  <NConfigProvider :theme="theme" class="app-theme-root">
+  <NConfigProvider :theme="theme" :theme-overrides="themeOverrides" class="app-theme-root">
     <div class="app">
       <BrandBar
         :cluster="cluster"
