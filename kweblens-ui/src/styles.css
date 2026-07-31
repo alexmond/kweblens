@@ -2937,3 +2937,89 @@ body.dragging {
 .error-retry {
   flex: 0 0 auto;
 }
+
+/* Command palette (Ctrl/Cmd-K). Styled from the semantic tokens so both themes follow
+   automatically — see the palette work in docs/design/cluster-selection.md. */
+.palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.palette-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.palette-list {
+  max-height: 320px;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.palette-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* Keyboard and mouse share one highlight, so the armed row is never ambiguous.
+
+   Selection is carried by the tint and the inset bar, borrowing the nav tree's language
+   (.leaf.active) — but NOT its accent-coloured text. Two earlier attempts were measured
+   against the real rendered pixels and both failed the 4.5:1 floor: white-on-accent gave
+   3.02:1, and accent-on-tint (what the nav leaf does) gave 3.80:1. Keeping the normal
+   text colour over the tint measures ~12:1 in both themes. Same failure mode as the
+   StatusBadge tag in #173 — worth measuring rather than eyeballing. */
+.palette-row.active {
+  background: rgba(10, 122, 194, 0.14);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* The hint drops its muted grey here: over the tint that measured 3.63:1, worse than the
+   4.38:1 it has on the plain panel. Full-strength text costs nothing — the row is already
+   distinguished by the bar, the tint and the weight. */
+.palette-row.active .palette-hint,
+.palette-row.active .palette-kind {
+  color: var(--text);
+}
+
+.palette-row.active .palette-kind {
+  border-color: var(--accent);
+}
+
+.palette-kind {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.palette-label {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+.palette-hint {
+  flex: 0 1 auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.palette-empty {
+  margin: 12px 2px 0;
+  color: var(--muted);
+}
