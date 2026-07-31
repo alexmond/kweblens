@@ -20,13 +20,19 @@ const emit = defineEmits<{
   (e: 'toggle', label: string, isOpen: boolean): void;
 }>();
 
-function categoryBadge(cat: NavCategory): string {
-  const known = cat.items.filter((i) => props.counts[i.id] !== undefined);
-  if (known.length > 0) {
-    return String(known.reduce((sum, i) => sum + props.counts[i.id], 0));
-  }
-  const nested = (cat.subgroups ?? []).reduce((sum, g) => sum + g.items.length, 0);
-  return String(cat.items.length + nested);
+/**
+ * Objects in a category, or nothing.
+ *
+ * There used to be a fallback here: with no counts available it returned the number of MENU
+ * ENTRIES instead. That made the Gateway badge read "8" — its eight kinds — while Workloads'
+ * "328" was a sum of objects, so the same badge meant two different things in the same
+ * styling with nothing to say which. A plausible-looking wrong number is worse than none,
+ * so a category with no counts now shows no badge.
+ */
+function categoryBadge(cat: NavCategory): string | undefined {
+  const items = [...cat.items, ...(cat.subgroups ?? []).flatMap((g) => g.items)];
+  const known = items.filter((i) => props.counts[i.id] !== undefined);
+  return known.length > 0 ? String(known.reduce((sum, i) => sum + props.counts[i.id], 0)) : undefined;
 }
 
 const holdsSelected = computed(
