@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { NConfigProvider, darkTheme } from 'naive-ui';
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { api } from './api';
+import type { Command } from './commandPalette';
 import { auth } from './auth';
 import { useAppActions } from './composables/useAppActions';
 import { useClusterScope } from './composables/useClusterScope';
@@ -22,6 +23,7 @@ import AppFooter from './components/AppFooter.vue';
 import BrandBar from './components/BrandBar.vue';
 import CategoryOverview from './components/CategoryOverview.vue';
 import ClusterOverview from './components/ClusterOverview.vue';
+import CommandPalette from './components/CommandPalette.vue';
 import CreateModal from './components/CreateModal.vue';
 import Detail from './components/Detail.vue';
 import DiagnosticsModal from './components/DiagnosticsModal.vue';
@@ -177,6 +179,33 @@ const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDele
 // nav id for the Pod kind, so the YAML/actions in the drawer resolve against the right kind.
 const openPodDetail = (obj: KubeObject) => {
   detail.value = { resourceId: 'pods', obj };
+};
+
+// Command palette (Ctrl/Cmd-K). Bound at the window so it opens from anywhere in the
+// shell; the guard lets the shortcut through only when focus is not in a text field, so it
+// cannot steal the key from the YAML editor or a filter box.
+const paletteOpen = ref(false);
+const onPaletteKey = (e: KeyboardEvent) => {
+  if (e.key !== 'k' || !(e.ctrlKey || e.metaKey)) {
+    return;
+  }
+  const el = e.target as HTMLElement | null;
+  if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(el.tagName))) {
+    return;
+  }
+  e.preventDefault();
+  paletteOpen.value = true;
+};
+onMounted(() => window.addEventListener('keydown', onPaletteKey));
+onBeforeUnmount(() => window.removeEventListener('keydown', onPaletteKey));
+
+const runCommand = (command: Command) => {
+  paletteOpen.value = false;
+  if (command.kind === 'cluster') {
+    cluster.value = command.target;
+  } else if (command.item) {
+    selected.value = command.item;
+  }
 };
 
 const activeCluster = computed(() => clusters.value.find((c) => c.id === cluster.value) ?? null);
@@ -376,6 +405,15 @@ const onForwardStarted = () => {
         @close="forward = null"
         @started="onForwardStarted"
         @auth-expired="signOut"
+      />
+
+      <CommandPalette
+        :show="paletteOpen"
+        :clusters="clusters"
+        :nav="nav"
+        :active-cluster="cluster"
+        @pick="runCommand"
+        @cancel="paletteOpen = false"
       />
 
       <DialogHost />
