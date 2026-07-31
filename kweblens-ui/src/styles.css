@@ -1206,8 +1206,20 @@ body {
   border-bottom: none;
 }
 
-.mini tr.warn td {
-  background: var(--warn-tint);
+/* A warning row in an events table.
+   Two selectors because events render in two kinds of table: a plain one inside the drawer
+   sections, and Naive's NDataTable in the Events list and the Recent Events pane. Only the
+   first was ever styled, so the class was inert in the pane and what looked like an
+   inconsistent highlight was Naive's own row striping showing through. */
+.mini tr.warn td,
+.n-data-table-tr.warn > .n-data-table-td {
+  background-color: var(--warn-tint);
+}
+
+/* Keep hover legible: without this the tint above would swallow the hover feedback and the
+   row would stop responding to the pointer. */
+.n-data-table-tr.warn:hover > .n-data-table-td {
+  background-color: color-mix(in srgb, var(--warn-tint) 60%, var(--panel));
 }
 
 .mono {
