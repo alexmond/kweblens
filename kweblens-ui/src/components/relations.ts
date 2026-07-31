@@ -32,12 +32,21 @@ const plain = (text: string): RelationCell => ({ text });
 const mono = (text: string): RelationCell => ({ text, mono: true });
 const str = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
 
-/** Titles are per relation key, so the server can add relations without the UI guessing names. */
+/**
+ * Titles for the relations we know about. A key with no entry is humanised rather than shown
+ * raw, so a new server-side relation reads as "Owned By" instead of "ownedBy" on day one.
+ */
 const TITLES: Record<string, string> = {
   endpoints: 'Endpoints',
   selectedPods: 'Selected Pods',
   mountedBy: 'Mounted By',
 };
+
+/** `ownedBy` -> `Owned By`. Only used for keys TITLES does not cover. */
+function humanise(key: string): string {
+  const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 
 /**
  * Endpoints, split into ready and not-ready addresses.
@@ -83,6 +92,32 @@ function podRows(items: KubeObject[]): { headers: string[]; rows: RelationCell[]
 }
 
 /**
+ * Any list of Kubernetes objects, projected on the three fields every object has.
+ *
+ * <p>This is the fallback for a relation key the UI does not recognise, and it is the reason
+ * a new server-side relation cannot render wrong. Previously the choice was
+ * `key === 'endpoints' ? endpointRows : podRows`, so ANY new relation was rendered as pods —
+ * a ConfigMap list would have appeared under Pod/Status/Node/Namespace headers with three
+ * empty columns, silently (#203). Bland and correct beats rich and wrong; a relation earns a
+ * richer projection by being added to PROJECTIONS.
+ */
+function genericRows(items: KubeObject[]): { headers: string[]; rows: RelationCell[][] } {
+  const rows = items.map((o) => [plain(objName(o)), plain(str(o.kind) || '—'), plain(objNs(o) ?? '—')]);
+  return { headers: ['Name', 'Kind', 'Namespace'], rows };
+}
+
+/**
+ * How each known relation is projected. Registry rather than a conditional so adding one is a
+ * line here, and so an unknown key falls through to {@link genericRows} instead of borrowing
+ * whichever projection the condition happened to land on.
+ */
+const PROJECTIONS: Record<string, (items: KubeObject[]) => { headers: string[]; rows: RelationCell[][] }> = {
+  endpoints: endpointRows,
+  selectedPods: podRows,
+  mountedBy: podRows,
+};
+
+/**
  * Turn the endpoint's relations map into sections, in a stable order.
  *
  * A relation carrying an error or `notPermitted` becomes a section with a MESSAGE and no
@@ -101,7 +136,7 @@ export function relationSections(relations: Record<string, Relation> | undefined
   });
   return keys.map((key) => {
     const relation = relations[key];
-    const title = TITLES[key] ?? key;
+    const title = TITLES[key] ?? humanise(key);
     if (relation.notPermitted) {
       return {
         title,
@@ -116,7 +151,7 @@ export function relationSections(relations: Record<string, Relation> | undefined
     if (relation.error) {
       return { title, headers: [], rows: [], message: `Could not load: ${relation.error}` };
     }
-    const projected = key === 'endpoints' ? endpointRows(relation.items) : podRows(relation.items);
+    const projected = (PROJECTIONS[key] ?? genericRows)(relation.items);
     return {
       title,
       count: projected.rows.length,
