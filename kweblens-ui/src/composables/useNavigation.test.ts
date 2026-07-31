@@ -64,4 +64,20 @@ describe('useNavigation', () => {
     navigateToKind('Widget');
     expect(state.selected).toBe('');
   });
+
+  describe('resourceIdForKind', () => {
+    it('maps a kind to the id that addresses it', () => {
+      const { resourceIdForKind } = setup(null);
+      expect(resourceIdForKind('Pod')).toBe('pods');
+      expect(resourceIdForKind('Node')).toBe('nodes');
+    });
+
+    it('is null for a kind the nav does not model, so the caller can fall back', () => {
+      // An expanded workload's child rows are Pods, not the list's kind. Addressing one by
+      // the parent list's id asks the server for a Deployment by a pod's name — a 400 the
+      // server is right to return.
+      const { resourceIdForKind } = setup(null);
+      expect(resourceIdForKind('Widget')).toBeNull();
+    });
+  });
 });

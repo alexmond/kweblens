@@ -54,5 +54,15 @@ export function useNavigation(
    * name a kind the nav does not model, and a dead click is worse than an inert row.
    */
   const knowsKind = (kind: string) => kindNav.value.has(kind);
-  return { navigateToKind, navigateToPortForwards, navigateToHelmRelease, knowsKind };
+
+  /**
+   * The resource id that addresses a kind in the API, or null when the nav does not model
+   * it.
+   *
+   * Needed because a row is not always the kind of the list it appears in: an expanded
+   * workload carries its child pods as rows, and using the list's id for one of those asks
+   * the server for a Deployment by a pod's name.
+   */
+  const resourceIdForKind = (kind: string) => kindNav.value.get(kind)?.id ?? null;
+  return { navigateToKind, navigateToPortForwards, navigateToHelmRelease, knowsKind, resourceIdForKind };
 }
