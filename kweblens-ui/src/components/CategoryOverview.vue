@@ -1,9 +1,13 @@
 <script setup lang="ts">
 // One dashboard for every category — Workloads, Network, Storage, Config.
 //
-// Leads with what NEEDS ATTENTION and names the objects, then shows the totals: a count is only
-// interesting when it is unexpected, and "one of your 52 Services is broken" without saying which
-// one just moves the hunt one step later.
+// Leads with the totals, then names the objects that need attention.
+//
+// The order was the other way round on the reasoning that a count is only interesting when it is
+// unexpected. In use it reads wrong: the cards are the orientation you want before a list of
+// individual problems, and putting a detail table above its own summary made every overview
+// disagree with the Cluster one. The naming still matters — "one of your 52 Services is broken"
+// without saying which just moves the hunt one step later — it simply comes second.
 //
 // The checks are computed SERVER-SIDE (/overview/<category>) and they differ completely per
 // category — a workload verdict, a Service-to-Endpoints join, a PVC phase, a reverse reference
@@ -100,7 +104,21 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
 
     <div v-if="error" class="error">{{ error }}</div>
 
-    <!-- Needs attention FIRST. This is the question the page exists to answer. -->
+    <!-- Cards first: they are the orientation — how much is here, and how much of it is fine —
+         and the table below is the detail. The Cluster overview reads the same way. -->
+    <div class="ov-cards">
+      <StatCard
+        v-for="c in cards"
+        :key="c.id"
+        :value="c.value"
+        :label="c.label"
+        :danger="c.danger"
+        clickable
+        @select="emit('navigate', c.kind)"
+      />
+    </div>
+
+    <!-- Then the detail: what is wrong, named. -->
     <section v-if="health" class="ov-sec">
       <h3>{{ copy.attention }}</h3>
       <div v-if="attention.length === 0" class="empty">{{ copy.clean }}</div>
@@ -142,18 +160,6 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
         <li v-for="(note, i) in copy.notes" :key="i">{{ note }}</li>
       </ul>
     </section>
-
-    <div class="ov-cards">
-      <StatCard
-        v-for="c in cards"
-        :key="c.id"
-        :value="c.value"
-        :label="c.label"
-        :danger="c.danger"
-        clickable
-        @select="emit('navigate', c.kind)"
-      />
-    </div>
 
     <section v-if="showEvents" class="ov-sec">
       <h3>Recent Events</h3>
