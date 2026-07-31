@@ -106,9 +106,21 @@ html.kw-dark .group > summary:hover,
 html.kw-dark .leaf:hover {
   background: rgba(255, 255, 255, 0.06);
 }
+/* All three are the same "count in a pill" and all three hardcode a light background, so
+   they must be overridden together. `.count` was missing here, which is why the "N items"
+   chip rendered as a light box in dark mode — its muted text measured 2.13:1 against it,
+   i.e. nearly invisible. Adding a fourth pill later means adding it here too. */
 html.kw-dark .nav-badge,
-html.kw-dark .acc-count {
+html.kw-dark .acc-count,
+html.kw-dark .count {
   background: #2c333b;
+}
+
+/* The plain YAML block hardcodes a light page-like surface; without this it is a white
+   sheet in a dark UI. Found by the same sweep as .count. */
+html.kw-dark .yaml {
+  background: #12161a;
+  color: var(--text);
 }
 
 * {
