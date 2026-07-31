@@ -59,7 +59,8 @@ NODE_PATH=$HOME/.local/lib/playwright/node_modules node scripts/perf-sweep.mjs  
   `web/security/` (`SecurityConfig` + `AuditService` — see the security gotcha), `web/mcp/`
   (`ClusterTools` `@Tool` methods + `McpConfig` provider), `web/nav/` (`NavCatalog` — the
   categories→kinds registry, 39 built-in kinds + discovered CRDs), `web/helm/` (jhelm-backed
-  release surface), `web/exec/` (exec-over-WebSocket), `web/ai/` (`DiagnoseService` +
+  release surface), `web/exec/` (exec-over-WebSocket), `web/files/` (pod file browser over
+  one-shot exec — **off by default**, `kweblens.files.enabled`), `web/ai/` (`DiagnoseService` +
   `RemediationService`, inert unless `kweblens.ai.enabled` and a key are set), `web/sim/` (the
   in-JVM cluster simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as
   cluster `default` on startup). `/actuator/{health,info,metrics,prometheus}` exposed.

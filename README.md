@@ -129,6 +129,28 @@ Two modes:
 - **`kweblens.security.open-mode=false`** — everything except health and the login page requires
   authentication.
 
+Some path families are **always authenticated, even in open-mode**, because what they return is
+itself a secret: pod exec, Helm release/library values, and the pod file browser.
+
+### Pod file browser — off by default
+
+`kweblens.files.enabled` (default **false**) turns on browsing, viewing, editing and deleting
+files inside a container, over the same Kubernetes exec API the terminal uses. It ships off
+deliberately: it can read a projected Secret volume or the service-account token straight off
+disk, which no other kweblens view does, so an operator has to choose it. See
+[ADR-001](docs/design/adr-001-identity-model.md).
+
+When it is on:
+
+- **every endpoint requires the admin login**, reads included — a file read is never a public GET;
+- every content read, download, write and delete is **audited with its path**;
+- `kweblens.files.writable=false` makes it browse-and-download only;
+- `kweblens.files.allowed-roots` confines it to given path prefixes (checked against the path the
+  container actually resolves, so a symlink cannot step outside);
+- reads and writes are capped (`max-read-bytes` / `max-write-bytes`, 1 MiB each) and oversized
+  files are **refused** rather than silently truncated;
+- containers without a shell (distroless, scratch) report that plainly instead of an empty tree.
+
 Known gaps, stated plainly:
 
 - **No OIDC / no per-user identity.** One shared admin is not a multi-user auth model.

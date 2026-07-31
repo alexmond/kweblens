@@ -74,6 +74,13 @@ public class SecurityConfig {
 			// Pod exec is privileged: the WebSocket handshake always requires auth, even
 			// in open-mode.
 			auth.requestMatchers("/ws/**").authenticated();
+			// The pod file browser reads arbitrary files out of a container, including
+			// projected Secret volumes and the service-account token. Letting those GETs
+			// ride open-mode's public read path would make secret exfiltration an
+			// UNAUTHENTICATED operation, so the whole family is authenticated — reads
+			// included. (The feature is also off unless kweblens.files.enabled=true.)
+			auth.requestMatchers("/api/v1/clusters/*/pods/*/*/files", "/api/v1/clusters/*/pods/*/*/files/**")
+				.authenticated();
 			// Helm values — a release's stored config and the saved values-file library —
 			// commonly carry plaintext secrets and are returned raw (unlike the masked
 			// Secret drawer), so they always require auth, even in open-mode.

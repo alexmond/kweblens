@@ -75,6 +75,21 @@ kweblens:
     enabled: ${KWEBLENS_SIMULATOR_ENABLED:false}
     size: ${KWEBLENS_SIMULATOR_SIZE:200}
     namespaces: ${KWEBLENS_SIMULATOR_NAMESPACES:3}
+  # Pod file browser (#140) — browse/view/edit files inside a container over the exec API.
+  # OFF by default and deliberately so: it can read a projected Secret volume or the
+  # service-account token straight off a container's disk, which no other kweblens view
+  # exposes. ADR-001 (kweblens runs as one shared, non-RBAC-aware identity) requires it to
+  # stay opt-in. Note that EVERY endpoint here — GETs included — requires the admin login
+  # even in open-mode; see SecurityConfig.
+  files:
+    enabled: ${KWEBLENS_FILES_ENABLED:false}
+    # Set false for browse-and-download only (no edit, upload or delete).
+    writable: ${KWEBLENS_FILES_WRITABLE:true}
+    max-read-bytes: ${KWEBLENS_FILES_MAX_READ_BYTES:1048576}
+    max-write-bytes: ${KWEBLENS_FILES_MAX_WRITE_BYTES:1048576}
+    max-entries: ${KWEBLENS_FILES_MAX_ENTRIES:1000}
+    # Optional confinement, e.g. ["/data","/tmp"]; empty means the whole container filesystem.
+    allowed-roots: []
   # AI diagnosis (#10). Deterministic validators always run; LLM enrichment only when enabled
   # AND an Anthropic API key is configured.
   ai:
