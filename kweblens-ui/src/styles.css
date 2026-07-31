@@ -15,6 +15,23 @@
   --cm-atom: #8250df;
   --cm-comment: #6b7b85;
   --cm-meta: #7a8791;
+
+  /* Semantic state (light). See the dark block for why these are tints rather than
+     opaque swatches. Three roles per state: `fg` for text and icons, `tint` for a badge
+     or alert body, `wash` for a full card that must not shout, and `line` for borders. */
+  --danger-fg: #b3261e;
+  --danger-tint: rgba(211, 47, 47, 0.1);
+  --danger-wash: rgba(211, 47, 47, 0.05);
+  --danger-line: rgba(179, 38, 30, 0.3);
+  --warn-fg: #a35b00;
+  --warn-tint: rgba(224, 168, 0, 0.18);
+  --warn-wash: rgba(224, 168, 0, 0.09);
+  --warn-line: rgba(163, 91, 0, 0.3);
+  /* Darker than the #1a7f37 this replaced: measured on its own tint that read 4.41,
+     just under AA for the badge text it carries. */
+  --ok-fg: #15702e;
+  --ok-tint: rgba(34, 163, 82, 0.13);
+  --ok-line: rgba(26, 127, 55, 0.3);
 }
 
 /* The detail drawer is a NON-MODAL side panel (no mask): let clicks pass through its
@@ -45,6 +62,26 @@ html.kw-dark {
   --cm-atom: #bb9af7;
   --cm-comment: #7f8c98;
   --cm-meta: #9aa5b0;
+
+  /* Semantic state (dark) — DESIGNED, not inverted.
+     Two things go wrong when a light palette is flipped: the foregrounds become muddy
+     mid-tones, and the backgrounds become bright blocks. The one that shipped was the
+     second — the Warnings card kept its near-white #fdf4f3 and turned into the loudest
+     thing on a dark page, with pale text on it.
+     So the backgrounds are translucent tints of the state's own hue, composited over
+     whatever panel they sit on, and the foregrounds are light enough to read against the
+     dark ground rather than against white. */
+  --danger-fg: #ff9a90;
+  --danger-tint: rgba(255, 138, 128, 0.16);
+  --danger-wash: rgba(255, 138, 128, 0.09);
+  --danger-line: rgba(255, 138, 128, 0.34);
+  --warn-fg: #ffc861;
+  --warn-tint: rgba(255, 193, 87, 0.16);
+  --warn-wash: rgba(255, 193, 87, 0.09);
+  --warn-line: rgba(255, 193, 87, 0.32);
+  --ok-fg: #7ee2a8;
+  --ok-tint: rgba(126, 226, 168, 0.15);
+  --ok-line: rgba(126, 226, 168, 0.32);
 }
 html.kw-dark body {
   background: var(--bg);
@@ -568,7 +605,7 @@ body {
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: #1a7f37;
+  color: var(--ok-fg);
   font-weight: 600;
 }
 
@@ -576,7 +613,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #1a7f37;
+  background: var(--ok-fg);
   animation: pulse 1.6s ease-in-out infinite;
 }
 
@@ -781,9 +818,14 @@ body {
   min-width: 130px;
 }
 
+/* The wash LAYERS over the panel rather than replacing it: `background: <tint>` would let
+   the page show through, so the card would sit a shade darker than every other card and
+   drag the muted label below its already-marginal contrast. Layering keeps it a panel that
+   happens to be tinted, in both themes. */
 .ov-card.danger {
-  border-color: #f0c9c5;
-  background: #fdf4f3;
+  border-color: var(--danger-line);
+  background-color: var(--panel);
+  background-image: linear-gradient(var(--danger-wash), var(--danger-wash));
 }
 
 .ov-num {
@@ -882,9 +924,9 @@ body {
 }
 
 .error {
-  color: #b3261e;
-  background: #fde7e6;
-  border: 1px solid #f4c7c3;
+  color: var(--danger-fg);
+  background: var(--danger-tint);
+  border: 1px solid var(--danger-line);
   padding: 10px 12px;
   border-radius: 6px;
   margin-bottom: 12px;
@@ -1954,8 +1996,8 @@ body.row-resizing {
 }
 
 .pf-active {
-  background: #e6f4ea;
-  color: #1a7f37;
+  background: var(--ok-tint);
+  color: var(--ok-fg);
 }
 
 .pf-closed {
@@ -1964,8 +2006,8 @@ body.row-resizing {
 }
 
 .pf-failed {
-  background: #fdecea;
-  color: #b3261e;
+  background: var(--danger-tint);
+  color: var(--danger-fg);
 }
 
 .helm-badge {
@@ -2052,17 +2094,17 @@ body.row-resizing {
 }
 
 .menu-item.danger {
-  color: #b3261e;
+  color: var(--danger-fg);
 }
 
 .menu-item.danger:hover {
-  background: #fdecea;
+  background: var(--danger-tint);
 }
 
 /* Danger items in a Naive NDropdown row-actions menu (options carry class "menu-danger"). */
 .n-dropdown-option-body.menu-danger .n-dropdown-option-body__label,
 .menu-danger .n-dropdown-option-body__label {
-  color: #b3261e;
+  color: var(--danger-fg);
 }
 
 /* per-container status squares (Pods · Freelens-style) */
@@ -2150,18 +2192,18 @@ body.row-resizing {
 }
 
 .status-ok {
-  background: #e6f4ea;
-  color: #1a7f37;
+  background: var(--ok-tint);
+  color: var(--ok-fg);
 }
 
 .status-warn {
-  background: #fff4e0;
-  color: #a35b00;
+  background: var(--warn-tint);
+  color: var(--warn-fg);
 }
 
 .status-err {
-  background: #fdecea;
-  color: #b3261e;
+  background: var(--danger-tint);
+  color: var(--danger-fg);
 }
 
 /* used/total usage bar (Nodes CPU/Memory) */
@@ -2286,30 +2328,30 @@ body.row-resizing {
 }
 
 .btn.danger {
-  color: #b3261e;
-  border-color: #e6b4b0;
+  color: var(--danger-fg);
+  border-color: var(--danger-line);
   margin-left: auto;
 }
 
 .btn.danger:hover:not(:disabled) {
-  background: #fde7e6;
+  background: var(--danger-tint);
 }
 
 .act-msg {
   flex-basis: 100%;
   font-size: 12px;
-  color: #1a7f37;
+  color: var(--ok-fg);
 }
 
 .act-msg.err {
-  color: #b3261e;
+  color: var(--danger-fg);
 }
 
 /* Helm "update available" chip on a release's version cell. */
 .update-chip {
   margin-left: 6px;
-  background: #fff3cd;
-  color: #7a5b00;
+  background: var(--warn-tint);
+  color: var(--warn-fg);
   font-weight: 600;
 }
 
