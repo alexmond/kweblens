@@ -61,6 +61,13 @@ server:
 kweblens:
   load-kubeconfig: ${KWEBLENS_LOAD_KUBECONFIG:true}
   clusters: []
+  # Clusters added at runtime through POST /api/v1/clusters. A kubeconfig is a credential, so
+  # `auto` keeps it in a Kubernetes Secret when kweblens runs in-cluster (encryption-at-rest +
+  # RBAC + survives a reschedule with no PVC) and in the data directory otherwise, which is the
+  # only durable option off-cluster. Set mode=memory to refuse to persist credentials at all.
+  cluster-store:
+    mode: ${KWEBLENS_CLUSTER_STORE_MODE:auto}
+    path: ${KWEBLENS_DATA_DIR:${user.home}/.kweblens}/clusters
   # Built-in cluster simulator (dev / CI / performance testing) — generates an in-JVM "sim"
   # cluster with configurable object counts, no real cluster. Enable and pair with
   # KWEBLENS_LOAD_KUBECONFIG=false so the simulator is the only cluster. See web/sim/*.

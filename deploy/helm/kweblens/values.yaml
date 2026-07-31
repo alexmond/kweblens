@@ -38,6 +38,12 @@ clusterScope:
 rbac:
   create: true
   role: viewer
+  # Namespaced Role letting kweblens keep RUNTIME-ADDED clusters in Secrets in its own
+  # namespace (POST /api/v1/clusters). Independent of clusterScope.local — an instance
+  # that monitors only external clusters is exactly the one that needs this. Set false
+  # to refuse the grant; then either point kweblens.cluster-store at a mounted volume
+  # (mode=file) or accept that clusters can only come from config.
+  clusterStore: true
 
 serviceAccount:
   create: true

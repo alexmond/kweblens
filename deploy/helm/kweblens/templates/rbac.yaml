@@ -38,4 +38,40 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kweblens.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
-{{- end -}}
+{{- end }}
+{{- if and .Values.rbac.create .Values.rbac.clusterStore }}
+---
+# Namespaced Role for the RUNTIME CLUSTER STORE: kweblens persists clusters added through
+# POST /api/v1/clusters as one Secret per cluster in its own namespace. Deliberately
+# separate from the ClusterRole above — that one is about the cluster kweblens *browses*
+# and is skipped entirely when clusterScope.local is false, whereas this is about
+# kweblens's own storage and is needed by any in-cluster deployment that wants runtime
+# clusters. Scoped to this namespace and to `secrets` only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kweblens.fullname" . }}-cluster-store
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kweblens.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kweblens.fullname" . }}-cluster-store
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kweblens.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kweblens.fullname" . }}-cluster-store
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kweblens.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

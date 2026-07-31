@@ -61,7 +61,10 @@ scripts/dev-verify.sh                        # format + full reactor verify (CI 
 
 kweblens seeds your **ambient kubeconfig** (`KUBECONFIG` / `~/.kube/config`) as cluster
 `default` on startup. Set `KWEBLENS_LOAD_KUBECONFIG=false` to start with none, or configure
-clusters explicitly under `kweblens.clusters[*]`.
+clusters explicitly under `kweblens.clusters[*]`. Clusters can also be added, edited and
+removed **at runtime** (`POST/PUT/DELETE /api/v1/clusters`, admin login required); the
+kubeconfig is kept in a Kubernetes Secret in-cluster and in a data directory otherwise —
+see [docs/deployment.md](docs/deployment.md#adding-clusters-at-runtime).
 
 ### No cluster? Use the built-in simulator
 

@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class ClusterRegistryTest {
 
@@ -31,6 +33,33 @@ class ClusterRegistryTest {
 			assertThat(registry.client("nope")).isEmpty();
 			assertThatThrownBy(() -> registry.require("nope")).isInstanceOf(UnknownClusterException.class)
 				.hasMessageContaining("nope");
+		}
+	}
+
+	@Test
+	void unregisterClosesTheClientAndDropsTheEntry() {
+		try (ClusterRegistry registry = new ClusterRegistry()) {
+			KubernetesClient client = mock(KubernetesClient.class);
+			registry.register("gone", "Gone", client, ClusterOrigin.RUNTIME);
+
+			assertThat(registry.unregister("gone")).isTrue();
+
+			// Closing is the point: a removed cluster must stop holding its connection
+			// pool, not merely vanish from the list.
+			verify(client).close();
+			assertThat(registry.list()).isEmpty();
+			assertThat(registry.unregister("gone")).isFalse();
+		}
+	}
+
+	@Test
+	void originIsReportedSoTheUiKnowsWhatIsEditable() {
+		try (ClusterRegistry registry = new ClusterRegistry()) {
+			registry.register("declared", "Declared", clientPointedAt("https://198.51.100.10:6443/"));
+			registry.register("added", "Added", clientPointedAt("https://198.51.100.11:6443/"), ClusterOrigin.RUNTIME);
+
+			assertThat(registry.info("declared")).get().extracting(ClusterInfo::origin).isEqualTo(ClusterOrigin.STATIC);
+			assertThat(registry.info("added")).get().extracting(ClusterInfo::origin).isEqualTo(ClusterOrigin.RUNTIME);
 		}
 	}
 

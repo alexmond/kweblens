@@ -22,6 +22,15 @@ public class ClusterRegistry implements AutoCloseable {
 	private final Map<String, Entry> entries = new ConcurrentHashMap<>();
 
 	/**
+	 * Register (or replace) a cluster declared outside kweblens (configuration or the
+	 * ambient kubeconfig).
+	 * @return the {@link ClusterInfo} view of the registered cluster
+	 */
+	public ClusterInfo register(String id, String name, KubernetesClient client) {
+		return register(id, name, client, ClusterOrigin.STATIC);
+	}
+
+	/**
 	 * Register (or replace) a cluster. Replacing an existing id closes the old client,
 	 * unless the same client instance is being re-registered.
 	 * @return the {@link ClusterInfo} view of the registered cluster
@@ -30,13 +39,28 @@ public class ClusterRegistry implements AutoCloseable {
 	// the
 	// same one being re-registered.
 	@SuppressWarnings("PMD.CompareObjectsWithEquals")
-	public ClusterInfo register(String id, String name, KubernetesClient client) {
-		Entry previous = entries.put(id, new Entry(name, client));
+	public ClusterInfo register(String id, String name, KubernetesClient client, ClusterOrigin origin) {
+		Entry previous = entries.put(id, new Entry(name, client, origin));
 		if (previous != null && previous.client() != client) {
 			closeQuietly(previous.client());
 		}
 		log.info("Registered cluster '{}' ({}) at {}", id, name, client.getMasterUrl());
 		return info(id).orElseThrow();
+	}
+
+	/**
+	 * Drop a cluster and close its client. Closing is the point: a removed cluster must
+	 * stop holding sockets and threads, not merely disappear from the list.
+	 * @return true if a cluster was removed
+	 */
+	public boolean unregister(String id) {
+		Entry removed = entries.remove(id);
+		if (removed == null) {
+			return false;
+		}
+		closeQuietly(removed.client());
+		log.info("Unregistered cluster '{}'", id);
+		return true;
 	}
 
 	/**
@@ -58,8 +82,7 @@ public class ClusterRegistry implements AutoCloseable {
 	 * @return the {@link ClusterInfo} view of {@code id}, or empty if unknown
 	 */
 	public Optional<ClusterInfo> info(String id) {
-		return Optional.ofNullable(entries.get(id))
-			.map((e) -> new ClusterInfo(id, e.name(), String.valueOf(e.client().getMasterUrl())));
+		return Optional.ofNullable(entries.get(id)).map((e) -> toInfo(id, e));
 	}
 
 	/**
@@ -68,10 +91,13 @@ public class ClusterRegistry implements AutoCloseable {
 	public List<ClusterInfo> list() {
 		return entries.entrySet()
 			.stream()
-			.map((e) -> new ClusterInfo(e.getKey(), e.getValue().name(),
-					String.valueOf(e.getValue().client().getMasterUrl())))
+			.map((e) -> toInfo(e.getKey(), e.getValue()))
 			.sorted((a, b) -> a.id().compareTo(b.id()))
 			.toList();
+	}
+
+	private ClusterInfo toInfo(String id, Entry entry) {
+		return new ClusterInfo(id, entry.name(), String.valueOf(entry.client().getMasterUrl()), entry.origin());
 	}
 
 	@Override
@@ -89,7 +115,7 @@ public class ClusterRegistry implements AutoCloseable {
 		}
 	}
 
-	private record Entry(String name, KubernetesClient client) {
+	private record Entry(String name, KubernetesClient client, ClusterOrigin origin) {
 	}
 
 }
