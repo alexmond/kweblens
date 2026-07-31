@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { NDataTable, NTag } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { shallowRef, computed, h, ref, watch } from 'vue';
+import { computed, h, ref } from 'vue';
 
 import { api } from '../api';
+import { useAsyncData } from '../composables/useAsyncData';
 import { age } from '../columns';
 import { useDialog } from '../dialog';
+import ErrorNotice from './ErrorNotice.vue';
 import StatusBadge from './StatusBadge.vue';
 import KebabMenu from './KebabMenu.vue';
 import type { HelmAction, KebabItem } from './helm-types';
@@ -33,24 +35,16 @@ const emit = defineEmits<{
 }>();
 
 const dialog = useDialog();
-const releases = shallowRef<HelmRelease[] | null>(null);
-const error = ref<string | null>(null);
-const localKey = ref(0);
-
-watch(
+const {
+  data: releases,
+  loading,
+  error,
+  reload,
+} = useAsyncData(
   () => [props.cluster, props.refreshKey, localKey.value],
-  (_v, _o, onCleanup) => {
-    let cancelled = false;
-    onCleanup(() => (cancelled = true));
-    releases.value = null;
-    error.value = null;
-    api
-      .helmReleases(props.cluster)
-      .then((r) => !cancelled && (releases.value = r))
-      .catch((e) => !cancelled && (error.value = String(e)));
-  },
-  { immediate: true },
+  () => api.helmReleases(props.cluster),
 );
+const localKey = ref(0);
 
 const uninstall = (r: HelmRelease) => {
   if (!props.authed) {
@@ -160,8 +154,8 @@ const rowKey = (r: HelmRelease) => `${r.namespace}/${r.name}`;
   <div class="content-head">
     <span class="count">{{ releases ? `${releases.length} releases` : '' }}</span>
   </div>
-  <div v-if="error" class="error">{{ error }}</div>
-  <NDataTable :columns="columns" :data="releases ?? []" :row-key="rowKey" :loading="releases === null" size="small">
+  <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
+  <NDataTable :columns="columns" :data="releases ?? []" :row-key="rowKey" :loading="loading" size="small">
     <template #empty>
       {{ releases === null ? 'Loading…' : 'No releases.' }}
     </template>

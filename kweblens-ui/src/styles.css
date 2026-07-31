@@ -2919,3 +2919,21 @@ body.dragging {
 .ov-state.tone-idle .ov-state-l {
   color: var(--muted);
 }
+
+/* A failed request plus its retry. The button sits on the same line as the message so the
+   recovery is where the problem is, not somewhere else on the page. */
+.error-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.error-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.error-retry {
+  flex: 0 0 auto;
+}

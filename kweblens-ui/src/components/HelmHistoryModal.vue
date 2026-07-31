@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NModal } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { shallowRef, computed, h, ref, watch } from 'vue';
+import { computed, h } from 'vue';
 
 import { api } from '../api';
+import { useAsyncData } from '../composables/useAsyncData';
 import { age } from '../columns';
+import ErrorNotice from './ErrorNotice.vue';
 import StatusBadge from './StatusBadge.vue';
 import type { HelmRelease } from '../types';
 
@@ -15,20 +17,14 @@ import type { HelmRelease } from '../types';
 const props = defineProps<{ cluster: string; namespace: string; name: string }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
-const history = shallowRef<HelmRelease[] | null>(null);
-const error = ref<string | null>(null);
-
-watch(
+const {
+  data: history,
+  loading,
+  error,
+  reload,
+} = useAsyncData(
   () => [props.cluster, props.namespace, props.name],
-  (_v, _o, onCleanup) => {
-    let cancelled = false;
-    onCleanup(() => (cancelled = true));
-    api
-      .helmHistory(props.cluster, props.namespace, props.name)
-      .then((h) => !cancelled && (history.value = h))
-      .catch((e) => !cancelled && (error.value = String(e)));
-  },
-  { immediate: true },
+  () => api.helmHistory(props.cluster, props.namespace, props.name),
 );
 
 const rows = computed(() => [...(history.value ?? [])].sort((a, b) => b.revision - a.revision));
@@ -56,8 +52,8 @@ const rowKey = (r: HelmRelease) => r.revision;
     <p class="modal-note">
       Revision history of release <strong>{{ name }}</strong> in <strong>{{ namespace }}</strong> (helm history).
     </p>
-    <div v-if="error" class="error">{{ error }}</div>
-    <NDataTable :columns="columns" :data="rows" :row-key="rowKey" :loading="history === null" size="small">
+    <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
+    <NDataTable :columns="columns" :data="rows" :row-key="rowKey" :loading="loading" size="small">
       <template #empty>
         {{ history === null ? 'Loading…' : 'No history for this release.' }}
       </template>

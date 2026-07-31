@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { NDataTable, NInput } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { shallowRef, computed, h, ref, watch } from 'vue';
+import { computed, h, ref } from 'vue';
 
 import { api } from '../api';
+import { useAsyncData } from '../composables/useAsyncData';
+import ErrorNotice from './ErrorNotice.vue';
 import KebabMenu from './KebabMenu.vue';
 import type { HelmAction, KebabItem } from './helm-types';
 import type { HelmChart } from '../types';
@@ -16,24 +18,16 @@ import type { HelmChart } from '../types';
 const props = defineProps<{ cluster: string }>();
 const emit = defineEmits<{ (e: 'action', a: HelmAction): void }>();
 
-const charts = shallowRef<HelmChart[] | null>(null);
-const error = ref<string | null>(null);
-const query = ref('');
-
-watch(
+const {
+  data: charts,
+  loading,
+  error,
+  reload,
+} = useAsyncData(
   () => props.cluster,
-  (cluster, _old, onCleanup) => {
-    let cancelled = false;
-    onCleanup(() => (cancelled = true));
-    charts.value = null;
-    error.value = null;
-    api
-      .helmCharts(cluster)
-      .then((c) => !cancelled && (charts.value = c))
-      .catch((e) => !cancelled && (error.value = String(e)));
-  },
-  { immediate: true },
+  () => api.helmCharts(props.cluster),
 );
+const query = ref('');
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase();
@@ -70,8 +64,8 @@ const rowKey = (r: HelmChart) => `${r.repository}/${r.name}`;
     <div class="spacer" />
     <NInput v-model:value="query" placeholder="Search charts…" clearable style="max-width: 240px" />
   </div>
-  <div v-if="error" class="error">{{ error }}</div>
-  <NDataTable :columns="columns" :data="filtered" :row-key="rowKey" :loading="charts === null" size="small">
+  <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
+  <NDataTable :columns="columns" :data="filtered" :row-key="rowKey" :loading="loading" size="small">
     <template #empty>
       {{ charts === null ? 'Loading…' : 'No charts. Configure repositories under kweblens.helm.repositories.' }}
     </template>

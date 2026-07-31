@@ -48,12 +48,14 @@ const data = computed(() => props.events ?? []);
 </script>
 
 <template>
+  <!-- An error means the load finished, unsuccessfully — so the table must stop spinning.
+       `events === null` alone cannot say which of the two happened. -->
   <div v-if="error" class="error">{{ error }}</div>
   <NDataTable
     v-else
     :columns="columns"
     :data="data"
-    :loading="events === null"
+    :loading="events === null && !error"
     :row-class-name="rowClassName"
     size="small"
   >

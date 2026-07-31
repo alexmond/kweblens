@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NModal } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { shallowRef, computed, h, ref, watch } from 'vue';
+import { computed, h } from 'vue';
 
 import { api } from '../api';
+import { useAsyncData } from '../composables/useAsyncData';
 import type { HelmResourceRef } from '../types';
 
 // Objects a release manages (from its rendered manifest). Click a name to open it in the shell.
@@ -14,20 +15,14 @@ import type { HelmResourceRef } from '../types';
 const props = defineProps<{ cluster: string; namespace: string; name: string }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'open', kind: string, namespace: string): void }>();
 
-const resources = shallowRef<HelmResourceRef[] | null>(null);
-const error = ref<string | null>(null);
-
-watch(
+const {
+  data: resources,
+  loading,
+  error,
+  reload,
+} = useAsyncData(
   () => [props.cluster, props.namespace, props.name],
-  (_v, _o, onCleanup) => {
-    let cancelled = false;
-    onCleanup(() => (cancelled = true));
-    api
-      .helmReleaseResources(props.cluster, props.namespace, props.name)
-      .then((r) => !cancelled && (resources.value = r))
-      .catch((e) => !cancelled && (error.value = String(e)));
-  },
-  { immediate: true },
+  () => api.helmReleaseResources(props.cluster, props.namespace, props.name),
 );
 
 const cmp = (k: keyof HelmResourceRef) => (a: HelmResourceRef, b: HelmResourceRef) =>
@@ -59,8 +54,8 @@ const rowKey = (r: HelmResourceRef) => `${r.kind}/${r.namespace}/${r.name}`;
       Objects managed by release <strong>{{ name }}</strong> in <strong>{{ namespace }}</strong> (from its manifest).
       Click a name to open it.
     </p>
-    <div v-if="error" class="error">{{ error }}</div>
-    <NDataTable :columns="columns" :data="resources ?? []" :row-key="rowKey" :loading="resources === null" size="small">
+    <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
+    <NDataTable :columns="columns" :data="resources ?? []" :row-key="rowKey" :loading="loading" size="small">
       <template #empty>
         {{ resources === null ? 'Loading…' : "No resources in this release's manifest." }}
       </template>
