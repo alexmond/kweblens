@@ -115,11 +115,40 @@ describe('ordering and unknown relations', () => {
   });
 
   it('renders a relation the UI does not know about rather than dropping it', () => {
-    // The server can add relations without a UI release; an unknown key falls back to its own
-    // name and the pod projection rather than disappearing.
+    // The server can add relations without a UI release, so an unknown key must still appear.
     const sections = relationSections({ somethingNew: ok([pod('x', 'Running')]) });
-    expect(sections.map((s) => s.title)).toEqual(['somethingNew']);
     expect(sections[0].rows).toHaveLength(1);
+  });
+
+  it('humanises an unknown key instead of showing it raw', () => {
+    // This assertion changed in #203: it used to pin the raw key, i.e. a heading literally
+    // reading `ownedBy`. A machine-readable key in a heading is a defect, not a contract.
+    expect(relationSections({ ownedBy: ok([]) })[0].title).toBe('Owned By');
+    expect(relationSections({ volumeattachments: ok([]) })[0].title).toBe('Volumeattachments');
+  });
+
+  it('projects an unknown relation generically rather than as pods', () => {
+    // THE BUG (#203). Projection used to be `key === 'endpoints' ? endpointRows : podRows`,
+    // so any new relation was rendered under Pod/Status/Node/Namespace headers. A ConfigMap
+    // list came out with three empty columns and no error — wrong, and silent about it.
+    const configMaps: KubeObject[] = [
+      { kind: 'ConfigMap', metadata: { name: 'app-config', namespace: 'app' }, spec: {}, status: {} },
+    ];
+    const [section] = relationSections({ referencedConfig: ok(configMaps) });
+    expect(section.headers).toEqual(['Name', 'Kind', 'Namespace']);
+    expect(section.headers).not.toContain('Node');
+    expect(section.rows[0].map((c) => c.text)).toEqual(['app-config', 'ConfigMap', 'app']);
+  });
+
+  it('still gives the known relations their rich projections', () => {
+    // The generic fallback must not have flattened the ones that earn more than three columns.
+    expect(relationSections({ selectedPods: ok([pod('p', 'Running', 'node-1')]) })[0].headers).toEqual([
+      'Pod',
+      'Status',
+      'Node',
+      'Namespace',
+    ]);
+    expect(relationSections({ mountedBy: ok([pod('p', 'Running')]) })[0].headers).toContain('Node');
   });
 
   it('returns nothing when the detail has not loaded yet', () => {
