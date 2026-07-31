@@ -102,13 +102,30 @@ an apiserver is effectively always `https://`, while a corporate forward proxy i
 written `http://proxy:3128` — the proxy is reached in cleartext and tunnels TLS via `CONNECT`.
 fabric8 files that under `httpProxy`, i.e. the proxy used for **http** targets.
 
-Whether the underlying HTTP client then applies `httpProxy` to an `https://` request is an
-implementation detail that was **[unverified]** here — but the asymmetry is real, and it means
-the configuration most likely to be used is also the one most likely to silently not proxy,
-presenting as an unexplained connection timeout.
+#### Now **[verified against a real proxy]**, and the answer is worse than predicted
 
-**This single fact drives the recommendation**: do not claim proxy support until this exact
-combination (`proxy-url: http://…` + `https://` apiserver) has been tested against a real proxy.
+This was left open above as "likely to present as an unexplained connection timeout". It does
+not. Tested end to end against a live cluster with a local CONNECT proxy that logs every
+connection:
+
+| `proxy-url` | apiserver | result | proxy log |
+|---|---|---|---|
+| `http://127.0.0.1:3128` | `https://…` | **29 namespaces listed — succeeded** | **0 connections** |
+| `socks5://127.0.0.1:1080` | `https://…` | 29 namespaces listed | 1 connection |
+
+The proxy was not at fault: `curl -x http://127.0.0.1:3128` against the same apiserver logged a
+`CONNECT` and got its expected `401`.
+
+So an `http://` proxy-url against an https apiserver does not fail — it is **silently ignored**
+and the traffic goes **direct**. That is the dangerous version of this bug rather than the
+merely annoying one: in an environment where egress is supposed to be audited or restricted to
+a proxy, everything appears configured and working while the requirement is not being met. A
+timeout would at least have prompted someone to look.
+
+**This drives the recommendation**: do not document `http://` proxy-url as supported, and detect
+the combination at runtime rather than relying on anyone reading this page. `ProxyStatus` now
+reports it in the diagnostics panel as a capability that is NOT available, with the reason and
+the fix (use `socks5://` or `https://`).
 It is pinned by `KubeconfigProxyTest.routesTheProxyUrlByTheProxysOwnSchemeNotTheServers` so a
 fabric8 upgrade that changes the mapping is caught rather than discovered in production.
 
@@ -188,14 +205,18 @@ Small, because the library already does the work:
 1. ~~**Test what we claim.**~~ **DONE** — `KubeconfigProxyTest` (kweblens-core) now pins that
    `proxy-url` reaches the built client, that no proxy is invented when the kubeconfig asks for
    none, that TLS settings survive alongside it, and the scheme-routing behaviour above.
-2. **Test the http-proxy-to-https-apiserver case against a REAL proxy** before advertising proxy
-   support at all. This is now the top item, because of the scheme-routing finding: the most
-   common configuration is the one whose end-to-end behaviour is unproven. A squid or tinyproxy
-   container plus a kind cluster is enough.
-3. **Document it**: kubeconfig `proxy-url` per cluster; `HTTPS_PROXY`/`NO_PROXY` for the whole
-   server; the `KUBERNETES_*`-constant naming trap; a recommended in-cluster `NO_PROXY` default
-   including `.svc`/`.cluster.local` and the pod/service CIDRs.
-4. **Surface the effective proxy per cluster in the #27 diagnostics panel** — one capability row
+2. ~~**Test the http-proxy-to-https-apiserver case against a REAL proxy**~~ **DONE** — and it
+   does not time out, it **silently bypasses the proxy** (see the verified table above). The
+   conclusion is stronger than "test before advertising": `http://` proxy-url must be documented
+   as **not supported for an https apiserver**, and detected at runtime, because the symptom of
+   getting it wrong is that everything works.
+3. ~~**Document it**~~ **DONE** — `docs/proxy.md` covers per-cluster `proxy-url`,
+   `HTTPS_PROXY`/`NO_PROXY` for the whole server, the `KUBERNETES_*`-constant naming trap, the
+   in-cluster `NO_PROXY` default including `.svc`/`.cluster.local` and the pod/service CIDRs,
+   and leads with the silent-bypass rule.
+4. ~~**Surface the effective proxy per cluster in the #27 diagnostics panel**~~ **DONE** —
+   `ProxyStatus` reports the proxy actually in force, and reports the silent-bypass combination
+   as a capability that is NOT available, with the reason and the fix. One capability row
    ("Egress proxy: none / socks5://… from kubeconfig"), so a proxy problem is visible instead of
    presenting as an unexplained timeout.
 5. **Verify streaming through a proxy** (classification item 9): stand up a SOCKS5 proxy, point `proxy-url` at

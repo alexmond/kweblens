@@ -14,7 +14,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.stereotype.Service;
 
+import io.fabric8.kubernetes.client.Config;
+
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.cluster.ProxyStatus;
 import org.alexmond.kweblens.config.KweblensProperties;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
 import org.alexmond.kweblens.web.ai.KweblensAiProperties;
@@ -90,6 +93,7 @@ public class DiagnosticsService {
 		List<Capability> caps = new ArrayList<>();
 		caps.add(metricsServer(clusterId));
 		caps.add(prometheusBackend(clusterId));
+		caps.add(egressProxy(clusterId));
 		caps.add(apiGroup(clusterId, "Gateway API", "gateway.networking.k8s.io",
 				"Gateway/HTTPRoute resources can be listed", "install the Gateway API CRDs to use a Gateway view"));
 		caps.add(apiGroup(clusterId, "Custom resources", "apiextensions.k8s.io",
@@ -154,6 +158,31 @@ public class DiagnosticsService {
 		}
 		catch (RuntimeException ex) {
 			return Capability.no(name, "discovery failed: " + ex.getMessage());
+		}
+	}
+
+	/**
+	 * The egress proxy in force for this cluster, and whether a configured one is being
+	 * ignored.
+	 *
+	 * <p>
+	 * Reported because the failure it catches is invisible: an {@code http://} proxy-url
+	 * against an https apiserver is never consulted, and everything keeps working, so
+	 * nothing prompts anyone to check whether traffic is really taking the audited path.
+	 * See {@link ProxyStatus}.
+	 */
+	private Capability egressProxy(String clusterId) {
+		String name = "Egress proxy";
+		try {
+			Config config = this.clusters.require(clusterId).getConfiguration();
+			ProxyStatus status = ProxyStatus.of(config.getMasterUrl(), config.getHttpProxy(), config.getHttpsProxy(),
+					config.getNoProxy());
+			// A bypass is reported as NOT available: it is the one case where the
+			// configuration says one thing and the connection does another.
+			return status.bypassed() ? Capability.no(name, status.detail()) : Capability.yes(name, status.detail());
+		}
+		catch (RuntimeException ex) {
+			return Capability.no(name, "could not read the cluster's connection settings: " + ex.getMessage());
 		}
 	}
 
