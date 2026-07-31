@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import io.fabric8.kubernetes.client.Config;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.cluster.ClusterStore;
 import org.alexmond.kweblens.cluster.ProxyStatus;
 import org.alexmond.kweblens.config.KweblensProperties;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
@@ -52,6 +53,8 @@ public class DiagnosticsService {
 
 	private final ClusterRegistry clusters;
 
+	private final ClusterStore clusterStore;
+
 	private final PrometheusMetricService prometheus;
 
 	private final KweblensProperties properties;
@@ -64,6 +67,21 @@ public class DiagnosticsService {
 
 	/** Optional: only present when build-info.properties was generated. */
 	private final ObjectProvider<BuildProperties> buildProperties;
+
+	/**
+	 * How many clusters the store holds. Guarded because for the Secret backend this is
+	 * an API call, and a diagnostics panel that 500s when its own storage is unreachable
+	 * is useless precisely when it is needed.
+	 */
+	private Object runtimeClusterCount() {
+		try {
+			return this.clusterStore.load().size();
+		}
+		catch (RuntimeException ex) {
+			log.debug("Could not count runtime clusters: {}", ex.getMessage());
+			return "unavailable";
+		}
+	}
 
 	/**
 	 * What this cluster can support. Every probe is individually guarded: a cluster that
@@ -239,6 +257,15 @@ public class DiagnosticsService {
 		out.put("clusterCount", this.clusters.list().size());
 		out.put("loadKubeconfig", this.properties.isLoadKubeconfig());
 		out.put("configuredClusters", this.properties.getClusters().size());
+		// Where runtime-added clusters (and their kubeconfigs) are kept. Reported the
+		// same
+		// way credentials always are here: what holds them and whether it survives a
+		// restart, never what is in it.
+		Map<String, Object> store = new LinkedHashMap<>();
+		store.put("backend", this.clusterStore.describe());
+		store.put("persistent", this.clusterStore.persistent());
+		store.put("runtimeClusters", runtimeClusterCount());
+		out.put("clusterStore", store);
 		// Security posture, stated plainly. This is the project's known weak spot and the
 		// panel should not soften it.
 		Map<String, Object> sec = new LinkedHashMap<>();

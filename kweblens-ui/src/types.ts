@@ -4,6 +4,9 @@ export interface ClusterInfo {
   id: string;
   name: string;
   masterUrl: string;
+  // STATIC = declared in kweblens.clusters[*] or the ambient kubeconfig (read-only at
+  // runtime); RUNTIME = added through the API and editable/removable.
+  origin?: 'STATIC' | 'RUNTIME';
 }
 
 export interface NavItem {

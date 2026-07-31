@@ -7,6 +7,8 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import org.alexmond.kweblens.cluster.ClusterConflictException;
+import org.alexmond.kweblens.cluster.InvalidClusterException;
 import org.alexmond.kweblens.cluster.UnknownClusterException;
 import org.alexmond.kweblens.portforward.PortForwardException;
 import org.alexmond.kweblens.web.helm.HelmException;
@@ -22,6 +24,30 @@ public class ApiExceptionHandler {
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
 		problem.setTitle("Unknown cluster");
 		problem.setProperties(Map.of("code", "unknown-cluster"));
+		return problem;
+	}
+
+	/**
+	 * A cluster definition that cannot be used. Rejected before anything is registered or
+	 * persisted, so the registry is unchanged when this is returned.
+	 */
+	@ExceptionHandler(InvalidClusterException.class)
+	public ProblemDetail invalidCluster(InvalidClusterException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+		problem.setTitle("Invalid cluster");
+		problem.setProperties(Map.of("code", "invalid-cluster"));
+		return problem;
+	}
+
+	/**
+	 * A well-formed request that conflicts with current state — a duplicate id, or
+	 * editing a cluster the deployment declared rather than one added at runtime.
+	 */
+	@ExceptionHandler(ClusterConflictException.class)
+	public ProblemDetail clusterConflict(ClusterConflictException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+		problem.setTitle("Cluster conflict");
+		problem.setProperties(Map.of("code", "cluster-conflict"));
 		return problem;
 	}
 

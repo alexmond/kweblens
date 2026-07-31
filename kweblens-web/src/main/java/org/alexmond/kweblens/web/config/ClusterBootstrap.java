@@ -15,6 +15,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import org.alexmond.kweblens.cluster.ClusterConfigService;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.cluster.KubeconfigLoader;
 import org.alexmond.kweblens.config.KweblensProperties;
@@ -22,8 +23,16 @@ import org.alexmond.kweblens.config.KweblensProperties;
 /**
  * On startup, seeds the {@link ClusterRegistry}: first every explicitly-configured
  * {@code kweblens.clusters[*]}, then — when {@code kweblens.load-kubeconfig} is on —
- * every context in the ambient kubeconfig (each becomes its own cluster). Building a
- * fabric8 client does not connect, so a missing/unreachable kubeconfig never blocks boot.
+ * every context in the ambient kubeconfig (each becomes its own cluster), and finally
+ * every cluster added at runtime and persisted by the
+ * {@link org.alexmond.kweblens.cluster.ClusterStore}. Building a fabric8 client does not
+ * connect, so a missing/unreachable kubeconfig never blocks boot.
+ *
+ * <p>
+ * Runtime clusters are restored <b>last and never overwrite</b> a declared id: the
+ * deployment manifest is the authority on the clusters it names, and a persisted entry
+ * silently shadowing one would make the running state disagree with the manifest with
+ * nothing in the UI to explain why.
  */
 @Slf4j
 @Component
@@ -34,11 +43,17 @@ public class ClusterBootstrap implements ApplicationRunner {
 
 	private final ClusterRegistry registry;
 
+	private final ClusterConfigService clusterConfig;
+
 	@Override
 	public void run(ApplicationArguments args) {
 		properties.getClusters().forEach(this::registerConfigured);
 		if (properties.isLoadKubeconfig()) {
 			loadAmbientContexts();
+		}
+		int restored = this.clusterConfig.restore();
+		if (restored > 0) {
+			log.info("Restored {} runtime-configured cluster(s)", restored);
 		}
 		if (registry.list().isEmpty()) {
 			log.info("No clusters registered — set kweblens.clusters[*] or provide a kubeconfig.");

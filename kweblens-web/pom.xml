@@ -146,6 +146,23 @@
         <finalName>kweblens</finalName>
         <plugins>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!--
+                          Keep the runtime cluster store inside target/. Without this the default
+                          data directory is ~/.kweblens/clusters, so every @SpringBootTest would
+                          restore (and could delete) the developer's real runtime clusters, and
+                          test results would depend on what happened to be on the machine. A
+                          system property, not a test application.properties, because it must beat
+                          application.yml unambiguously.
+                        -->
+                        <kweblens.cluster-store.path>${project.build.directory}/test-cluster-store</kweblens.cluster-store.path>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>

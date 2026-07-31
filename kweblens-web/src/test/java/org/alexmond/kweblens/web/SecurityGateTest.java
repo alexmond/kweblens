@@ -43,10 +43,10 @@ class SecurityGateTest {
 
 	@Test
 	void writesPassSecurityWithValidCredentials() throws Exception {
-		// Authenticated -> gets past the security filter; the GET-only endpoint then
-		// answers 405.
-		mvc.perform(post("/api/v1/clusters").with(httpBasic("admin", "secret")))
-			.andExpect(status().isMethodNotAllowed());
+		// Authenticated -> gets past the security filter; POST /api/v1/clusters (add a
+		// cluster) then rejects the empty body as a bad request, which is what proves the
+		// request reached the controller rather than being stopped at the filter chain.
+		mvc.perform(post("/api/v1/clusters").with(httpBasic("admin", "secret"))).andExpect(status().isBadRequest());
 	}
 
 	@Test
