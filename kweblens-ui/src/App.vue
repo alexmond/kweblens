@@ -119,13 +119,16 @@ watch([selected, namespace], () => {
   }
 });
 
-const { navigateToKind, navigateToPortForwards, navigateToHelmRelease, knowsKind } = useNavigation(nav, {
-  setSelected: (i) => (selected.value = i),
-  setDetail: (d) => (detail.value = d),
-  setNamespace: (ns) => (namespace.value = ns),
-  setHelmTarget: (t) => (helmTarget.value = t),
-  currentNamespace: () => namespace.value,
-});
+const { navigateToKind, navigateToPortForwards, navigateToHelmRelease, knowsKind, resourceIdForKind } = useNavigation(
+  nav,
+  {
+    setSelected: (i) => (selected.value = i),
+    setDetail: (d) => (detail.value = d),
+    setNamespace: (ns) => (namespace.value = ns),
+    setHelmTarget: (t) => (helmTarget.value = t),
+    currentNamespace: () => namespace.value,
+  },
+);
 
 const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDelete } = useAppActions({
   cluster,
@@ -169,6 +172,17 @@ const helmViewName = computed(() =>
 const showList = computed(() => selected.value && !isSynthetic(selected.value.id));
 const selectedKey = computed(() => (detail.value ? objKey(detail.value.obj) : null));
 const fetchChildrenFn = computed(() => (selected.value?.expandable ? fetchPods : undefined));
+
+/**
+ * The resource id to address an opened row by.
+ *
+ * A row is not always the kind of the list it sits in: an expanded workload carries its child
+ * pods as rows, and addressing one of those as the parent's kind asks the server for a
+ * Deployment by a pod's name, which it rightly refuses. The row's own kind wins; the selected
+ * nav item is the fallback for rows that do not carry one.
+ */
+const resourceIdFor = (obj: KubeObject): string =>
+  (obj.kind ? resourceIdForKind(obj.kind) : null) ?? selected.value?.id ?? '';
 
 const loginSubmit = async (user: string, pass: string): Promise<boolean> => {
   auth.set(user, pass);
@@ -286,7 +300,7 @@ const onForwardStarted = () => {
               @clear-selection="selection = new Set()"
               @bulk-delete="bulkDelete"
               @update:selection="(keys) => (selection = new Set(keys))"
-              @open="(o) => (detail = { resourceId: selected!.id, obj: o })"
+              @open="(o) => (detail = { resourceId: resourceIdFor(o), obj: o })"
               @namespace-click="(ns) => (namespace = ns)"
               @create="authUser ? (showCreate = true) : (showLogin = true)"
               @row-action="(a, o, c) => handleRowAction(selected!.id, a, o, c)"
