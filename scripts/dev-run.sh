@@ -12,11 +12,19 @@
 #   scripts/dev-run.sh --build         # force a rebuild first
 #   scripts/dev-run.sh --port 8085     # run somewhere else (parallel instances)
 #   scripts/dev-run.sh --sim           # cluster-free: the built-in simulator
+#   scripts/dev-run.sh --ai            # LLM enrichment of /diagnose (needs a key, see below)
 #   scripts/dev-run.sh --stop          # stop whatever is on the port
 #
 # Login is admin/admin. These are DEV credentials passed as environment at run
 # time — do not add them to application.yml, which would bake a default password
 # into the repo.
+#
+# --ai turns on LLM enrichment, which needs an Anthropic key. The key is read
+# from the environment and NEVER stored here: set ANTHROPIC_API_KEY, or
+# VANTAGE_ANTHROPIC_API_KEY which this box already has. Without one the flag
+# refuses to start rather than booting a build whose AI silently does nothing.
+# Only the prose summary over /diagnose findings depends on it — the findings
+# themselves, the remediation proposals and the dry run are all deterministic.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -25,11 +33,13 @@ PORT=8080
 BUILD=false
 SIM=false
 STOP=false
+AI=false
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--build) BUILD=true; shift ;;
 		--sim) SIM=true; shift ;;
+		--ai) AI=true; shift ;;
 		--stop) STOP=true; shift ;;
 		--port) PORT="$2"; shift 2 ;;
 		-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -76,6 +86,17 @@ if [[ "$SIM" == true ]]; then
 	# The generated `sim` cluster instead of the ambient kubeconfig, so the app is
 	# usable with no cluster reachable at all.
 	ENV_VARS+=(KWEBLENS_SIMULATOR_ENABLED=true KWEBLENS_LOAD_KUBECONFIG=false)
+fi
+
+if [[ "$AI" == true ]]; then
+	KEY="${ANTHROPIC_API_KEY:-${VANTAGE_ANTHROPIC_API_KEY:-}}"
+	if [[ -z "$KEY" ]]; then
+		echo "--ai needs a key: set ANTHROPIC_API_KEY or VANTAGE_ANTHROPIC_API_KEY" >&2
+		exit 2
+	fi
+	# Passed as environment only. Never echoed, never written to a file.
+	ENV_VARS+=(KWEBLENS_AI_ENABLED=true "ANTHROPIC_API_KEY=${KEY}")
+	echo "==> AI enrichment ON (key from ${ANTHROPIC_API_KEY:+ANTHROPIC_API_KEY}${ANTHROPIC_API_KEY:-VANTAGE_ANTHROPIC_API_KEY})"
 fi
 
 echo "==> starting on :${PORT}  (log: ${LOG})"
