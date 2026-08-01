@@ -166,6 +166,28 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
 
 const sortVal = (o: KubeObject, c: TableColumn): string => (c.sortText ? c.sortText(o) : c.render(o));
 
+/**
+ * Row height NDataTable assumes when windowing. Measured, not guessed: a 300-row list
+ * reported a 11,999px scrollHeight, i.e. ~40px a row.
+ */
+const ROW_HEIGHT = 40;
+
+/**
+ * Below this many rows, render the old way.
+ *
+ * <p>Windowing costs something — it fixes row height and re-renders on scroll — and a list
+ * of eighty pods was never the problem. The measured problem (#215) is that the table put
+ * one DOM row on the page per object: 300 objects meant 14,353 nodes and a 12,000px table,
+ * which extrapolates to roughly 715,000 nodes at 15,000 objects. Above the threshold the
+ * DOM cost becomes a constant instead.
+ */
+const VIRTUAL_FROM = 150;
+
+// Tree rows are opt-in per kind (workload -> its pods). Naive windows the FLAT rendered
+// list, so an expanded parent's children are windowed too — but the row-height assumption
+// has to hold for children as well, and a child row is the same height as its parent here.
+const virtual = computed(() => props.objects.length >= VIRTUAL_FROM);
+
 // Total width the columns want. Handed to NDataTable as scroll-x so a wide column set
 // scrolls horizontally instead of being squeezed (which is what forced text to wrap).
 const scrollX = computed(() => {
@@ -237,6 +259,8 @@ const rowProps = (row: KubeObject) => ({
     :indent="18"
     :cascade="false"
     :scroll-x="scrollX"
+    :virtual-scroll="virtual"
+    :min-row-height="ROW_HEIGHT"
     flex-height
     size="small"
     @update:checked-row-keys="(keys) => emit('update:selection', keys as string[])"
