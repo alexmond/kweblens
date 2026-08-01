@@ -27,7 +27,7 @@ Because it runs as a server rather than on your laptop, the browser needs no kub
 | **Live updates** | Kubernetes watches streamed to the browser over SSE, batched per animation frame so a large-list event burst can't freeze the tab |
 | **Overviews** | A cluster overview plus Workloads / Network / Storage / Config category overviews — stat cards, the objects needing attention named rather than only counted, click-through to the filtered list, namespace-scoped |
 | **YAML editing** | CodeMirror 6 with completion and validation driven by **the cluster's own OpenAPI v3 schema**, plus Form (generated from the schema), Warnings and Review-Changes (diff) tabs, then apply or JSON-merge patch |
-| **Detail drawer** | Per-kind detail from a server-side endpoint, including relation sections (a Service's endpoints and the pods it selects, what mounts a ConfigMap/Secret/PVC) |
+| **Detail drawer** | Per-kind detail from a server-side endpoint, including three relation sections: a Service's endpoints, the pods a Service selects, and which pods mount a ConfigMap or Secret |
 | **Logs** | Multi-source streaming over SSE: every container of a pod, or every pod behind a workload, in one stream — new pods created by a rollout join a stream already in flight |
 | **Terminal** | Exec into a container over WebSocket, in a multi-tab dockable pane that can be popped out to a floating window |
 | **Port-forward** | Started and managed from the browser |
