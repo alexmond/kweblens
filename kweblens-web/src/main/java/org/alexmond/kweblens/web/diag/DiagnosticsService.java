@@ -22,6 +22,7 @@ import org.alexmond.kweblens.cluster.ProxyStatus;
 import org.alexmond.kweblens.config.KweblensProperties;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
 import org.alexmond.kweblens.web.ai.KweblensAiProperties;
+import org.alexmond.kweblens.web.files.FilesProperties;
 import org.alexmond.kweblens.web.security.SecurityProperties;
 import org.alexmond.kweblens.web.sim.SimulatorProperties;
 
@@ -64,6 +65,8 @@ public class DiagnosticsService {
 	private final SimulatorProperties simulator;
 
 	private final KweblensAiProperties ai;
+
+	private final FilesProperties files;
 
 	/** Optional: only present when build-info.properties was generated. */
 	private final ObjectProvider<BuildProperties> buildProperties;
@@ -277,6 +280,13 @@ public class DiagnosticsService {
 		sec.put("rbacAware", false);
 		out.put("security", sec);
 		out.put("aiEnabled", this.ai.isEnabled());
+		// The pod file browser's two gates, so the UI can decide whether to offer the tab
+		// on FIRST paint. Without this it can only learn by making a request that fails,
+		// which means a tab that exists solely to explain that it does not work.
+		Map<String, Object> podFiles = new LinkedHashMap<>();
+		podFiles.put("enabled", this.files.isEnabled());
+		podFiles.put("writable", this.files.isWritable());
+		out.put("podFiles", podFiles);
 		Map<String, Object> sim = new LinkedHashMap<>();
 		sim.put("enabled", this.simulator.isEnabled());
 		if (this.simulator.isEnabled()) {

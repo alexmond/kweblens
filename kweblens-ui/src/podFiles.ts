@@ -198,6 +198,21 @@ export const filesFeature = {
   noteReached(): void {
     state.value = 'enabled';
   },
+  /**
+   * Seed from `/api/v1/about`, so the Files tab is right on FIRST paint rather than after
+   * a request that exists only to fail.
+   *
+   * <p>A server that does not report `podFiles` predates the field. That is left as
+   * `unknown` on purpose: the tab is shown and the first listing settles it, which is the
+   * old behaviour. Guessing `disabled` would hide a working feature.
+   */
+  noteAbout(about: { podFiles?: { enabled: boolean; writable: boolean } } | null): void {
+    if (!about?.podFiles) {
+      return;
+    }
+    state.value = about.podFiles.enabled ? 'enabled' : 'disabled';
+    writable.value = about.podFiles.writable;
+  },
   /** Learn from a failure: only `files-disabled` and `files-read-only` are verdicts. */
   noteFailure(e: unknown): void {
     if (!(e instanceof PodFileError)) {
