@@ -93,8 +93,9 @@ Full descriptions: [`scripts/README.md`](scripts/README.md).
   registry, 39 built-in kinds across 7 static categories + discovered CRDs; `ClusterNavService`
   promotes a Gateway category at runtime when the Gateway API CRDs exist), `web/helm/`
   (jhelm-backed release surface), `web/exec/` (exec-over-WebSocket), `web/files/` (pod file
-  browser over one-shot exec — **off by default**, `kweblens.files.enabled`, and **backend only,
-  no UI**), `web/diag/` (the diagnostics panel's capability report), `web/ai/`
+  browser over one-shot exec — **off by default**, `kweblens.files.enabled`; the UI is the pod
+  detail drawer's **Files** tab, which discovers availability from the first listing and stops
+  offering the tab once the server answers `files-disabled`), `web/diag/` (the diagnostics panel's capability report), `web/ai/`
   (`DiagnoseService` — LLM enrichment inert unless `kweblens.ai.enabled` and a key are set —
   plus `RemediationService`, which is **not** AI-gated), `web/sim/` (the in-JVM cluster
   simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as cluster

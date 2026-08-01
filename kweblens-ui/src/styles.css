@@ -3189,3 +3189,224 @@ body.dragging {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* --- Pod file browser (GH#140) ------------------------------------------------------
+   Two notice tones, and the difference is the point. `off` is a deliberate configuration
+   ("the feature is switched off", "this instance is browse-only") — neutral, because
+   nothing has gone wrong. `blocked` is a real refusal from the container (no shell, not
+   running, too large) — amber, because it stops the reader but is still a correct answer.
+   An actual malfunction is not styled here at all: it goes through ErrorNotice. */
+.files-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.files-head,
+.files-view-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.files-spacer {
+  flex: 1;
+}
+
+.files-field {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.files-select {
+  padding: 3px 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.files-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.files-crumb {
+  padding: 1px 3px;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+}
+
+.files-crumb:hover {
+  text-decoration: underline;
+}
+
+.files-crumb.current {
+  color: var(--text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.files-crumb-sep {
+  color: var(--muted);
+}
+
+.files-notice {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 6px;
+}
+
+.files-notice.off {
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.files-notice.blocked {
+  color: var(--warn-fg);
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-line);
+}
+
+.files-notice-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.files-notice-detail {
+  margin: 0;
+}
+
+/* The hint deliberately does NOT get the muted grey: measured on the amber `blocked` tint it
+   read 3.80:1 in dark mode (contrast-check, #140). It inherits the notice's own colour and
+   is separated by spacing instead, so no notice tone can produce a low-contrast hint. */
+.files-notice-hint {
+  margin: 6px 0 0;
+}
+
+.files-notice .btn {
+  margin-top: 8px;
+}
+
+.files-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.files-table {
+  width: 100%;
+}
+
+.files-table tr.selected td {
+  background: var(--warn-wash);
+}
+
+.files-entry {
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.files-entry.dir {
+  font-weight: 600;
+}
+
+.files-entry:hover {
+  text-decoration: underline;
+}
+
+.files-entry-plain {
+  color: var(--muted);
+}
+
+.files-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.files-view-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.files-view-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.files-tag {
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--warn-fg);
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-line);
+  border-radius: 10px;
+}
+
+.files-saved {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ok-fg);
+}
+
+.files-content,
+.files-editor {
+  max-height: 340px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.files-editor {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+}
+
+/* The directory listing gets its own scroll so the file pane below it stays reachable —
+   /bin can be 400 rows, and appending the viewer under that reads as "nothing happened". */
+.files-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* The hint inside a BLOCKED notice cannot be muted grey: measured on the amber tint it read
+   3.80:1 in dark mode (contrast-check, #140). It takes the body text colour instead, and
+   stays distinguishable from the amber title/detail above it. */
+.files-notice.blocked .files-notice-hint {
+  color: var(--text);
+}

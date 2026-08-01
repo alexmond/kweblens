@@ -184,6 +184,58 @@ export interface HelmMutationResult {
 export type DockKind = 'terminal' | 'logs';
 
 /**
+ * One entry in a container directory listing (GH#140).
+ *
+ * Every field but `name` and `type` is nullable on purpose: the server reads them with
+ * `stat`, and a busybox/scratch image may have none, in which case saying "unknown" is the
+ * only honest answer.
+ */
+export interface PodFileEntry {
+  name: string;
+  type: 'dir' | 'file' | 'symlink' | 'other';
+  size: number | null;
+  /** Octal permission bits, e.g. `644`. */
+  mode: string | null;
+  /** Last modified, epoch seconds. */
+  modified: number | null;
+  owner: string | null;
+  group: string | null;
+  /** For a symlink, its literal target. */
+  linkTarget: string | null;
+  /** What a symlink resolves to; null when the link is broken or unresolvable. */
+  linkType: 'dir' | 'file' | null;
+}
+
+/** A container directory listing. */
+export interface PodDirectoryListing {
+  path: string;
+  /** The same directory after the container resolved symlinks (`pwd -P`). */
+  resolvedPath: string;
+  container: string;
+  entries: PodFileEntry[];
+  /** True when the server capped the listing — the directory holds more than is shown. */
+  truncated: boolean;
+}
+
+/**
+ * The contents of one file inside a container.
+ *
+ * `editable` is the server's verdict and the UI must not second-guess it: it is false for
+ * binaries and for anything that did not arrive whole, because saving either would rewrite
+ * the file with a mis-decoded or partial copy of itself.
+ */
+export interface PodFileContent {
+  path: string;
+  container: string;
+  size: number;
+  binary: boolean;
+  truncated: boolean;
+  editable: boolean;
+  encoding: 'utf-8' | 'base64';
+  content: string;
+}
+
+/**
  * One probed capability from the read-only diagnostics panel (#27). `detail` is the important
  * field: it explains what was looked for and what was found, so "why is this chart empty?"
  * has an answer in the UI instead of only in the server log.
@@ -216,6 +268,8 @@ export interface AboutInfo {
   };
   aiEnabled: boolean;
   simulator: { enabled: boolean; clusterId?: string; size?: number; namespaces?: number };
+  /** The pod file browser's two gates. Absent on a server older than this field. */
+  podFiles?: { enabled: boolean; writable: boolean };
 }
 
 /**

@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { api } from './api';
 import type { Command } from './commandPalette';
+import { filesFeature } from './podFiles';
 import { auth } from './auth';
 import { useAppActions } from './composables/useAppActions';
 import { useClusterScope } from './composables/useClusterScope';
@@ -100,6 +101,15 @@ api
     authUser.value = r.user;
     void refreshClusters();
   })
+  .catch(() => undefined);
+// Ask once, at startup, whether the pod file browser is on. Without this the Files tab can
+// only learn by making a request that fails, so a drawer opened before that first failure
+// shows a tab whose sole content is an explanation that it does not work. A public GET, so
+// it works signed out too; a server that omits the field leaves the state unknown and the
+// old learn-from-failure path still applies.
+api
+  .about()
+  .then((info) => filesFeature.noteAbout(info))
   .catch(() => undefined);
 const { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, helmScope } = useClusterScope(
   cluster,
@@ -405,6 +415,7 @@ const onForwardStarted = () => {
           @navigate="navigateToKind"
           @helm-release="navigateToHelmRelease"
           @auth-expired="signOut"
+          @require-auth="showLogin = true"
           @open-object="openPodDetail"
           @close="detail = null"
         />
