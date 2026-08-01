@@ -36,7 +36,7 @@ scripts/dev-test.sh <selector>        # targeted -Dtest run (last arg = selector
 scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
 ./mvnw spring-javaformat:apply        # auto-format (run before committing)
 
-scripts/dev-run.sh                    # run locally on :8080, login admin/admin (--sim, --port, --stop)
+scripts/dev-run.sh                    # run locally on :8080, login admin/admin (--sim, --files, --port, --stop)
 scripts/pr-watch.sh <pr> [--merge]    # wait on CI; exit 1 on any failure
 
 # UI checks — both drive a RUNNING instance (see "Performance testing" below)
@@ -94,8 +94,12 @@ Full descriptions: [`scripts/README.md`](scripts/README.md).
   promotes a Gateway category at runtime when the Gateway API CRDs exist), `web/helm/`
   (jhelm-backed release surface), `web/exec/` (exec-over-WebSocket), `web/files/` (pod file
   browser over one-shot exec — **off by default**, `kweblens.files.enabled`; the UI is the pod
-  detail drawer's **Files** tab, which discovers availability from the first listing and stops
-  offering the tab once the server answers `files-disabled`), `web/diag/` (the diagnostics panel's capability report), `web/ai/`
+  detail drawer's **Files** tab, which takes both gates plus the write cap from `/api/v1/about`
+  (`podFiles.enabled` / `.writable` / `.maxWriteBytes`), so Edit and Upload are offered only where
+  a write can succeed, and still learns from the first listing against an older server.
+  **Anything piped into a container must bound its own read of stdin** — the exec API has no
+  end-of-input signal, so a script that reads to EOF hangs for the whole `command-timeout` and
+  then lands anyway once the connection drops, i.e. reports failure for a write that happened), `web/diag/` (the diagnostics panel's capability report), `web/ai/`
   (`DiagnoseService` — LLM enrichment inert unless `kweblens.ai.enabled` and a key are set —
   plus `RemediationService`, which is **not** AI-gated), `web/sim/` (the in-JVM cluster
   simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as cluster

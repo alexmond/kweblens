@@ -28,6 +28,8 @@ scripts/dev-run.sh                 # build if needed, run on :8080, login admin/
 scripts/dev-run.sh --build         # force a rebuild first
 scripts/dev-run.sh --sim           # no cluster needed — the built-in simulator
 scripts/dev-run.sh --ai            # LLM enrichment of /diagnose (needs an Anthropic key)
+scripts/dev-run.sh --files         # pod file browser ON, read-write
+scripts/dev-run.sh --files=ro      # pod file browser ON, browse-and-download only
 scripts/dev-run.sh --port 8085     # a second instance alongside the first
 scripts/dev-run.sh --stop          # stop whatever is on the port
 ```
@@ -39,6 +41,12 @@ passes the dev credentials, and *fails loudly* if a password gets generated anyw
 
 The credentials are passed as environment at run time on purpose. Do not move them into
 `application.yml`: that would bake a default password into the repository.
+
+`--files` switches on the pod file browser (`kweblens.files.enabled`), which is off by
+default because a container's disk holds mounted Secrets and its service-account token.
+`--files=ro` keeps `kweblens.files.writable=false`, which is what to use when only the
+refusal paths matter. Without the flag the Files tab correctly reports that the feature is
+switched off, which looks like a bug and is not one.
 
 `--ai` reads an Anthropic key from `ANTHROPIC_API_KEY`, falling back to
 `VANTAGE_ANTHROPIC_API_KEY`. **The key is never written to a file** — the flag refuses to
@@ -73,6 +81,23 @@ when anything is under its floor, so it can gate a change.
 A selector that is not currently on screen reports `not present` rather than passing —
 use `PREPARE` to open the thing first. Treat a screenful of `not present` as a failed run,
 not a clean one.
+
+`PREPARE` steps are `press:` / `click:` / `fill:<sel>=<text>` / `upload:<sel>=<path>` /
+`wait:<ms>`, and a step prefixed with `?` is skipped when its selector is not on screen.
+The `?` matters for anything behind the login: `PREPARE` runs once per theme, so a sign-in
+that only applies to the first pass would otherwise stall the second one until it times
+out. `upload:` reaches UI that only exists once a file has been picked. Measuring the pod
+file browser's save confirmation, for instance, means signing in and walking to a file:
+
+```bash
+PREPARE='?click:.linkbtn:has-text("Sign in");?fill:.n-modal input[type=password]=admin;…' \
+  node scripts/contrast-check.mjs '.files-saved'
+```
+
+One limitation to know: the backdrop is composited one level up, so a nested element
+inside a translucent panel is measured against that panel's colour at full opacity and can
+read far darker than it is. Measure the panel — its text-bearing children are sampled with
+it — rather than a bare descendant selector.
 
 ## Watching CI
 

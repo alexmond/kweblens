@@ -286,6 +286,13 @@ public class DiagnosticsService {
 		Map<String, Object> podFiles = new LinkedHashMap<>();
 		podFiles.put("enabled", this.files.isEnabled());
 		podFiles.put("writable", this.files.isWritable());
+		// The write cap, so an upload that cannot fit is refused before the browser reads
+		// a gigabyte off disk to be told 413. The cap is still enforced server-side —
+		// this
+		// only lets the refusal happen without the round trip. Not a secret: it is a
+		// limit,
+		// and the same number already appears in the 413 the server sends.
+		podFiles.put("maxWriteBytes", this.files.getMaxWriteBytes());
 		out.put("podFiles", podFiles);
 		Map<String, Object> sim = new LinkedHashMap<>();
 		sim.put("enabled", this.simulator.isEnabled());

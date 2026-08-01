@@ -121,12 +121,28 @@ final class PodFileScripts {
 	 * ({@code wc} missing) the write is refused — corrupting somebody's config file is a
 	 * worse outcome than a clear failure. The final copy is a redirect rather than a
 	 * {@code mv} so the target keeps its inode, owner and mode.
+	 *
+	 * <p>
+	 * <strong>It reads exactly {@code $2} bytes rather than to end-of-input, and that is
+	 * load-bearing.</strong> The Kubernetes exec protocol gives the client no way to say
+	 * "stdin is finished": a plain {@code cat} therefore blocks until the whole session
+	 * is torn down. Observed against a real cluster — every write sat for the full
+	 * {@code command-timeout} and came back {@code 504 container-command-timeout}, and
+	 * then landed anyway once the connection dropped, so the API reported failure for a
+	 * write that had happened. {@code head -c} returns as soon as it has the bytes it was
+	 * promised, which ends the command and lets the exit status come back. The
+	 * {@code cat} fallback is kept for an image without {@code head}: it still writes the
+	 * right bytes, it just cannot finish early.
 	 */
 	static final String WRITE = """
 			p=$1
 			if [ -d "$p" ]; then printf 'is-a-directory\\n' >&2; exit 4; fi
 			t="$p.kweblens-upload.$$"
-			cat > "$t" || { rm -f "$t" 2>/dev/null; printf 'cannot-write\\n' >&2; exit 5; }
+			if command -v head >/dev/null 2>&1; then
+			  head -c "$2" > "$t" || { rm -f "$t" 2>/dev/null; printf 'cannot-write\\n' >&2; exit 5; }
+			else
+			  cat > "$t" || { rm -f "$t" 2>/dev/null; printf 'cannot-write\\n' >&2; exit 5; }
+			fi
 			n=$(wc -c < "$t" 2>/dev/null || echo x)
 			n=$(printf '%s' "$n" | tr -dc '0-9')
 			if [ "$n" != "$2" ]; then

@@ -179,6 +179,17 @@ class PodFileServiceTest {
 	}
 
 	@Test
+	void theWriteScriptTakesExactlyTheBytesItWasPromisedRatherThanWaitingForEndOfInput() {
+		// The exec API has no way to say "stdin is finished", so a plain `cat` sits there
+		// until the whole session is torn down. Live, that made EVERY write hang for the
+		// full command-timeout and answer 504 — and then land anyway when the connection
+		// dropped, so the API reported failure for a write that had happened. A mock exec
+		// cannot reproduce that (nothing is really waiting on a stream), so the invariant
+		// is pinned here instead: the script must bound its own read.
+		assertThat(PodFileScripts.WRITE).contains("head -c \"$2\"");
+	}
+
+	@Test
 	void leavesTheTargetAloneWhenTheContainerCannotVerifyTheUpload() {
 		statResponds("f", "3", "/app/config.yaml");
 		respond("write", 6, new byte[0], "size-mismatch\n");
