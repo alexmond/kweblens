@@ -1,15 +1,10 @@
 package org.alexmond.kweblens.resource;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
-import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.Pod;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.stereotype.Service;
 
@@ -22,9 +17,9 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
  * <p>
  * This exists because the UI's section registry is a pure function of one object
  * ({@code (o) => body}), so "which pods back this Service", "what mounts this Secret" and
- * "which pods does this selector match" are not merely unimplemented there — they are
- * inexpressible. Doing the joins here means one implementation serves the SPA, a future
- * TUI and the agent tool surface, instead of each reimplementing them. See
+ * "what created this pod" are not merely unimplemented there — they are inexpressible.
+ * Doing the joins here means one implementation serves the SPA, a future TUI and the
+ * agent tool surface, instead of each reimplementing them. See
  * {@code docs/design/detail-sections-audit.md}.
  *
  * <p>
@@ -32,21 +27,58 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
  * become a cluster-wide scan, and one unreadable kind must not blank the whole detail —
  * so each join returns a {@link Relation} carrying items, an error, or "not permitted",
  * and never throws.
+ *
+ * <p>
+ * <b>What a relation is allowed to cost.</b> Every join is one of: a GET of a name the
+ * object already carries; a LIST filtered server-side by a label selector; or a LIST of a
+ * <em>single namespace's</em> objects of a kind that is few by construction (Ingresses,
+ * HPAs, PodDisruptionBudgets, RoleBindings). Exactly one relation lists cluster-wide —
+ * {@code grantedBy}, because ClusterRoleBindings have no other scope — and it hangs off
+ * the ServiceAccount drawer, not off every pod, so nothing pays for it by accident. A
+ * relation is registered only when the kind can actually have it, so a kind with no
+ * relations issues no requests at all.
+ *
+ * <p>
+ * <b>What is deliberately not resolved.</b> A reference to an object that does not exist
+ * — a mounted ConfigMap that was deleted, an Ingress TLS secret that was never created —
+ * is a real and common failure, and {@link Relation} has no way to say it: an item is an
+ * object, so a missing reference can only be dropped (asserting a completeness that is
+ * false) or fabricated (asserting an existence that is false). Those joins are left out
+ * until the shape can carry a per-item note. Gateway API {@code HTTPRoute} is out for a
+ * different reason: probing for it in a cluster without the CRDs would put a 404 on every
+ * Service drawer, and the catalog that knows which CRDs exist lives above this layer.
  */
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class RelationService {
 
-	/**
-	 * Cap on related objects returned per relation. Bounded because the reverse joins
-	 * ("what mounts this Secret") have no server-side selector and must list pods; a
-	 * namespace with thousands of pods would otherwise turn opening a drawer into a large
-	 * transfer. Truncation is reported rather than hidden.
-	 */
-	private static final int MAX_ITEMS = 100;
+	/** Workload kinds an HPA can address through the scale subresource. */
+	private static final Set<String> SCALABLE = Set.of("Deployment", "StatefulSet", "ReplicaSet",
+			"ReplicationController");
 
-	private final ClusterRegistry clusters;
+	/** Kinds whose pods a PodDisruptionBudget can cover. */
+	private static final Set<String> DISRUPTABLE = Set.of("Pod", "Deployment", "StatefulSet", "DaemonSet",
+			"ReplicaSet");
+
+	/** Kinds a pod consumes, and whose consumers are therefore worth scanning for. */
+	private static final Set<String> CONSUMABLE = Set.of("Secret", "ConfigMap", "PersistentVolumeClaim");
+
+	private final NetworkRelations network;
+
+	private final ReferenceRelations references;
+
+	private final WorkloadRelations workloads;
+
+	private final StorageRelations storage;
+
+	private final AccessRelations access;
+
+	public RelationService(ClusterRegistry clusters) {
+		this.network = new NetworkRelations(clusters);
+		this.references = new ReferenceRelations(clusters);
+		this.workloads = new WorkloadRelations(clusters);
+		this.storage = new StorageRelations(clusters);
+		this.access = new AccessRelations(clusters);
+	}
 
 	/**
 	 * Every relation kweblens knows how to resolve for this kind. Keyed by a stable name
@@ -57,210 +89,80 @@ public class RelationService {
 			GenericKubernetesResource object) {
 		Map<String, Relation> out = new LinkedHashMap<>();
 		String kind = descriptor.kind();
-		String namespace = (object.getMetadata() != null) ? object.getMetadata().getNamespace() : null;
 		String name = (object.getMetadata() != null) ? object.getMetadata().getName() : null;
-		if (namespace == null || name == null) {
+		if (name == null) {
 			return out;
 		}
+		String namespace = object.getMetadata().getNamespace();
+		if (namespace != null) {
+			addNamespaced(out, clusterId, kind, namespace, object);
+		}
+		if ("PersistentVolume".equals(kind)) {
+			// Cluster-scoped, so it is reachable only outside the namespaced branch — and
+			// it is why this method no longer requires a namespace at all.
+			out.put("boundClaim", this.storage.boundClaim(clusterId, object));
+		}
+		if (hasOwner(object)) {
+			out.put("ownedBy", this.workloads.ownedBy(clusterId, namespace, object));
+		}
+		return out;
+	}
+
+	private void addNamespaced(Map<String, Relation> out, String clusterId, String kind, String namespace,
+			GenericKubernetesResource object) {
+		String name = object.getMetadata().getName();
 		if ("Service".equals(kind)) {
-			out.put("endpoints", endpoints(clusterId, namespace, name));
+			out.put("endpoints", this.network.endpoints(clusterId, namespace, name));
+			out.put("routedBy", this.network.routedBy(clusterId, namespace, name));
 		}
-		if (hasSelector(object)) {
-			out.put("selectedPods", selectedPods(clusterId, namespace, object));
+		if (selectsPods(kind, object)) {
+			out.put("selectedPods", this.network.selectedPods(clusterId, namespace, object));
 		}
-		if ("Secret".equals(kind) || "ConfigMap".equals(kind)) {
-			out.put("mountedBy", mountedBy(clusterId, namespace, kind, name));
+		if (CONSUMABLE.contains(kind)) {
+			out.put("mountedBy", this.references.mountedBy(clusterId, namespace, kind, name));
 		}
-		return out;
-	}
-
-	/**
-	 * The Endpoints backing a Service, which is how you tell "no pods match my selector"
-	 * from "pods match but none are ready" — the single most common Service
-	 * misconfiguration, and invisible from the Service object itself.
-	 */
-	private Relation endpoints(String clusterId, String namespace, String serviceName) {
-		try {
-			var endpoints = this.clusters.require(clusterId)
-				.endpoints()
-				.inNamespace(namespace)
-				.withName(serviceName)
-				.get();
-			if (endpoints == null) {
-				// No Endpoints object at all is itself the answer: nothing is backing it.
-				return Relation.of(List.of());
-			}
-			return bound(List.of(endpoints));
+		addWorkload(out, clusterId, kind, namespace, object);
+		if ("PersistentVolumeClaim".equals(kind)) {
+			out.put("boundVolume", this.storage.boundVolume(clusterId, object));
 		}
-		catch (RuntimeException ex) {
-			log.debug("Endpoints lookup failed for {}/{}: {}", namespace, serviceName, ex.getMessage());
-			return Relation.from(ex);
+		if ("Pod".equals(kind)) {
+			out.put("serviceAccount", this.access.serviceAccount(clusterId, namespace, object));
+		}
+		if ("ServiceAccount".equals(kind)) {
+			out.put("grantedBy", this.access.grantedBy(clusterId, namespace, name));
 		}
 	}
 
-	/**
-	 * Pods matched by the object's selector — for a Service, what it actually routes to;
-	 * for a workload, which replicas it owns. Uses a server-side label selector, so the
-	 * API server does the filtering rather than kweblens listing the namespace.
-	 */
-	private Relation selectedPods(String clusterId, String namespace, GenericKubernetesResource object) {
-		Map<String, String> selector = selectorOf(object);
-		if (selector.isEmpty()) {
-			// A selector-less object matches nothing; saying so beats an unexplained
-			// blank.
-			return Relation.of(List.of());
+	private void addWorkload(Map<String, Relation> out, String clusterId, String kind, String namespace,
+			GenericKubernetesResource object) {
+		String name = object.getMetadata().getName();
+		if ("Deployment".equals(kind)) {
+			out.put("replicaSets", this.workloads.ownedReplicaSets(clusterId, namespace, name, object));
 		}
-		try {
-			List<Pod> pods = this.clusters.require(clusterId)
-				.pods()
-				.inNamespace(namespace)
-				.withLabels(selector)
-				.list()
-				.getItems();
-			return bound(pods);
+		if (SCALABLE.contains(kind)) {
+			out.put("autoscaledBy", this.workloads.autoscaledBy(clusterId, namespace, kind, name));
 		}
-		catch (RuntimeException ex) {
-			log.debug("Selector pod lookup failed in {}: {}", namespace, ex.getMessage());
-			return Relation.from(ex);
+		if (DISRUPTABLE.contains(kind)) {
+			out.put("disruptionBudgets", this.workloads.disruptionBudgets(clusterId, namespace, kind, object));
 		}
 	}
 
 	/**
-	 * Which pods mount this Secret/ConfigMap — as a volume, via {@code envFrom}, or via a
-	 * single {@code valueFrom} key reference.
+	 * Whether {@code spec.selector} on this object selects <em>pods</em>.
 	 *
 	 * <p>
-	 * This is a REVERSE join with no server-side selector available, so it lists the
-	 * namespace's pods and filters locally. That is why it is bounded and
-	 * namespace-scoped: a cluster-wide version of this query would be genuinely
-	 * expensive, and a drawer is not the place to pay for it.
+	 * Deliberately generic, so a custom resource carrying a pod selector gets the
+	 * relation without being enumerated here — but not blindly generic: a
+	 * PersistentVolumeClaim's {@code spec.selector} selects PersistentVolumes, and
+	 * matching pods against it would produce a confidently wrong table.
 	 */
-	private Relation mountedBy(String clusterId, String namespace, String kind, String name) {
-		try {
-			List<Pod> pods = this.clusters.require(clusterId).pods().inNamespace(namespace).list().getItems();
-			List<Object> matches = new ArrayList<>();
-			for (Pod pod : pods) {
-				if (podReferences(pod, kind, name)) {
-					matches.add(pod);
-				}
-			}
-			return bound(matches);
-		}
-		catch (RuntimeException ex) {
-			log.debug("mountedBy scan failed in {}: {}", namespace, ex.getMessage());
-			return Relation.from(ex);
-		}
+	private boolean selectsPods(String kind, GenericKubernetesResource object) {
+		return !"PersistentVolumeClaim".equals(kind) && !RelationSupport.selectorOf(object).isEmpty();
 	}
 
-	private boolean podReferences(Pod pod, String kind, String name) {
-		if (pod.getSpec() == null) {
-			return false;
-		}
-		boolean secret = "Secret".equals(kind);
-		if (volumeReferences(pod, secret, name)) {
-			return true;
-		}
-		return containerReferences(pod, secret, name);
-	}
-
-	private boolean volumeReferences(Pod pod, boolean secret, String name) {
-		if (pod.getSpec().getVolumes() == null) {
-			return false;
-		}
-		return pod.getSpec().getVolumes().stream().anyMatch((v) -> {
-			if (secret) {
-				return v.getSecret() != null && name.equals(v.getSecret().getSecretName());
-			}
-			return v.getConfigMap() != null && name.equals(v.getConfigMap().getName());
-		});
-	}
-
-	private boolean containerReferences(Pod pod, boolean secret, String name) {
-		var containers = new ArrayList<io.fabric8.kubernetes.api.model.Container>();
-		if (pod.getSpec().getContainers() != null) {
-			containers.addAll(pod.getSpec().getContainers());
-		}
-		if (pod.getSpec().getInitContainers() != null) {
-			containers.addAll(pod.getSpec().getInitContainers());
-		}
-		for (var container : containers) {
-			if (container.getEnvFrom() != null && container.getEnvFrom().stream().anyMatch((from) -> {
-				if (secret) {
-					return from.getSecretRef() != null && name.equals(from.getSecretRef().getName());
-				}
-				return from.getConfigMapRef() != null && name.equals(from.getConfigMapRef().getName());
-			})) {
-				return true;
-			}
-			if (container.getEnv() != null
-					&& container.getEnv().stream().anyMatch((e) -> envReferences(e, secret, name))) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private boolean envReferences(io.fabric8.kubernetes.api.model.EnvVar env, boolean secret, String name) {
-		if (env.getValueFrom() == null) {
-			return false;
-		}
-		if (secret) {
-			var ref = env.getValueFrom().getSecretKeyRef();
-			return ref != null && name.equals(ref.getName());
-		}
-		var ref = env.getValueFrom().getConfigMapKeyRef();
-		return ref != null && name.equals(ref.getName());
-	}
-
-	/** True when the object has a selector we can resolve to pods. */
-	private boolean hasSelector(GenericKubernetesResource object) {
-		return !selectorOf(object).isEmpty();
-	}
-
-	/**
-	 * The object's pod selector. Services carry a flat {@code spec.selector}; workloads
-	 * nest it under {@code matchLabels}. Only {@code matchLabels} is supported —
-	 * set-based {@code matchExpressions} cannot be passed to {@code withLabels()} without
-	 * translating the full grammar, and every built-in workload controller writes
-	 * matchLabels.
-	 */
-	@SuppressWarnings("unchecked")
-	private Map<String, String> selectorOf(GenericKubernetesResource object) {
-		Object raw = object.get("spec", "selector");
-		if (!(raw instanceof Map<?, ?> map)) {
-			return Map.of();
-		}
-		Object nested = map.get("matchLabels");
-		Map<?, ?> selector = (nested instanceof Map<?, ?> inner) ? inner : map;
-		Map<String, String> out = new LinkedHashMap<>();
-		for (var entry : selector.entrySet()) {
-			if (entry.getKey() instanceof String key && entry.getValue() instanceof String value) {
-				out.put(key, value);
-			}
-		}
-		return out;
-	}
-
-	private Relation bound(List<? extends Object> items) {
-		List<? extends Object> capped = (items.size() <= MAX_ITEMS) ? items : items.subList(0, MAX_ITEMS);
-		return Relation.of(List.copyOf(capped.stream().map(this::forDisplay).toList()), items.size() > MAX_ITEMS);
-	}
-
-	/**
-	 * Strip {@code managedFields} from a related object.
-	 *
-	 * <p>
-	 * Relation items exist to be displayed in a table — nothing reads their server-side
-	 * field-management bookkeeping, and it is bulky: measured on a real Service it was
-	 * <b>35% of the whole detail payload</b>, and that multiplies by the item cap. The
-	 * main object is left untouched; only the related items are trimmed, because those
-	 * are the ones returned in quantity.
-	 */
-	private Object forDisplay(Object item) {
-		if (item instanceof HasMetadata resource && resource.getMetadata() != null) {
-			resource.getMetadata().setManagedFields(null);
-		}
-		return item;
+	private boolean hasOwner(GenericKubernetesResource object) {
+		return object.getMetadata() != null && object.getMetadata().getOwnerReferences() != null
+				&& !object.getMetadata().getOwnerReferences().isEmpty();
 	}
 
 }
