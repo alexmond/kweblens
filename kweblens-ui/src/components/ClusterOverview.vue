@@ -6,6 +6,7 @@
 // split scope: warnings follow the namespace filter, while nodes and the cluster metric charts
 // are cluster-scoped and CANNOT — so they say so instead of quietly showing unfiltered numbers
 // beside filtered ones.
+import DiagnosisPanel from './DiagnosisPanel.vue';
 import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
@@ -116,6 +117,10 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
       <MetricChart :cluster="cluster" target="cluster-cpu" label="Cluster CPU (cores)" />
       <MetricChart :cluster="cluster" target="cluster-mem" label="Cluster Memory" />
     </div>
+    <!-- Diagnosis sits above Warnings: warnings are raw events, diagnosis is the reading
+         of them plus what to do. Reason before evidence. -->
+    <DiagnosisPanel :cluster="cluster" :namespace="namespace ?? null" />
+
     <section class="ov-sec">
       <h3>Warnings</h3>
       <div v-if="warningsTruncated" class="ov-truncated">

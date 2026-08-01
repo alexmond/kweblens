@@ -3437,3 +3437,163 @@ body.dragging {
 .files-notice.blocked .files-notice-hint {
   color: var(--text);
 }
+
+/* Diagnosis panel (#218). Prefixed dx- NOT diag-: the diagnostics modal already owns the
+   diag-* namespace (.diag-detail, .diag-head, .diag-warn and a dozen more), and sharing it
+   meant each component silently restyled the other — .diag-detail was inheriting the modal's
+   grey and measured 2.56:1 here. Distinct prefix, no collision. */
+/* (was: Diagnosis panel #218: findings with their reasons, plus the optional LLM summary.
+   Colours come from the semantic tokens; text stays at full strength rather than
+   accent-on-tint, which has measured under the floor every time it was tried. */
+.dx {
+  margin: 18px 0 0;
+}
+
+.dx-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.dx-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dx-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dx-note {
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.dx-summary {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dx-h {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dx-h:first-child {
+  margin-top: 0;
+}
+
+.dx-p {
+  margin: 3px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dx-li {
+  padding-left: 14px;
+  text-indent: -8px;
+}
+
+.dx-li::before {
+  content: '· ';
+  color: var(--muted);
+}
+
+.dx-d1 {
+  margin-left: 14px;
+}
+
+.dx-d2,
+.dx-d3 {
+  margin-left: 28px;
+}
+
+.dx-b {
+  font-weight: 600;
+}
+
+/* Says who wrote it. A summary that reads as the tool's own verdict, when a model wrote
+   it, is a claim the tool cannot stand behind. */
+.dx-attrib {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.dx-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dx-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dx-item.dx-critical {
+  border-left: 3px solid var(--danger-fg);
+}
+
+.dx-item.dx-warning {
+  border-left: 3px solid var(--warn-fg);
+}
+
+.dx-item-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.dx-sev {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+}
+
+.dx-sev-critical {
+  border-color: var(--danger-line);
+}
+
+.dx-sev-warning {
+  border-color: var(--warn-line);
+}
+
+.dx-item-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.dx-obj {
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dx-detail,
+.dx-fix {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dx-detail {
+  word-break: break-word;
+}

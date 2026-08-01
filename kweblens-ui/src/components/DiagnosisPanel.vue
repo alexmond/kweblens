@@ -1,0 +1,69 @@
+<script setup lang="ts">
+// Diagnosis: why the things needing attention need it, and what to do about them.
+//
+// This deepens the overview rather than sitting beside it (#218). The overview says which
+// objects need attention and gives a terse reason ("ImagePullBackOff", "0/3 ready"); a
+// finding carries the scheduler's actual message, what an exit code meant, and a suggested
+// fix. Same question, more depth — so it belongs on the same page, below the tallies.
+//
+// The summary is rendered from parsed spans, never as HTML. See diagnosis.ts for why.
+import { computed } from 'vue';
+
+import { api } from '../api';
+import { countLine, type DiagnoseResult, parseSummary, severityOf, sortFindings } from '../diagnosis';
+import { useAsyncData } from '../composables/useAsyncData';
+import ErrorNotice from './ErrorNotice.vue';
+
+const props = defineProps<{ cluster: string; namespace: string | null }>();
+
+const { data, loading, error, reload } = useAsyncData<DiagnoseResult>(
+  () => [props.cluster, props.namespace],
+  () => api.diagnose(props.cluster, props.namespace ?? undefined),
+);
+
+const findings = computed(() => sortFindings(data.value?.findings ?? []));
+const blocks = computed(() => parseSummary(data.value?.summary));
+const enriched = computed(() => data.value?.aiEnriched === true);
+</script>
+
+<template>
+  <section class="dx">
+    <header class="dx-head">
+      <h3 class="dx-title">Diagnosis</h3>
+      <span v-if="data && !loading" class="dx-count">{{ countLine(findings) }}</span>
+    </header>
+
+    <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
+    <p v-else-if="loading" class="dx-note">Checking…</p>
+
+    <template v-else-if="data">
+      <!-- The summary is optional and its absence is normal: it needs an LLM key, and the
+           findings below stand on their own without one. Say so rather than implying a
+           failure. -->
+      <div v-if="enriched && blocks.length" class="dx-summary">
+        <template v-for="(b, i) in blocks" :key="i">
+          <h4 v-if="b.kind === 'heading'" class="dx-h">
+            <span v-for="(s, j) in b.spans" :key="j" :class="s.bold ? 'dx-b' : ''">{{ s.text }}</span>
+          </h4>
+          <p v-else :class="['dx-p', 'dx-d' + b.depth, b.kind === 'bullet' || b.kind === 'numbered' ? 'dx-li' : '']">
+            <span v-for="(s, j) in b.spans" :key="j" :class="s.bold ? 'dx-b' : ''">{{ s.text }}</span>
+          </p>
+        </template>
+        <p class="dx-attrib">Written by a language model from the findings below.</p>
+      </div>
+
+      <ul v-if="findings.length" class="dx-list">
+        <li v-for="(f, i) in findings" :key="i" :class="'dx-item dx-' + severityOf(f)">
+          <div class="dx-item-head">
+            <span :class="'dx-sev dx-sev-' + severityOf(f)">{{ severityOf(f) }}</span>
+            <span class="dx-item-title">{{ f.title }}</span>
+          </div>
+          <div class="dx-obj">{{ f.object }}</div>
+          <p v-if="f.detail" class="dx-detail">{{ f.detail }}</p>
+          <p v-if="f.suggestedFix" class="dx-fix"><strong>Try:</strong> {{ f.suggestedFix }}</p>
+        </li>
+      </ul>
+      <p v-else class="dx-note">Nothing looks wrong in this scope.</p>
+    </template>
+  </section>
+</template>

@@ -1,4 +1,5 @@
 import { auth } from './auth';
+import type { DiagnoseResult } from './diagnosis';
 import { PodFileError } from './podFiles';
 import type {
   AboutInfo,
@@ -239,6 +240,9 @@ export const api = {
   // Read-only diagnostics (#27): what a cluster supports, and how this instance is configured.
   clusterDiagnostics: (cluster: string) => getJson<ClusterDiagnostics>(`${clusterBase(cluster)}/diagnostics`),
   about: () => getJson<AboutInfo>('/api/v1/about'),
+  /** Findings with reasons and fixes, plus an LLM summary when a key is configured (#218). */
+  diagnose: (cluster: string, namespace?: string) =>
+    getJson<DiagnoseResult>(`${clusterBase(cluster)}/diagnose` + nsQuery(namespace)),
   // Per-kind workload health, computed server-side (GH#153/#155): tallies plus the NAMED
   // objects needing attention, so the browser no longer fetches whole collections to count.
   /** A category dashboard: per-kind tallies plus the named objects needing attention. */
