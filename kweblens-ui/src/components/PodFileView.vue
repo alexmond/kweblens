@@ -18,7 +18,7 @@ import { computed, onMounted, ref, shallowRef, watch } from 'vue';
 
 import { podFiles } from '../api';
 import { filesFeature, formatSize, isAuthFailure, noticeFor } from '../podFiles';
-import type { FileNotice as FileNoticeShape } from '../podFiles';
+import type { FileDirection, FileNotice as FileNoticeShape } from '../podFiles';
 import type { PodFileContent } from '../types';
 import FileNotice from './FileNotice.vue';
 
@@ -38,19 +38,26 @@ const requestKey = () => `${props.container}:${props.path}`;
 /** Editing needs the server's verdict AND the write gate — either one can withdraw it. */
 const canEdit = computed(() => content.value?.editable === true && filesFeature.writable.value);
 
-function fail(e: unknown) {
+function fail(e: unknown, direction: FileDirection = 'read') {
   filesFeature.noteFailure(e);
-  notice.value = noticeFor(e);
+  notice.value = noticeFor(e, direction);
   if (isAuthFailure(e)) {
     emit('auth-required');
   }
 }
 
-function load() {
+/**
+ * (Re)read the file. `keepSaved` exists because a save ends by reloading, and clearing the
+ * confirmation on the way would mean "Saved." is set and unset in the same tick — it never
+ * reached the screen at all, which is how it went un-measured for contrast until now.
+ */
+function load(keepSaved = false) {
   loading.value = true;
   notice.value = null;
   draft.value = null;
-  saved.value = false;
+  if (!keepSaved) {
+    saved.value = false;
+  }
   const mine = requestKey();
   podFiles
     .read(props.cluster, props.namespace, props.pod, props.container, props.path)
@@ -71,7 +78,15 @@ function load() {
     .finally(() => (loading.value = false));
 }
 
-watch(() => [props.cluster, props.namespace, props.pod, props.container, props.path], load, { immediate: true });
+// Wrapped rather than passed straight in: a watch handler is called with (new, old), which
+// would arrive as `keepSaved` and keep a stale confirmation across a change of file.
+watch(
+  () => [props.cluster, props.namespace, props.pod, props.container, props.path],
+  () => load(),
+  {
+    immediate: true,
+  },
+);
 
 // The listing above can be hundreds of rows; without this, clicking a file appends a pane
 // below the fold and reads as "nothing happened".
@@ -106,10 +121,11 @@ function save() {
     .writeText(props.cluster, props.namespace, props.pod, props.container, props.path, text)
     .then(() => {
       saved.value = true;
-      draft.value = null;
-      load();
+      // Reload so what is shown is what the container now holds, not what was typed —
+      // keeping the confirmation, which the reload would otherwise clear immediately.
+      load(true);
     })
-    .catch(fail)
+    .catch((e: unknown) => fail(e, 'write'))
     .finally(() => (busy.value = false));
 }
 
@@ -119,7 +135,7 @@ function remove() {
   podFiles
     .remove(props.cluster, props.namespace, props.pod, props.container, props.path)
     .then(() => emit('deleted'))
-    .catch(fail)
+    .catch((e: unknown) => fail(e, 'write'))
     .finally(() => (busy.value = false));
 }
 </script>

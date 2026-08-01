@@ -28,8 +28,10 @@ import {
   noticeFor,
   parentPath,
   isAuthFailure,
+  readUpload,
+  uploadConflict,
 } from '../podFiles';
-import type { FileNotice as FileNoticeShape } from '../podFiles';
+import type { FileDirection, FileNotice as FileNoticeShape, UploadPlan } from '../podFiles';
 import type { KubeObject, PodDirectoryListing, PodFileEntry } from '../types';
 import FileNotice from './FileNotice.vue';
 import PodFileView from './PodFileView.vue';
@@ -44,6 +46,17 @@ const listing = shallowRef<PodDirectoryListing | null>(null);
 const notice = ref<FileNoticeShape | null>(null);
 const loading = ref(false);
 const selected = ref<string | null>(null);
+
+// Upload state. `pending` holds a read-and-checked file waiting for the "replace what is
+// already there?" answer — an upload that silently overwrites is the one destructive thing
+// this pane can do without the reader naming a file first.
+const picker = ref<HTMLInputElement | null>(null);
+const pending = ref<UploadPlan | null>(null);
+const uploading = ref(false);
+const uploaded = ref<string | null>(null);
+const dragging = ref(false);
+/** Upload is offered only where a write can actually succeed (kweblens.files.writable). */
+const canUpload = computed(() => filesFeature.writable.value);
 
 const crumbs = computed(() => breadcrumbs(path.value));
 /** Identifies the request in flight, so a slow answer for a directory you have left is dropped. */
@@ -74,18 +87,30 @@ function load() {
       // The listing is deliberately cleared: showing the previous directory's entries under
       // a message about this one would be a claim about the wrong directory.
       listing.value = null;
-      filesFeature.noteFailure(e);
-      notice.value = noticeFor(e);
-      if (isAuthFailure(e)) {
-        emit('auth-required');
-      }
+      fail(e);
     })
     .finally(() => (loading.value = false));
 }
 
-watch(() => [props.cluster, props.namespace, props.pod, container.value, path.value, props.authed], load, {
-  immediate: true,
-});
+function fail(e: unknown, direction: FileDirection = 'read') {
+  filesFeature.noteFailure(e);
+  notice.value = noticeFor(e, direction);
+  if (isAuthFailure(e)) {
+    emit('auth-required');
+  }
+}
+
+watch(
+  () => [props.cluster, props.namespace, props.pod, container.value, path.value, props.authed],
+  () => {
+    // A confirmation naming a file belongs to the directory it was written in, and a
+    // half-answered overwrite question must not follow the reader somewhere else.
+    uploaded.value = null;
+    pending.value = null;
+    load();
+  },
+  { immediate: true },
+);
 
 function open(entry: PodFileEntry) {
   const full = joinPath(path.value, entry.name);
@@ -107,10 +132,79 @@ function onDeleted() {
   selected.value = null;
   load();
 }
+
+// --- upload ---------------------------------------------------------------------------
+//
+// One file at a time, into the directory on screen, as base64 through the same write
+// endpoint the editor uses. There is no separate upload API and no separate cap: the
+// server enforces kweblens.files.max-write-bytes either way, and an oversized file is
+// REFUSED, never truncated — a partial upload would replace a container's file with a
+// fragment of the one that was picked.
+
+/** Take a picked or dropped file: read it, then either ask or send. */
+function offer(file: File) {
+  notice.value = null;
+  uploaded.value = null;
+  pending.value = null;
+  uploading.value = true;
+  readUpload(path.value, file, filesFeature.writeLimit.value)
+    .then((plan) => {
+      const clash = uploadConflict(listing.value, plan.name);
+      if (clash) {
+        pending.value = plan;
+        return undefined;
+      }
+      return send(plan);
+    })
+    .catch((e: unknown) => fail(e, 'write'))
+    .finally(() => (uploading.value = false));
+}
+
+/** PUT the prepared bytes, then refetch so the listing shows what the container now holds. */
+function send(plan: UploadPlan): Promise<void> {
+  uploading.value = true;
+  return podFiles
+    .writeBase64(props.cluster, props.namespace, props.pod, container.value, plan.path, plan.base64)
+    .then(() => {
+      filesFeature.noteReached();
+      pending.value = null;
+      uploaded.value = plan.name;
+      load();
+    })
+    .catch((e: unknown) => fail(e, 'write'))
+    .finally(() => (uploading.value = false));
+}
+
+function onPicked(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) {
+    offer(file);
+  }
+  // Cleared so picking the same file twice fires `change` again.
+  input.value = '';
+}
+
+function onDrop(event: DragEvent) {
+  dragging.value = false;
+  if (!canUpload.value) {
+    return;
+  }
+  const file = event.dataTransfer?.files?.[0];
+  if (file) {
+    offer(file);
+  }
+}
 </script>
 
 <template>
-  <div class="files-pane">
+  <div
+    class="files-pane"
+    :class="{ dragging: dragging && canUpload }"
+    @dragover.prevent="dragging = canUpload"
+    @dragleave="dragging = false"
+    @drop.prevent="onDrop($event)"
+  >
     <div v-if="!authed" class="files-notice off" role="status">
       <p class="files-notice-title">Sign in to browse files</p>
       <p class="files-notice-detail">
@@ -131,6 +225,12 @@ function onDeleted() {
           </select>
         </label>
         <span class="files-spacer" />
+        <template v-if="canUpload">
+          <input ref="picker" type="file" class="files-picker" @change="onPicked($event)" />
+          <button type="button" class="btn" :disabled="loading || uploading" @click="picker?.click()">
+            {{ uploading ? 'Uploading…' : 'Upload' }}
+          </button>
+        </template>
         <button type="button" class="btn" :disabled="loading || path === '/'" @click="goUp()">Up</button>
         <button type="button" class="btn" :disabled="loading" @click="load()">Refresh</button>
       </header>
@@ -153,6 +253,19 @@ function onDeleted() {
       </nav>
 
       <FileNotice v-if="notice" :notice="notice" :retrying="loading" @retry="load()" />
+
+      <div v-if="pending" class="files-confirm" role="alert">
+        <p>
+          <span class="mono">{{ pending.name }}</span> already exists in this directory. Uploading replaces its contents
+          — this cannot be undone.
+        </p>
+        <div class="files-confirm-actions">
+          <button type="button" class="btn danger" :disabled="uploading" @click="send(pending)">Replace</button>
+          <button type="button" class="btn" :disabled="uploading" @click="pending = null">Cancel</button>
+        </div>
+      </div>
+      <p v-else-if="uploaded" class="files-saved">Uploaded {{ uploaded }}.</p>
+      <p v-if="dragging && canUpload" class="files-hint">Drop to upload into {{ path }}.</p>
 
       <p v-if="loading && !listing" class="empty">Loading…</p>
       <template v-else-if="listing">

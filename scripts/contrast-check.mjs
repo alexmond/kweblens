@@ -21,6 +21,12 @@
 //
 // PREPARE runs simple actions before sampling, semicolon-separated:
 //   press:<key>   click:<selector>   fill:<selector>=<text>   wait:<ms>
+//   upload:<file-input selector>=<path on this machine>
+//
+// Prefix a step with `?` to skip it when its selector is not on screen. PREPARE runs once
+// per theme, so a step that only applies the first time — signing in — otherwise stalls the
+// second pass until it times out and takes the whole run with it:
+//   PREPARE='?click:.linkbtn:has-text("Sign in");?fill:.n-modal input[type=password]=admin;…'
 //
 // Exit code is 1 if anything falls under the AA floor, so it can gate a change.
 //
@@ -75,16 +81,32 @@ const alphaOf = (s) => {
 };
 const composite = (fg, a, bg) => fg.slice(0, 3).map((c, i) => Math.round(c * a + bg[i] * (1 - a)));
 
+/** What a step waits for, so an optional one can be tested before it is run. */
+const selectorOf = (verb, arg) =>
+  (verb === 'fill' || verb === 'upload') ? arg.slice(0, arg.lastIndexOf('=')) : arg;
+
 async function runPrepare(page, spec) {
-  for (const step of (spec || '').split(';').map((s) => s.trim()).filter(Boolean)) {
+  for (const raw of (spec || '').split(';').map((s) => s.trim()).filter(Boolean)) {
+    const optional = raw.startsWith('?');
+    const step = optional ? raw.slice(1) : raw;
     const [verb, ...rest] = step.split(':');
     const arg = rest.join(':');
+    if (optional && verb === 'press') throw new Error('? needs a selector, so it cannot mark a press step');
+    // `?step` is skipped when its target is not on screen. PREPARE runs once per theme, and
+    // a step like signing in only applies the first time — without this the second pass sits
+    // waiting for a modal that is already dealt with, and the run dies on a timeout.
+    if (optional && !(await page.$(selectorOf(verb, arg)))) continue;
     if (verb === 'press') await page.keyboard.press(arg);
     else if (verb === 'click') await page.click(arg);
     else if (verb === 'wait') await page.waitForTimeout(Number(arg));
     else if (verb === 'fill') {
       const at = arg.lastIndexOf('=');
       await page.fill(arg.slice(0, at), arg.slice(at + 1));
+    } else if (verb === 'upload') {
+      // A file input, for UI that only appears once something has been picked — the pod
+      // file browser's upload confirmation, for one, which is otherwise unreachable here.
+      const at = arg.lastIndexOf('=');
+      await page.setInputFiles(arg.slice(0, at), arg.slice(at + 1));
     } else throw new Error(`unknown PREPARE verb: ${verb}`);
     await page.waitForTimeout(250);
   }

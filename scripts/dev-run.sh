@@ -13,11 +13,20 @@
 #   scripts/dev-run.sh --port 8085     # run somewhere else (parallel instances)
 #   scripts/dev-run.sh --sim           # cluster-free: the built-in simulator
 #   scripts/dev-run.sh --ai            # LLM enrichment of /diagnose (needs a key, see below)
+#   scripts/dev-run.sh --files         # pod file browser ON, read-write (see below)
+#   scripts/dev-run.sh --files=ro      # pod file browser ON, browse-and-download only
 #   scripts/dev-run.sh --stop          # stop whatever is on the port
 #
 # Login is admin/admin. These are DEV credentials passed as environment at run
 # time — do not add them to application.yml, which would bake a default password
 # into the repo.
+#
+# --files turns on the pod file browser (kweblens.files.enabled), which is OFF by
+# default because a container's disk holds mounted Secrets and its service-account
+# token. --files is read-write; --files=ro leaves kweblens.files.writable=false, which
+# is the combination to use when only the refusal paths are being checked. There is no
+# way to reach a container's filesystem without this flag, so a Files tab that reports
+# "switched off" means the app was started without it.
 #
 # --ai turns on LLM enrichment, which needs an Anthropic key. The key is read
 # from the environment and NEVER stored here: set ANTHROPIC_API_KEY, or
@@ -34,15 +43,19 @@ BUILD=false
 SIM=false
 STOP=false
 AI=false
+FILES=off
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--build) BUILD=true; shift ;;
 		--sim) SIM=true; shift ;;
 		--ai) AI=true; shift ;;
+		--files) FILES=rw; shift ;;
+		--files=rw) FILES=rw; shift ;;
+		--files=ro) FILES=ro; shift ;;
 		--stop) STOP=true; shift ;;
 		--port) PORT="$2"; shift 2 ;;
-		-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
@@ -86,6 +99,13 @@ if [[ "$SIM" == true ]]; then
 	# The generated `sim` cluster instead of the ambient kubeconfig, so the app is
 	# usable with no cluster reachable at all.
 	ENV_VARS+=(KWEBLENS_SIMULATOR_ENABLED=true KWEBLENS_LOAD_KUBECONFIG=false)
+fi
+
+if [[ "$FILES" != off ]]; then
+	# Both gates are set explicitly, including the "off" one: kweblens.files.writable
+	# defaults to true, so --files=ro has to say so rather than rely on a default.
+	ENV_VARS+=(KWEBLENS_FILES_ENABLED=true "KWEBLENS_FILES_WRITABLE=$([[ "$FILES" == rw ]] && echo true || echo false)")
+	echo "==> pod file browser ON ($([[ "$FILES" == rw ]] && echo read-write || echo browse-only))"
 fi
 
 if [[ "$AI" == true ]]; then

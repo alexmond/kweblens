@@ -196,6 +196,22 @@ function filesUrl(cluster: string, ns: string, pod: string, container: string, p
   return `${base}${suffix}?${params.toString()}`;
 }
 
+/** PUT one file's contents; the body carries either `text` or `base64`, never both. */
+async function putContent(
+  cluster: string,
+  ns: string,
+  pod: string,
+  container: string,
+  path: string,
+  body: { text: string } | { base64: string },
+): Promise<void> {
+  await filesFetch(filesUrl(cluster, ns, pod, container, path, '/content'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 /** The pod file browser. Every call may throw a {@link PodFileError}. */
 export const podFiles = {
   list: async (cluster: string, ns: string, pod: string, container: string, path: string) =>
@@ -207,13 +223,13 @@ export const podFiles = {
   // instead of the browser saving an error page under the file's name.
   download: async (cluster: string, ns: string, pod: string, container: string, path: string) =>
     (await filesFetch(filesUrl(cluster, ns, pod, container, path, '/download'), { headers: { Accept: '*/*' } })).blob(),
-  writeText: async (cluster: string, ns: string, pod: string, container: string, path: string, text: string) => {
-    await filesFetch(filesUrl(cluster, ns, pod, container, path, '/content'), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-  },
+  writeText: async (cluster: string, ns: string, pod: string, container: string, path: string, text: string) =>
+    putContent(cluster, ns, pod, container, path, { text }),
+  // An upload goes as base64, never as text: a picked file may be anything, and
+  // round-tripping arbitrary bytes through a string is how a binary gets corrupted. The
+  // server takes exactly one of the two fields for the same reason.
+  writeBase64: async (cluster: string, ns: string, pod: string, container: string, path: string, base64: string) =>
+    putContent(cluster, ns, pod, container, path, { base64 }),
   remove: async (cluster: string, ns: string, pod: string, container: string, path: string) => {
     await filesFetch(filesUrl(cluster, ns, pod, container, path), { method: 'DELETE' });
   },

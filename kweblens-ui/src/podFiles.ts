@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 
 import { objSpec } from './kube';
-import type { KubeObject, PodFileEntry } from './types';
+import type { KubeObject, PodDirectoryListing, PodFileEntry } from './types';
 
 /**
  * Logic for the pod file browser (GH#140) — everything except the rendering, so it can be
@@ -53,8 +53,17 @@ interface NoticeShape {
   tone: NoticeTone;
   title: string;
   hint?: string;
+  /**
+   * Replaces `hint` when the failure happened on the way IN (a save or an upload). Only a
+   * few codes need it, but for those the read hint is actively misleading — telling someone
+   * whose upload was refused to raise `max-read-bytes` sends them to the wrong setting.
+   */
+  writeHint?: string;
   retryable?: boolean;
 }
+
+/** Which direction a failed request was going; it changes the advice, never the fact. */
+export type FileDirection = 'read' | 'write';
 
 /**
  * One entry per code the server can send. Anything not listed falls through to a generic
@@ -118,6 +127,11 @@ const NOTICES: Record<string, NoticeShape> = {
     // max-read-bytes, so it would fail identically. Saying so avoids sending the reader
     // down a path that cannot work.
     hint: 'kweblens refuses rather than handing back a silently truncated copy. Downloading is capped by the same limit, so raise kweblens.files.max-read-bytes to open it here.',
+    // An upload is refused by a different setting, and it is refused BEFORE anything is
+    // sent, so the file in the container is untouched — worth saying, because "too large"
+    // otherwise reads like it might have half-arrived.
+    writeHint:
+      'Nothing was sent, so the container is unchanged. Uploads are capped by kweblens.files.max-write-bytes; raise it to allow a larger file.',
   },
   'file-not-found': { tone: 'blocked', title: 'No such file or directory', retryable: true },
   'not-a-directory': { tone: 'blocked', title: 'Not a directory' },
@@ -156,16 +170,17 @@ export function isAuthFailure(e: unknown): boolean {
 }
 
 /** Turn any thrown value into something worth showing a human. */
-export function noticeFor(e: unknown): FileNotice {
+export function noticeFor(e: unknown, direction: FileDirection = 'read'): FileNotice {
   if (!(e instanceof PodFileError)) {
     return { ...GENERIC, detail: String(e), hint: null, retryable: true };
   }
   const shape = NOTICES[e.code] ?? GENERIC;
+  const hint = (direction === 'write' && shape.writeHint) || shape.hint;
   return {
     tone: shape.tone,
     title: shape.title,
     detail: e.message,
-    hint: shape.hint ?? null,
+    hint: hint ?? null,
     retryable: shape.retryable ?? false,
   };
 }
@@ -188,12 +203,20 @@ type FilesFeatureState = 'unknown' | 'enabled' | 'disabled';
 
 const state = ref<FilesFeatureState>('unknown');
 const writable = ref<boolean>(true);
+const writeLimit = ref<number | null>(null);
 
 export const filesFeature = {
   /** `unknown` until the first answer; the Files tab is hidden only once `disabled`. */
   state,
   /** False once a write has been refused with `files-read-only`. */
   writable,
+  /**
+   * `kweblens.files.max-write-bytes`, when the server reports it. Null on a server that
+   * does not, and then an oversized upload is refused by the server's own 413 instead of
+   * here — the cap is the server's either way, this only avoids reading a huge file into
+   * the browser to have it rejected.
+   */
+  writeLimit,
   /** A request that reached the feature — so it is enabled, whatever it then said. */
   noteReached(): void {
     state.value = 'enabled';
@@ -206,12 +229,13 @@ export const filesFeature = {
    * `unknown` on purpose: the tab is shown and the first listing settles it, which is the
    * old behaviour. Guessing `disabled` would hide a working feature.
    */
-  noteAbout(about: { podFiles?: { enabled: boolean; writable: boolean } } | null): void {
+  noteAbout(about: { podFiles?: { enabled: boolean; writable: boolean; maxWriteBytes?: number } } | null): void {
     if (!about?.podFiles) {
       return;
     }
     state.value = about.podFiles.enabled ? 'enabled' : 'disabled';
     writable.value = about.podFiles.writable;
+    writeLimit.value = about.podFiles.maxWriteBytes ?? null;
   },
   /** Learn from a failure: only `files-disabled` and `files-read-only` are verdicts. */
   noteFailure(e: unknown): void {
@@ -236,6 +260,7 @@ export const filesFeature = {
   reset(): void {
     state.value = 'unknown';
     writable.value = true;
+    writeLimit.value = null;
   },
 };
 
@@ -305,6 +330,83 @@ export function isDirectory(entry: PodFileEntry): boolean {
 /** Whether the entry has contents kweblens can try to read (a regular file, or a link to one). */
 export function isReadable(entry: PodFileEntry): boolean {
   return entry.type === 'file' || (entry.type === 'symlink' && entry.linkType === 'file');
+}
+
+// --- upload --------------------------------------------------------------------------
+
+/**
+ * What the pane needs in order to PUT a picked file: where it goes, and its bytes in the
+ * form the write endpoint takes.
+ */
+export interface UploadPlan {
+  /** Absolute path inside the container. */
+  path: string;
+  /** The file's own name, for the confirm text and the "uploaded" line. */
+  name: string;
+  size: number;
+  /** Base64 of the exact bytes — never `text`, since a picked file may be anything. */
+  base64: string;
+}
+
+/** The smallest part of a browser `File` this module needs, so it can be tested without one. */
+export interface UploadSource {
+  name: string;
+  size: number;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+/**
+ * The name a picked file would take in `dir`, refusing anything that is not a plain file
+ * name.
+ *
+ * <p>A browser reports a basename, so this is not the primary defence — the server
+ * normalises and re-checks every path — but a name carrying a separator or `..` would
+ * silently write somewhere other than the directory on screen, and a write that lands
+ * somewhere the reader did not look at is exactly the mistake this feature must not make.
+ */
+export function uploadPath(dir: string, name: string): string {
+  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\0')) {
+    throw new PodFileError(400, 'invalid-file-path', `"${name}" is not a usable file name.`);
+  }
+  return joinPath(dir, name);
+}
+
+/** The entry a new file would overwrite, when the directory already holds that name. */
+export function uploadConflict(listing: PodDirectoryListing | null, name: string): PodFileEntry | null {
+  return listing?.entries.find((e) => e.name === name) ?? null;
+}
+
+/** Base64 of raw bytes, chunked so a megabyte does not blow the argument limit of `apply`. */
+export function base64Of(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Read a picked file into an {@link UploadPlan}, refusing an oversized one BEFORE it is
+ * read.
+ *
+ * <p>The refusal is the same `file-too-large` the server answers with, deliberately: the
+ * cap is the server's (`kweblens.files.max-write-bytes`, reported on `/api/v1/about`) and
+ * checking it here only avoids pulling a gigabyte into the tab to be told no. The file is
+ * never truncated to fit — a partial upload would overwrite whatever is in the container
+ * with a fragment of what was chosen.
+ */
+export async function readUpload(dir: string, file: UploadSource, limit: number | null): Promise<UploadPlan> {
+  const path = uploadPath(dir, file.name);
+  if (limit !== null && file.size > limit) {
+    throw new PodFileError(
+      413,
+      'file-too-large',
+      `${file.name} is ${formatSize(file.size)}; this kweblens accepts at most ${formatSize(limit)} per write.`,
+    );
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return { path, name: file.name, size: bytes.length, base64: base64Of(bytes) };
 }
 
 // --- display -------------------------------------------------------------------------

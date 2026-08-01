@@ -268,8 +268,11 @@ export interface AboutInfo {
   };
   aiEnabled: boolean;
   simulator: { enabled: boolean; clusterId?: string; size?: number; namespaces?: number };
-  /** The pod file browser's two gates. Absent on a server older than this field. */
-  podFiles?: { enabled: boolean; writable: boolean };
+  /**
+   * The pod file browser's two gates, plus the write cap so an oversized upload can be
+   * refused before it is read. Absent on a server older than this field.
+   */
+  podFiles?: { enabled: boolean; writable: boolean; maxWriteBytes?: number };
 }
 
 /**

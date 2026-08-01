@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  base64Of,
   breadcrumbs,
   containerChoices,
   filesFeature,
@@ -14,6 +15,9 @@ import {
   noticeFor,
   parentPath,
   PodFileError,
+  readUpload,
+  uploadConflict,
+  uploadPath,
 } from './podFiles';
 import type { PodFileEntry } from './types';
 
@@ -53,6 +57,20 @@ describe('noticeFor', () => {
     const n = noticeFor(new PodFileError(413, 'file-too-large', 'too big'));
     expect(n.hint).toMatch(/Downloading is capped by the same limit/);
     expect(n.hint).toContain('max-read-bytes');
+  });
+
+  it('names the write cap, not the read cap, when it was an upload that was refused', () => {
+    const n = noticeFor(new PodFileError(413, 'file-too-large', 'too big'), 'write');
+    expect(n.hint).toContain('max-write-bytes');
+    expect(n.hint).not.toContain('max-read-bytes');
+    // And says the container is untouched: "too large" otherwise reads as a half-write.
+    expect(n.hint).toMatch(/unchanged/);
+  });
+
+  it('keeps the same title and the server’s own sentence in either direction', () => {
+    const e = new PodFileError(413, 'file-too-large', 'payload is 9 bytes');
+    expect(noticeFor(e, 'write').title).toBe(noticeFor(e).title);
+    expect(noticeFor(e, 'write').detail).toBe('payload is 9 bytes');
   });
 
   it('falls back to a generic, retryable error for an unknown code or a plain throw', () => {
@@ -99,6 +117,88 @@ describe('filesFeature', () => {
     filesFeature.noteFailure(new PodFileError(401, '', 'Unauthorized'));
     filesFeature.noteFailure(new Error('offline'));
     expect(filesFeature.state.value).toBe('unknown');
+  });
+
+  it('takes both gates and the write cap from /about', () => {
+    filesFeature.noteAbout({ podFiles: { enabled: true, writable: false, maxWriteBytes: 1024 } });
+    expect(filesFeature.state.value).toBe('enabled');
+    expect(filesFeature.writable.value).toBe(false);
+    expect(filesFeature.writeLimit.value).toBe(1024);
+  });
+
+  it('leaves the write cap unknown on a server that does not report one', () => {
+    // Then the server's own 413 is the refusal, which is where the cap lives anyway.
+    filesFeature.noteAbout({ podFiles: { enabled: true, writable: true } });
+    expect(filesFeature.writeLimit.value).toBeNull();
+  });
+});
+
+describe('upload', () => {
+  beforeEach(() => filesFeature.reset());
+
+  const source = (name: string, bytes: number[]) => ({
+    name,
+    size: bytes.length,
+    arrayBuffer: () => Promise.resolve(new Uint8Array(bytes).buffer),
+  });
+
+  it('puts the file in the directory on screen', () => {
+    expect(uploadPath('/srv/app', 'notes.txt')).toBe('/srv/app/notes.txt');
+    expect(uploadPath('/', 'notes.txt')).toBe('/notes.txt');
+  });
+
+  it('refuses a name that would write somewhere other than the directory shown', () => {
+    // A browser reports a basename, so this is a backstop — but a write that lands
+    // somewhere the reader did not look is the one mistake this must not make.
+    for (const bad of ['../escape', 'a/b', '..', '.', '']) {
+      expect(() => uploadPath('/srv/app', bad)).toThrow(PodFileError);
+    }
+    expect(() => uploadPath('/srv/app', '../escape')).toThrow(/not a usable file name/);
+  });
+
+  it('refuses an oversized file before reading it, and says nothing was sent', async () => {
+    let read = false;
+    const big = {
+      name: 'big.bin',
+      size: 5000,
+      arrayBuffer: () => {
+        read = true;
+        return Promise.resolve(new ArrayBuffer(5000));
+      },
+    };
+    await expect(readUpload('/srv/app', big, 1024)).rejects.toMatchObject({ status: 413, code: 'file-too-large' });
+    expect(read).toBe(false);
+  });
+
+  it('leaves the refusal to the server when the cap is unknown', async () => {
+    const plan = await readUpload('/srv/app', source('x.txt', [104, 105]), null);
+    expect(plan.path).toBe('/srv/app/x.txt');
+    expect(plan.size).toBe(2);
+  });
+
+  it('sends the exact bytes as base64, so a binary survives the trip', async () => {
+    // 0x00 and 0xff would both be mangled by any text round trip.
+    const plan = await readUpload('/srv/app', source('b.bin', [0, 255, 65]), 1024);
+    expect(plan.base64).toBe(base64Of(new Uint8Array([0, 255, 65])));
+    expect([...atob(plan.base64)].map((c) => c.charCodeAt(0))).toEqual([0, 255, 65]);
+  });
+
+  it('encodes a payload larger than one chunk', () => {
+    const bytes = new Uint8Array(70_000).fill(7);
+    expect(atob(base64Of(bytes))).toHaveLength(70_000);
+  });
+
+  it('spots the entry an upload would replace', () => {
+    const listing = {
+      path: '/srv/app',
+      resolvedPath: '/srv/app',
+      container: 'app',
+      entries: [entry({ name: 'keep.txt' })],
+      truncated: false,
+    };
+    expect(uploadConflict(listing, 'keep.txt')?.name).toBe('keep.txt');
+    expect(uploadConflict(listing, 'new.txt')).toBeNull();
+    expect(uploadConflict(null, 'keep.txt')).toBeNull();
   });
 });
 

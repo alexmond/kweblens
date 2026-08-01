@@ -3401,6 +3401,38 @@ body.dragging {
   color: var(--ok-fg);
 }
 
+/* The picker is driven by the Upload button, so the native control never renders — the
+   button carries the label, the disabled state and the keyboard focus. */
+.files-picker {
+  display: none;
+}
+
+/* Overwrite confirmation. Danger-toned because it is the one thing this pane can do that
+   destroys something the reader never named: replacing a file that is already there. */
+.files-confirm {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--danger-tint);
+  border: 1px solid var(--danger-line);
+  border-radius: 6px;
+}
+
+.files-confirm p {
+  margin: 0 0 8px;
+}
+
+.files-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.files-pane.dragging {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+}
+
 .files-content,
 .files-editor {
   max-height: 340px;
