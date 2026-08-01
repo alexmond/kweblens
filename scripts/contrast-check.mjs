@@ -50,6 +50,11 @@ const DEFAULT_SELECTORS = [
   // omission is caught by the tool rather than by a person noticing.
   '.count',
   '.acc-count',
+  // Plain .ov-card, not just its .danger variant: the variant matched a <div> and passed
+  // while the clickable <button> cards sat at 1.34:1 in dark mode. Measure the base class.
+  '.ov-card',
+  '.ov-kind',
+  '.ov-num',
 ];
 
 const selectors = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_SELECTORS;

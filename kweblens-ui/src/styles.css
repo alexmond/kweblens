@@ -833,7 +833,13 @@ body {
   align-items: stretch;
 }
 
+/* `color` is NOT decoration here. StatCard renders a <button> when the card is clickable
+   (#154) and a <div> otherwise, and a <button> does not inherit color — the UA stylesheet
+   gives it `buttontext`, i.e. black. So the clickable cards were black-on-dark-panel in
+   dark mode: measured 1.34:1, effectively invisible, while the identical <div> cards were
+   fine. Setting it explicitly makes both element types read the same. */
 .ov-card {
+  color: var(--text);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1029,16 +1035,32 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* Naive's header main is a flex child of .n-drawer-header and ships min-width:auto, so it
+   refuses to shrink below its content. A long object name therefore widened it past the
+   drawer itself — 554px inside a 520px panel — carrying the expand toggle AND the drawer's
+   own close button off the right edge, where neither could be clicked. The header is
+   Naive's element, so the constraint has to be applied here; nothing on .drawer-title can
+   fix a parent that has already overflowed. */
+.n-drawer-header__main {
+  min-width: 0;
+}
+
+/* The right padding reserves the corner for Naive's absolutely-positioned close, so the
+   expand toggle cannot come to rest underneath it. */
 .drawer-title {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
+  max-width: 100%;
+  padding-right: 28px;
+  box-sizing: border-box;
 }
 
 /* Expand-to-fill toggle, next to the title (the close X is the drawer's own control). */
 .drawer-expand {
   margin-left: auto;
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: transparent;
@@ -1061,8 +1083,13 @@ body {
   font-weight: 700;
 }
 
+/* min-width:0 is the load-bearing line. A flex item defaults to min-width:auto and will
+   not shrink below its content, so overflow/ellipsis alone does not stop a long name from
+   widening the row — it only clips what has already claimed the space. */
 .drawer-name {
   font-weight: 600;
+  min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
