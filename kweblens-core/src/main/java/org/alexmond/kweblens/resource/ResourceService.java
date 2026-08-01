@@ -228,7 +228,7 @@ public class ResourceService {
 
 	/** Set a workload's replica count (Deployments, StatefulSets, ReplicaSets). */
 	public void scale(String clusterId, ResourceDescriptor descriptor, String namespace, String name, int replicas) {
-		strategicPatch(clusterId, descriptor, namespace, name, "{\"spec\":{\"replicas\":" + replicas + "}}");
+		strategicPatch(clusterId, descriptor, namespace, name, scalePatch(replicas));
 	}
 
 	/**
@@ -237,9 +237,7 @@ public class ResourceService {
 	 * Deployments/StatefulSets/DaemonSets.
 	 */
 	public void rolloutRestart(String clusterId, ResourceDescriptor descriptor, String namespace, String name) {
-		String patch = "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{"
-				+ "\"kweblens.alexmond.org/restartedAt\":\"" + Instant.now() + "\"}}}}}";
-		strategicPatch(clusterId, descriptor, namespace, name, patch);
+		strategicPatch(clusterId, descriptor, namespace, name, restartPatch(Instant.now()));
 	}
 
 	/**
@@ -334,6 +332,45 @@ public class ResourceService {
 				log.warn("Eviction failed for {}/{}: {}", meta.getNamespace(), meta.getName(), ex.getMessage());
 			}
 		}
+	}
+
+	/**
+	 * Ask the API server what a patch <em>would</em> do, without doing it.
+	 *
+	 * <p>
+	 * {@code dryRun=All} runs the request through the whole admission chain — validation,
+	 * mutating and validating webhooks, quota — and returns the object that would have
+	 * been persisted, then discards it. That is the difference between describing an
+	 * intention and knowing the outcome: a webhook that rejects the change, a quota that
+	 * blocks it, or a mutating webhook that rewrites it all surface here rather than at
+	 * apply time.
+	 * @return the object the server says would result, serialised as YAML
+	 */
+	public String dryRunPatch(String clusterId, ResourceDescriptor descriptor, String namespace, String name,
+			String patchJson) {
+		PatchContext context = new PatchContext.Builder().withPatchType(PatchType.JSON_MERGE)
+			.withDryRun(List.of("All"))
+			.build();
+		GenericKubernetesResource result = resource(clusterId, descriptor, namespace, name).patch(context, patchJson);
+		return Serialization.asYaml(result);
+	}
+
+	/** The patch {@link #scale} would send — shared so a dry-run cannot drift from it. */
+	public static String scalePatch(int replicas) {
+		return "{\"spec\":{\"replicas\":" + replicas + "}}";
+	}
+
+	/**
+	 * The patch {@link #rolloutRestart} would send.
+	 *
+	 * <p>
+	 * Takes the timestamp rather than calling {@code Instant.now()} so a dry-run and the
+	 * apply that follows it stamp the same value; otherwise the preview would differ from
+	 * the real change in the one field the change is made of.
+	 */
+	public static String restartPatch(Instant at) {
+		return "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{" + "\"kweblens.alexmond.org/restartedAt\":\""
+				+ at + "\"}}}}}";
 	}
 
 	private void strategicPatch(String clusterId, ResourceDescriptor descriptor, String namespace, String name,

@@ -1,11 +1,13 @@
 package org.alexmond.kweblens.web.ai;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -109,6 +111,51 @@ public class RemediationService {
 	}
 
 	/**
+	 * Ask the API server what an action <em>would</em> do, without doing it.
+	 *
+	 * <p>
+	 * This is the real thing, not a description: the patch goes to the cluster with
+	 * {@code dryRun=All}, so admission webhooks, validation and quota all run and the
+	 * server returns the object that would have resulted. A change a webhook rejects
+	 * fails here, before anyone approves it.
+	 *
+	 * <p>
+	 * Only the two patch-shaped actions can be previewed this way. Deleting a pod and
+	 * rolling a workload back are not patches — the first is a DELETE, the second asks
+	 * fabric8 to resolve a previous revision — so for those this reports plainly that the
+	 * cluster was <b>not</b> consulted rather than returning prose that reads like a
+	 * server answer. Saying "we did not check" is more useful than implying we did.
+	 */
+	public RemediationPreview preview(String clusterId, String namespace, String action, String target) {
+		return switch (action) {
+			case SCALE_UP -> serverPreview(clusterId, namespace, target, ResourceService.scalePatch(1));
+			case ROLLOUT_RESTART ->
+				serverPreview(clusterId, namespace, target, ResourceService.restartPatch(Instant.now()));
+			case RESTART_POD -> RemediationPreview
+				.notChecked("Deleting a pod is not a patch, so it cannot be validated by a server-side dry run."
+						+ " Pod '" + target + "' would be deleted and recreated by its owner.");
+			case ROLLBACK -> RemediationPreview
+				.notChecked("A rollback is resolved from the workload's revision history rather than sent as a patch,"
+						+ " so it cannot be validated by a server-side dry run.");
+			default -> throw new IllegalArgumentException("Unsupported remediation action: " + action);
+		};
+	}
+
+	private RemediationPreview serverPreview(String clusterId, String namespace, String target, String patch) {
+		WorkloadRef workload = workload(target);
+		try {
+			String result = resources.dryRunPatch(clusterId, descriptor(workload), namespace, workload.name(), patch);
+			return RemediationPreview.serverValidated(result);
+		}
+		catch (KubernetesClientException ex) {
+			// A rejection IS the useful answer — it is exactly what the operator needed
+			// to
+			// know before approving, so it is a result rather than an error.
+			return RemediationPreview.rejected(ex.getMessage());
+		}
+	}
+
+	/**
 	 * Apply an approved remediation. Requires {@code confirm=true}; audited.
 	 * @throws ConfirmationRequiredException if not confirmed
 	 */
@@ -184,8 +231,7 @@ public class RemediationService {
 		if (restartable) {
 			add(proposals, seen, new RemediationProposal(RESTART_POD, namespace, pod,
 					"Delete pod '" + pod + "' so its controller recreates it (clears a stuck/crashed pod).",
-					"dry-run: pod '" + pod + "' in '" + namespace + "' would be deleted and recreated by its owner.",
-					"low"));
+					"Pod '" + pod + "' in '" + namespace + "' would be deleted and recreated by its owner.", "low"));
 		}
 		if (!scoped) {
 			return;
@@ -199,7 +245,7 @@ public class RemediationService {
 			add(proposals, seen,
 					new RemediationProposal(ROLLOUT_RESTART, namespace, workload.ref(),
 							"Roll " + workload.ref() + " — replace all of its pods under its update strategy.",
-							"dry-run: " + workload.ref() + " in '" + namespace
+							workload.ref() + " in '" + namespace
 									+ "' would have its pod template stamped with a restart annotation; "
 									+ "its controller then replaces the pods, honouring maxUnavailable.",
 							"low"));
@@ -209,7 +255,7 @@ public class RemediationService {
 			add(proposals, seen, new RemediationProposal(ROLLBACK, namespace, workload.ref(),
 					"Roll " + workload.ref() + " back to its previous revision — '" + finding.title()
 							+ "' is a property of the current pod template.",
-					"dry-run: " + workload.ref() + " in '" + namespace
+					workload.ref() + " in '" + namespace
 							+ "' would be reverted to the revision before the current one (kubectl rollout undo).",
 					"medium"));
 		}
@@ -240,7 +286,7 @@ public class RemediationService {
 		add(proposals, seen, new RemediationProposal(SCALE_UP, namespace, workload.ref(),
 				"Scale " + workload.ref() + " to 1 replica — it is the only workload matching Service '" + service
 						+ "' and it is scaled to zero, which is why the Service has no endpoints.",
-				"dry-run: " + workload.ref() + " in '" + namespace
+				workload.ref() + " in '" + namespace
 						+ "' would have spec.replicas set to 1; the Service gains an endpoint once the pod is ready.",
 				"low"));
 	}
