@@ -1,4 +1,5 @@
 import { auth } from './auth';
+import { PodFileError } from './podFiles';
 import type {
   AboutInfo,
   KindHealth,
@@ -16,6 +17,8 @@ import type {
   MetricSeries,
   NodeDiskUsage,
   NavCategory,
+  PodDirectoryListing,
+  PodFileContent,
   PortForward,
   PrinterColumn,
   ResourceRow,
@@ -146,6 +149,75 @@ const nsQuery = (namespace?: string): string => (namespace ? `?namespace=${encod
 /** `/api/v1/clusters/<cluster>/helm/releases/<namespace>/<name>` — a single release. */
 const helmReleaseUrl = (cluster: string, namespace: string, name: string): string =>
   `${clusterBase(cluster)}/helm/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`;
+
+/**
+ * A request against the pod file browser (GH#140).
+ *
+ * <p>Three things differ from the helpers above, and all three matter. It sends the Basic
+ * header on GETs — the file endpoints are authenticated even in open-mode, where every
+ * other GET is public. It parses the `ProblemDetail` body, because the whole point of that
+ * slice is that each failure carries a distinct `code` the UI reacts to. And it allows a
+ * longer timeout than the default, since each call is a command run inside somebody's
+ * container (the server's own budget is `kweblens.files.command-timeout`, 20s by default).
+ */
+async function filesFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetchWithTimeout(
+    url,
+    { ...init, headers: { ...auth.header(), Accept: 'application/json', ...(init.headers ?? {}) } },
+    30000,
+  );
+  if (!res.ok) {
+    throw await podFileError(res);
+  }
+  return res;
+}
+
+/** Read a failed file-API response into a {@link PodFileError}, code included. */
+async function podFileError(res: Response): Promise<PodFileError> {
+  let code = '';
+  let detail = `${res.status} ${res.statusText}`;
+  try {
+    const body = (await res.json()) as { code?: string; detail?: string };
+    code = body.code ?? '';
+    detail = body.detail ?? detail;
+  } catch {
+    // A 401 from the Basic entry point has no JSON body at all; the status is the message.
+  }
+  return new PodFileError(res.status, code, detail);
+}
+
+/** `…/pods/<ns>/<pod>/files` plus the container/path query every call carries. */
+function filesUrl(cluster: string, ns: string, pod: string, container: string, path: string, suffix = ''): string {
+  const params = new URLSearchParams({ path });
+  if (container) {
+    params.set('container', container);
+  }
+  const base = `${clusterBase(cluster)}/pods/${encodeURIComponent(ns)}/${encodeURIComponent(pod)}/files`;
+  return `${base}${suffix}?${params.toString()}`;
+}
+
+/** The pod file browser. Every call may throw a {@link PodFileError}. */
+export const podFiles = {
+  list: async (cluster: string, ns: string, pod: string, container: string, path: string) =>
+    (await (await filesFetch(filesUrl(cluster, ns, pod, container, path))).json()) as PodDirectoryListing,
+  read: async (cluster: string, ns: string, pod: string, container: string, path: string) =>
+    (await (await filesFetch(filesUrl(cluster, ns, pod, container, path, '/content'))).json()) as PodFileContent,
+  // Fetched rather than linked so the Basic credentials travel with it (a plain <a> would
+  // rely on the session cookie alone) and so a refusal surfaces as its ProblemDetail
+  // instead of the browser saving an error page under the file's name.
+  download: async (cluster: string, ns: string, pod: string, container: string, path: string) =>
+    (await filesFetch(filesUrl(cluster, ns, pod, container, path, '/download'), { headers: { Accept: '*/*' } })).blob(),
+  writeText: async (cluster: string, ns: string, pod: string, container: string, path: string, text: string) => {
+    await filesFetch(filesUrl(cluster, ns, pod, container, path, '/content'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+  },
+  remove: async (cluster: string, ns: string, pod: string, container: string, path: string) => {
+    await filesFetch(filesUrl(cluster, ns, pod, container, path), { method: 'DELETE' });
+  },
+};
 
 export const api = {
   // Validates HTTP Basic creds and establishes the session cookie the exec WebSocket rides.

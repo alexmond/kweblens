@@ -1,0 +1,216 @@
+<script setup lang="ts">
+// The Files tab of a pod: browse a container's filesystem, then view/edit one file.
+//
+// Availability cannot be pre-flighted — there is no endpoint that reports
+// `kweblens.files.enabled`, and every files endpoint needs a pod — so it is learned from
+// the first listing and cached in `filesFeature` for the page session. A `files-disabled`
+// answer is therefore shown once, in full, as an explained state (not an error), and from
+// then on the tab is not offered at all (see Detail.vue).
+//
+// Reads here are authenticated even in open-mode, on purpose: a container's disk includes
+// mounted Secrets and the service-account token. Signed out, the pane asks for the login
+// rather than firing a request that can only 401.
+//
+// Emits: auth-required () — the shell opens the login modal.
+import { computed, ref, shallowRef, watch } from 'vue';
+
+import { podFiles } from '../api';
+import {
+  breadcrumbs,
+  containerChoices,
+  filesFeature,
+  formatMode,
+  formatModified,
+  formatSize,
+  isDirectory,
+  isReadable,
+  joinPath,
+  noticeFor,
+  parentPath,
+  isAuthFailure,
+} from '../podFiles';
+import type { FileNotice as FileNoticeShape } from '../podFiles';
+import type { KubeObject, PodDirectoryListing, PodFileEntry } from '../types';
+import FileNotice from './FileNotice.vue';
+import PodFileView from './PodFileView.vue';
+
+const props = defineProps<{ cluster: string; namespace: string; pod: string; obj: KubeObject; authed: boolean }>();
+const emit = defineEmits<{ (e: 'auth-required'): void }>();
+
+const containers = computed(() => containerChoices(props.obj));
+const container = ref(containers.value.find((c) => !c.init)?.name ?? containers.value[0]?.name ?? '');
+const path = ref('/');
+const listing = shallowRef<PodDirectoryListing | null>(null);
+const notice = ref<FileNoticeShape | null>(null);
+const loading = ref(false);
+const selected = ref<string | null>(null);
+
+const crumbs = computed(() => breadcrumbs(path.value));
+/** Identifies the request in flight, so a slow answer for a directory you have left is dropped. */
+const requestKey = () => `${container.value}:${path.value}`;
+const entryName = (e: PodFileEntry) => (e.linkTarget ? `${e.name} → ${e.linkTarget}` : e.name);
+const entryKind = (e: PodFileEntry) => (e.type === 'symlink' ? `link (${e.linkType ?? 'broken'})` : e.type);
+
+function load() {
+  if (!props.authed) {
+    return;
+  }
+  loading.value = true;
+  notice.value = null;
+  const mine = requestKey();
+  podFiles
+    .list(props.cluster, props.namespace, props.pod, container.value, path.value)
+    .then((l) => {
+      if (mine !== requestKey()) {
+        return;
+      }
+      filesFeature.noteReached();
+      listing.value = l;
+    })
+    .catch((e: unknown) => {
+      if (mine !== requestKey()) {
+        return;
+      }
+      // The listing is deliberately cleared: showing the previous directory's entries under
+      // a message about this one would be a claim about the wrong directory.
+      listing.value = null;
+      filesFeature.noteFailure(e);
+      notice.value = noticeFor(e);
+      if (isAuthFailure(e)) {
+        emit('auth-required');
+      }
+    })
+    .finally(() => (loading.value = false));
+}
+
+watch(() => [props.cluster, props.namespace, props.pod, container.value, path.value, props.authed], load, {
+  immediate: true,
+});
+
+function open(entry: PodFileEntry) {
+  const full = joinPath(path.value, entry.name);
+  if (isDirectory(entry)) {
+    selected.value = null;
+    path.value = full;
+  } else if (isReadable(entry)) {
+    selected.value = full;
+  }
+}
+
+function goUp() {
+  selected.value = null;
+  path.value = parentPath(path.value);
+}
+
+/** A delete removes the open file: drop the viewer and refetch the directory. */
+function onDeleted() {
+  selected.value = null;
+  load();
+}
+</script>
+
+<template>
+  <div class="files-pane">
+    <div v-if="!authed" class="files-notice off" role="status">
+      <p class="files-notice-title">Sign in to browse files</p>
+      <p class="files-notice-detail">
+        Reading a container’s filesystem needs the admin login even when kweblens is in open mode — a pod’s disk holds
+        mounted Secrets and its service-account token.
+      </p>
+      <button type="button" class="btn" @click="emit('auth-required')">Sign in</button>
+    </div>
+
+    <template v-else>
+      <header class="files-head">
+        <label class="files-field">
+          <span>Container</span>
+          <select v-model="container" class="files-select">
+            <option v-for="c in containers" :key="c.name" :value="c.name">
+              {{ c.init ? `${c.name} (init)` : c.name }}
+            </option>
+          </select>
+        </label>
+        <span class="files-spacer" />
+        <button type="button" class="btn" :disabled="loading || path === '/'" @click="goUp()">Up</button>
+        <button type="button" class="btn" :disabled="loading" @click="load()">Refresh</button>
+      </header>
+
+      <nav class="files-crumbs" aria-label="Path">
+        <template v-for="(c, i) in crumbs" :key="c.path">
+          <span v-if="i > 0" class="files-crumb-sep">/</span>
+          <button
+            type="button"
+            class="files-crumb"
+            :class="{ current: c.path === path }"
+            @click="
+              selected = null;
+              path = c.path;
+            "
+          >
+            {{ c.label }}
+          </button>
+        </template>
+      </nav>
+
+      <FileNotice v-if="notice" :notice="notice" :retrying="loading" @retry="load()" />
+
+      <p v-if="loading && !listing" class="empty">Loading…</p>
+      <template v-else-if="listing">
+        <p v-if="listing.resolvedPath && listing.resolvedPath !== listing.path" class="files-hint">
+          Resolves to <span class="mono">{{ listing.resolvedPath }}</span> inside the container.
+        </p>
+        <p v-if="listing.truncated" class="files-hint">
+          This directory holds more entries than are listed (kweblens.files.max-entries).
+        </p>
+        <p v-if="listing.entries.length === 0" class="empty">This directory is empty.</p>
+        <div v-else class="files-list">
+          <table class="mini files-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Size</th>
+                <th>Mode</th>
+                <th>Owner</th>
+                <th>Modified</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in listing.entries" :key="e.name" :class="{ selected: selected === joinPath(path, e.name) }">
+                <td>
+                  <button
+                    v-if="isDirectory(e) || isReadable(e)"
+                    type="button"
+                    class="files-entry"
+                    :class="{ dir: isDirectory(e) }"
+                    @click="open(e)"
+                  >
+                    {{ entryName(e) }}
+                  </button>
+                  <span v-else class="files-entry-plain">{{ entryName(e) }}</span>
+                </td>
+                <td>{{ entryKind(e) }}</td>
+                <td>{{ isDirectory(e) ? '—' : formatSize(e.size) }}</td>
+                <td class="mono">{{ formatMode(e.mode) }}</td>
+                <td>{{ e.owner ?? '—' }}</td>
+                <td>{{ formatModified(e.modified) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <PodFileView
+        v-if="selected"
+        :key="selected + container"
+        :cluster="cluster"
+        :namespace="namespace"
+        :pod="pod"
+        :container="container"
+        :path="selected"
+        @deleted="onDeleted()"
+        @auth-required="emit('auth-required')"
+      />
+    </template>
+  </div>
+</template>

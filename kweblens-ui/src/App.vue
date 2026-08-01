@@ -405,6 +405,7 @@ const onForwardStarted = () => {
           @navigate="navigateToKind"
           @helm-release="navigateToHelmRelease"
           @auth-expired="signOut"
+          @require-auth="showLogin = true"
           @open-object="openPodDetail"
           @close="detail = null"
         />
