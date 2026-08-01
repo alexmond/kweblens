@@ -86,13 +86,23 @@ plan built on a document older than a week is wrong.
 - No `SelfSubjectAccessReview` / `SelfSubjectRulesReview` anywhere (Java, TS or Vue).
 - No plugin API, no topology graph, no per-user identity.
 
-**Three things the docs get wrong about the code — worth correcting before anything is built
+**Two things the docs get wrong about the code — worth correcting before anything is built
 on them:**
 
-1. **The MCP transport is streamable HTTP at `/mcp`, not SSE.** `application.yml` sets no
-   `spring.ai.mcp.server.protocol`, and Spring AI 2.0.0 defaults to `streamable`. The
-   `McpConfig` javadoc, `application.yml`'s comment, `README.md` and `CLAUDE.md` all still say
-   "SSE over WebMVC".
+1. ~~The MCP transport is streamable HTTP at `/mcp`, not SSE.~~ **Retracted — the docs are
+   right and this claim was wrong.** It was inferred from `application.yml` setting no
+   `spring.ai.mcp.server.protocol`; probing the running server settles it instead. `GET /sse`
+   holds a stream open and emits the classic SSE handshake:
+
+   ```
+   event:endpoint
+   data:/mcp/message?sessionId=9eeda7e5-…
+   ```
+
+   So the transport is SSE over WebMVC at `/sse`, messages POST to `/mcp/message`, and the
+   dependency is `spring-ai-starter-mcp-server-webmvc`. `POST /mcp` 404s. This also explains
+   why the CSRF exemption matters: `ignoringRequestMatchers("/api/**", "/mcp/**")` covers
+   `/mcp/message`, which is what makes MCP callable at all.
 2. **The remediation "dry-run preview" is a hand-written English sentence, not a dry-run.**
    `RemediationService` builds strings like `"dry-run: pod 'x' would be deleted…"` and the
    record's javadoc calls the field "a dry-run preview of the change". Nothing is sent to the
@@ -268,9 +278,9 @@ Stated rather than smoothed over.
   doing that **before** committing to T2's size would be a reasonable first move.
 - **Whether `metadata.remainingItemCount` is reachable through fabric8** — flagged unverified
   in [overview-pages.md](overview-pages.md), still unverified.
-- **Whether Spring AI 2.0.0's streamable transport conforms to the MCP spec final of
-  2026-07-28.** The transport was verified from the autoconfiguration default, not from a
-  spec conformance run.
+- **Whether the SSE transport conforms to the MCP spec final of 2026-07-28.** The handshake
+  was observed against the running server, but a conformance run against the spec was not
+  done — an `initialize` exchange completing is not the same as full conformance.
 - **What `dryRun=All` returns through fabric8's server-side-apply path** — the plan assumes
   the merged object comes back and is diffable. Unverified; it is the first thing to check
   when starting T1.
@@ -295,7 +305,7 @@ GH#142, GH#143, GH#146, GH#147, GH#148.
 | F | Analyzers: security/RBAC checks and the first cross-manifest rule over `RelationService` | D3 — folds into GH#142 | P2 |
 | G | Shared `EmptyState`, `ErrorNotice` everywhere, empty-state copy a required prop | T4 — **new** | P3 |
 | H | SSAR affordances: stop offering actions the deployment's service account cannot perform | T5 — **new** | P3 |
-| I | Docs currency: README/CLAUDE.md say identity is "the gap that matters" (ADR-001 says otherwise), that MCP is SSE (it is streamable HTTP) and read-only three tools (it is 15) | — **new chore** | P3 |
+| I | Docs currency: README/CLAUDE.md say identity is "the gap that matters" (ADR-001 says otherwise) and that MCP exposes three read-only tools (it is 15). The MCP *transport* wording is correct — see §retraction above. | — **new chore** | P3 |
 
 GH#141's remaining workstream (the cluster rail trim and the Clusters-page landing screen) is
 unaffected by this plan and can proceed on
