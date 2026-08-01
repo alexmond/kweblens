@@ -273,6 +273,23 @@ class PodFileServiceTest {
 	}
 
 	@Test
+	void treatsAMissingExitStatusAsCannotRunRatherThanARefusal() {
+		// Observed against a real cluster, not imagined: listing a shell-less container
+		// came back exit -1 with EMPTY stderr, so neither the 126/127 check nor the
+		// stderr hints fired and it surfaced as "the container refused the request",
+		// which is wrong twice over — nothing refused, and -1 is not an exit code the
+		// container chose.
+		respond("list", -1, new byte[0], "");
+
+		assertThatThrownBy(() -> service.list("c", "ns", "pod", null, "/"))
+			.isInstanceOfSatisfying(PodFileException.class, (ex) -> {
+				assertThat(ex.getStatus()).isEqualTo(HttpStatus.NOT_IMPLEMENTED);
+				assertThat(ex.getCode()).isEqualTo("no-exit-status");
+			})
+			.hasMessageContaining("no shell");
+	}
+
+	@Test
 	void surfacesATimeoutAsAGatewayTimeout() {
 		willThrow(new ExecFailedException("command timed out after 20s in ns/pod")).given(exec)
 			.run(any(), any(), any(), any(), any(), any(), anyLong(), any());

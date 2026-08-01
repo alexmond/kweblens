@@ -21,6 +21,9 @@ import org.alexmond.kweblens.exec.ExecResult;
  */
 final class PodFileFailures {
 
+	/** {@link ExecResult#exitCode()} when the stream closed without an exit status. */
+	private static final int NO_EXIT_STATUS = -1;
+
 	private static final String[] NO_SHELL_HINTS = { "executable file not found", "no such file or directory",
 			"unable to start container process", "oci runtime exec failed", "not found in $path" };
 
@@ -71,6 +74,18 @@ final class PodFileFailures {
 
 	private static PodFileException generic(ExecResult result, String path) {
 		String stderr = result.stderr().trim();
+		// ExecService reports -1 when the API server closed the stream without an exit
+		// status, i.e. the command never ran to completion. Observed against a real
+		// cluster: a container with no shell fails exactly this way — exit -1, empty
+		// stderr — so neither the 126/127 check nor the stderr hints below catch it, and
+		// it used to surface as "the container refused the request", which is wrong twice
+		// over. Nothing refused anything, and -1 is not an exit code the container chose.
+		if (result.exitCode() == NO_EXIT_STATUS) {
+			return new PodFileException(HttpStatus.NOT_IMPLEMENTED, "no-exit-status",
+					"the command could not be run in this container — it exited without a status."
+							+ " The usual cause is that the image ships no shell (distroless and scratch"
+							+ " images have none), so its filesystem cannot be browsed." + detail(stderr));
+		}
 		if (result.exitCode() == 126 || result.exitCode() == 127 || looksLikeMissingShell(stderr)) {
 			return new PodFileException(HttpStatus.NOT_IMPLEMENTED, "no-shell",
 					"this container has no usable shell, so its filesystem cannot be browsed."
