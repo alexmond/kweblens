@@ -6,15 +6,27 @@ Guidance for Claude Code when working in this repository.
 
 kweblens is a **web-based Kubernetes IDE** — Freelens/Lens reimagined as a self-hosted
 Spring Boot web app instead of an Electron desktop app. It connects to one or more clusters
-(via kubeconfig), browses their resources, and (over time) will edit YAML, stream pod logs,
-show events and metrics, and exec into pods — all from a browser. It also exposes the same
-read-only cluster view to AI assistants over **MCP**.
+(via kubeconfig), browses their resources, edits and applies YAML, streams pod logs, shows
+events and metrics, execs into pods and manages Helm releases — all from a browser. It also
+exposes the same read-only cluster view to AI assistants over **MCP**.
 
 Built with **Spring Boot 4.0.6 / Java 21**, a multi-module Maven build
 (`org.alexmond:kweblens-parent`, version `0.1.0-SNAPSHOT`). Cluster access is via the
 **fabric8 Kubernetes client**; the UI is a **Vue 3 + Vite + TypeScript SPA** (Naive UI, dark
 theme) in `kweblens-ui`, built into the jar and served at `/`. The old Thymeleaf/htmx "classic"
 UI was **deleted** (PR #124) — if you find a reference to it, it's stale.
+
+**Two documents settle questions this file only summarises. Read them before planning work:**
+
+- [`docs/design/adr-001-identity-model.md`](docs/design/adr-001-identity-model.md) — **ACCEPTED**.
+  kweblens targets a **single trusted operator**: multi-tenancy is not a goal, identity sources
+  are deferred, impersonation is the sanctioned mechanism if identity ever arrives. So "no
+  per-user identity" is a **position, not a gap** — but the product must keep saying out loud
+  that it runs as one shared credential.
+- [`docs/design/roadmap.md`](docs/design/roadmap.md) — the thesis, the re-ranked gap list and
+  the build order, verified against the code rather than against older docs. It is the current
+  answer to "what next". Shipping has been fast; treat any planning doc older than a week as
+  suspect and check the code.
 
 ## Build, Test & Verify
 
@@ -69,17 +81,25 @@ Full descriptions: [`scripts/README.md`](scripts/README.md).
 - **`kweblens-core`** — the cluster access layer, no web concerns. `cluster/` (the
   `ClusterRegistry` that owns one fabric8 `KubernetesClient` per cluster id + the `ClusterInfo`
   view), `resource/` (`ResourceService` projects Kubernetes objects into kind-agnostic
-  `ResourceSummary` rows), `config/` (`KweblensProperties`). **Published** to Maven Central.
+  `ResourceSummary` rows; `RelationService` resolves the detail drawer's relation sections),
+  `health/` (the deterministic workload/network/storage/config checks, shared by the dashboard,
+  `/diagnose` and the MCP tools), `event/`, `log/`, `exec/`, `metric/`, `portforward/`,
+  `schema/`, `config/` (`KweblensProperties`). **Published** to Maven Central.
 - **`kweblens-web`** — the runnable Spring Boot app. Slices: `web/api/` (JSON API +
   `ProblemDetail` error mapping), `web/ui/` (`SpaController` — serves the built Vue SPA),
   `web/security/` (`SecurityConfig` + `AuditService` — see the security gotcha), `web/mcp/`
-  (`ClusterTools` `@Tool` methods + `McpConfig` provider), `web/nav/` (`NavCatalog` — the
-  categories→kinds registry, 39 built-in kinds + discovered CRDs), `web/helm/` (jhelm-backed
-  release surface), `web/exec/` (exec-over-WebSocket), `web/files/` (pod file browser over
-  one-shot exec — **off by default**, `kweblens.files.enabled`), `web/ai/` (`DiagnoseService` +
-  `RemediationService`, inert unless `kweblens.ai.enabled` and a key are set), `web/sim/` (the
-  in-JVM cluster simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as
-  cluster `default` on startup). `/actuator/{health,info,metrics,prometheus}` exposed.
+  (three `@Tool` beans — `ClusterTools` / `DiagnosticTools` / `HealthTools` — wired into
+  `McpConfig`'s provider, plus `ToolRedaction`), `web/nav/` (`NavCatalog` — the categories→kinds
+  registry, 39 built-in kinds across 7 static categories + discovered CRDs; `ClusterNavService`
+  promotes a Gateway category at runtime when the Gateway API CRDs exist), `web/helm/`
+  (jhelm-backed release surface), `web/exec/` (exec-over-WebSocket), `web/files/` (pod file
+  browser over one-shot exec — **off by default**, `kweblens.files.enabled`, and **backend only,
+  no UI**), `web/diag/` (the diagnostics panel's capability report), `web/ai/`
+  (`DiagnoseService` — LLM enrichment inert unless `kweblens.ai.enabled` and a key are set —
+  plus `RemediationService`, which is **not** AI-gated), `web/sim/` (the in-JVM cluster
+  simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as cluster
+  `default` on startup; `ClusterConfigApiController` in `web/api/` adds/edits/removes clusters
+  at runtime). `/actuator/{health,info,metrics,prometheus}` exposed.
   **Not published** — ships as a container image.
 - **`kweblens-cli`** — a dependency-light cluster inspector (picocli). Prints the cluster the
   ambient kubeconfig points at. **Published**; runnable fat jar is the `exec` classifier.
@@ -131,9 +151,23 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
   no password is set one is **generated at startup and logged** — never bake a default password
   into the source. The authenticated context is persisted to the `HttpSession` as well as the
   request, because the SPA's one-shot Basic login must establish a `JSESSIONID` for the exec
-  WebSocket (a browser cannot attach Basic auth to a WS handshake). Still **missing**: OIDC /
-  per-user identity, and RBAC-awareness (no `SelfSubjectAccessReview`), so the UI can offer
-  actions that then 403.
+  WebSocket (a browser cannot attach Basic auth to a WS handshake). A few path families are
+  authenticated **even in open-mode**, because what they return is itself a secret: pod exec,
+  Helm release/library values, and the whole pod-file-browser family.
+- **One shared identity is the accepted design, not a TODO.** There is no OIDC / per-user
+  identity and no RBAC-awareness (no `SelfSubjectAccessReview` anywhere), so the UI can offer
+  actions that then 403, and audit entries name an action but no person. Per ADR-001 that is
+  **decided** — do not open work to "fix" it, and do not describe it as a gap. Do keep saying it
+  plainly in user-facing text; the ADR requires that honesty. SSAR is sanctioned only as a UI
+  affordance (grey out what won't work), never as an authorization gate — it fails open.
+- **"Suggest → preview → confirm → apply" is weaker than it sounds — know which link is real.**
+  Helm mutations take a genuine jhelm `dryRun`. But `ResourceService` applies with
+  `forceConflicts().serverSideApply()` and **never sends `dryRun=All`**, so the Review Changes
+  diff is "my edit vs what I loaded", not "live vs what the server would accept"; and
+  `RemediationService`'s `preview` is a hand-written English sentence, not a server round-trip.
+  `AuditService` is a bounded **in-memory** 500-entry deque, so "always audited" holds only
+  within one process lifetime. Don't repeat the stronger claim in docs or commit messages, and
+  see roadmap item T1 before building anything that leans on it.
 - **fabric8 version is BOM-pinned.** `kubernetes-client-bom` (`${fabric8.version}`) aligns
   client + model + mock-server; bump the one property, never individual fabric8 artifacts.
 - **kubeconfigs are secrets.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig`, `.kube/` — never
@@ -165,39 +199,76 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
 
 ## MCP server
 
-`kweblens-web` runs an in-jar MCP server (SSE over WebMVC) exposing the read-only `ClusterTools`
-(`listClusters`, `listNamespaces`, `listPods`) to AI assistants. A new tool is one `@Tool`-annotated
-method on a bean wired into `McpConfig`'s `MethodToolCallbackProvider`.
+`kweblens-web` runs an in-jar MCP server exposing **15 read-only tools** to AI assistants,
+across three beans registered together by `McpConfig`'s `MethodToolCallbackProvider`:
 
-## Planned integrations / roadmap
+- `ClusterTools` (orientation, 4): `listClusters`, `listNamespaces`, `listPods`,
+  `listResourceKinds`
+- `DiagnosticTools` (evidence, 4): `describeResource`, `listResources`, `getEvents`,
+  `getPodLogs`
+- `HealthTools` (verdicts, 7): `checkWorkloadHealth`, `checkNetworkHealth`,
+  `checkStorageHealth`, `checkConfigUsage`, `getPodUsage`, `getNodeUsage`, `listHelmReleases`
+
+A new tool is one `@Tool`-annotated method on a bean wired into that provider. **Keep the count
+in this file and in the README correct when you add one** — it is the number people check.
+
+**Transport: SSE over WebMVC** (`spring-ai-starter-mcp-server-webmvc`). `GET /sse` holds the
+stream open and emits `event:endpoint` / `data:/mcp/message?sessionId=…`; messages POST to
+`/mcp/message`. There is no `POST /mcp` — it 404s. This was probed against a running server, so
+don't "correct" it from `application.yml` (which sets no `spring.ai.mcp.server.protocol`).
+It is also why the CSRF exemption matters: `ignoringRequestMatchers("/api/**", "/mcp/**")`
+covers `/mcp/message`, which is what makes MCP callable at all.
+
+**Tool output is redacted at the boundary** by `ToolRedaction`: Secret `data`/`stringData`
+values and the `last-applied-configuration` annotation are replaced (keys kept), `managedFields`
+dropped. The asymmetry with the dashboard is deliberate — tool output leaves the machine and
+lands in inference logs. Any new tool returning raw objects must go through it.
+
+## Standing rules and roadmap
+
+**Where "what next" lives:** [`docs/design/roadmap.md`](docs/design/roadmap.md), re-derived
+against the code and against ADR-001. The items below are the *standing constraints* that
+outlive any one plan, plus references. Several bullets that used to describe future work are
+now shipped and are kept only for the rule they carry.
 
 - **Helm — use jhelm, not shelling out to the `helm` binary.** Freelens has a Helm-releases view;
   kweblens's Helm slice MUST be built on the sibling **jhelm** library
   (`org.alexmond:jhelm-core`, currently `1.5.0`) — kweblens is also a **dogfood** of
   jhelm. `jhelm-core` is Spring-Boot-autoconfigured (`JhelmCoreAutoConfiguration`) and exposes an
-  `action/` API (`StatusAction`, `HistoryAction`, `ListAction`, `CreateAction`/upgrade, etc.);
-  wrap those in a `HelmService` in core and a `web/helm/` slice. Pin the version via a
-  `jhelm.version` property (BOM-align with the Boot line). Do **not** add a `helm` CLI dependency.
+  `action/` API (`StatusAction`, `HistoryAction`, `ListAction`, `CreateAction`/upgrade, etc.).
+  **Shipped** as `web/helm/HelmService` (install / upgrade / rollback / uninstall / history /
+  values library / repo refresh, each with a real `dryRun`) — note it lives in `kweblens-web`,
+  not core. Pin the version via a `jhelm.version` property (BOM-align with the Boot line). Do
+  **not** add a `helm` CLI dependency.
   **Keep `jhelm.version` a RELEASED version — never a `-SNAPSHOT`.** jhelm publishes releases to
   Maven Central but **no snapshots**, so a `-SNAPSHOT` pin resolves only from whatever happens to
   be in the local `~/.m2` and CI goes red on every build (this bit us: `1.3.1-SNAPSHOT` was green
   locally and unresolvable everywhere else). Note Maven Central's *search* index does not return
   the `org.alexmond:jhelm-*` releases — check `repo1.maven.org/maven2/org/alexmond/<artifact>/`
   directly before concluding a version isn't published.
-- **AI troubleshooting agent** (issues #10/#11): a Spring AI `ChatClient` that **tool-calls the
-  existing cluster access layer** (`ClusterTools` + read tools) to validate/diagnose, then
-  proposes guarded fixes. Model-configurable (default Anthropic Claude, inert without a key),
-  mirroring the unitrack `AiAnalyzer`. **Remediation is suggest→approve→apply with a dry-run/diff
-  by default — never autonomous, always audited, all writes behind auth.** Helm fixes go through
-  jhelm; manifest fixes through the YAML apply path.
-- **Later Freelens-parity surfaces**: pod logs (SSE), YAML view/edit + apply, events, live
-  metrics, exec-into-pod. Each is a new `web/<area>/` slice over `kweblens-core` access services.
-- **Dashboard shell + left-nav IA** (issue #12): grow past the scaffold's trivial table into the
-  Freelens-style shell — cluster rail, collapsible category nav, per-category tab bar, one reusable
-  resource-list component, dockable terminal. Model the left menu as a **declarative nav registry**
-  (category → kind → list-route); the **Custom Resources** section is **dynamic**, generated from
-  the cluster's CRDs grouped by API group. Full IA + screenshots: `docs/references/freelens-ia.md`.
+- **AI troubleshooting agent** (issues #10/#11): **partly shipped.** `DiagnoseService` runs a
+  deterministic pass over the `health/` checks and optionally enriches it with a Spring AI
+  `ChatClient` (default Anthropic Claude, inert without a key). `RemediationService` proposes
+  four actions — `restart-pod`, `rollout-restart`, `rollback`, `scale-up` — each gated on a
+  precondition that says when it *cannot* work, and each applied only with `confirm=true` and
+  audited. **The standing rule: remediation is suggest→approve→apply — never autonomous, always
+  audited, all writes behind auth.** Note the preview is currently prose, not a server dry-run
+  (see the security gotcha); roadmap T1 is the fix, and no new remediation action should be
+  added expecting a real dry-run until it lands. Helm fixes go through jhelm; manifest fixes
+  through the YAML apply path.
+- **Freelens-parity surfaces** — pod logs, YAML view/edit + apply, events, live metrics,
+  exec-into-pod, port-forward, Helm, overviews, detail drawer with relation sections, command
+  palette, runtime cluster add/edit/remove: **all shipped.** The rule that produced them stands —
+  each surface is a `web/<area>/` slice over a `kweblens-core` access service, never cluster
+  access reimplemented in a controller.
+- **Dashboard shell + left-nav IA** (issue #12): **shipped** — the Freelens-style shell with a
+  cluster rail, collapsible category nav, one reusable resource-list component and a dockable
+  terminal. The rule that stands: the left menu is a **declarative nav registry**
+  (category → kind → list-route) in `NavCatalog`, and the **Custom Resources** section is
+  **dynamic**, generated from the cluster's CRDs grouped by API group. Full IA + screenshots:
+  `docs/references/freelens-ia.md`.
 - **Design references**: `docs/references/freelens-reference-deck.md` — captioned Freelens
-  walkthrough mapping each surface to kweblens; `freelens-ia.md` is the full IA map. Headless
-  `xvfb` capture is documented there but blocked on this box (no `xdotool`/compositor → black
-  frames); the deck uses real captures.
+  walkthrough mapping each surface to kweblens; `freelens-ia.md` is the full IA map. The deck
+  documents a headless `xvfb` capture procedure and records it as blocked on this box (no
+  `xdotool`/compositor → black frames); **that note is disputed** — re-test before relying on
+  it either way. The deck's own images are real captures.
