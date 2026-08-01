@@ -13,6 +13,7 @@ import io.fabric8.kubernetes.api.model.apps.ReplicaSet;
 import io.fabric8.kubernetes.api.model.apps.ReplicaSetBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -39,9 +40,65 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @EnableKubernetesMockClient(crud = true)
 class RemediationActionsTest {
 
+	@Test
+	void previewOfAPatchShapedActionAsksTheClusterAndReturnsWhatItSays() {
+		// The whole point of #209. The old "preview" was a sentence kweblens wrote about
+		// its own intention; this one is the object the API server says would result.
+		RemediationPreview preview = remediation.preview("test", NS, "scale-up", "Deployment/idle");
+
+		assertThat(preview.validated()).isTrue();
+		assertThat(preview.outcome()).isEqualTo(RemediationPreview.Outcome.SERVER_VALIDATED);
+		// It is the real object, not prose: YAML carrying the field being changed.
+		assertThat(preview.detail()).contains("replicas");
+	}
+
+	@Test
+	void previewSendsDryRunAllSoTheServerDiscardsTheResult() throws InterruptedException {
+		// What the mock CAN prove: the request carries dryRun=All. It cannot prove the
+		// change is discarded, because the CRUD mock does not implement dry-run semantics
+		// — it applies the patch regardless, which is a property of the harness and not
+		// of
+		// the code. The no-mutation invariant was checked against the real cluster
+		// instead: a rollout-restart preview on a live Deployment left generation at 1
+		// with no restartedAt annotation.
+		remediation.preview("test", NS, "scale-up", "Deployment/idle");
+
+		assertThat(server.getLastRequest().getPath()).contains("dryRun=All");
+	}
+
+	@Test
+	void previewSaysPlainlyWhenTheClusterCouldNotBeAsked() {
+		// Deleting a pod is not a patch, so there is nothing to dry-run. Reporting that
+		// honestly beats emitting a sentence that reads like a server answer — which is
+		// exactly what #209 was about.
+		RemediationPreview preview = remediation.preview("test", NS, "restart-pod", "web-0");
+
+		assertThat(preview.validated()).isFalse();
+		assertThat(preview.outcome()).isEqualTo(RemediationPreview.Outcome.NOT_CHECKED);
+		assertThat(preview.detail()).contains("cannot be validated by a server-side dry run");
+	}
+
+	@Test
+	void aRollbackCannotBeDryRunEither() {
+		RemediationPreview preview = remediation.preview("test", NS, "rollback", "Deployment/rolled");
+
+		assertThat(preview.outcome()).isEqualTo(RemediationPreview.Outcome.NOT_CHECKED);
+		assertThat(preview.validated()).isFalse();
+	}
+
+	@Test
+	void noProposalClaimsToBeADryRunAnyMore() {
+		// The proposals still describe what would happen — that is useful — but none of
+		// them may label itself a dry run, because none of them consulted the cluster.
+		assertThat(remediation.propose("test", NS))
+			.allSatisfy((proposal) -> assertThat(proposal.preview()).doesNotContain("dry-run:"));
+	}
+
 	private static final String NS = "shop";
 
 	KubernetesClient client;
+
+	KubernetesMockServer server;
 
 	@Autowired
 	private ClusterRegistry registry;

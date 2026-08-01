@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.alexmond.kweblens.web.ai.RemediationPreview;
 import org.alexmond.kweblens.web.ai.RemediationProposal;
 import org.alexmond.kweblens.web.ai.RemediationService;
 
@@ -32,6 +33,21 @@ public class RemediationApiController {
 	public List<RemediationProposal> propose(@PathVariable String clusterId,
 			@RequestParam(required = false) String namespace) {
 		return remediation.propose(clusterId, namespace);
+	}
+
+	/**
+	 * Ask the cluster what an action would do, without doing it.
+	 *
+	 * <p>
+	 * A POST because it reaches the API server with {@code dryRun=All} — admission
+	 * webhooks run — so it is auth-gated like every other non-GET even though it changes
+	 * nothing. Treating it as a read would put a call that executes admission behind the
+	 * public read path.
+	 */
+	@PostMapping("/preview")
+	public RemediationPreview preview(@PathVariable String clusterId, @RequestParam String namespace,
+			@RequestParam String action, @RequestParam String target) {
+		return remediation.preview(clusterId, namespace, action, target);
 	}
 
 	@PostMapping("/apply")
