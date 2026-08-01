@@ -148,3 +148,11 @@ management:
 logging:
   level:
     io.fabric8.kubernetes.client: WARN
+    # The audit trail. Every recorded write (AuditService) is also written here as one
+    # structured line — `kweblens-audit seq=… ts=… user="…" cluster="…" action="…"
+    # target="…"` — so the record survives a restart via whatever already ships this log;
+    # the in-app /audit view is only the newest 500, in memory. Pinned at INFO on purpose:
+    # raising the root level must not silently switch the audit trail off. To keep a local
+    # copy instead of shipping it, route this category to a rolling file appender in a
+    # logback-spring.xml — no kweblens config needed, the logger name is the contract.
+    kweblens.audit: INFO

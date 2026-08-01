@@ -142,6 +142,40 @@ kubectl -n kweblens create secret generic kweblens-auth \
 # then: --set auth.existingSecret=kweblens-auth  (and auth.openMode=false)
 ```
 
+### Audit trail
+
+Every write — apply, patch, scale, restart, rollback, delete, exec/attach, port-forward,
+Helm actions, runtime cluster add/edit/remove, pod file read/write/delete — is recorded
+twice:
+
+- **In the log**, one structured line per entry on the dedicated `kweblens.audit` logger.
+  This is the durable copy — it outlives a restart because whatever already collects the
+  container's stdout keeps it.
+- **In memory**, the newest 500, shown at `/audit` and `GET /api/v1/audit`. That is a
+  live view only: it is empty after a restart and older entries fall out of it.
+
+A line looks like:
+
+```
+kweblens-audit seq=42 ts=2026-07-31T10:15:30.123456Z user="admin" cluster="prod" action="scale=3" target="Deployment/web/api"
+```
+
+so `grep kweblens-audit` (or `action="delete"`, `cluster="prod"`) answers "who changed
+what, when". `seq` is a per-process counter, so a gap means lines were lost in shipping,
+not that nothing happened. Values are quoted, escaped and stripped of control characters —
+a newline in a pod file path cannot forge a second line.
+
+**Entries carry references, never contents**: a kubeconfig upload is audited as
+`cluster-update-credential` against the cluster id, a pod file write as
+`file-write=<n>B` against the file's path. No credential, request body or file byte is
+written to the trail.
+
+To keep the trail as a file rather than shipping stdout, route the logger by name in a
+`logback-spring.xml` on the classpath (a `RollingFileAppender` for `kweblens.audit`); no
+kweblens setting is involved. The category is pinned to `INFO` in `application.yml` so
+raising the root log level cannot silently switch the trail off — if you set
+`logging.level.root`, leave `logging.level.kweblens.audit` alone.
+
 ### Key chart values
 
 | Value | Purpose |
