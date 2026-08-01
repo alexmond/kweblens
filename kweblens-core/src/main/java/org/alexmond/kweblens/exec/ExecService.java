@@ -8,6 +8,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.ContainerResource;
 import io.fabric8.kubernetes.client.dsl.ExecListener;
 import io.fabric8.kubernetes.client.dsl.ExecWatch;
@@ -94,6 +95,13 @@ public class ExecService {
 		}
 		catch (ExecutionException ex) {
 			throw new ExecFailedException(rootMessage(ex), ex);
+		}
+		// exec() itself throws this when the connection to the container cannot be set up
+		// at all — most often because the container is not running, which is a normal
+		// thing to hit (a crashlooping pod is exactly when someone wants to look inside).
+		// It is a RuntimeException, so without this it escapes as a bare 500.
+		catch (KubernetesClientException ex) {
+			throw new ExecFailedException("could not attach to " + namespace + "/" + pod + ": " + rootMessage(ex), ex);
 		}
 	}
 

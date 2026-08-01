@@ -68,6 +68,18 @@ final class PodFileFailures {
 		if (message.contains("timed out")) {
 			return new PodFileException(HttpStatus.GATEWAY_TIMEOUT, "container-command-timeout", message);
 		}
+		// A container that is not running cannot be attached to. Observed against a
+		// crashlooping pod: fabric8 reports a WebSocket upgrade failure and "not ready
+		// after 10000 MILLISECONDS". That is an ordinary situation for a file browser —
+		// a broken pod is exactly what someone wants to look inside — so it gets its own
+		// answer rather than reading as a malfunction.
+		if (looksLikeUnattachable(message)) {
+			return new PodFileException(HttpStatus.CONFLICT, "container-not-running",
+					"could not attach to a container in " + namespace + "/" + pod
+							+ ". Its filesystem can only be browsed while it is running;"
+							+ " a pod that is pending, crash-looping or completed has nothing to attach to."
+							+ detail(message));
+		}
 		return new PodFileException(HttpStatus.BAD_GATEWAY, "container-command-failed",
 				"could not run a command in " + namespace + "/" + pod + ": " + message);
 	}
@@ -101,6 +113,11 @@ final class PodFileFailures {
 				"container in " + namespace + "/" + pod + " has no shell, so its filesystem cannot be browsed."
 						+ " The file browser needs /bin/sh; distroless and scratch images do not ship one."
 						+ detail(message));
+	}
+
+	private static boolean looksLikeUnattachable(String message) {
+		String lower = message.toLowerCase(Locale.ROOT);
+		return lower.contains("upgrade") || lower.contains("not ready after") || lower.contains("could not attach");
 	}
 
 	private static boolean looksLikeMissingShell(String message) {

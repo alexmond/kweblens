@@ -290,6 +290,27 @@ class PodFileServiceTest {
 	}
 
 	@Test
+	void saysTheContainerIsNotRunningRatherThanFailingWithA500() {
+		// Observed against a crashlooping fixture: fabric8 threw
+		// KubernetesClientException
+		// ("WebSocket upgrade failure", "not ready after 10000 MILLISECONDS") straight
+		// out
+		// of exec(). Being a RuntimeException it escaped every catch and surfaced as a
+		// bare
+		// 500 with no ProblemDetail at all. A broken pod is exactly what someone wants to
+		// look inside, so it needs a real answer.
+		willThrow(new ExecFailedException("could not attach to ns/pod: not ready after 10000 MILLISECONDS")).given(exec)
+			.run(any(), any(), any(), any(), any(), any(), anyLong(), any());
+
+		assertThatThrownBy(() -> service.list("c", "ns", "pod", null, "/"))
+			.isInstanceOfSatisfying(PodFileException.class, (ex) -> {
+				assertThat(ex.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+				assertThat(ex.getCode()).isEqualTo("container-not-running");
+			})
+			.hasMessageContaining("crash-looping");
+	}
+
+	@Test
 	void surfacesATimeoutAsAGatewayTimeout() {
 		willThrow(new ExecFailedException("command timed out after 20s in ns/pod")).given(exec)
 			.run(any(), any(), any(), any(), any(), any(), anyLong(), any());
