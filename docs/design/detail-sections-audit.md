@@ -43,6 +43,31 @@ Group B needs one of:
 as an abstract refactor. Do not build Group B client-side first — it would be written twice.
 Until then the drawer should not pretend to answer relational questions.
 
+### Group B status (roadmap D1)
+
+(2) was built — `RelationService` plus the `/detail/{resourceId}/{ns}/{name}` endpoint — and
+then widened. **Resolved today:** Endpoints, selector → pods, who mounts a Secret/ConfigMap
+(now also a PVC), the owner chain up to the workload, a Deployment's ReplicaSets (rollout
+history), HPA targeting a workload, PodDisruptionBudget covering it, Ingress → Service,
+PVC ↔ PV, Pod → ServiceAccount, and the RBAC bindings that grant one.
+
+**Still not resolved, and why, since these are the ones people re-propose:**
+
+- **Ingress TLS secret expiry**, and any other join whose interesting answer is that the
+  referenced object is *missing*. `Relation` carries objects, so an absent reference can only
+  be dropped (claiming a completeness that is false) or fabricated (claiming an existence that
+  is false). Needs a per-item note on the shape first.
+- **Requests/limits vs actual usage** — that is the metrics path, not a relation.
+- **Gateway API `HTTPRoute` → Service.** Probing for it in a cluster without the CRDs would put
+  a 404 on every Service drawer; the catalog that knows which CRDs exist is `ClusterNavService`,
+  above the access layer.
+- **Node → its pods** is not a relation because it already exists as its own endpoint and its
+  own pane (with per-pod metrics, which a relation table cannot carry).
+
+One reachability gap remains: the detail route requires a namespace and the SPA skips the
+relations fetch for cluster-scoped objects, so `boundClaim` on a PersistentVolume resolves
+correctly but nothing calls it yet.
+
 ## Ordering and collapse policy (applied)
 
 Sections render in registry order. The rule adopted: **most-diagnostic first, identity last.**
