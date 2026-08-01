@@ -27,6 +27,7 @@ scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
 scripts/dev-run.sh                 # build if needed, run on :8080, login admin/admin
 scripts/dev-run.sh --build         # force a rebuild first
 scripts/dev-run.sh --sim           # no cluster needed — the built-in simulator
+scripts/dev-run.sh --ai            # LLM enrichment of /diagnose (needs an Anthropic key)
 scripts/dev-run.sh --port 8085     # a second instance alongside the first
 scripts/dev-run.sh --stop          # stop whatever is on the port
 ```
@@ -38,6 +39,12 @@ passes the dev credentials, and *fails loudly* if a password gets generated anyw
 
 The credentials are passed as environment at run time on purpose. Do not move them into
 `application.yml`: that would bake a default password into the repository.
+
+`--ai` reads an Anthropic key from `ANTHROPIC_API_KEY`, falling back to
+`VANTAGE_ANTHROPIC_API_KEY`. **The key is never written to a file** — the flag refuses to
+start without one rather than booting a build whose AI silently does nothing. Only the prose
+summary on `GET /api/v1/clusters/{id}/diagnose` depends on it; the findings themselves, the
+remediation proposals and the server-side dry run are all deterministic and need no key.
 
 ## Checking the UI
 
