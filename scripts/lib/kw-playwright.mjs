@@ -94,9 +94,21 @@ export const currentTheme = (page) =>
  * Toggles and re-reads rather than counting clicks: the app remembers the last theme in
  * prefs, so "click once for dark" is wrong roughly half the time, and a run that thinks
  * it measured dark mode while looking at light is worse than no run at all.
+ *
+ * It dismisses any open overlay first. Callers loop themes with PREPARE INSIDE the loop
+ * (ui-shot, contrast-check), so a PREPARE that opens the command palette or a drawer
+ * leaves a modal mask over the whole shell — and the second theme's click on
+ * `.theme-toggle` is then intercepted by that mask. An earlier version did not do this and
+ * `PREPARE='press:Control+k;…'` failed on the dark pass with a 30-second timeout whose
+ * message named the toggle, not the modal actually in the way. Escape is what the app
+ * itself binds to close both, so this is the same exit the reader would take.
  */
 export async function setTheme(page, want) {
   if ((await currentTheme(page)) === want) return;
+  if (await page.locator('.n-modal-mask, .n-drawer-mask').first().isVisible().catch(() => false)) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
   await page.click('.theme-toggle');
   await page.waitForTimeout(700);
   const got = await currentTheme(page);

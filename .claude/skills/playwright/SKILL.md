@@ -137,6 +137,26 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-02 — **A PREPARE that opens a modal broke the theme loop in two scripts.** Both
+  `ui-shot` and `contrast-check` run PREPARE *inside* the per-theme loop, so
+  `PREPARE='press:Control+k;…'` (checking the command palette — the surface already got
+  wrong twice in #200) left Naive's `.n-modal-mask` over the shell, and the second theme's
+  click on `.theme-toggle` was intercepted. Both died after 30s with a message naming the
+  toggle, not the modal actually in the way — the failure pointed at the wrong element.
+  → `setTheme` in `lib/kw-playwright.mjs` and `contrast-check`'s own toggle now press
+  Escape first when a modal or drawer mask is visible. **When a script loops over a
+  dimension, every step inside the loop has to be able to run from the state the previous
+  iteration left behind.**
+- 2026-08-02 — **The armed row moved under a stationary mouse, and only an end-to-end
+  click-through caught it.** Typing `sim-pod-7` in the palette and pressing Enter opened
+  `sim-pod-77`. Cause: the modal is vertically centred, so async results arriving make it
+  grow and slide the list *up* under a cursor that has not moved; the browser fires
+  `mouseenter` on whatever row lands beneath it, which re-armed row 8. Screenshots showed
+  the right list and were no help — the defect lives between what is drawn and what Enter
+  does. → Fixed in the component (`@mousemove`, which only fires on real pointer movement).
+  **A surface whose content arrives asynchronously needs a script that types, waits, and
+  presses Enter, then asserts what it actually opened.**
+
 - 2026-08-02 — `contrast-check` read `color(srgb 0.89 0.91 0.93 / 0.75)` — which is what
   Naive UI's controls actually compute to — as channels 0.89/255, i.e. near-black, and
   reported near-white text as a **1.42:1 FAIL** (#245). → Both parsers in the file now scale

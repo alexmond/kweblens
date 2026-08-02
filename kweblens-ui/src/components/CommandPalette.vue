@@ -163,12 +163,20 @@ const choose = (command: Command | undefined) => {
       @keydown.enter.prevent="choose(hits[active])"
       @keydown.esc.prevent="emit('cancel')"
     />
+    <!-- `mousemove`, NOT `mouseenter`, to arm a row under the mouse.
+         The modal is vertically centred, so results arriving from the network make it grow
+         and shift the whole list UP under a stationary cursor. The browser then fires
+         mouseenter on whatever row has slid beneath the pointer, which re-arms it — measured
+         here: typing `sim-pod-7` and pressing Enter opened `sim-pod-77`, the eighth row,
+         because that is what ended up under a mouse that had not moved since the click on the
+         input. mousemove only fires on actual pointer movement, so the armed row now changes
+         when the reader moves the mouse and not when the layout moves the list. -->
     <ul v-if="hits.length" class="palette-list">
       <li
         v-for="(c, i) in hits"
         :key="c.key"
         :class="'palette-row' + (i === active ? ' active' : '')"
-        @mouseenter="active = i"
+        @mousemove="active = i"
         @click="choose(c)"
       >
         <span :class="'palette-kind palette-kind-' + c.kind">{{ rowType(c.kind) }}</span>
