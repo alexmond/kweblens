@@ -583,8 +583,10 @@ for (let pass = 0; pass < 2; pass++) {
 const pad = (s, n) => String(s).padEnd(n);
 console.log(pad('theme', 6) + pad('selector', 26) + pad('part', 18) + pad('ratio', 9) + 'verdict');
 let failures = 0;
+let unmeasured = 0;
 for (const r of rows) {
   if (r.r === null) {
+    unmeasured += 1;
     console.log(pad(r.theme, 6) + pad(r.sel, 26) + pad(r.what, 18) + pad('—', 9) + r.note);
     continue;
   }
@@ -612,11 +614,24 @@ if (disagreements.length) {
   }
 }
 
+// "All measured text" is doing a lot of work in that sentence, so say how much was NOT
+// measured. Rows that report a note carry no ratio and therefore cannot fail, which means a
+// run that silently stopped measuring things exits 0 and looks identical to a clean one —
+// exactly the trap the `not present` rule warns about, and now countable rather than
+// something you have to notice by scrolling. Deliberately not an automatic exit 1: a
+// healthy cluster genuinely never renders `.ov-card.danger`, and a checker that cries wolf
+// on that gets switched off.
 console.log(
   failures
     ? `\n${failures} below the floor. Worst: ${worst.sel} ${worst.what} at ${worst.r.toFixed(2)}:1 (${worst.theme}).`
-    : '\nAll measured text clears its floor in both themes.',
+    : `\nAll measured text clears its floor in both themes (${rows.length - unmeasured} of ${rows.length} samples measured).`,
 );
+if (unmeasured) {
+  console.log(
+    `${unmeasured} sample(s) produced no ratio — NOT passes. If that is most of the run, ` +
+      'the run failed: bring the surfaces on screen with PREPARE and measure again.',
+  );
+}
 
 await browser.close();
 process.exit(failures ? 1 : 0);
