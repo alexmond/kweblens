@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NDropdown } from 'naive-ui';
-import type { DataTableColumns } from 'naive-ui';
+import type { DataTableColumns, DropdownOption } from 'naive-ui';
 import { shallowRef, computed, h } from 'vue';
 
 import { age } from '../columns';
-import { containerNames, objKey, objName, objNs } from '../kube';
+import { objKey, objName, objNs } from '../kube';
 import type { RowAction } from '../rowActions';
-import { ALL_CONTAINERS, ROW_ACTIONS } from '../rowActions';
+import { parseRowActionKey, rowActionOptions } from '../rowActions';
 import type { CellSpec, TableColumn } from '../table';
 import { toneFor } from '../table';
 import type { KubeObject } from '../types';
@@ -46,29 +46,15 @@ const renderCell = (spec: CellSpec, row: KubeObject) => {
   return spec.tone ? h(StatusBadge, { text: spec.text, tone: spec.tone }) : spec.text;
 };
 
-const menuOptions = (row: KubeObject) => {
-  const ctx = { kind: row.kind ?? '', suspended: Boolean((row.spec as Record<string, unknown>)?.suspend) };
-  const containers = containerNames(row);
-  const apply = ROW_ACTIONS.filter((a) => a.applies(ctx));
-  const toOpt = (a: (typeof ROW_ACTIONS)[number]) => {
-    if (!a.containerScoped || containers.length <= 1) {
-      return { label: a.label, key: a.id, props: { class: a.danger ? 'menu-danger' : '' } };
-    }
-    // Logs can span containers, so it leads with "All containers"; a shell or attach can
-    // only ever target one, so those stay a plain container list.
-    const children = containers.map((c) => ({ label: c, key: `${a.id}::${c}` }));
-    if (a.id === 'logs') {
-      children.unshift({ label: 'All containers', key: `${a.id}::${ALL_CONTAINERS}` });
-    }
-    return { label: a.label, key: a.id, children };
-  };
-  const main = apply.filter((a) => a.section === 'main').map(toOpt);
-  const life = apply.filter((a) => a.section === 'lifecycle').map(toOpt);
-  return main.length && life.length ? [...main, { type: 'divider', key: 'd' }, ...life] : [...main, ...life];
-};
+// Which actions an object offers is decided once, in rowActions.ts, because the detail
+// drawer renders the same menu (#233).
+// Cast at the boundary: rowActions.ts stays framework-agnostic (so the projection is
+// testable without a DOM), which means it describes the shape rather than importing
+// Naive's `DropdownOption` union.
+const menuOptions = (row: KubeObject) => rowActionOptions(row) as unknown as DropdownOption[];
 const onMenu = (key: string, row: KubeObject) => {
-  const [id, container] = key.split('::');
-  emit('row-action', id as RowAction, row, container);
+  const { action, container } = parseRowActionKey(key);
+  emit('row-action', action, row, container);
 };
 
 // Column sizing. Without hints Naive spreads width evenly, so short columns (Taints "0",

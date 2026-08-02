@@ -51,7 +51,8 @@ function ovPodSpec(o: KubeObject): Record<string, unknown> {
 }
 
 // ---- Field descriptors (a key/value row's rendered value) ----
-type OvValue =
+/** What a summary row renders. Exported because OverviewField.vue is the one that renders it. */
+export type OvValue =
   | { kind: 'text'; text: string }
   | { kind: 'nav'; text: string; navKind: string; navNs?: string }
   | { kind: 'helm'; rel: string; rns: string }
@@ -76,6 +77,27 @@ export type SectionRank = 'primary' | 'secondary';
 /** The rank of a field, section or relation section. Unmarked means `primary`. */
 export function rankOf(entry: { rank?: SectionRank }): SectionRank {
   return entry.rank ?? 'primary';
+}
+
+/**
+ * The two columns of the wide drawer (#232): `main` keeps the object's substance, `aside`
+ * takes provenance and bookkeeping.
+ *
+ * One generic split for summary rows, sections and relation sections alike, because all
+ * three answer {@link rankOf} — which is the point of the rank living on the registry entry.
+ * `entry` is how a caller points at the rank-bearing value when the list it holds wraps it
+ * (`{ field, value }` pairs), so nothing has to be re-derived from a section title.
+ *
+ * Order is preserved within each column: the wide layout MOVES sections, it does not
+ * reorder them, and at narrow the same DOM renders as one stacked column.
+ */
+export function splitByRank<T>(items: T[], entry: (item: T) => { rank?: SectionRank }): { main: T[]; aside: T[] } {
+  const main: T[] = [];
+  const aside: T[] = [];
+  for (const item of items) {
+    (rankOf(entry(item)) === 'secondary' ? aside : main).push(item);
+  }
+  return { main, aside };
 }
 
 // A summary key/value row. `get` returns null to hide the row.
@@ -228,7 +250,8 @@ interface OvCell {
   mono?: boolean;
 }
 
-type OvBody =
+/** What a section renders. Exported because OverviewSection.vue is the one that renders it. */
+export type OvBody =
   | { type: 'chips'; map: Record<string, string> }
   | { type: 'annotations'; map: Record<string, string> }
   | { type: 'secret'; data: Record<string, string> }

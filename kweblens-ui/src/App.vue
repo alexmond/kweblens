@@ -448,6 +448,7 @@ const onForwardStarted = () => {
           @auth-expired="signOut"
           @require-auth="showLogin = true"
           @open-object="openPodDetail"
+          @row-action="(a, o, c) => handleRowAction(detail!.resourceId, a, o, c)"
           @close="detail = null"
         />
       </div>

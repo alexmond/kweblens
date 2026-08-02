@@ -1,7 +1,7 @@
 import { api } from './api';
 import type { DialogApi } from './dialog';
 import type { LogScope } from './dock';
-import { objectPorts } from './kube';
+import { containerNames, objectPorts } from './kube';
 import type { DockKind, KubeObject } from './types';
 
 // The declarative per-row action registry — shared by the RowMenu kebab (renders it) and the
@@ -14,8 +14,13 @@ const ROLLBACKABLE = ['Deployment', 'StatefulSet'];
 // Kinds whose pods can be resolved from a spec.selector, so "Logs" can mean every replica.
 const POD_OWNERS = ['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'Job'];
 
-/** The sentinel the container submenu uses for "every container", vs. one container's name. */
-export const ALL_CONTAINERS = '*';
+/**
+ * The sentinel the container submenu uses for "every container", vs. one container's name.
+ *
+ * Module-private since the menu is projected here too (`rowActionOptions`): the surfaces that
+ * render the menu pass the key back through `parseRowActionKey` and never spell it themselves.
+ */
+const ALL_CONTAINERS = '*';
 
 export type RowAction =
   | 'logs'
@@ -274,3 +279,53 @@ export const ROW_ACTIONS: RowActionDef[] = [
     run: (c) => confirmDelete(c, true),
   },
 ];
+
+/**
+ * One entry in an actions menu — plain data shaped to what Naive's NDropdown consumes, but
+ * deliberately not typed as `DropdownOption`: this module stays framework-agnostic so the
+ * projection can be tested without a DOM.
+ */
+export interface RowActionOption {
+  label?: string;
+  key: string;
+  type?: 'divider';
+  props?: { class: string };
+  children?: { label: string; key: string }[];
+}
+
+/** Separator between the kind-specific actions and Edit/Delete. */
+const DIVIDER: RowActionOption = { type: 'divider', key: 'divider' };
+
+/**
+ * Every action that applies to `obj`, as menu options.
+ *
+ * Lives here rather than in the table because the detail drawer offers the same menu (#233):
+ * two copies of "which actions apply, and which of them need a per-container submenu" would
+ * be two chances for the drawer and the list to disagree about what an object can do.
+ */
+export function rowActionOptions(obj: KubeObject): RowActionOption[] {
+  const ctx = { kind: obj.kind ?? '', suspended: Boolean((obj.spec as Record<string, unknown>)?.suspend) };
+  const containers = containerNames(obj);
+  const applicable = ROW_ACTIONS.filter((a) => a.applies(ctx));
+  const toOption = (a: RowActionDef): RowActionOption => {
+    if (!a.containerScoped || containers.length <= 1) {
+      return { label: a.label, key: a.id, props: { class: a.danger ? 'menu-danger' : '' } };
+    }
+    // Logs can span containers, so it leads with "All containers"; a shell or attach can
+    // only ever target one, so those stay a plain container list.
+    const children = containers.map((c) => ({ label: c, key: `${a.id}::${c}` }));
+    if (a.id === 'logs') {
+      children.unshift({ label: 'All containers', key: `${a.id}::${ALL_CONTAINERS}` });
+    }
+    return { label: a.label, key: a.id, children };
+  };
+  const main = applicable.filter((a) => a.section === 'main').map(toOption);
+  const life = applicable.filter((a) => a.section === 'lifecycle').map(toOption);
+  return main.length > 0 && life.length > 0 ? [...main, DIVIDER, ...life] : [...main, ...life];
+}
+
+/** Read a menu key back as the action it names, plus the container a submenu scoped it to. */
+export function parseRowActionKey(key: string): { action: RowAction; container?: string } {
+  const [action, container] = key.split('::');
+  return { action: action as RowAction, container };
+}

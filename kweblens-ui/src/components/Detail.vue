@@ -9,14 +9,18 @@
 //   auth-expired ()                                   — a YAML apply came back 401/403
 //   require-auth ()                                   — a pane needs the login (Files)
 //   close        ()                                   — close the drawer (X or Escape)
-import { NDrawer, NDrawerContent, NTabPane, NTabs } from 'naive-ui';
+import { NDrawer, NDrawerContent, NDropdown, NTabPane, NTabs } from 'naive-ui';
+import type { DropdownOption } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { useEscapeKey } from '../composables/useEscapeKey';
 import { objName, objNs } from '../kube';
 import { filesFeature } from '../podFiles';
+import type { RowAction } from '../rowActions';
+import { parseRowActionKey } from '../rowActions';
 import type { EventSummary, KubeObject } from '../types';
+import { drawerActions, drawerBadges } from './drawerHeader';
 import EventsPane from './EventsPane.vue';
 import MetricChart from './MetricChart.vue';
 import NodePodsPane from './NodePodsPane.vue';
@@ -37,6 +41,7 @@ const emit = defineEmits<{
   (e: 'auth-expired'): void;
   (e: 'require-auth'): void;
   (e: 'open-object', obj: KubeObject): void;
+  (e: 'row-action', action: RowAction, obj: KubeObject, container?: string): void;
   (e: 'close'): void;
 }>();
 
@@ -56,6 +61,18 @@ const kind = computed(() => props.obj.kind ?? '');
 const isNode = computed(() => kind.value === 'Node');
 const name = computed(() => objName(props.obj));
 const ns = computed(() => objNs(props.obj) ?? '');
+
+// ---- Header, laid out for the width it has (#233) ----
+// Both decisions come from `drawerHeader.ts`; this component only renders them and lets the
+// container query choose. The menu is the FULL action list at every width — the buttons are
+// a shortcut to three of them when there is room, never the only way to reach one.
+const badges = computed(() => drawerBadges(props.obj));
+const actions = computed(() => drawerActions(props.obj));
+const menuOptions = computed(() => actions.value.menu as unknown as DropdownOption[]);
+const onMenu = (key: string) => {
+  const { action, container } = parseRowActionKey(key);
+  emit('row-action', action, props.obj, container);
+};
 
 // Expand-to-fill: the drawer is mounted into the content column (see `to` below), so 100%
 // is exactly the area the table occupies — no header/footer/sidebar overlap either way.
@@ -118,19 +135,31 @@ watch(
     @update:width="(w) => (width = w)"
   >
     <NDrawerContent closable body-content-style="padding: 0 20px; display: flex; flex-direction: column;">
+      <!-- The header sits OUTSIDE the tab panes, so it needs its own `kw-pane` to have a
+           width to query (#233); the wrapper is the container because a container query
+           never styles the container itself, and `.drawer-title` is what has to restyle. -->
       <template #header>
-        <div class="drawer-title">
-          <span class="drawer-kind">{{ kind }}</span>
-          <span class="drawer-name">{{ name }}</span>
-          <button
-            type="button"
-            class="drawer-expand"
-            :title="expanded ? 'Restore panel width' : 'Expand to fill'"
-            :aria-label="expanded ? 'Restore panel width' : 'Expand to fill'"
-            @click="expanded = !expanded"
-          >
-            {{ expanded ? '⤡' : '⤢' }}
-          </button>
+        <div class="drawer-head-pane kw-pane">
+          <div class="drawer-title">
+            <!-- Narrow keeps the kind inline before the name; wide shows it as the first of
+                 the badges below, which is why both exist rather than one moving. -->
+            <span class="drawer-kind kw-when-narrow">{{ kind }}</span>
+            <span class="drawer-name" :title="name">{{ name }}</span>
+            <button
+              type="button"
+              class="drawer-expand"
+              :title="expanded ? 'Restore panel width' : 'Expand to fill'"
+              :aria-label="expanded ? 'Restore panel width' : 'Expand to fill'"
+              @click="expanded = !expanded"
+            >
+              {{ expanded ? '⤡' : '⤢' }}
+            </button>
+            <div class="drawer-badges kw-when-wide">
+              <span v-for="b in badges" :key="b.key" :class="`drawer-badge tone-${b.tone}`" :title="b.title">
+                {{ b.text }}
+              </span>
+            </div>
+          </div>
         </div>
       </template>
 
@@ -139,7 +168,29 @@ watch(
            which no viewport media query can see. The pane, not its content, is the container:
            a container query never styles the container itself, so the content is free to
            become the two-column layout. -->
-      <NTabs v-model:value="tab" type="line" size="small" pane-class="drawer-body kw-pane">
+      <NTabs v-model:value="tab" type="line" size="small" class="drawer-tabs kw-pane" pane-class="drawer-body kw-pane">
+        <!-- The band to the right of the tab row was empty at every width. It now carries the
+             object's actions: three buttons once the pane is wide enough for them, and a menu
+             holding the COMPLETE list at both widths, so nothing is reachable at one width
+             and not the other. -->
+        <template #suffix>
+          <div class="drawer-actions">
+            <button
+              v-for="a in actions.buttons"
+              :key="a.id"
+              type="button"
+              class="drawer-action kw-when-wide"
+              @click="emit('row-action', a.id, obj)"
+            >
+              {{ a.label }}
+            </button>
+            <NDropdown trigger="click" :options="menuOptions" @select="onMenu">
+              <button type="button" class="drawer-action drawer-action-menu" title="Actions" aria-label="Actions">
+                ⋮
+              </button>
+            </NDropdown>
+          </div>
+        </template>
         <NTabPane name="overview" tab="Overview" display-directive="if">
           <Overview
             :obj="obj"
