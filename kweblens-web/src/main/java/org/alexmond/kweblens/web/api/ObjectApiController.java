@@ -3,6 +3,7 @@ package org.alexmond.kweblens.web.api;
 import java.io.IOException;
 import java.util.List;
 
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.utils.Serialization;
 import lombok.RequiredArgsConstructor;
@@ -66,6 +67,33 @@ public class ObjectApiController {
 			@RequestParam(required = false) String namespace) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		return Serialization.asJson(resources.listRaw(clusterId, descriptor, namespace));
+	}
+
+	/**
+	 * One raw object, addressed by kind + namespace + name.
+	 *
+	 * <p>
+	 * Added for global search (GH#259): a hit names an object that is <b>not</b> in the
+	 * list currently on screen, so the drawer cannot be opened from a row the client
+	 * already holds. Fetching the single object is the cheap way to do that — the
+	 * alternative, listing the whole kind and picking one out of it, costs a full list to
+	 * open one drawer, and returning whole objects from the search endpoint would mean
+	 * shipping hundreds of them to render twenty rows.
+	 *
+	 * <p>
+	 * {@code namespace} is optional so the same call addresses cluster-scoped kinds,
+	 * which ignore it.
+	 */
+	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/object",
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	public String object(@PathVariable String clusterId, @PathVariable String resourceId,
+			@RequestParam(required = false) String namespace, @RequestParam String name) {
+		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
+		GenericKubernetesResource object = resources.getRaw(clusterId, descriptor, namespace, name);
+		if (object == null) {
+			throw new IllegalArgumentException("No such " + descriptor.kind() + ": " + name);
+		}
+		return Serialization.asJson(object);
 	}
 
 	/**

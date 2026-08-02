@@ -23,6 +23,7 @@ import type {
   PortForward,
   PrinterColumn,
   ResourceRow,
+  SearchResponse,
   UsageSummary,
 } from './types';
 
@@ -106,9 +107,13 @@ async function putText(url: string, body: string): Promise<void> {
 
 /** fetch with a hard timeout so a stalled request surfaces an error instead of a
  *  never-ending "Loading…" (e.g. after a pod restart drops the request mid-flight). */
-async function fetchWithTimeout(url: string, init: RequestInit, ms = 20000): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit, ms = 20000, signal?: AbortSignal): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
+  // A caller-supplied signal (a superseded search) aborts the same request as the timeout.
+  // Without this, typing fast leaves a queue of in-flight searches competing for the browser's
+  // six connections per host, and the answer to the query you have STOPPED typing still arrives.
+  signal?.addEventListener('abort', () => ctrl.abort(), { once: true });
   try {
     return await fetch(url, { ...init, signal: ctrl.signal });
   } catch (e) {
@@ -121,8 +126,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms = 20000): Pro
   }
 }
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } });
+async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, undefined, signal);
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText} — ${url}`);
   }
@@ -393,6 +398,29 @@ export const api = {
   },
   resources: (cluster: string, resourceId: string, namespace?: string) =>
     getJson<ResourceRow[]>(`${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}` + nsQuery(namespace)),
+  // Global search across kinds and namespaces (GH#259). The caller is expected to debounce:
+  // one request lists every kind in the bounded set, so a keystroke is not free.
+  search: (cluster: string, q: string, opts?: { namespace?: string | null; limit?: number; signal?: AbortSignal }) => {
+    const p = new URLSearchParams({ q });
+    if (opts?.namespace) {
+      p.set('namespace', opts.namespace);
+    }
+    if (opts?.limit) {
+      p.set('limit', String(opts.limit));
+    }
+    return getJson<SearchResponse>(`${clusterBase(cluster)}/search?${p.toString()}`, opts?.signal);
+  },
+  // One raw object by name — how a search hit is turned into a detail drawer without listing
+  // its whole kind first.
+  object: (cluster: string, resourceId: string, name: string, namespace?: string | null) => {
+    const p = new URLSearchParams({ name });
+    if (namespace) {
+      p.set('namespace', namespace);
+    }
+    return getJson<KubeObject>(
+      `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}/object?${p.toString()}`,
+    );
+  },
   yaml: (cluster: string, resourceId: string, name: string, namespace?: string) =>
     getText(
       `${clusterBase(cluster)}/yaml` +

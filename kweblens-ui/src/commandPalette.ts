@@ -1,4 +1,4 @@
-import type { ClusterInfo, NavCategory, NavItem } from './types';
+import type { ClusterInfo, NavCategory, NavItem, SearchHit, SearchResponse } from './types';
 
 /**
  * Type-to-filter command palette: the fast path for switching cluster and jumping to a
@@ -15,20 +15,22 @@ import type { ClusterInfo, NavCategory, NavItem } from './types';
  */
 
 /** What kind of thing a row does when you pick it. */
-type CommandKind = 'cluster' | 'nav';
+type CommandKind = 'cluster' | 'nav' | 'object';
 
 export interface Command {
   /** Stable key for :key and for tests. */
   key: string;
   kind: CommandKind;
-  /** Primary text — the cluster name, or the kind's label. */
+  /** Primary text — the cluster name, the kind's label, or the object's name. */
   label: string;
-  /** Secondary text: the cluster id, or the category the kind sits under. */
+  /** Secondary text: the cluster id, the category the kind sits under, or `Kind · namespace`. */
   hint: string;
-  /** Cluster id for 'cluster', nav item id for 'nav'. */
+  /** Cluster id for 'cluster', nav item id for 'nav', resource id for 'object'. */
   target: string;
   /** Present only for 'nav' — the item to select, so the caller need not look it up. */
   item?: NavItem;
+  /** Present only for 'object' — everything needed to address and open the object. */
+  hit?: SearchHit;
 }
 
 /**
@@ -150,4 +152,102 @@ export function wrapIndex(index: number, length: number): number {
     return 0;
   }
   return ((index % length) + length) % length;
+}
+
+// ---------------------------------------------------------------------------
+// Global search (GH#259): the same palette, now also finding OBJECTS.
+//
+// Until this, the palette searched navigation targets — it found the Pods kind and never a
+// pod. The server-side engine (web/search) finds objects across a bounded set of kinds; what
+// follows is only how those hits become palette rows, so it stays DOM-free and testable.
+// ---------------------------------------------------------------------------
+
+/** Below this the query is too broad to be worth 13 list calls per keystroke. */
+const MIN_SEARCH_CHARS = 2;
+
+/** How many navigation rows keep their place once object hits arrive — see `mergeCommands`. */
+const NAV_ROWS_WITH_OBJECTS = 5;
+
+/** Whether `query` is worth sending to the search endpoint. */
+export function shouldSearch(query: string): boolean {
+  return query.trim().length >= MIN_SEARCH_CHARS;
+}
+
+/**
+ * Search hits as palette rows.
+ *
+ * The hint is `Kind · namespace` because a bare name is not addressable: names collide across
+ * namespaces, and the reader has to be able to tell the two `postgresql` Services apart before
+ * pressing Enter. Cluster-scoped objects say so rather than showing an empty namespace, which
+ * would read as "namespace unknown".
+ */
+export function objectCommands(hits: SearchHit[]): Command[] {
+  return hits.map((hit) => ({
+    key: `object:${hit.resourceId}:${hit.namespace ?? ''}:${hit.name}`,
+    kind: 'object' as const,
+    label: hit.name,
+    hint: hit.namespace ? `${hit.kind} · ${hit.namespace}` : `${hit.kind} · cluster-scoped`,
+    target: hit.resourceId,
+    hit,
+  }));
+}
+
+/**
+ * Navigation rows first, then object rows.
+ *
+ * Not one merged ranking, deliberately. Navigation matches are computed locally and appear on
+ * the keystroke; object hits arrive ~200ms later over the network. Interleaving the two by
+ * score would re-order the list under the reader's fingers exactly when they are about to
+ * press Enter — the armed row would be a different thing than the one they aimed at. Keeping
+ * the groups in fixed order means arriving results only ever APPEND.
+ *
+ * Navigation is capped when objects are present so the two dozen kinds matching "co" cannot
+ * push every object off the visible list; the cap lifts when there is nothing to make room for.
+ */
+export function mergeCommands(navCommands: Command[], objects: Command[], limit = 30): Command[] {
+  const navCap = objects.length > 0 ? NAV_ROWS_WITH_OBJECTS : limit;
+  return [...navCommands.slice(0, navCap), ...objects].slice(0, limit);
+}
+
+/** One thing the reader should know about the scope of a result set. */
+export interface ScopeNote {
+  text: string;
+  /** Long-form detail for a `title` tooltip (the full list behind a count). */
+  detail?: string;
+}
+
+/**
+ * What this result set does and does not cover, in the reader's words.
+ *
+ * This is the load-bearing half of the feature. Search covers a bounded set of kinds, so a
+ * CRD-backed object simply is not in the results; a dropdown that shows twenty rows and says
+ * nothing else implies it looked everywhere. GH#157 made the overviews report truncation
+ * against the real total for the same reason — a silent cap is a wrong answer, not a short one.
+ */
+export function scopeNotes(result: SearchResponse | null, shown: number): ScopeNote[] {
+  if (!result) {
+    return [];
+  }
+  const notes: ScopeNote[] = [];
+  if (result.total > shown) {
+    notes.push({ text: `showing ${shown} of ${result.total}` });
+  } else {
+    notes.push({ text: `${result.total} ${result.total === 1 ? 'match' : 'matches'}` });
+  }
+  if (result.namespace) {
+    notes.push({ text: `in ${result.namespace}`, detail: 'The namespace filter is scoping these results.' });
+  }
+  if (result.unsearchedKinds.length > 0) {
+    notes.push({
+      text: `${result.unsearchedKinds.length} kinds not searched`,
+      detail: `Global search covers ${result.searchedKinds.length} kinds. Not searched: ${result.unsearchedKinds.join(', ')}.`,
+    });
+  }
+  if (result.skippedKinds.length > 0) {
+    notes.push({
+      text: `${result.skippedKinds.length} could not be listed`,
+      detail: result.skippedKinds.map((k) => `${k.kind}: ${k.reason}`).join('\n'),
+    });
+  }
+  return notes;
 }
