@@ -74,7 +74,24 @@ const ratio = (a, b) => {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 };
-const parse = (s) => (s || '').match(/[\d.]+/g)?.map(Number) ?? null;
+// Colour channels as 0-255, whatever notation the browser returned.
+//
+// `getComputedStyle` does NOT always answer in `rgb()`. Naive UI's controls resolve to
+// `color(srgb 0.890196 0.909804 0.92549 / 0.75)`, whose channels are 0-1 floats. Read as
+// 0-255 those are near-black, so this reported a near-white label on a dark panel as a
+// 1.42:1 FAIL (#245) — a false failure in a gating tool, which is worse than no tool,
+// because it teaches people to ignore the real ones.
+const parse = (s) => {
+  const nums = (s || '').match(/[\d.]+/g)?.map(Number) ?? null;
+  if (!nums || !/^\s*color\(/.test(s)) return nums;
+  if (!/^\s*color\(\s*srgb\b/.test(s)) {
+    // display-p3 and the rest need a real gamut conversion, not a scale factor. Refuse
+    // rather than guess: a wrong number here is indistinguishable from a right one.
+    throw new Error(`unsupported colour space, cannot measure: ${s}`);
+  }
+  // r g b are 0-1; a trailing alpha after `/` is already 0-1 and must not be scaled.
+  return nums.map((n, i) => (i < 3 ? Math.round(n * 255) : n));
+};
 const alphaOf = (s) => {
   const p = parse(s);
   return p && p.length > 3 ? p[3] : 1;
@@ -149,7 +166,15 @@ for (let pass = 0; pass < 2; pass++) {
           // So: collect every translucent layer up to the first opaque one, then composite
           // them bottom-up, which is what the browser does.
           const behind = (el) => {
-            const nums = (c) => (c || '').match(/[\d.]+/g)?.map(Number) ?? null;
+            // Same 0-1 vs 0-255 trap as the parser outside the page (#245): a
+            // `color(srgb ...)` backdrop read as 0-255 is near-black, which makes every
+            // ratio composited against it wrong.
+            const nums = (c) => {
+              const n = (c || '').match(/[\d.]+/g)?.map(Number) ?? null;
+              if (!n || !/^\s*color\(/.test(c)) return n;
+              if (!/^\s*color\(\s*srgb\b/.test(c)) return null; // unknown space: skip this layer
+              return n.map((v, i) => (i < 3 ? Math.round(v * 255) : v));
+            };
             const layers = [];
             let node = el.parentElement;
             let base = [255, 255, 255];
