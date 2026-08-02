@@ -33,7 +33,7 @@ Because it runs as a server rather than on your laptop, the browser needs no kub
 | **Port-forward** | Started and managed from the browser |
 | **Helm** | Releases, history, values, rendered resources, install, upgrade, rollback and uninstall — via [jhelm](https://github.com/alexmond/jhelm), no `helm` binary; mutating actions take a real `dryRun` |
 | **Metrics** | Node and pod CPU/memory from metrics-server, with optional Prometheus/VictoriaMetrics (discovered, or configured explicitly) for node CPU, memory and disk graphs |
-| **Health & diagnostics** | Deterministic workload / network / storage / config health checks shared by the dashboard, the `diagnose` pass and the MCP tools, optionally enriched by an LLM (off unless configured) |
+| **Health & diagnostics** | Deterministic workload / network / storage / config health checks shared by the dashboard, the `diagnose` pass and the MCP tools. An LLM summary can be added on top, but only when you press *Analyse* — reading the diagnosis never calls a model, and a summary is cached (in memory, per process) against the exact findings it was written about |
 | **Remediation** | Four proposed fixes — `restart-pod`, `rollout-restart`, `rollback`, `scale-up` — each offered only when a precondition says it can actually work, and applied only with explicit confirmation |
 | **Cluster management** | Add, edit and remove clusters at runtime from a dedicated Clusters page, not just from config |
 | **Command palette** | `Ctrl`/`⌘`-`K` to switch cluster or jump to a kind |
@@ -126,7 +126,8 @@ but not yet versioned beyond `v1`.
 | `/api/v1/clusters/{id}/pods/{ns}/{pod}/log/stream` | pod log stream (SSE) |
 | `/api/v1/clusters/{id}/schema` | OpenAPI v3 schema for a kind (drives editor validation) |
 | `/api/v1/clusters/{id}/yaml` · `/apply` · `/patch` | read / apply / merge-patch an object |
-| `/api/v1/clusters/{id}/diagnose` | diagnostics findings |
+| `/api/v1/clusters/{id}/diagnose` | diagnostics findings, plus any cached LLM summary — never calls a model |
+| `/api/v1/clusters/{id}/diagnose/summary` (POST) | runs the LLM analysis on demand and caches it (in-memory, per-process) |
 | `/api/v1/clusters/{id}/remediations` · `/apply` | proposed fixes, and applying an approved one |
 | `/api/v1/audit` | audit log of mutating actions (in-memory, last 500) |
 

@@ -11,6 +11,7 @@ import org.alexmond.kweblens.cluster.ClusterConflictException;
 import org.alexmond.kweblens.cluster.InvalidClusterException;
 import org.alexmond.kweblens.cluster.UnknownClusterException;
 import org.alexmond.kweblens.portforward.PortForwardException;
+import org.alexmond.kweblens.web.ai.AiUnavailableException;
 import org.alexmond.kweblens.web.helm.HelmException;
 
 /**
@@ -56,6 +57,20 @@ public class ApiExceptionHandler {
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
 		problem.setTitle("Port-forward failed");
 		problem.setProperties(Map.of("code", "port-forward-failed"));
+		return problem;
+	}
+
+	/**
+	 * An analysis was requested from an instance with no LLM configured. 409 rather than
+	 * 500: nothing broke and nothing was spent — the server is simply not set up to do
+	 * it, which the caller can tell in advance from {@code aiAvailable} on the diagnosis
+	 * read.
+	 */
+	@ExceptionHandler(AiUnavailableException.class)
+	public ProblemDetail aiUnavailable(AiUnavailableException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+		problem.setTitle("AI analysis unavailable");
+		problem.setProperties(Map.of("code", "ai-unavailable"));
 		return problem;
 	}
 

@@ -70,6 +70,10 @@ class DiagnoseEndpointsTest {
 		mvc.perform(get("/api/v1/clusters/test/diagnose").param("namespace", "web"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.aiEnriched").value(false))
+			// No key configured, so the trigger must not be offered at all — a button
+			// that
+			// can only 409 is worse than no button (#251).
+			.andExpect(jsonPath("$.aiAvailable").value(false))
 			.andExpect(jsonPath("$.findings[?(@.title=='CrashLoopBackOff')]").exists())
 			.andExpect(jsonPath("$.findings[?(@.severity=='critical')]").exists());
 	}

@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { countLine, type Finding, groupFindings, parseSummary, severityOf, sortFindings } from './diagnosis';
+import {
+  analyseLabel,
+  analysisNote,
+  analysisState,
+  countLine,
+  type DiagnoseResult,
+  type Finding,
+  groupFindings,
+  parseSummary,
+  relativeAge,
+  severityOf,
+  sortFindings,
+} from './diagnosis';
 
 const f = (severity: string, title = 't'): Finding => ({ severity, title, object: 'Pod/x' });
 
@@ -126,5 +138,103 @@ describe('countLine', () => {
   it('counts each severity present and omits the ones that are not', () => {
     expect(countLine([f('critical'), f('critical'), f('warning')])).toBe('2 critical, 1 warning');
     expect(countLine([f('info')])).toBe('1 info');
+  });
+});
+
+// The manual-trigger contract (#251). That opening the panel never spends an inference call
+// is enforced server-side; what these cover is the half the UI owns — offering the trigger
+// only where it can work, and never letting a cached reading pass as a current one.
+const result = (over: Partial<DiagnoseResult> = {}): DiagnoseResult => ({
+  findings: [f('critical', 'CrashLoopBackOff')],
+  aiAvailable: true,
+  ...over,
+});
+
+describe('analysisState', () => {
+  it('offers nothing when the server has no model', () => {
+    expect(analysisState(result({ aiAvailable: false }))).toBe('unavailable');
+    expect(analysisState(result({ aiAvailable: undefined }))).toBe('unavailable');
+    expect(analysisState(null)).toBe('unavailable');
+  });
+
+  it('offers nothing when there is nothing to summarise', () => {
+    // A healthy scope: a button whose only possible answer is "no problems found" is not
+    // worth an inference call.
+    expect(analysisState(result({ findings: [] }))).toBe('unavailable');
+  });
+
+  it('separates never-analysed, current and overtaken', () => {
+    expect(analysisState(result())).toBe('never');
+    expect(analysisState(result({ summary: 'Restart the api pod.' }))).toBe('current');
+    expect(analysisState(result({ summaryOutdated: true }))).toBe('outdated');
+  });
+
+  it('treats a summary as current only when the server actually sent one', () => {
+    // The server withholds the prose the moment the findings stop matching, so an
+    // `analysedAt` with no `summary` is the stale case, never the fresh one.
+    expect(analysisState(result({ analysedAt: '2026-08-02T12:00:00Z', summaryOutdated: true }))).toBe('outdated');
+  });
+});
+
+describe('analyseLabel', () => {
+  it('says Analyse first and Re-analyse afterwards', () => {
+    expect(analyseLabel('never')).toBe('Analyse');
+    expect(analyseLabel('unavailable')).toBe('Analyse');
+    expect(analyseLabel('current')).toBe('Re-analyse');
+    // Overtaken still counts as "again": a call was already spent on this scope.
+    expect(analyseLabel('outdated')).toBe('Re-analyse');
+  });
+});
+
+describe('relativeAge', () => {
+  const now = Date.parse('2026-08-02T12:00:00Z');
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  it('has nothing to say about a missing or unparseable instant', () => {
+    expect(relativeAge(null, now)).toBeNull();
+    expect(relativeAge(undefined, now)).toBeNull();
+    expect(relativeAge('not a date', now)).toBeNull();
+  });
+
+  it('reads coarsely, in the unit a reader would use', () => {
+    expect(relativeAge(ago(5_000), now)).toBe('just now');
+    expect(relativeAge(ago(60_000), now)).toBe('1 minute ago');
+    expect(relativeAge(ago(20 * 60_000), now)).toBe('20 minutes ago');
+    expect(relativeAge(ago(3 * 3_600_000), now)).toBe('3 hours ago');
+    expect(relativeAge(ago(3 * 86_400_000), now)).toBe('3 days ago');
+  });
+
+  it('does not report a negative age when the clocks disagree', () => {
+    // The server stamps the instant; a browser a few seconds behind must not render
+    // "-1 minutes ago", which reads as a bug rather than as skew.
+    expect(relativeAge(new Date(now + 30_000).toISOString(), now)).toBe('just now');
+  });
+});
+
+describe('analysisNote', () => {
+  const now = Date.parse('2026-08-02T12:00:00Z');
+  const at = (ms: number) => new Date(now - ms).toISOString();
+
+  it('dates the summary it is shown with', () => {
+    const note = analysisNote(result({ summary: 'Restart the api pod.', analysedAt: at(20 * 60_000) }), now);
+    expect(note).toContain('language model');
+    expect(note).toContain('20 minutes ago');
+  });
+
+  it('explains a withheld summary rather than pretending none was ever made', () => {
+    // The failure this prevents: after a rollout the panel silently goes back to
+    // "Analyse", and the reader cannot tell an overtaken verdict from a missing one.
+    const note = analysisNote(result({ summaryOutdated: true, analysedAt: at(2 * 3_600_000) }), now);
+    expect(note).toContain('findings have changed');
+    expect(note).toContain('2 hours ago');
+  });
+
+  it('still explains a withheld summary when the age is unknown', () => {
+    expect(analysisNote(result({ summaryOutdated: true }), now)).toContain('findings have changed');
+  });
+
+  it('says nothing when nothing has been analysed', () => {
+    expect(analysisNote(result(), now)).toBeNull();
+    expect(analysisNote(result({ aiAvailable: false }), now)).toBeNull();
   });
 });

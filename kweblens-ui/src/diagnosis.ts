@@ -36,8 +36,101 @@ export interface Finding {
 
 export interface DiagnoseResult {
   findings: Finding[];
+  /** Present only when an analysis was run AND still describes these exact findings. */
   summary?: string | null;
   aiEnriched?: boolean;
+  /** ISO instant this scope was last analysed — the summary's age, or the stale one's. */
+  analysedAt?: string | null;
+  /** This scope was analysed, but the findings changed, so the old reading is withheld. */
+  summaryOutdated?: boolean;
+  /** Whether the server could run an analysis at all (AI enabled and a key configured). */
+  aiAvailable?: boolean;
+}
+
+/**
+ * What the panel can say about the LLM summary, and therefore what it offers.
+ *
+ * <p>`unavailable` covers both "this server has no model" and "there is nothing to
+ * summarise": in either case a trigger would be a button that cannot help, which is worse
+ * than no button. The other three are the honest states of a cache keyed on the findings —
+ * never analysed, analysed and still applicable, analysed and overtaken by the cluster.
+ */
+export type AnalysisState = 'unavailable' | 'never' | 'current' | 'outdated';
+
+export function analysisState(result: DiagnoseResult | null | undefined): AnalysisState {
+  if (!result || result.aiAvailable !== true || result.findings.length === 0) {
+    return 'unavailable';
+  }
+  if (result.summary) {
+    return 'current';
+  }
+  return result.summaryOutdated === true ? 'outdated' : 'never';
+}
+
+/**
+ * The trigger's label. "Re-analyse" whenever this scope has been analysed before — including
+ * when that reading has been overtaken, because the user is repeating something they already
+ * did, and calling it "Analyse" would hide that a call was already spent here.
+ */
+export function analyseLabel(state: AnalysisState): string {
+  return state === 'current' || state === 'outdated' ? 'Re-analyse' : 'Analyse';
+}
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/**
+ * How long ago an instant was, in words — the whole point of point 4 of the issue.
+ *
+ * <p>Deliberately coarse and never precise-looking: the reader needs "is this from before
+ * the rollout I just did", not a duration. A future timestamp (clock skew between the
+ * browser and a server in another zone) reads as "just now" rather than as a negative age.
+ */
+export function relativeAge(iso: string | null | undefined, now: number = Date.now()): string | null {
+  if (!iso) {
+    return null;
+  }
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) {
+    return null;
+  }
+  const ago = Math.max(0, now - at);
+  if (ago < 45_000) {
+    return 'just now';
+  }
+  if (ago < 90 * MINUTE) {
+    return plural(Math.round(ago / MINUTE), 'minute');
+  }
+  if (ago < 36 * HOUR) {
+    return plural(Math.round(ago / HOUR), 'hour');
+  }
+  return plural(Math.round(ago / DAY), 'day');
+}
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * The sentence under the summary, or the one that replaces it.
+ *
+ * <p>A summary that reads as current when it predates a rollout is worse than none, so the
+ * two cases that need saying out loud both do: a shown summary carries its age, and a
+ * withheld one says why it is missing instead of silently reverting to "never analysed".
+ */
+export function analysisNote(result: DiagnoseResult | null | undefined, now: number = Date.now()): string | null {
+  const state = analysisState(result);
+  const age = relativeAge(result?.analysedAt, now);
+  if (state === 'current') {
+    const when = age ? `, ${age}` : '';
+    return `Written by a language model from the findings below${when}.`;
+  }
+  if (state === 'outdated') {
+    const when = age ? ` ${age}` : '';
+    return `The findings have changed since this was analysed${when}, so that summary is no longer shown.`;
+  }
+  return null;
 }
 
 const BOLD = /\*\*([^*]+)\*\*/g;

@@ -1,5 +1,6 @@
 package org.alexmond.kweblens.web.ai;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -29,8 +30,17 @@ import org.alexmond.kweblens.resource.ResourceService;
  * Validates and troubleshoots a cluster/namespace. Deterministic validators run first —
  * no LLM, so this always returns grounded findings and works in CI. When
  * {@code kweblens.ai.enabled} is on and an Anthropic {@link ChatClient} is available, the
- * LLM is fed those real findings to produce a prioritized root-cause summary (it reasons
- * over observed evidence, not invented state). Read-only.
+ * LLM can be fed those real findings to produce a prioritized root-cause summary (it
+ * reasons over observed evidence, not invented state). Read-only.
+ *
+ * <p>
+ * <b>The two entry points are not symmetric, on purpose (#251).</b> {@link #diagnose}
+ * runs the validators and serves whatever summary the {@link DiagnosisSummaryCache}
+ * already holds for exactly those findings — it never calls a model. {@link #analyse} is
+ * the only thing in kweblens that does, and it exists because somebody pressed a button:
+ * inference costs money and ships cluster state to a third party, so it is a non-GET,
+ * auth-gated in both security modes, and audited. Panel mounts and namespace switches
+ * used to buy an analysis each; now they cost nothing.
  */
 @Slf4j
 @Service
@@ -128,7 +138,50 @@ public class DiagnoseService {
 
 	private final WorkloadLookup workloads;
 
+	private final DiagnosisSummaryCache summaries;
+
+	/**
+	 * Read the diagnosis. Deterministic only — this MUST NOT reach a model, however
+	 * tempting a cache miss makes it. The summary it returns was bought by an earlier
+	 * {@link #analyse} and is served only when the findings still fingerprint the same.
+	 */
 	public DiagnoseResult diagnose(String clusterId, String namespace) {
+		List<Finding> findings = findings(clusterId, namespace);
+		return served(clusterId, namespace, findings, DiagnosisSummaryCache.fingerprint(findings));
+	}
+
+	/**
+	 * Buy an analysis of this scope, replacing any cached one.
+	 *
+	 * <p>
+	 * Always re-runs on a hit: the caller pressed "Re-analyse" against a summary they can
+	 * already see, so quietly returning that same summary would answer a request nobody
+	 * made. Empty findings short-circuit — there is nothing to summarise and no reason to
+	 * spend a call saying so.
+	 */
+	public DiagnoseResult analyse(String clusterId, String namespace) {
+		ChatClient.Builder builder = availableClient();
+		if (builder == null) {
+			throw new AiUnavailableException(
+					"AI analysis is not configured on this server (kweblens.ai.enabled and an API key are required).");
+		}
+		List<Finding> findings = findings(clusterId, namespace);
+		String fingerprint = DiagnosisSummaryCache.fingerprint(findings);
+		if (!findings.isEmpty()) {
+			String summary = summarize(builder, findings);
+			if (summary != null) {
+				this.summaries.put(clusterId, namespace, fingerprint, summary, findings.size());
+			}
+			// A null summary means the model was called and did not answer usably.
+			// Nothing
+			// is cached, so the trigger stays live rather than pinning a failure until
+			// the
+			// findings happen to change.
+		}
+		return served(clusterId, namespace, findings, fingerprint);
+	}
+
+	private List<Finding> findings(String clusterId, String namespace) {
 		List<Finding> findings = new ArrayList<>();
 		findings.addAll(checkPods(clusterId, namespace));
 		findings.addAll(checkRelational(clusterId, namespace));
@@ -136,17 +189,31 @@ public class DiagnoseService {
 		// evidence rather than repeat it.
 		findings.addAll(checkEvents(clusterId, namespace, findings));
 		findings.sort(BY_SEVERITY);
+		return List.copyOf(findings);
+	}
 
-		String summary = null;
-		boolean enriched = false;
-		if (aiProperties.isEnabled() && !findings.isEmpty()) {
-			ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
-			if (builder != null) {
-				summary = summarize(builder, findings);
-				enriched = summary != null;
-			}
+	/**
+	 * What a caller is shown for this scope — the single place that decides whether a
+	 * stored summary is still allowed to be seen, so the read and the trigger cannot
+	 * drift apart on the question.
+	 */
+	private DiagnoseResult served(String clusterId, String namespace, List<Finding> findings, String fingerprint) {
+		boolean available = availableClient() != null;
+		DiagnosisSummaryCache.CachedSummary cached = this.summaries.find(clusterId, namespace, fingerprint);
+		if (cached != null) {
+			return new DiagnoseResult(findings, cached.summary(), true, cached.producedAt(), false, available);
 		}
-		return new DiagnoseResult(List.copyOf(findings), summary, enriched);
+		// No usable summary. If this scope WAS analysed, say when — an unexplained
+		// "never analysed" after the reader has seen one reads as the panel losing it.
+		Instant superseded = this.summaries.supersededAt(clusterId, namespace, fingerprint);
+		return new DiagnoseResult(findings, null, false, superseded, superseded != null, available);
+	}
+
+	/**
+	 * The chat client to use, or null when this instance cannot run an analysis at all.
+	 */
+	private ChatClient.Builder availableClient() {
+		return this.aiProperties.isEnabled() ? this.chatClientBuilder.getIfAvailable() : null;
 	}
 
 	private List<Finding> checkPods(String clusterId, String namespace) {
