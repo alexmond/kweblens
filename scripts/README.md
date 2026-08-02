@@ -8,8 +8,11 @@ once — the reason is in the header comment of each script.
 | [`dev-verify.sh`](dev-verify.sh) | Format + full-reactor `verify`. **Green here means green on the PR.** |
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
+| [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
+| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
+| [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
 | [`pr-watch.sh`](pr-watch.sh) | Wait for a PR's checks; optionally merge when they pass. |
 | [`deploy-k8s.sh`](deploy-k8s.sh) | Build/push the image and `helm upgrade --install`. |
 
@@ -80,7 +83,29 @@ PORT=8085 node scripts/contrast-check.mjs
 PREPARE='press:Control+k;fill:.palette-input=pod' node scripts/contrast-check.mjs '.palette-row.active'
 
 node scripts/perf-sweep.mjs                            # needs a cluster or --sim
+
+node scripts/ui-shot.mjs                               # 3 widths x 2 themes of the shell
+node scripts/ui-shot.mjs --leaf Pods --view wide
+node scripts/ui-measure.mjs --view wide '.n-drawer' '.drawer-title'
 ```
+
+`ui-shot.mjs` defaults to the **matrix**, not one image, because captures here were taken
+ad hoc at roughly one width in one theme and that shaped what got found: a 338-character
+prose line (#235) survived weeks of screenshots that were all ~1400px, and the
+black-on-black stat cards survived because the captures were light-mode. Output goes to
+`.playwright/shots/` — **gitignored, and it must stay that way**: these are pictures of a
+live cluster and carry its API-server hostname, node names and namespaces.
+
+`ui-measure.mjs` settles size the way `contrast-check.mjs` settles colour — box, overflow
+against the nearest clipping ancestor, and characters per line — and exits non-zero over
+budget. An `absent` selector is a **failed** measurement, not a pass, the same trap as
+`not present` above.
+
+Both take `--view narrow|normal|wide` (1024/1400/1900), `--theme`, `--leaf`, `--path` and
+`PREPARE`. Shared plumbing lives in [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs);
+`contrast-check.mjs` and `perf-sweep.mjs` predate it and deliberately still carry their own
+copies — they are the instruments that caught real defects, and rewriting a working
+measuring tool for tidiness is how you end up with one you cannot trust.
 
 `contrast-check.mjs` exists because eyeballing colour has failed here repeatedly — the
 StatusBadge tag shipped at 1.93:1 (#169), and the command palette's first two stylings

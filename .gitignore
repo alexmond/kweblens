@@ -30,3 +30,7 @@ kubeconfig
 
 # Screenshot-tour output lands in the module dir (surefire CWD); the deck lives in /presentation
 kweblens-web/presentation/
+
+# Playwright captures: these are pictures of a live cluster and contain its API
+# server hostname, node names and namespaces. Never commit one.
+.playwright/
