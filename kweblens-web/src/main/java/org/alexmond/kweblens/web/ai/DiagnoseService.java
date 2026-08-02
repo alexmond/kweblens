@@ -173,10 +173,8 @@ public class DiagnoseService {
 				this.summaries.put(clusterId, namespace, fingerprint, summary, findings.size());
 			}
 			// A null summary means the model was called and did not answer usably.
-			// Nothing
-			// is cached, so the trigger stays live rather than pinning a failure until
-			// the
-			// findings happen to change.
+			// Nothing is cached, so the trigger stays live rather than pinning a
+			// failure until the findings happen to change.
 		}
 		return served(clusterId, namespace, findings, fingerprint);
 	}
