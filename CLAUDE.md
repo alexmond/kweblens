@@ -125,6 +125,13 @@ header, and log it.
   simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as cluster
   `default` on startup; `ClusterConfigApiController` in `web/api/` adds/edits/removes clusters
   at runtime). `/actuator/{health,info,metrics,prometheus}` exposed.
+  **A `GET` never calls a model (#251).** `DiagnoseService.diagnose()` returns the deterministic
+  findings plus only what `DiagnosisSummaryCache` already holds *for exactly those findings* —
+  a SHA-256 of the finding list is the key, so a cluster that changed is a miss rather than a
+  stale verdict, and the cache is in-memory/per-process like `AuditService`. `analyse()`
+  (`POST /api/v1/clusters/{id}/diagnose/summary`, hence auth-gated in both security modes, and
+  audited) is the only caller of the LLM. Do not reintroduce an on-read or on-stale
+  auto-analysis.
   **Not published** — ships as a container image.
 - **`kweblens-cli`** — a dependency-light cluster inspector (picocli). Prints the cluster the
   ambient kubeconfig points at. **Published**; runnable fat jar is the `exec` classifier.

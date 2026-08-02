@@ -25,9 +25,14 @@ const props = defineProps<{
   namespace?: string | null;
   /** Whether the shell can navigate to a kind — a row with nowhere to go must not look clickable. */
   knowsKind?: (kind: string) => boolean;
+  /** Passed to the diagnosis panel: its Analyse trigger is a POST and needs the admin login. */
+  authed?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: 'navigate', kind: string, namespace?: string): void }>();
+const emit = defineEmits<{
+  (e: 'navigate', kind: string, namespace?: string): void;
+  (e: 'require-auth'): void;
+}>();
 
 const nodes = shallowRef<KubeObject[] | null>(null);
 const warnings = shallowRef<EventSummary[] | null>(null);
@@ -119,7 +124,12 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
     </div>
     <!-- Diagnosis sits above Warnings: warnings are raw events, diagnosis is the reading
          of them plus what to do. Reason before evidence. -->
-    <DiagnosisPanel :cluster="cluster" :namespace="namespace ?? null" />
+    <DiagnosisPanel
+      :cluster="cluster"
+      :namespace="namespace ?? null"
+      :authed="authed"
+      @require-auth="emit('require-auth')"
+    />
 
     <section class="ov-sec">
       <h3>Warnings</h3>

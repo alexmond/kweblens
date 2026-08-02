@@ -66,6 +66,15 @@ class SecurityGateTest {
 	}
 
 	@Test
+	void diagnosisReadsArePublicButAnalysingIsNot() throws Exception {
+		// Reading the diagnosis is deterministic and free, so it stays on the public read
+		// path. Asking for the LLM summary spends money and ships cluster state to an
+		// inference provider, so it is a non-GET and lands behind the admin login (#251).
+		mvc.perform(get("/api/v1/clusters/default/diagnose")).andExpect(status().isNotFound());
+		mvc.perform(post("/api/v1/clusters/default/diagnose/summary")).andExpect(status().isUnauthorized());
+	}
+
+	@Test
 	void helmReposRemainPublicInOpenMode() throws Exception {
 		// Repo names/URLs aren't secret — the repos list stays a public read in
 		// open-mode.

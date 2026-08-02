@@ -3618,6 +3618,30 @@ body.dragging {
   color: var(--muted);
 }
 
+/* The one control on this panel that spends money (#251), so it sits at the end of the
+   header rather than beside the title — read the count, then decide. Plain .btn: no new
+   colours, so nothing here can drift below the contrast floor. */
+.dx-analyse {
+  margin-left: auto;
+}
+
+.dx-analyse-error {
+  color: var(--danger-fg);
+}
+
+/* "There was a summary and it no longer applies." Full-strength text, not muted: it is a
+   correction to something the reader may have read, not a footnote. */
+.dx-stale {
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn-fg);
+  border-radius: 8px;
+}
+
 .dx-summary {
   padding: 12px 14px;
   margin-bottom: 12px;

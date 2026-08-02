@@ -341,7 +341,9 @@ const onForwardStarted = () => {
                 :namespace-count="namespaces.length"
                 :namespace="namespace"
                 :knows-kind="knowsKind"
+                :authed="!!authUser"
                 @navigate="navigateToKind"
+                @require-auth="showLogin = true"
               />
               <CategoryOverview
                 v-else-if="overviewCategory"

@@ -7,14 +7,30 @@
 // fix. Same question, more depth — so it belongs on the same page, below the tallies.
 //
 // The summary is rendered from parsed spans, never as HTML. See diagnosis.ts for why.
-import { computed } from 'vue';
+//
+// MOUNTING THIS COSTS NOTHING (#251). The GET is deterministic: findings plus whatever
+// summary is already cached for exactly those findings. The model is called only by the
+// Analyse button, which is a POST and therefore needs the admin login — so the panel takes
+// `authed` and asks for a sign-in rather than firing a request that would 401. Do not move
+// the analysis back onto load, however convenient an "auto-refresh on stale" would feel.
+import { computed, ref } from 'vue';
 
 import { api } from '../api';
-import { countLine, type DiagnoseResult, groupFindings, parseSummary, sortFindings } from '../diagnosis';
+import {
+  analyseLabel,
+  analysisNote,
+  analysisState,
+  countLine,
+  type DiagnoseResult,
+  groupFindings,
+  parseSummary,
+  sortFindings,
+} from '../diagnosis';
 import { useAsyncData } from '../composables/useAsyncData';
 import ErrorNotice from './ErrorNotice.vue';
 
-const props = defineProps<{ cluster: string; namespace: string | null }>();
+const props = defineProps<{ cluster: string; namespace: string | null; authed?: boolean }>();
+const emit = defineEmits<{ (e: 'require-auth'): void }>();
 
 const { data, loading, error, reload } = useAsyncData<DiagnoseResult>(
   () => [props.cluster, props.namespace],
@@ -25,6 +41,32 @@ const findings = computed(() => sortFindings(data.value?.findings ?? []));
 const groups = computed(() => groupFindings(data.value?.findings ?? []));
 const blocks = computed(() => parseSummary(data.value?.summary));
 const enriched = computed(() => data.value?.aiEnriched === true);
+const state = computed(() => analysisState(data.value));
+const note = computed(() => analysisNote(data.value));
+const label = computed(() => analyseLabel(state.value));
+
+const analysing = ref(false);
+const analyseError = ref<string | null>(null);
+
+/**
+ * Spend the call. Guarded on `authed` first so an unauthenticated click opens the sign-in
+ * dialog instead of burning a round-trip on a guaranteed 401.
+ */
+const analyse = async () => {
+  if (!props.authed) {
+    emit('require-auth');
+    return;
+  }
+  analysing.value = true;
+  analyseError.value = null;
+  try {
+    data.value = await api.analyseDiagnosis(props.cluster, props.namespace ?? undefined);
+  } catch (e: unknown) {
+    analyseError.value = String(e);
+  } finally {
+    analysing.value = false;
+  }
+};
 </script>
 
 <template>
@@ -32,15 +74,27 @@ const enriched = computed(() => data.value?.aiEnriched === true);
     <header class="dx-head">
       <h3 class="dx-title">Diagnosis</h3>
       <span v-if="data && !loading" class="dx-count">{{ countLine(findings) }}</span>
+      <!-- Offered only where it can work: a model is configured and there is something to
+           summarise. The label says whether a call has already been spent on this scope. -->
+      <button
+        v-if="data && !loading && state !== 'unavailable'"
+        class="btn dx-analyse"
+        :disabled="analysing"
+        :title="authed ? 'Send these findings to the configured language model' : 'Sign in to run the analysis'"
+        @click="analyse"
+      >
+        {{ analysing ? 'Analysing…' : label }}
+      </button>
     </header>
 
     <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
     <p v-else-if="loading" class="dx-note">Checking…</p>
 
     <template v-else-if="data">
-      <!-- The summary is optional and its absence is normal: it needs an LLM key, and the
-           findings below stand on their own without one. Say so rather than implying a
-           failure. -->
+      <p v-if="analyseError" class="dx-note dx-analyse-error">Analysis failed: {{ analyseError }}</p>
+
+      <!-- The summary is optional and its absence is normal: it needs an LLM key AND an
+           explicit run, and the findings below stand on their own without one. -->
       <div v-if="enriched && blocks.length" class="dx-summary">
         <template v-for="(b, i) in blocks" :key="i">
           <h4 v-if="b.kind === 'heading'" class="dx-h">
@@ -50,8 +104,14 @@ const enriched = computed(() => data.value?.aiEnriched === true);
             <span v-for="(s, j) in b.spans" :key="j" :class="s.bold ? 'dx-b' : ''">{{ s.text }}</span>
           </p>
         </template>
-        <p class="dx-attrib">Written by a language model from the findings below.</p>
+        <!-- Who wrote it AND when. A reading from before a rollout that presents as current
+             is worse than no reading at all. -->
+        <p class="dx-attrib">{{ note }}</p>
       </div>
+
+      <!-- Analysed once, then the cluster moved: say so instead of quietly reverting to the
+           never-analysed state, which reads as the panel having lost the answer. -->
+      <p v-else-if="state === 'outdated'" class="dx-stale">{{ note }}</p>
 
       <!-- Grouped by title so one repeated check cannot crowd out the rest. Nothing is
            hidden: every finding is still listed under its heading. -->

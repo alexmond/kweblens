@@ -256,9 +256,21 @@ export const api = {
   // Read-only diagnostics (#27): what a cluster supports, and how this instance is configured.
   clusterDiagnostics: (cluster: string) => getJson<ClusterDiagnostics>(`${clusterBase(cluster)}/diagnostics`),
   about: () => getJson<AboutInfo>('/api/v1/about'),
-  /** Findings with reasons and fixes, plus an LLM summary when a key is configured (#218). */
+  /**
+   * Findings with reasons and fixes, plus any summary already cached for exactly those
+   * findings (#218/#251). Deterministic and free — this never starts an inference call, so
+   * it is safe to re-run on every mount and namespace change.
+   */
   diagnose: (cluster: string, namespace?: string) =>
     getJson<DiagnoseResult>(`${clusterBase(cluster)}/diagnose` + nsQuery(namespace)),
+  /**
+   * Spend an inference call on this scope and cache the result (#251). A POST because it is
+   * write-shaped — it costs money and ships cluster state to a third party — which also puts
+   * it behind the admin login in both security modes. The cache it fills is in-memory and
+   * per-process: a server restart loses it, and that costs another call, never a wrong answer.
+   */
+  analyseDiagnosis: (cluster: string, namespace?: string) =>
+    postJson<DiagnoseResult>(`${clusterBase(cluster)}/diagnose/summary` + nsQuery(namespace)),
   // Per-kind workload health, computed server-side (GH#153/#155): tallies plus the NAMED
   // objects needing attention, so the browser no longer fetches whole collections to count.
   /** A category dashboard: per-kind tallies plus the named objects needing attention. */
