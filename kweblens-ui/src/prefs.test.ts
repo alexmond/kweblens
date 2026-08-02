@@ -5,10 +5,12 @@ import {
   loadDark,
   loadHiddenCols,
   loadNamespace,
+  loadNavCollapsed,
   saveCluster,
   saveDark,
   saveHiddenCols,
   saveNamespace,
+  saveNavCollapsed,
 } from './prefs';
 
 // Preferences must never throw into a render: a corrupt value or a browser that refuses
@@ -85,6 +87,16 @@ describe('theme', () => {
     expect(loadDark()).toBe(false);
     saveDark(true);
     expect(loadDark()).toBe(true);
+  });
+});
+
+describe('nav collapse', () => {
+  it('defaults to expanded and round-trips a choice', () => {
+    expect(loadNavCollapsed()).toBe(false);
+    saveNavCollapsed(true);
+    expect(loadNavCollapsed()).toBe(true);
+    saveNavCollapsed(false);
+    expect(loadNavCollapsed()).toBe(false);
   });
 });
 
