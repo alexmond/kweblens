@@ -116,6 +116,26 @@ describe('groupFindings', () => {
     expect(groups.flatMap((g) => g.findings)).toHaveLength(16);
   });
 
+  it('never puts two severities in one group', () => {
+    // A group carries ONE badge, taken from its first member, so keying on title alone
+    // would badge warnings as CRITICAL and hide the split entirely. #223 made this real
+    // by splitting the no-endpoints check so the deliberately scaled-to-zero case reports
+    // as a warning while the others stay critical.
+    const groups = groupFindings([
+      { severity: 'critical', title: 'Same title', object: 'Service/a' },
+      { severity: 'warning', title: 'Same title', object: 'Service/b' },
+      { severity: 'warning', title: 'Same title', object: 'Service/c' },
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].severity).toBe('critical');
+    expect(groups[0].findings).toHaveLength(1);
+    expect(groups[1].severity).toBe('warning');
+    expect(groups[1].findings).toHaveLength(2);
+    for (const g of groups) {
+      expect(new Set(g.findings.map((x) => x.severity)).size).toBe(1);
+    }
+  });
+
   it('orders groups by severity, not by how many there are', () => {
     // A pile of warnings must not outrank one critical.
     const groups = groupFindings([f('warning', 'a'), f('warning', 'a'), f('warning', 'a'), f('critical', 'b')]);

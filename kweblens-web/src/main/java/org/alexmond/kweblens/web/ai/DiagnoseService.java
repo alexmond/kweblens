@@ -66,6 +66,30 @@ public class DiagnoseService {
 			+ " it is meant to match.";
 
 	/**
+	 * The idle case gets its own title and a lower severity (#223), because it is not the
+	 * same kind of event as the others.
+	 *
+	 * <p>
+	 * On a real cluster this one check produced 16 of 22 criticals and buried an
+	 * ImagePullBackOff and an OOM kill — the two things anyone would actually act on. But
+	 * 11 of those 16 were "a workload is deliberately scaled to zero", which is a state
+	 * somebody <i>chose</i>. Nothing is failing and nothing is degraded, so reporting it
+	 * at the same severity as a crash loop is what makes the panel hard to read.
+	 *
+	 * <p>
+	 * The remaining causes stay critical: "no workload carries this selector" means
+	 * nothing will ever back this Service, which is a genuine misconfiguration. So this
+	 * is a statement about the <b>cause</b>, not a judgement about how much anyone cares
+	 * about Services in general — that distinction is why it is safe to make.
+	 *
+	 * <p>
+	 * Warning rather than info on purpose: a Service pointing at a scaled-down workload
+	 * is worth noticing when you did not expect it, and info risks it never being seen. A
+	 * scale-up remediation is still offered, so this is a warning with a one-click fix.
+	 */
+	private static final String IDLE_TITLE = "Service points at a scaled-down workload";
+
+	/**
 	 * Cap on the problem groups sent to the model — the findings are grouped first, so
 	 * this is 25 <em>distinct</em> problems, not 25 objects. A cluster whose findings all
 	 * say the same thing costs one group; only a cluster with more than 25 genuinely
@@ -246,10 +270,13 @@ public class DiagnoseService {
 		// The detail is left EXACTLY as the health check produced it. RemediationService
 		// selects the scale-up proposal with `NO_ENDPOINTS.equals(finding.detail())`, so
 		// appending the workload name here — which the first version of this did —
-		// matches
-		// nothing and silently stops the fix being offered at all. Everything this knows
-		// goes in the advice instead, which no one matches on.
+		// matches nothing and silently stops the fix being offered at all. Everything
+		// this knows goes in the title, severity and advice instead, none of which
+		// anyone matches on.
 		String fix = (backing != null) ? fixFor(backing) : SELECTOR_ADVICE;
+		if (backing != null && backing.cause() == ServiceBacking.Cause.IDLE_WORKLOAD) {
+			return new Finding("warning", IDLE_TITLE, object, item.reason(), fix, "validator");
+		}
 		return new Finding("critical", "Service has nothing behind it", object, item.reason(), fix, "validator");
 	}
 
