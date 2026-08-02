@@ -100,10 +100,8 @@ PREPARE='?click:.linkbtn:has-text("Sign in");?fill:.n-modal input[type=password]
   node scripts/contrast-check.mjs '.files-saved'
 ```
 
-One limitation to know: the backdrop is composited one level up, so a nested element
-inside a translucent panel is measured against that panel's colour at full opacity and can
-read far darker than it is. Measure the panel — its text-bearing children are sampled with
-it — rather than a bare descendant selector.
+Measuring the panel is still usually the better call — its text-bearing children are
+sampled along with it, so one selector covers the row.
 
 ## Watching CI
 
