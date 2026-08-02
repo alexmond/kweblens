@@ -45,7 +45,7 @@ and the reason is in its own header comment — read that before changing one.
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
 | `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line. Exits 1 over budget. |
-| `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, composited properly. Exits 1 under the floor. |
+| `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
 | `dev-verify.sh` | Before every commit. Format + full reactor. Green here means green on the PR. |
@@ -85,9 +85,11 @@ until it times out and takes the run with it.
 
 ## Rules that keep the results true
 
-**An absent selector is a failed run, not a pass.** `contrast-check` prints `not present`
-and `ui-measure` prints `absent` rather than quietly succeeding. A screenful of those means
-you measured nothing. Use `--leaf` / `--path` / `PREPARE` and measure again.
+**An absent selector is a failed run, not a pass.** `contrast-check` prints `not present`,
+`present, but no text of its own`, `covered by another layer` or `outside the viewport`, and
+`ui-measure` prints `absent`, rather than quietly succeeding. A screenful of those means you
+measured nothing. Use `--leaf` / `--path` / `PREPARE`, a wider `--view`, or close the drawer
+that is sitting on top of what you asked for, and measure again.
 
 **Look at both themes and both extremes of width.** Every default here is a matrix for
 that reason. A dark-mode-only defect and a wide-viewport-only defect have both shipped.
@@ -146,8 +148,25 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   FAIL. Decoded pixel said `rgb(255,255,255)`; the tool said `rgb(27,42,51)`. → Filed as
   **#250** with the evidence and a fix (sample the rendered pixel instead of deriving the
   backdrop from the DOM) rather than rewritten in passing — this instrument has now been
-  wrong three times, and hasty is how it got there. **Until #250 lands, treat any reading
-  taken through a Naive control as suspect and check it against a decoded pixel.**
+  wrong three times, and hasty is how it got there. **FIXED** — see the next entry.
+- 2026-08-02 — #250 fixed: `contrast-check` no longer derives the backdrop from the DOM at
+  all. It hides every glyph, screenshots the viewport, and takes the **mode** of the decoded
+  pixels under each text run; the ancestor walk survives only as a cross-check whose
+  disagreements are printed under the table. `.bar-filter` went 1.21:1 FAIL → 12.16:1 pass,
+  and `.mini th` went from an invisible 1.00:1 to the 4.40:1 that had to be hand-measured for
+  #247. Three things the rewrite taught, each now pinned by a `--self-test` control:
+  **(a) hide the text rather than dodging it** — under `color: transparent` every pixel in the
+  run's own rect is backdrop, so there is no sample point left to land on a glyph;
+  **(b) a pixel needs the element to be ON SCREEN, which the DOM walk never did** — the first
+  run against an open drawer reported `+ Create` at 1.00:1 (it sits *behind* the drawer) and
+  sampled row buttons parked at x=1594 in a 1400px window. Both now say `covered by another
+  layer` / `outside the viewport`, and are never back-filled from the walk;
+  **(c) `textContent` is recursive, so wrappers were measured as if they held their children's
+  text** — three `.bar-filter` wrappers sampled the white select box while carrying the top
+  bar's inherited colour and read 1.17:1 for text that does not exist. Only elements with a
+  direct text node are measured now. **When you replace how a measurement is taken, write the
+  positive controls first: five of the seven in `--self-test` exist because they caught
+  something inside this one change.**
 - 2026-08-02 — `ui-measure`'s first version estimated characters-per-line as
   `width / (fontSize * 0.5)`. Against a known 900px of 14px monospace (8.40px per glyph) it
   read 129 where the truth was 107 — **20.6% out, in the direction that invents defects**.

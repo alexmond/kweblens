@@ -2,6 +2,15 @@
 :root {
   --bar-bg: #1b2a33;
   --bar-fg: #e8eef2;
+  /* Secondary text and links for the bars, which stay DARK in both themes (#170, #244).
+     A surface whose colour does not follow the theme must not take its text from the
+     palette that happens to be active: the app footer used --muted / --accent and so
+     painted light-theme greys on a dark bar at 2.48:1 and 3.21:1. These are derived from
+     --bar-fg / --bar-bg / --accent, so they follow the SURFACE and are defined once rather
+     than needing a kw-dark override that is easy to forget. Measured on both bars:
+     --bar-muted 6.48:1 light / 7.28:1 dark, --bar-link 6.00:1 / 9.22:1. */
+  --bar-muted: color-mix(in srgb, var(--bar-fg) 68%, var(--bar-bg));
+  --bar-link: color-mix(in srgb, var(--accent) 55%, var(--bar-fg));
   --accent: #0a7ac2;
   --bg: #f4f6f8;
   --panel: #ffffff;
@@ -1331,7 +1340,11 @@ body {
 }
 
 .mini th {
-  color: color-mix(in srgb, var(--accent) 65%, var(--muted));
+  /* Mixed with --text, not --muted (#247). The muted mix measured 4.40:1 in the light theme
+     against this header's own tint — under the 4.5:1 floor for 11px/600 text — and cleared
+     dark by only 0.08. --text is the darker partner in light and the lighter one in dark, so
+     the SAME 65% accent share keeps the blue and now measures 5.88:1 / 5.90:1. */
+  color: color-mix(in srgb, var(--accent) 65%, var(--text));
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
@@ -2651,12 +2664,13 @@ body.dragging {
   padding: 0 14px;
   border-top: 1px solid var(--border);
   background: var(--bar-bg);
-  color: var(--muted);
+  /* On-bar tokens, not palette tokens — the bar is dark in BOTH themes (#244). */
+  color: var(--bar-muted);
   font-size: 11px;
   line-height: 1;
 }
 .app-footer .repo-link {
-  color: var(--accent);
+  color: var(--bar-link);
   text-decoration: none;
 }
 .app-footer .repo-link:hover {

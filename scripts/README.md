@@ -81,6 +81,7 @@ node scripts/contrast-check.mjs                        # the default watchlist
 node scripts/contrast-check.mjs '.leaf.active' '.badge'
 PORT=8085 node scripts/contrast-check.mjs
 PREPARE='press:Control+k;fill:.palette-input=pod' node scripts/contrast-check.mjs '.palette-row.active'
+node scripts/contrast-check.mjs --self-test             # positive controls; no running app
 
 node scripts/perf-sweep.mjs                            # needs a cluster or --sim
 
@@ -109,20 +110,29 @@ measuring tool for tidiness is how you end up with one you cannot trust.
 
 `contrast-check.mjs` exists because eyeballing colour has failed here repeatedly — the
 StatusBadge tag shipped at 1.93:1 (#169), and the command palette's first two stylings
-measured 3.02:1 and 3.80:1 while looking perfectly fine (#200). It composites translucent
-backgrounds over their real backdrop, which is the step hand-calculation gets wrong, reads
-the active theme from the DOM rather than assuming a toggle order, and **exits non-zero**
-when anything is under its floor, so it can gate a change.
+measured 3.02:1 and 3.80:1 while looking perfectly fine (#200). It reads the active theme
+from the DOM rather than assuming a toggle order, and **exits non-zero** when anything is
+under its floor, so it can gate a change.
 
-It composites **every** translucent layer down to the first opaque ancestor, which is what
-the browser paints. An earlier version stopped at the first non-transparent ancestor and
-treated it as opaque, so nested tints — a notice inside a tinted panel — read far too dark
-and it reported failures for text that was fine. Verified against rendered pixels: computed
-`rgb(41,63,80)` vs the browser's `rgb(40,63,79)` for a three-layer stack.
+**The backdrop is decoded from the rendered image, not derived from the DOM.** It hides
+every glyph, screenshots the viewport, and takes the modal pixel under each text run — so
+the answer is ground truth by construction, and a sample cannot land on a letter and report
+the ink as the background. Earlier versions walked `parentElement` upward instead, which is
+right about the cascade and wrong about paint order: Naive UI paints a select's white box as
+a *sibling* of the input, so the walk climbed past it to the dark top bar and called a real
+12.16:1 a **1.21:1 FAIL** (#250). The ancestor walk is still run as a **cross-check** and any
+disagreement is printed under the table — that disagreement is what surfaced #250.
 
-A selector that is not currently on screen reports `not present` rather than passing —
-use `PREPARE` to open the thing first. Treat a screenful of `not present` as a failed run,
-not a clean one.
+Run `node scripts/contrast-check.mjs --self-test` after touching any of that. It measures a
+built-in fixture whose answers are arithmetic — an opaque element, a tint over a panel, a
+three-layer stack (the case the compositing fix was verified against: computed `rgb(41,63,80)`
+vs the browser's `rgb(40,63,79)`), the sibling-paint shape from #250, dense glyphs, and the
+two unmeasurable cases below. No running app needed.
+
+Nothing measured is reported as such, never as a pass: `not present`, `present, but no text
+of its own` (a wrapper whose text belongs to a child), `covered by another layer` (an element
+behind the open drawer) and `outside the viewport`. Treat a screenful of those as a failed
+run — use `PREPARE`, a wider `--view`, or close the drawer, and measure again.
 
 `PREPARE` steps are `press:` / `click:` / `fill:<sel>=<text>` / `upload:<sel>=<path>` /
 `wait:<ms>`, and a step prefixed with `?` is skipped when its selector is not on screen.
