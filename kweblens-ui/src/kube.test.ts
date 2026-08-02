@@ -15,6 +15,7 @@ import {
   parseCpuCores,
   parseMemBytes,
   stripManagedFields,
+  tileLabels,
   toNum,
 } from './kube';
 
@@ -46,9 +47,47 @@ describe('kube accessors', () => {
     expect(objKey({ metadata: { name: 'n' } })).toBe('/n');
   });
 
-  it('initials builds a two-letter avatar', () => {
+  it('initials builds a two-letter avatar, splitting on word boundaries', () => {
     expect(initials('default')).toBe('DE');
     expect(initials('x')).toBe('X');
+    // The whole point of splitting: a shared prefix is the normal naming convention, and
+    // `id.slice(0, 2)` made every member of one collapse to the same two letters.
+    expect(initials('prod-eu')).toBe('PE');
+    expect(initials('prod-us')).toBe('PU');
+    expect(initials('k3s_test')).toBe('KT');
+  });
+
+  it('tileLabels never gives two clusters the same label', () => {
+    // The acceptance criterion from #252, stated directly: five clusters that all rendered
+    // as "KI" before, plus the shapes word-splitting alone cannot separate.
+    const ids = ['kind-a', 'kind-a2', 'kind', 'kinder', 'kind-a3', 'prod-eu', 'prod-us', 'default'];
+    const labels = tileLabels(ids);
+    expect(labels.size).toBe(ids.length);
+    expect(new Set(labels.values()).size).toBe(ids.length);
+    for (const l of labels.values()) {
+      expect(l).toHaveLength(2);
+    }
+  });
+
+  it('tileLabels keeps the natural label for the first of a colliding set', () => {
+    const labels = tileLabels(['kind', 'kinetic']);
+    expect(labels.get('kind')).toBe('KI');
+    expect(labels.get('kinetic')).not.toBe('KI');
+  });
+
+  it('tileLabels does not relabel existing clusters when one is appended', () => {
+    // A rail whose letters shuffle when you add a cluster is worse than one with
+    // duplicates, so only the later colliding id may change.
+    const before = tileLabels(['kind', 'kinetic']);
+    const after = tileLabels(['kind', 'kinetic', 'kindly']);
+    expect(after.get('kind')).toBe(before.get('kind'));
+    expect(after.get('kinetic')).toBe(before.get('kinetic'));
+    expect(new Set(after.values()).size).toBe(3);
+  });
+
+  it('tileLabels still separates ids that differ only in punctuation', () => {
+    const labels = tileLabels(['a-b', 'a.b', 'a_b']);
+    expect(new Set(labels.values()).size).toBe(3);
   });
 
   it('containerNames lists non-empty names', () => {
