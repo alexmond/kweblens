@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
@@ -49,6 +50,10 @@ public class DiagnoseService {
 	 */
 	private static final int MAX_EVENT_FINDINGS = 15;
 
+	/** The general wording, used when the cause cannot be narrowed further. */
+	private static final String SELECTOR_ADVICE = "Check the Service's selector against the pod labels"
+			+ " it is meant to match.";
+
 	private final ResourceService resources;
 
 	private final EventService events;
@@ -60,6 +65,8 @@ public class DiagnoseService {
 	private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
 	private final KweblensAiProperties aiProperties;
+
+	private final WorkloadLookup workloads;
 
 	public DiagnoseResult diagnose(String clusterId, String namespace) {
 		List<Finding> findings = new ArrayList<>();
@@ -91,6 +98,49 @@ public class DiagnoseService {
 	}
 
 	/**
+	 * A Service with nothing behind it, told what to do about the cause it actually has.
+	 *
+	 * <p>
+	 * Every case used to get "check the Service's selector against the pod labels it is
+	 * meant to match". That is wrong advice for the commonest one: when a single workload
+	 * carries the selector and sits at zero replicas, the selector is the one thing that
+	 * IS right, and scaling up is the fix — which {@code RemediationService} already
+	 * offers as an action.
+	 *
+	 * <p>
+	 * {@code backing} is null when the lookup could not speak to the cluster, or when the
+	 * Service has no selector at all. Both fall back to the general wording rather than
+	 * guessing.
+	 */
+	private Finding serviceFinding(KindHealth.UnhealthyItem item, ServiceBacking backing) {
+		String object = item.kind() + "/" + item.name();
+		if (!"no endpoints".equals(item.reason())) {
+			return new Finding("critical", "Service has nothing behind it", object, item.reason(),
+					"The pods exist but are not ready — check their readiness probe and logs.", "validator");
+		}
+		// The detail is left EXACTLY as the health check produced it. RemediationService
+		// selects the scale-up proposal with `NO_ENDPOINTS.equals(finding.detail())`, so
+		// appending the workload name here — which the first version of this did —
+		// matches
+		// nothing and silently stops the fix being offered at all. Everything this knows
+		// goes in the advice instead, which no one matches on.
+		String fix = (backing != null) ? fixFor(backing) : SELECTOR_ADVICE;
+		return new Finding("critical", "Service has nothing behind it", object, item.reason(), fix, "validator");
+	}
+
+	private String fixFor(ServiceBacking backing) {
+		return switch (backing.cause()) {
+			case IDLE_WORKLOAD -> "Nothing is running behind it: " + backing.workload().ref()
+					+ " is scaled to zero. Scale it up — the selector is correct.";
+			case NO_MATCH ->
+				"No workload's pod template carries this selector, so nothing will ever back it. " + SELECTOR_ADVICE;
+			case AMBIGUOUS -> "Several workloads carry this selector, so which one it was meant for is unclear.";
+			case MATCHED_RUNNING -> "A workload carries this selector and is not scaled down,"
+					+ " so look at why its pods are not becoming endpoints.";
+		};
+	}
+
+	/**
 	 * The relational failures a pod-by-pod scan cannot see, from the same checks the
 	 * dashboard renders.
 	 *
@@ -102,14 +152,15 @@ public class DiagnoseService {
 	 */
 	private List<Finding> checkRelational(String clusterId, String namespace) {
 		List<Finding> findings = new ArrayList<>();
-		for (KindHealth kind : this.network.summarise(clusterId, namespace)) {
+		List<KindHealth> services = this.network.summarise(clusterId, namespace);
+		// Resolved once for the whole scope rather than per finding — see
+		// backingByService.
+		// Only worth the three calls if something is actually empty.
+		Map<String, ServiceBacking> backing = services.stream().anyMatch((k) -> !k.needsAttention().isEmpty())
+				? this.workloads.backingByService(clusterId, namespace) : Map.of();
+		for (KindHealth kind : services) {
 			for (KindHealth.UnhealthyItem item : kind.needsAttention()) {
-				findings.add(new Finding("critical", "Service has nothing behind it", item.kind() + "/" + item.name(),
-						item.reason(),
-						"no endpoints".equals(item.reason())
-								? "Check the Service's selector against the pod labels it is meant to match."
-								: "The pods exist but are not ready — check their readiness probe and logs.",
-						"validator"));
+				findings.add(serviceFinding(item, backing.get(item.namespace() + "/" + item.name())));
 			}
 		}
 		for (KindHealth kind : this.storage.summarise(clusterId, namespace)) {

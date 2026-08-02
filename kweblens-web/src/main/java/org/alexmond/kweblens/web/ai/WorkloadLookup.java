@@ -1,6 +1,7 @@
 package org.alexmond.kweblens.web.ai;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -159,6 +160,67 @@ class WorkloadLookup {
 			return Optional.empty();
 		}
 		return Optional.of(new WorkloadRef(kinds.get(0), only.getMetadata().getName()));
+	}
+
+	/**
+	 * Why every Service in scope has nothing behind it, in a fixed number of API calls.
+	 *
+	 * <p>
+	 * {@link #idleWorkloadBehind} answers this for one Service, at a cost of a GET plus a
+	 * LIST per workload kind. Asking it per finding does not scale: a cluster with
+	 * fifteen empty Services would spend sixty calls on a request that already takes
+	 * seconds. This lists the Services once and each workload kind once — <b>three calls
+	 * for the whole scope, however many Services are involved</b> — and matches in
+	 * memory.
+	 * @param namespace the namespace to scope to, or null for every namespace
+	 * @return backing keyed by {@code namespace/name}. A Service with no selector is
+	 * absent: it never picks pods, so its Endpoints come from somewhere this cannot see.
+	 */
+	Map<String, ServiceBacking> backingByService(String clusterId, String namespace) {
+		Map<String, List<GenericKubernetesResource>> workloads = new HashMap<>();
+		Map<String, String> kinds = new HashMap<>();
+		for (ResourceDescriptor descriptor : SELECTABLE_WORKLOADS) {
+			for (GenericKubernetesResource workload : list(descriptor, clusterId, namespace)) {
+				String ns = namespaceOf(workload);
+				workloads.computeIfAbsent(ns, (key) -> new ArrayList<>()).add(workload);
+				kinds.put(ns + "/" + workload.getMetadata().getName(), descriptor.kind());
+			}
+		}
+		Map<String, ServiceBacking> out = new HashMap<>();
+		for (GenericKubernetesResource service : list(SERVICES, clusterId, namespace)) {
+			Map<String, String> selector = selectorOf(service);
+			if (selector.isEmpty()) {
+				continue;
+			}
+			String ns = namespaceOf(service);
+			List<GenericKubernetesResource> matches = workloads.getOrDefault(ns, List.of())
+				.stream()
+				.filter((workload) -> templateLabels(workload).entrySet().containsAll(selector.entrySet()))
+				.toList();
+			out.put(ns + "/" + service.getMetadata().getName(), classify(matches, ns, kinds));
+		}
+		return out;
+	}
+
+	private ServiceBacking classify(List<GenericKubernetesResource> matches, String namespace,
+			Map<String, String> kinds) {
+		if (matches.isEmpty()) {
+			return ServiceBacking.of(ServiceBacking.Cause.NO_MATCH);
+		}
+		if (matches.size() > 1) {
+			return ServiceBacking.of(ServiceBacking.Cause.AMBIGUOUS);
+		}
+		GenericKubernetesResource only = matches.get(0);
+		if (replicas(only) != 0) {
+			return ServiceBacking.of(ServiceBacking.Cause.MATCHED_RUNNING);
+		}
+		String name = only.getMetadata().getName();
+		return ServiceBacking.idle(new WorkloadRef(kinds.get(namespace + "/" + name), name));
+	}
+
+	private String namespaceOf(GenericKubernetesResource resource) {
+		ObjectMeta meta = resource.getMetadata();
+		return (meta != null && meta.getNamespace() != null) ? meta.getNamespace() : "";
 	}
 
 	/** The descriptor for a workload kind, or null when the kind is not one we act on. */
