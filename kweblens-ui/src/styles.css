@@ -3629,3 +3629,19 @@ body.dragging {
 .dx-detail {
   word-break: break-word;
 }
+
+/* Repeat count on a grouped finding — the number of objects hitting one check. */
+.dx-times {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Each object under a grouped heading. Separated so fifteen of them still read as
+   fifteen distinct objects rather than one run-on block. */
+.dx-one + .dx-one {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}

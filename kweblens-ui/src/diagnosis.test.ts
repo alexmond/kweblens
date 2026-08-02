@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { countLine, type Finding, parseSummary, severityOf, sortFindings } from './diagnosis';
+import { countLine, type Finding, groupFindings, parseSummary, severityOf, sortFindings } from './diagnosis';
 
 const f = (severity: string, title = 't'): Finding => ({ severity, title, object: 'Pod/x' });
 
@@ -87,6 +87,34 @@ describe('sortFindings', () => {
     const input = [f('info', 'i'), f('critical', 'c')];
     sortFindings(input);
     expect(input.map((x) => x.title)).toEqual(['i', 'c']);
+  });
+});
+
+describe('groupFindings', () => {
+  it('collapses repeats of one title into a single group without dropping any', () => {
+    // The case this exists for: 15 of 22 criticals were one check, which pushed the
+    // ImagePullBackOff off the top of the list.
+    const many = Array.from({ length: 15 }, (_, i) => ({
+      severity: 'critical',
+      title: 'Service has nothing behind it',
+      object: `Service/s${i}`,
+    }));
+    const groups = groupFindings([...many, f('critical', 'ImagePullBackOff')]);
+    expect(groups).toHaveLength(2);
+    expect(groups.flatMap((g) => g.findings)).toHaveLength(16);
+  });
+
+  it('orders groups by severity, not by how many there are', () => {
+    // A pile of warnings must not outrank one critical.
+    const groups = groupFindings([f('warning', 'a'), f('warning', 'a'), f('warning', 'a'), f('critical', 'b')]);
+    expect(groups.map((g) => g.title)).toEqual(['b', 'a']);
+  });
+
+  it('hides nothing and reinterprets nothing', () => {
+    const input = [f('critical', 'x'), f('critical', 'x'), f('info', 'y')];
+    const groups = groupFindings(input);
+    expect(groups.flatMap((g) => g.findings)).toHaveLength(input.length);
+    expect(groups.find((g) => g.title === 'x')?.severity).toBe('critical');
   });
 });
 

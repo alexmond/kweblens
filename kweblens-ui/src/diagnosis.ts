@@ -142,6 +142,40 @@ export function severityOf(finding: Finding): Severity {
   return s === 'critical' || s === 'warning' ? s : 'info';
 }
 
+/** Findings sharing a title, kept together so one repeated check cannot crowd out the rest. */
+export interface FindingGroup {
+  title: string;
+  severity: Severity;
+  findings: Finding[];
+}
+
+/**
+ * Group findings by title, worst severity first.
+ *
+ * <p>Why: on a real cluster one check produced 15 of 22 critical findings — every Service
+ * with no endpoints, most of them a monitoring stack aimed at control-plane components that
+ * are not pods on this distribution, plus a test namespace that is not deployed. Fifteen
+ * rows saying the same thing pushed the ImagePullBackOff and the OOM kill off the top of
+ * the list, which are the two anyone would act on.
+ *
+ * <p>Grouping is deliberately not filtering. Nothing is hidden and no severity is
+ * reinterpreted — the fifteen are still there, still critical, still individually listed
+ * under their heading. They just occupy one heading instead of fifteen.
+ */
+export function groupFindings(findings: Finding[]): FindingGroup[] {
+  const rank: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
+  const byTitle = new Map<string, FindingGroup>();
+  for (const finding of sortFindings(findings)) {
+    const existing = byTitle.get(finding.title);
+    if (existing) {
+      existing.findings.push(finding);
+      continue;
+    }
+    byTitle.set(finding.title, { title: finding.title, severity: severityOf(finding), findings: [finding] });
+  }
+  return [...byTitle.values()].sort((a, b) => rank[a.severity] - rank[b.severity]);
+}
+
 /** Critical first, then warning, then info; stable within a severity. */
 export function sortFindings(findings: Finding[]): Finding[] {
   const rank: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
