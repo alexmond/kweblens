@@ -10,7 +10,7 @@ import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { computed, h } from 'vue';
 
-import { eventTypeTone } from '../columns';
+import { badgeTone, eventTypeTone } from '../columns';
 import { ageToSeconds } from '../kube';
 import type { EventSummary } from '../types';
 import StatusBadge from './StatusBadge.vue';
@@ -22,7 +22,7 @@ const columns = computed<DataTableColumns<EventSummary>>(() => [
     title: 'Type',
     key: 'type',
     sorter: (a, b) => (a.type ?? '').localeCompare(b.type ?? ''),
-    render: (row) => h(StatusBadge, { text: String(row.type ?? ''), tone: eventTypeTone(row.type) }),
+    render: (row) => h(StatusBadge, { text: String(row.type ?? ''), tone: badgeTone(eventTypeTone(row.type)) }),
   },
   {
     title: 'Reason',

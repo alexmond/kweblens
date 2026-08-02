@@ -1,5 +1,5 @@
 import type { ColumnDef, StatusTone } from './columns';
-import { eventTypeTone, readyTone, statusTone } from './columns';
+import { badgeTone, eventTypeTone, readyTone, statusTone } from './columns';
 import { gib, objKey, objName, parseCpuCores, parseMemBytes } from './kube';
 import type { KubeObject, NodeDiskUsage, UsageSummary } from './types';
 
@@ -18,16 +18,21 @@ export interface TableColumn extends ColumnDef {
   cell?: (o: KubeObject) => CellSpec;
 }
 
-/** Tone for a text cell, keyed off the stable column key (not the display header). */
+/**
+ * Tone for a text cell, keyed off the stable column key (not the display header).
+ *
+ * Every branch goes through badgeTone, so all three columns follow the one convention: a pill
+ * is an exception, an ordinary value is plain text. See badgeTone for why, and for the cost.
+ */
 export function toneFor(key: string, text: string): StatusTone {
   if (key === 'status') {
-    return statusTone(text);
+    return badgeTone(statusTone(text));
   }
   if (key === 'ready') {
-    return readyTone(text);
+    return badgeTone(readyTone(text));
   }
   if (key === 'type') {
-    return eventTypeTone(text);
+    return badgeTone(eventTypeTone(text));
   }
   return '';
 }
