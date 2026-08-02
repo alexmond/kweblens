@@ -17,9 +17,79 @@ export const objName = (o: KubeObject): string => o.metadata?.name ?? '';
 export const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 export const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
 
-/** Two-letter avatar for a cluster/id tile. */
+/**
+ * Two-letter avatar for a single id, split on word boundaries.
+ *
+ * <p>`prod-eu` is `PE` and `prod-us` is `PU`, where the old `id.slice(0, 2)` made both `PR`.
+ * Word-splitting alone fixes the common case — a naming convention with a shared prefix —
+ * but it cannot guarantee uniqueness, because it only ever sees one id. Use
+ * {@link tileLabels} anywhere several ids are shown together.
+ */
 export function initials(id: string): string {
-  return (id.length >= 2 ? id.slice(0, 2) : id).toUpperCase();
+  const words = id.split(/[-_.\s/]+/).filter(Boolean);
+  if (words.length === 0) {
+    return id.slice(0, 2).toUpperCase();
+  }
+  if (words.length === 1) {
+    return words[0].slice(0, 2).toUpperCase();
+  }
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+/**
+ * Distinct two-letter labels for a set of ids — no two ever the same (#252).
+ *
+ * <p>The rail is the cluster switcher, and every write in this product is scoped by what it
+ * selects. A label that looks precise and is not invites acting on the wrong cluster and
+ * gives no signal that you have: on a real setup five of seven tiles rendered the same two
+ * letters. {@link initials} alone cannot fix that, because uniqueness is a property of the
+ * SET, not of any one id.
+ *
+ * <p>Collisions are resolved by keeping the first letter and taking the second from the
+ * first character of the id that has not already been used in that position. Order matters
+ * and that is deliberate: ids are processed as given and only a *later* colliding id is
+ * changed, so appending a cluster never relabels the ones already on screen — a rail whose
+ * letters shuffle when you add a cluster would be worse than one with duplicates.
+ */
+export function tileLabels(ids: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const id of ids) {
+    let label = initials(id);
+    if (taken.has(label)) {
+      label = disambiguate(id, taken);
+    }
+    taken.add(label);
+    out.set(id, label);
+  }
+  return out;
+}
+
+const ALPHANUM = /[a-z0-9]/i;
+
+/** A free label for `id` that keeps its first letter where it can. */
+function disambiguate(id: string, taken: Set<string>): string {
+  const head = (initials(id)[0] ?? '?').toUpperCase();
+  // Prefer a second letter drawn from the id itself, so the label still says something
+  // about which cluster it is rather than becoming an opaque counter.
+  for (const ch of id.slice(1)) {
+    if (!ALPHANUM.test(ch)) {
+      continue;
+    }
+    const candidate = head + ch.toUpperCase();
+    if (!taken.has(candidate)) {
+      return candidate;
+    }
+  }
+  // Ids that differ only outside [a-z0-9] (or are equal) fall back to a digit. Uniqueness
+  // is the property we refuse to give up; legibility is what we spend to keep it.
+  for (let n = 2; n <= 9; n += 1) {
+    const candidate = head + String(n);
+    if (!taken.has(candidate)) {
+      return candidate;
+    }
+  }
+  return head + String(taken.size % 10);
 }
 
 /** Container names on a pod/workload spec (empty names filtered out). */

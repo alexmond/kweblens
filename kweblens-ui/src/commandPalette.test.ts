@@ -71,9 +71,9 @@ describe('filterCommands', () => {
   const commands = buildCommands(CLUSTERS, NAV, 'default');
 
   it('distinguishes clusters that share a two-letter prefix', () => {
-    // The whole reason the palette exists: the rail renders both prod-eu and prod-us as
-    // "PR" (initials() is id.slice(0, 2)), so they can only be told apart by hovering one
-    // at a time. Typing the name has to disambiguate them.
+    // Since #252 the rail labels these PE and PU rather than both PR, so they are no longer
+    // identical — but two letters still cannot say which is which without hovering. Typing
+    // the name has to disambiguate them.
     const hits = filterCommands(commands, 'Production US');
     expect(hits[0].target).toBe('prod-us');
   });
