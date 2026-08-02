@@ -82,6 +82,20 @@ class DiagnosticsEndpointsTest {
 	}
 
 	@Test
+	void reportsWhereThePodFileBrowserMayGo() throws Exception {
+		// The UI opens the Files tab on the first allowed root. Without this field it can
+		// only open on "/", which a confined deployment refuses — so the first thing a
+		// reader saw was a 403 for a directory nobody asked for. Empty here (the default)
+		// means unconfined, which is why the assertion is on the key existing rather than
+		// on its contents.
+		this.mvc.perform(get("/api/v1/about"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.podFiles.enabled").value(false))
+			.andExpect(jsonPath("$.podFiles.allowedRoots").isArray())
+			.andExpect(jsonPath("$.podFiles.allowedRoots").isEmpty());
+	}
+
+	@Test
 	void aboutIsReadableWithoutSigningInSoTheEmptyScreenQuestionCanBeAnswered() throws Exception {
 		// A GET in the default open-mode: a read-only user hits "why is this empty?" too.
 		this.mvc.perform(get("/api/v1/about")).andExpect(status().isOk());

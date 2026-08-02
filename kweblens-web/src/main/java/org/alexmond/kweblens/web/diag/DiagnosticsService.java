@@ -293,6 +293,12 @@ public class DiagnosticsService {
 		// limit,
 		// and the same number already appears in the 413 the server sends.
 		podFiles.put("maxWriteBytes", this.files.getMaxWriteBytes());
+		// Where the browser may go when it is confined; empty means the whole disk.
+		// Reported because otherwise the UI opens on "/", which every confined deployment
+		// refuses — the confinement works, but the browser cannot know where to start.
+		// This is deployment policy, not a secret: the path-outside-roots refusal already
+		// quotes the list verbatim to anyone who asks for a path outside it.
+		podFiles.put("allowedRoots", List.copyOf(this.files.getAllowedRoots()));
 		out.put("podFiles", podFiles);
 		Map<String, Object> sim = new LinkedHashMap<>();
 		sim.put("enabled", this.simulator.isEnabled());

@@ -160,9 +160,34 @@ const NOTICES: Record<string, NoticeShape> = {
   'invalid-file-path': { tone: 'blocked', title: 'That path is not usable' },
   'invalid-file-content': { tone: 'error', title: 'That content cannot be written' },
   'unknown-cluster': { tone: 'error', title: 'Unknown cluster' },
+  // Client-side codes. They never come off the wire — nothing was sent — but they share the
+  // notice surface so a refused drop reads like every other refusal instead of a bare
+  // "request failed" for a request that was never made.
+  'dropped-a-folder': {
+    tone: 'blocked',
+    title: 'A folder cannot be uploaded',
+    hint: 'kweblens uploads one file at a time and never creates directories in a container. Open the folder and drop a file from inside it.',
+  },
+  'dropped-many': {
+    tone: 'blocked',
+    title: 'One file at a time',
+    hint: 'Each upload is a single write into the container. Nothing was sent — drop one file, or upload them one after another.',
+  },
+  'dropped-unreadable': {
+    tone: 'blocked',
+    title: 'That could not be read',
+    hint: 'The browser would not hand over its bytes. A dropped folder does this on browsers that do not report one as a folder; so does a file that moved or was unmounted since it was picked.',
+  },
 };
 
 const GENERIC: NoticeShape = { tone: 'error', title: 'The file browser request failed', retryable: true };
+
+/**
+ * Codes raised in the browser, before anything is sent. They must not teach
+ * {@link filesFeature} anything: refusing a dropped folder says nothing about whether the
+ * server has the feature on.
+ */
+const CLIENT_CODES = new Set(['dropped-a-folder', 'dropped-many', 'dropped-unreadable', 'invalid-file-path']);
 
 /** Whether a failure is "you are not signed in", which the shell handles by prompting. */
 export function isAuthFailure(e: unknown): boolean {
@@ -204,6 +229,7 @@ type FilesFeatureState = 'unknown' | 'enabled' | 'disabled';
 const state = ref<FilesFeatureState>('unknown');
 const writable = ref<boolean>(true);
 const writeLimit = ref<number | null>(null);
+const allowedRoots = ref<string[]>([]);
 
 export const filesFeature = {
   /** `unknown` until the first answer; the Files tab is hidden only once `disabled`. */
@@ -217,6 +243,14 @@ export const filesFeature = {
    * the browser to have it rejected.
    */
   writeLimit,
+  /**
+   * `kweblens.files.allowed-roots`, when the server reports it. Empty means unconfined —
+   * and also means "an older server that does not report it", which is the same behaviour
+   * either way: start at `/` and let the server refuse anything it will not serve. The
+   * confinement is the server's; this only stops the browser opening on a path that a
+   * confined deployment will always refuse.
+   */
+  allowedRoots,
   /** A request that reached the feature — so it is enabled, whatever it then said. */
   noteReached(): void {
     state.value = 'enabled';
@@ -229,17 +263,22 @@ export const filesFeature = {
    * `unknown` on purpose: the tab is shown and the first listing settles it, which is the
    * old behaviour. Guessing `disabled` would hide a working feature.
    */
-  noteAbout(about: { podFiles?: { enabled: boolean; writable: boolean; maxWriteBytes?: number } } | null): void {
+  noteAbout(
+    about: {
+      podFiles?: { enabled: boolean; writable: boolean; maxWriteBytes?: number; allowedRoots?: string[] };
+    } | null,
+  ): void {
     if (!about?.podFiles) {
       return;
     }
     state.value = about.podFiles.enabled ? 'enabled' : 'disabled';
     writable.value = about.podFiles.writable;
     writeLimit.value = about.podFiles.maxWriteBytes ?? null;
+    allowedRoots.value = about.podFiles.allowedRoots ?? [];
   },
   /** Learn from a failure: only `files-disabled` and `files-read-only` are verdicts. */
   noteFailure(e: unknown): void {
-    if (!(e instanceof PodFileError)) {
+    if (!(e instanceof PodFileError) || CLIENT_CODES.has(e.code)) {
       return;
     }
     if (e.code === 'files-disabled') {
@@ -261,6 +300,7 @@ export const filesFeature = {
     state.value = 'unknown';
     writable.value = true;
     writeLimit.value = null;
+    allowedRoots.value = [];
   },
 };
 
@@ -318,6 +358,43 @@ export function breadcrumbs(path: string): { label: string; path: string }[] {
   return crumbs;
 }
 
+/** Trailing separators, dropped without a regex: `/tmp/` and `/tmp` are the same root. */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+/**
+ * Whether a path is one the server would serve, given the configured roots.
+ *
+ * <p>A mirror of the server's own check, and <strong>only</strong> an affordance: the
+ * server re-checks every request, and re-checks it again against the path the container
+ * actually resolves ({@code readlink -f}), which a browser cannot see. This exists so the
+ * pane does not offer a journey that ends in a 403 — never as the thing that stops one.
+ */
+export function withinRoots(path: string, roots: string[]): boolean {
+  if (roots.length === 0) {
+    return true;
+  }
+  return roots.some((raw) => {
+    const root = trimTrailingSlashes(raw);
+    return root === '' || path === root || path.startsWith(root + '/');
+  });
+}
+
+/**
+ * Where the browser should open. Unconfined that is `/`; confined it is the first root,
+ * because `/` is a path a confined server refuses — so opening there made the first thing
+ * every reader saw an error about a directory they had not asked for.
+ */
+export function startPath(roots: string[]): string {
+  const first = roots.length > 0 ? trimTrailingSlashes(roots[0]) : '';
+  return first ? first : '/';
+}
+
 /**
  * Whether clicking an entry should open a directory. A symlink counts only when the
  * container resolved its target to a directory — a broken link reports no `linkType`, and
@@ -371,6 +448,57 @@ export function uploadPath(dir: string, name: string): string {
   return joinPath(dir, name);
 }
 
+/**
+ * The parts of a `DataTransfer` a drop is read through, so the decision can be tested
+ * without a browser.
+ *
+ * <p>Both halves matter. `items[i].webkitGetAsEntry()` is the only thing that says whether
+ * a dropped item is a *directory*; `files` is the only thing that hands over bytes. A
+ * `DataTransfer` synthesised in a test — or an older browser — may carry only `files`.
+ */
+interface DroppedEntry {
+  isDirectory: boolean;
+}
+
+interface DroppedItem {
+  kind: string;
+  webkitGetAsEntry?: () => DroppedEntry | null;
+}
+
+export interface DropSource {
+  files?: ArrayLike<File> | null;
+  items?: ArrayLike<DroppedItem> | null;
+}
+
+/**
+ * The single file a drop is offering, or `null` when it offered nothing droppable at all
+ * (dragged text, an image from another tab). Throws {@link PodFileError} when it offered
+ * something this pane will not take.
+ *
+ * <p><strong>A dropped directory is the case worth naming.</strong> A browser reports one
+ * in `files` as an ordinary `File` — a plausible name, `type` empty, a small size — and
+ * only refuses when its bytes are asked for, with a `DOMException` that says nothing
+ * useful. Left alone it surfaces as a generic failure for what is really a simple mistake.
+ * `webkitGetAsEntry()` knows the difference before anything is read, so the refusal can say
+ * "that is a folder"; {@link readUpload} covers the browsers that do not report one.
+ *
+ * <p>Several files are refused rather than silently reduced to the first: one upload is one
+ * write, and quietly dropping four of five would be discovered only by re-reading the
+ * directory.
+ */
+export function fileFromDrop(source: DropSource | null | undefined): File | null {
+  const files = Array.from(source?.files ?? []);
+  const entries = Array.from(source?.items ?? []).filter((i) => i.kind === 'file');
+  if (entries.some((i) => i.webkitGetAsEntry?.()?.isDirectory)) {
+    throw new PodFileError(400, 'dropped-a-folder', 'A folder was dropped, and folders are not uploaded.');
+  }
+  const count = Math.max(files.length, entries.length);
+  if (count > 1) {
+    throw new PodFileError(400, 'dropped-many', `${count} files were dropped; kweblens uploads one at a time.`);
+  }
+  return files[0] ?? null;
+}
+
 /** The entry a new file would overwrite, when the directory already holds that name. */
 export function uploadConflict(listing: PodDirectoryListing | null, name: string): PodFileEntry | null {
   return listing?.entries.find((e) => e.name === name) ?? null;
@@ -395,6 +523,11 @@ export function base64Of(bytes: Uint8Array): string {
  * checking it here only avoids pulling a gigabyte into the tab to be told no. The file is
  * never truncated to fit — a partial upload would overwrite whatever is in the container
  * with a fragment of what was chosen.
+ *
+ * <p>A read that fails is given its own code rather than escaping as a raw
+ * `DOMException: NotFoundError`. That is the second half of the dropped-folder story: where
+ * {@link fileFromDrop} cannot tell (no `webkitGetAsEntry`), the folder gets this far and the
+ * browser refuses at `arrayBuffer()` with an exception that names no cause.
  */
 export async function readUpload(dir: string, file: UploadSource, limit: number | null): Promise<UploadPlan> {
   const path = uploadPath(dir, file.name);
@@ -405,7 +538,12 @@ export async function readUpload(dir: string, file: UploadSource, limit: number 
       `${file.name} is ${formatSize(file.size)}; this kweblens accepts at most ${formatSize(limit)} per write.`,
     );
   }
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    throw new PodFileError(400, 'dropped-unreadable', `${file.name} could not be read, so nothing was sent.`);
+  }
   return { path, name: file.name, size: bytes.length, base64: base64Of(bytes) };
 }
 

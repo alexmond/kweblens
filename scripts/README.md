@@ -30,6 +30,7 @@ scripts/dev-run.sh --sim           # no cluster needed — the built-in simulato
 scripts/dev-run.sh --ai            # LLM enrichment of /diagnose (needs an Anthropic key)
 scripts/dev-run.sh --files         # pod file browser ON, read-write
 scripts/dev-run.sh --files=ro      # pod file browser ON, browse-and-download only
+scripts/dev-run.sh --files-roots /tmp   # ...and confined to those paths (implies --files)
 scripts/dev-run.sh --port 8085     # a second instance alongside the first
 scripts/dev-run.sh --stop          # stop whatever is on the port
 ```
@@ -47,6 +48,16 @@ default because a container's disk holds mounted Secrets and its service-account
 `--files=ro` keeps `kweblens.files.writable=false`, which is what to use when only the
 refusal paths matter. Without the flag the Files tab correctly reports that the feature is
 switched off, which looks like a bug and is not one.
+
+`--files-roots` takes a comma-separated list of absolute paths and sets
+`kweblens.files.allowed-roots`, so the confinement can actually be exercised rather than
+taken on trust. The interesting case is a **symlink inside a root that points outside it**:
+the requested path passes the first check, and the second one — against the path the
+container itself resolves with `readlink -f` — is what refuses it. Create one with
+`kubectl exec <pod> -- ln -s /etc/hostname /tmp/escape`, then ask for `/tmp/escape` and
+expect `403 path-outside-roots` naming the *resolved* path. A path the container cannot
+resolve at all (a symlink loop) is refused as `403 unresolvable-path`: the check fails
+closed.
 
 `--ai` reads an Anthropic key from `ANTHROPIC_API_KEY`, falling back to
 `VANTAGE_ANTHROPIC_API_KEY`. **The key is never written to a file** — the flag refuses to
