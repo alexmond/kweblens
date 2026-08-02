@@ -100,6 +100,34 @@ class ServiceAdviceTest {
 	}
 
 	@Test
+	void reportsADeliberatelyScaledDownWorkloadAsAWarningRatherThanACritical() {
+		// #223. One check produced 16 of 22 criticals on a real cluster and buried an
+		// ImagePullBackOff and an OOM kill; 11 of those 16 were a workload somebody had
+		// deliberately scaled to zero. Nothing is failing there, so it must not compete
+		// with the things that are. This is a statement about the CAUSE — the other
+		// causes below stay critical — which is what makes it safe.
+		deployment("idle", 0);
+		service("idle-svc", "idle");
+
+		Finding finding = onlyServiceFinding();
+		assertThat(finding.severity()).isEqualTo("warning");
+		assertThat(finding.title()).isEqualTo("Service points at a scaled-down workload");
+		// The detail is still what the health check said, because RemediationService
+		// matches it exactly to offer the scale-up. A warning with a one-click fix.
+		assertThat(finding.detail()).isEqualTo("no endpoints");
+	}
+
+	@Test
+	void keepsAMissingSelectorTargetCriticalBecauseNothingWillEverBackIt() {
+		deployment("other", 1, "other-app");
+		service("orphan-svc", "nobody");
+
+		Finding finding = onlyServiceFinding();
+		assertThat(finding.severity()).isEqualTo("critical");
+		assertThat(finding.title()).isEqualTo("Service has nothing behind it");
+	}
+
+	@Test
 	void pointsAtThePodsWhenAWorkloadIsRunningButProducesNoEndpoints() {
 		deployment("api", 3);
 		service("api-svc", "api");
@@ -132,7 +160,7 @@ class ServiceAdviceTest {
 		List<Finding> findings = this.diagnose.diagnose("test", NS)
 			.findings()
 			.stream()
-			.filter((f) -> "Service has nothing behind it".equals(f.title()))
+			.filter((f) -> f.object().startsWith("Service/"))
 			.toList();
 		assertThat(findings).hasSize(1);
 		return findings.get(0);

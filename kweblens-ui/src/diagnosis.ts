@@ -257,16 +257,25 @@ export interface FindingGroup {
  */
 export function groupFindings(findings: Finding[]): FindingGroup[] {
   const rank: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
-  const byTitle = new Map<string, FindingGroup>();
+  // Keyed on severity AND title, never title alone. A group carries ONE badge, taken from
+  // its first member, so a title that legitimately occurs at two severities would put a
+  // CRITICAL badge on rows that are warnings and hide the split entirely. That is not
+  // hypothetical: #223 split "Service has nothing behind it" so the deliberately
+  // scaled-to-zero case reports as a warning, which is exactly a same-family/two-severity
+  // shape. `promptInput` on the server has always keyed on both — this was the UI
+  // disagreeing with it.
+  const byKey = new Map<string, FindingGroup>();
   for (const finding of sortFindings(findings)) {
-    const existing = byTitle.get(finding.title);
+    const severity = severityOf(finding);
+    const key = severity + ' ' + finding.title;
+    const existing = byKey.get(key);
     if (existing) {
       existing.findings.push(finding);
       continue;
     }
-    byTitle.set(finding.title, { title: finding.title, severity: severityOf(finding), findings: [finding] });
+    byKey.set(key, { title: finding.title, severity, findings: [finding] });
   }
-  return [...byTitle.values()].sort((a, b) => rank[a.severity] - rank[b.severity]);
+  return [...byKey.values()].sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
 /** Critical first, then warning, then info; stable within a severity. */
