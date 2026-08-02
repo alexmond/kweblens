@@ -47,7 +47,7 @@ class RemediationActionsTest {
 	void previewOfAPatchShapedActionAsksTheClusterAndReturnsWhatItSays() {
 		// The whole point of #209. The old "preview" was a sentence kweblens wrote about
 		// its own intention; this one is the object the API server says would result.
-		RemediationPreview preview = remediation.preview("test", NS, "scale-up", "Deployment/idle");
+		RemediationPreview preview = remediation.preview("test", NS, "scale-up", "Deployment/preview-target");
 
 		assertThat(preview.validated()).isTrue();
 		assertThat(preview.outcome()).isEqualTo(RemediationPreview.Outcome.SERVER_VALIDATED);
@@ -74,7 +74,7 @@ class RemediationActionsTest {
 		// and then failed in CI on someone else's branch — an order-dependent test that
 		// blames whoever happens to be next.
 		drain();
-		remediation.preview("test", NS, "scale-up", "Deployment/idle");
+		remediation.preview("test", NS, "scale-up", "Deployment/preview-target");
 
 		assertThat(pathsSince()).anySatisfy((path) -> assertThat(path).contains("dryRun=All"));
 	}
@@ -168,6 +168,14 @@ class RemediationActionsTest {
 		// same rules, so no template-level action is offered.
 		workload("sched", 4, 1);
 		client.pods().resource(unschedulable()).create();
+
+		// The preview tests get their OWN zero-replica workload. The CRUD mock does not
+		// implement dryRun — it applies the patch regardless — so a preview against a
+		// shared fixture silently scales it up and the proposal tests below then
+		// correctly
+		// decline to offer a scale-up for a workload that is no longer idle. That is a
+		// real order dependency, not a flake: it depends on which test runs first.
+		workload("preview-target", 1, 0);
 
 		// A Service whose only backing workload is scaled to zero, and one whose
 		// selector matches nothing at all.
