@@ -39,13 +39,20 @@ scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
 scripts/dev-run.sh                    # run locally on :8080, login admin/admin (--sim, --files, --port, --stop)
 scripts/pr-watch.sh <pr> [--merge]    # wait on CI; exit 1 on any failure
 
-# UI checks — both drive a RUNNING instance (see "Performance testing" below)
+# UI checks — all drive a RUNNING instance (see "Performance testing" below)
 export NODE_PATH=$HOME/.local/lib/playwright/node_modules
-node scripts/perf-sweep.mjs           # on-demand hang/long-load sweep
+node scripts/ui-shot.mjs              # screenshots: viewport x theme MATRIX, not one image
+node scripts/ui-measure.mjs '.sel'    # box / overflow / chars-per-line; exits 1 over budget
 node scripts/contrast-check.mjs       # WCAG contrast of rendered UI, BOTH themes; exits 1 on failure
+node scripts/perf-sweep.mjs           # on-demand hang/long-load sweep
 ```
 
-Full descriptions: [`scripts/README.md`](scripts/README.md).
+Full descriptions: [`scripts/README.md`](scripts/README.md). **Before doing anything that needs
+to see or measure the running UI, load the `playwright` skill**
+([`.claude/skills/playwright/SKILL.md`](.claude/skills/playwright/SKILL.md)) — it covers every
+script here, the traps that make a run lie to you, and a Learnings log of the times one did.
+It is self-improving by rule: when a run misleads you, fix the *script*, record why in its own
+header, and log it.
 
 - `dev-verify.sh` / `dev-test.sh` are the intended entry points (allowlist them in
   `.claude/settings.json` to run without prompts).
@@ -58,6 +65,19 @@ Full descriptions: [`scripts/README.md`](scripts/README.md).
   and 3.80:1 in #200, both of which looked fine). Run it against any change to `styles.css`. A
   selector that is not on screen reports `not present` rather than passing — use `PREPARE` to
   open it, and treat a screenful of `not present` as a failed run.
+- **Size is measured too.** `ui-measure.mjs` is the companion to the above: box, overflow against
+  the nearest clipping ancestor, characters per line. An `absent` selector is a failed
+  measurement, not a pass.
+- **Capture the matrix, not one image.** `ui-shot.mjs` defaults to three widths × both themes,
+  because captures taken ad hoc at ~1400px in one theme are why a 338-character prose line
+  (#235) and black-on-black cards both survived weeks of screenshots. Output lands in
+  `.playwright/` — **gitignored, and it must stay that way**: those images carry the cluster's
+  API-server hostname, node names and namespaces.
+- **Suspect the instrument before the code.** Every wrong UI conclusion here came from a broken
+  measuring tool, not broken reasoning: a sample point on a glyph, PNG *bytes* compared instead
+  of decoded pixels, a `0.5em` glyph guess 20% out, `color(srgb …)` read as 0-255 (#245), a
+  backdrop walk that climbs past sibling-painted backgrounds (#250). Build a positive control —
+  a case whose answer you already know — before believing a surprising result.
 - CI (`.github/workflows/ci.yml`) runs `./mvnw -B verify` on JDK 21 — same gates as `dev-verify`.
 - **Performance testing (two layers).** (1) *Regression guard, in the gate:* a Vitest test
   (`kweblens-ui/src/composables/useResourceData.test.ts`) asserts the resource-list watch
