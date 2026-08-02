@@ -78,6 +78,12 @@ backgrounds over their real backdrop, which is the step hand-calculation gets wr
 the active theme from the DOM rather than assuming a toggle order, and **exits non-zero**
 when anything is under its floor, so it can gate a change.
 
+It composites **every** translucent layer down to the first opaque ancestor, which is what
+the browser paints. An earlier version stopped at the first non-transparent ancestor and
+treated it as opaque, so nested tints — a notice inside a tinted panel — read far too dark
+and it reported failures for text that was fine. Verified against rendered pixels: computed
+`rgb(41,63,80)` vs the browser's `rgb(40,63,79)` for a three-layer stack.
+
 A selector that is not currently on screen reports `not present` rather than passing —
 use `PREPARE` to open the thing first. Treat a screenful of `not present` as a failed run,
 not a clean one.
