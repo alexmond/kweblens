@@ -92,7 +92,26 @@ if [[ "$STOP" == true ]]; then
 	exit 0
 fi
 
-if [[ "$BUILD" == true || ! -f "$JAR" ]]; then
+# A jar older than the sources is the same class of trap as a generated admin
+# password: everything starts cleanly and you spend the next hour measuring code
+# you did not write. (This bit us on #228 — the merge landed at 03:42 and the run
+# served a 02:10 jar, so a rewritten LLM prompt looked like it had not taken.)
+# So rebuild when anything is NEWER than the jar, not only when the jar is absent.
+newer_than_jar() {
+	# -quit on the first hit: this runs on every start, and we only need to know
+	# whether one such file exists.
+	find pom.xml kweblens-*/pom.xml kweblens-*/src -newer "$JAR" -print -quit 2>/dev/null
+}
+
+STALE=""
+if [[ -f "$JAR" ]]; then
+	STALE=$(newer_than_jar)
+fi
+
+if [[ "$BUILD" == true || ! -f "$JAR" || -n "$STALE" ]]; then
+	if [[ -n "$STALE" ]]; then
+		echo "==> jar is older than ${STALE} — rebuilding"
+	fi
 	# -am is required: kweblens-web depends on sibling modules, and a -pl build
 	# without it fails to resolve them.
 	echo "==> building (-pl kweblens-web -am)"
