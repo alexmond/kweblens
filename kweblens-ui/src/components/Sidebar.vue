@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { useNavCollapse } from '../composables/useNavCollapse';
 import { initials } from '../kube';
 import type { ClusterInfo, NavCategory, NavItem } from '../types';
 import NavTree from './NavTree.vue';
@@ -47,6 +48,12 @@ const railClusters = computed(() => {
 });
 
 const hiddenCount = computed(() => props.clusters.length - railClusters.value.length);
+
+// Collapse (#237). The control moves with the state rather than being duplicated: while the
+// tree is open it sits pinned at the bottom of the tree, labelled, where a collapse control
+// is looked for (Radar's model); once the tree is gone there is nothing to pin it to, so it
+// becomes a tile at the bottom of the rail — the only left-column chrome still on screen.
+const { collapsed: navCollapsed, toggle: toggleNav, toggleLabel, toggleTitle } = useNavCollapse();
 </script>
 
 <template>
@@ -68,17 +75,40 @@ const hiddenCount = computed(() => props.clusters.length - railClusters.value.le
     >
       {{ hiddenCount > 0 ? `+${hiddenCount}` : '···' }}
     </button>
+    <button
+      v-if="navCollapsed"
+      class="tile tile-nav"
+      :title="toggleTitle"
+      :aria-label="toggleLabel"
+      aria-expanded="false"
+      @click="toggleNav"
+    >
+      »
+    </button>
   </nav>
-  <aside class="nav">
+  <aside v-if="!navCollapsed" id="kw-nav" class="nav">
     <div class="nav-title">{{ activeCluster?.name ?? cluster ?? '—' }}</div>
-    <NavTree
-      v-if="cluster"
-      :categories="nav"
-      :counts="counts"
-      :favorites="favorites"
-      :selected="selected?.id ?? null"
-      @select="(i) => emit('select', i)"
-      @toggle-favorite="(id) => emit('toggle-favorite', id)"
-    />
+    <div class="nav-scroll">
+      <NavTree
+        v-if="cluster"
+        :categories="nav"
+        :counts="counts"
+        :favorites="favorites"
+        :selected="selected?.id ?? null"
+        @select="(i) => emit('select', i)"
+        @toggle-favorite="(id) => emit('toggle-favorite', id)"
+      />
+    </div>
+    <button
+      class="nav-collapse"
+      :title="toggleTitle"
+      :aria-label="toggleLabel"
+      aria-expanded="true"
+      aria-controls="kw-nav"
+      @click="toggleNav"
+    >
+      <span class="nav-collapse-chev">«</span>
+      <span>Collapse</span>
+    </button>
   </aside>
 </template>

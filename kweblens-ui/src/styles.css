@@ -103,7 +103,8 @@ html.kw-dark .tile:hover {
   background: #2c333b;
 }
 html.kw-dark .group > summary:hover,
-html.kw-dark .leaf:hover {
+html.kw-dark .leaf:hover,
+html.kw-dark .nav-collapse:hover {
   background: rgba(255, 255, 255, 0.06);
 }
 /* All three are the same "count in a pill" and all three hardcode a light background, so
@@ -405,12 +406,61 @@ body {
   border-color: var(--accent);
 }
 
+/* Expands the nav again once it has been collapsed (#237). Pinned to the bottom of the
+   rail, which is the only left-column chrome left on screen in that state. */
+.tile-nav {
+  margin-top: auto;
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* A column, not a scroll box: the tree scrolls inside `.nav-scroll` while the collapse
+   control below it stays put. Scrolling it out of reach in a cluster with many CRDs would
+   make the panel look permanent again. */
 .nav {
   width: 240px;
   padding: 12px 10px;
   background: var(--panel);
   border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.nav-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+}
+
+.nav-collapse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 8px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  /* Set explicitly: a <button> does not inherit `color`, so without this it falls back to
+     the UA's near-black and disappears into the dark panel — the exact defect
+     contrast-check.mjs was written to catch. */
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-collapse:hover {
+  background: #f0f4f7;
+  color: var(--text);
+}
+
+.nav-collapse-chev {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .nav-title {

@@ -91,3 +91,14 @@ export function loadDark(): boolean {
 }
 
 export const saveDark = (dark: boolean): void => write('dark', dark);
+
+/**
+ * Whether the nav tree (the 240px category/kind panel) is collapsed.
+ *
+ * Global rather than per cluster, like the theme: it is a statement about how much of a
+ * narrow screen you are willing to spend on navigation, and that does not change when you
+ * switch cluster. Defaults to expanded — the collapse is a deliberate choice the user makes
+ * once, never something the app decides for them (see `useNavCollapse`).
+ */
+export const loadNavCollapsed = (): boolean => read<boolean>('navCollapsed', false);
+export const saveNavCollapsed = (collapsed: boolean): void => write('navCollapsed', collapsed);
