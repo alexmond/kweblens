@@ -11,6 +11,14 @@ interface RelationCell {
 }
 
 export interface RelationSection {
+  /**
+   * The #231 rank, and it is not a field: a relation table (which pods back this Service,
+   * what mounts this Secret) is the object's own substance, so every relation section is
+   * PRIMARY. Carrying no `rank` is how it says so — `rankOf` in `overview.ts` reads an
+   * unmarked entry as primary, which lets a consumer rank both kinds of section through the
+   * same call instead of special-casing this one.
+   */
+  rank?: never;
   /** Section title shown in the accordion. */
   title: string;
   /** Count badge — the number of related objects, or undefined when unresolved. */
