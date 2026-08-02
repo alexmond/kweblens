@@ -5,6 +5,8 @@ import java.util.Map;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,10 +38,19 @@ public class DiagnosticsApiController {
 		return this.diagnostics.clusterDiagnostics(clusterId);
 	}
 
-	/** Version, build, cluster count and the effective (non-secret) configuration. */
+	/**
+	 * Version, build, cluster count and the effective configuration.
+	 *
+	 * <p>
+	 * Public in open-mode, so the operationally sensitive fields — the admin username,
+	 * the cluster store's host path, the pod file browser's allowed roots — are withheld
+	 * unless the caller has signed in. The SPA only needs them once signed in anyway.
+	 */
 	@GetMapping(value = "/api/v1/about", produces = MediaType.APPLICATION_JSON_VALUE)
-	public Map<String, Object> about() {
-		return this.diagnostics.appDiagnostics();
+	public Map<String, Object> about(Authentication authentication) {
+		boolean authenticated = authentication != null && authentication.isAuthenticated()
+				&& !(authentication instanceof AnonymousAuthenticationToken);
+		return this.diagnostics.appDiagnostics(authenticated);
 	}
 
 }
