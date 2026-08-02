@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { mergeCommands, objectCommands, scopeNotes, shouldSearch, type Command } from './commandPalette';
+import {
+  filterCommands,
+  mergeCommands,
+  objectCommands,
+  scopeNotes,
+  shouldSearch,
+  STRONG_MATCH,
+  type Command,
+} from './commandPalette';
 import type { SearchHit, SearchResponse } from './types';
 
 const hit = (over: Partial<SearchHit> = {}): SearchHit => ({
@@ -92,6 +100,33 @@ describe('mergeCommands', () => {
     expect(
       mergeCommands(nav(20), objectCommands(Array.from({ length: 40 }, (_, i) => hit({ name: `d${i}` }))), 30),
     ).toHaveLength(30);
+  });
+});
+
+describe('STRONG_MATCH floor on navigation rows', () => {
+  const navCommands: Command[] = [
+    { key: 'nav:persistentvolumes', kind: 'nav', label: 'Persistent Volumes', hint: 'Storage', target: '' },
+    { key: 'nav:pods', kind: 'nav', label: 'Pods', hint: 'Workloads', target: '' },
+  ];
+
+  it('drops subsequence-only matches, which is what crowds objects out', () => {
+    // Measured against the simulator: typing `sim` put "Persistent Volumes" and "Persistent
+    // Volume Claims" above every actual object, on the strength of s…i…m appearing in order.
+    expect(filterCommands(navCommands, 'sim', 30, 0).map((c) => c.label)).toContain('Persistent Volumes');
+    expect(filterCommands(navCommands, 'sim', 30, STRONG_MATCH)).toHaveLength(0);
+  });
+
+  it('keeps prefix and word-boundary matches, which are the ones worth showing', () => {
+    expect(filterCommands(navCommands, 'pod', 30, STRONG_MATCH).map((c) => c.label)).toEqual(['Pods']);
+    expect(filterCommands(navCommands, 'volumes', 30, STRONG_MATCH).map((c) => c.label)).toEqual([
+      'Persistent Volumes',
+    ]);
+  });
+
+  it('keeps a hint match, so a category name still finds its kinds', () => {
+    expect(filterCommands(navCommands, 'storage', 30, STRONG_MATCH).map((c) => c.label)).toEqual([
+      'Persistent Volumes',
+    ]);
   });
 });
 

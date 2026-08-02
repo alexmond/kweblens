@@ -130,8 +130,11 @@ function subsequence(q: string, t: string): boolean {
  *
  * <p>With an empty query the list is returned in natural order rather than sorted, so the
  * palette opens showing clusters first — the switch is the common case.
+ *
+ * <p>`minRank` raises the bar. Pass {@link STRONG_MATCH} to drop rows that only matched as a
+ * loose subsequence — see `mergeCommands` for why that matters once objects are in the list.
  */
-export function filterCommands(commands: Command[], query: string, limit = 30): Command[] {
+export function filterCommands(commands: Command[], query: string, limit = 30, minRank = 0): Command[] {
   if (!query.trim()) {
     return commands.slice(0, limit);
   }
@@ -140,7 +143,7 @@ export function filterCommands(commands: Command[], query: string, limit = 30): 
       command,
       rank: Math.max(score(query, command.label), score(query, command.hint) - 50),
     }))
-    .filter((scored) => scored.rank >= 0)
+    .filter((scored) => scored.rank >= minRank)
     .sort((a, b) => b.rank - a.rank)
     .slice(0, limit)
     .map((scored) => scored.command);
@@ -167,6 +170,18 @@ const MIN_SEARCH_CHARS = 2;
 
 /** How many navigation rows keep their place once object hits arrive — see `mergeCommands`. */
 const NAV_ROWS_WITH_OBJECTS = 5;
+
+/**
+ * The rank floor that excludes `score()`'s weakest tier — a bare subsequence.
+ *
+ * Above every subsequence score (at most 100) and below every word-boundary one (500 on a
+ * label, 450 via a hint, minus a name length that never approaches 250). It exists because
+ * the subsequence tier is right when nav labels are ALL there is — "rs" should find
+ * "ReplicaSets" — and wrong once real objects are competing for the same rows: measured
+ * against the simulator, typing `sim` put "Persistent Volumes" and "Persistent Volume
+ * Claims" above every actual object, on the strength of s…i…m appearing in that order.
+ */
+export const STRONG_MATCH = 200;
 
 /** Whether `query` is worth sending to the search endpoint. */
 export function shouldSearch(query: string): boolean {

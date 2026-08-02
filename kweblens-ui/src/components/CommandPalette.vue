@@ -28,6 +28,7 @@ import {
   objectCommands,
   scopeNotes,
   shouldSearch,
+  STRONG_MATCH,
   wrapIndex,
 } from '../commandPalette';
 import type { ClusterInfo, NavCategory, SearchResponse } from '../types';
@@ -47,7 +48,6 @@ const active = ref(0);
 const input = ref<HTMLInputElement | null>(null);
 
 const commands = computed(() => buildCommands(props.clusters, props.nav, props.activeCluster));
-const navHits = computed(() => filterCommands(commands.value, query.value));
 
 // --- Object search ---------------------------------------------------------
 // Debounced, because one request lists every kind in the bounded set: typing "sonarqube"
@@ -111,6 +111,13 @@ watch([query, () => props.show, () => props.activeCluster], () => {
 onBeforeUnmount(cancelPending);
 
 const objectHits = computed(() => objectCommands(result.value?.hits ?? []));
+// Once objects are on the list, navigation rows have to earn their place: the subsequence
+// tier that makes "rs" find "ReplicaSets" also makes "sim" find "Persistent Volumes", and two
+// rows of that above the objects you were looking for is the crowding this feature exists to
+// avoid. With no objects the bar drops back — a loose match still beats an empty palette.
+const navHits = computed(() =>
+  filterCommands(commands.value, query.value, 30, objectHits.value.length > 0 ? STRONG_MATCH : 0),
+);
 const hits = computed(() => mergeCommands(navHits.value, objectHits.value));
 const notes = computed(() => scopeNotes(result.value, objectHits.value.length));
 
