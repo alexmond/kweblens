@@ -45,7 +45,10 @@ type Any = Record<string, unknown>;
 const str = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
 const dash = (s: string): string => (s === '' ? '—' : s);
 
-// Classify a status/phase string into a health tone for colouring. Unknown → '' (no pill).
+// Classify a status/phase string into a health tone. Unknown → ''.
+//
+// A tone is a CLASSIFICATION, not a decision to draw a pill — badgeTone() below is the one
+// place that turns a classification into chrome.
 export type StatusTone = 'ok' | 'warn' | 'err' | '';
 
 const STATUS_ERR = [
@@ -114,8 +117,32 @@ export function statusTone(value: string): StatusTone {
   return '';
 }
 
-// Colour a "ready/total" readiness value: all ready → green, none → red, partial → amber,
-// scaled-to-zero (0/0) and non-ratio values → neutral (no pill).
+/**
+ * THE convention for status-ish columns, in one place (#240): **a pill marks an exception.**
+ * `warn` and `err` get one; `ok` renders as plain text, like an unclassified value.
+ *
+ * Before this, the app used two conventions a click apart — Pods badged every value including
+ * `Running`, Events badged only `Warning` — which read as an oversight rather than a decision.
+ * This is the decision, and it is the Events one:
+ *
+ * - A pill's whole job is to pull the eye. On a 600-row list where ~all rows are Running (or
+ *   Normal, or Bound, or Deployed), a pill on every row pulls the eye to nothing at all, and
+ *   the two rows that are actually broken lose the contrast that made them findable.
+ * - It scales the right way. The healthier the cluster, the quieter the table; a table that
+ *   has gone loud has something in it.
+ * - Cost, stated plainly: a plain `Running` is no longer visibly distinct from a value we
+ *   could not classify, and an all-healthy table loses its affirmative "all green" read. The
+ *   opposite choice is defensible on exactly that ground. It loses on the big lists, which is
+ *   where a status column earns its keep, so this is the trade taken.
+ *
+ * Note the tone itself is still computed for `ok` — callers that want an affirmative signal
+ * without chrome (Pods' container squares, the overview cards) read the classification and are
+ * unaffected by this rule.
+ */
+export function badgeTone(tone: StatusTone): StatusTone {
+  return tone === 'ok' ? '' : tone;
+}
+
 /**
  * Tone for a Kubernetes event's `type`, which has exactly two values.
  *
@@ -124,14 +151,20 @@ export function statusTone(value: string): StatusTone {
  * errors would put the loudest tone on the most common non-Normal row, which is how a list
  * stops being scannable.
  *
- * Normal returns no tone deliberately. On a busy cluster nearly every row is Normal, so giving
- * it a colour would decorate the whole table and leave the warnings no more visible than before
- * — the problem this is meant to solve.
+ * Normal classifies as `ok` — it says the same thing Running does — and is then left unbadged
+ * by badgeTone, not by a special case hidden in here. Anything else (`type` is also a column
+ * on Services and Secrets, and this sees only the column key) has no tone at all.
  */
 export function eventTypeTone(value: string): StatusTone {
-  return value.trim().toLowerCase() === 'warning' ? 'warn' : '';
+  const t = value.trim().toLowerCase();
+  if (t === 'warning') {
+    return 'warn';
+  }
+  return t === 'normal' ? 'ok' : '';
 }
 
+// Classify a "ready/total" readiness value: all ready → ok, none → err, partial → warn,
+// scaled-to-zero (0/0) and non-ratio values → no tone.
 export function readyTone(value: string): StatusTone {
   const m = /^(\d+)\s*\/\s*(\d+)$/.exec(value.trim());
   if (!m) {

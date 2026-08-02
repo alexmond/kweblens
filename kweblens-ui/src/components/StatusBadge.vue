@@ -3,7 +3,7 @@ import { NTag } from 'naive-ui';
 import { computed } from 'vue';
 
 import type { StatusTone } from '../columns';
-import { statusTone } from '../columns';
+import { badgeTone, statusTone } from '../columns';
 
 // A value coloured green/amber/red by health; plain text when there is no tone.
 //
@@ -25,7 +25,10 @@ const TONE_VARS: Record<string, { color: string; textColor: string }> = {
   err: { color: 'var(--danger-tint)', textColor: 'var(--danger-fg)' },
 };
 
-const colour = computed(() => TONE_VARS[props.tone ?? statusTone(props.text)] ?? null);
+// Callers that pass a `tone` have already applied badgeTone; the text fallback applies it here
+// so the callers that pass only a string (Helm release/history status, the node's pod list)
+// follow the same one convention — a pill is an exception, an ordinary value is plain text.
+const colour = computed(() => TONE_VARS[props.tone ?? badgeTone(statusTone(props.text))] ?? null);
 </script>
 
 <template>

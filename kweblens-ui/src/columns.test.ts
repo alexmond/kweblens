@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { age, columnsFor, defaultHiddenCols, eventTypeTone, printerColumnDefs, readyTone, statusTone } from './columns';
+import {
+  age,
+  badgeTone,
+  columnsFor,
+  defaultHiddenCols,
+  eventTypeTone,
+  printerColumnDefs,
+  readyTone,
+  statusTone,
+} from './columns';
 import { toneFor } from './table';
 import type { KubeObject, PrinterColumn } from './types';
 
@@ -180,11 +189,31 @@ describe('eventTypeTone', () => {
     expect(eventTypeTone('Warning')).toBe('warn');
   });
 
-  it('gives Normal no tone at all', () => {
-    // Nearly every row on a busy cluster is Normal; colouring it would decorate the whole table
-    // and leave the warnings no more visible than before.
-    expect(eventTypeTone('Normal')).toBe('');
+  it('classifies Normal as ok, and leaves the badging decision to badgeTone', () => {
+    // Normal says what Running says, so it classifies the same way. It ends up unbadged
+    // because of the shared convention, not because of a special case hidden in here.
+    expect(eventTypeTone('Normal')).toBe('ok');
     expect(eventTypeTone('')).toBe('');
+  });
+});
+
+describe('badgeTone', () => {
+  it('badges exceptions and leaves the ordinary case plain', () => {
+    // The one convention (#240): a pill marks something worth looking at. `ok` is the state
+    // nearly every row is in on a healthy cluster, so a pill there marks nothing.
+    expect(badgeTone('err')).toBe('err');
+    expect(badgeTone('warn')).toBe('warn');
+    expect(badgeTone('ok')).toBe('');
+    expect(badgeTone('')).toBe('');
+  });
+
+  it('applies to Pods and Events identically — the point of the change', () => {
+    // Before, these two disagreed: statusTone badged everything, eventTypeTone badged only
+    // Warning. The same value class now renders the same way in both tables.
+    expect(badgeTone(statusTone('Running'))).toBe('');
+    expect(badgeTone(eventTypeTone('Normal'))).toBe('');
+    expect(badgeTone(statusTone('CrashLoopBackOff'))).toBe('err');
+    expect(badgeTone(eventTypeTone('Warning'))).toBe('warn');
   });
 });
 
@@ -202,9 +231,18 @@ describe('toneFor', () => {
     // This tone is the one that used to be computed and then thrown away: StatusBadge
     // re-derived colour from the TEXT, and '1/3' matches no status keyword, so the Ready
     // column was badged and rendered plain.
-    expect(toneFor('ready', '3/3')).toBe('ok');
     expect(toneFor('ready', '1/3')).toBe('warn');
     expect(toneFor('ready', '0/3')).toBe('err');
+  });
+
+  it('badges only exceptions, in every column it handles', () => {
+    // The single convention, at the one place the table asks for a cell's tone.
+    expect(toneFor('status', 'Running')).toBe('');
+    expect(toneFor('status', 'Pending')).toBe('warn');
+    expect(toneFor('status', 'CrashLoopBackOff')).toBe('err');
+    expect(toneFor('ready', '3/3')).toBe('');
+    expect(toneFor('type', 'Normal')).toBe('');
+    expect(toneFor('type', 'Warning')).toBe('warn');
   });
 
   it('gives an unclassified column no tone', () => {
