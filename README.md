@@ -186,7 +186,7 @@ Two modes:
 Some path families are **always authenticated, even in open-mode**, because what they return is
 itself a secret: pod exec, Helm release/library values, and the pod file browser.
 
-### Pod file browser — off by default, backend only
+### Pod file browser — off by default
 
 `kweblens.files.enabled` (default **false**) turns on browsing, viewing, editing and deleting
 files inside a container, over the same Kubernetes exec API the terminal uses. It ships off
@@ -194,16 +194,22 @@ deliberately: it can read a projected Secret volume or the service-account token
 disk, which no other kweblens view does, so an operator has to choose it. See
 [ADR-001](docs/design/adr-001-identity-model.md).
 
-**There is no UI for it yet** — this is the HTTP slice
-(`/api/v1/clusters/{id}/pods/{ns}/{pod}/files`) only.
+The UI is the pod detail drawer's **Files** tab, over the HTTP slice
+(`/api/v1/clusters/{id}/pods/{ns}/{pod}/files`). Files can be dragged onto the pane to upload
+one; a dropped folder, or several files at once, is refused with an explanation and nothing is
+sent.
 
 When it is on:
 
 - **every endpoint requires the admin login**, reads included — a file read is never a public GET;
 - every content read, download, write and delete is **audited with its path**;
 - `kweblens.files.writable=false` makes it browse-and-download only;
-- `kweblens.files.allowed-roots` confines it to given path prefixes (checked against the path the
-  container actually resolves, so a symlink cannot step outside);
+- `kweblens.files.allowed-roots` confines it to given path prefixes. The check runs twice: on
+  the requested path, and again on the path the container itself resolves (`readlink -f`), so a
+  symlink **inside** a root that points outside it is refused (`403 path-outside-roots`) — and a
+  path the container cannot resolve at all is refused too (`403 unresolvable-path`), i.e. it
+  fails closed. Both are verified against a live container, not only against mocks. `/about`
+  reports the roots so the Files tab opens inside one instead of on `/`;
 - reads and writes are capped (`max-read-bytes` / `max-write-bytes`, 1 MiB each) and oversized
   files are **refused** rather than silently truncated;
 - containers without a shell (distroless, scratch) report that plainly instead of an empty tree.

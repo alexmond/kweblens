@@ -11,13 +11,16 @@ import {
   isAuthFailure,
   isDirectory,
   isReadable,
+  fileFromDrop,
   joinPath,
   noticeFor,
   parentPath,
   PodFileError,
   readUpload,
+  startPath,
   uploadConflict,
   uploadPath,
+  withinRoots,
 } from './podFiles';
 import type { PodFileEntry } from './types';
 
@@ -199,6 +202,89 @@ describe('upload', () => {
     expect(uploadConflict(listing, 'keep.txt')?.name).toBe('keep.txt');
     expect(uploadConflict(listing, 'new.txt')).toBeNull();
     expect(uploadConflict(null, 'keep.txt')).toBeNull();
+  });
+});
+
+describe('drop', () => {
+  beforeEach(() => filesFeature.reset());
+
+  const dropped = (name: string) => new File([new Uint8Array([1, 2, 3])], name);
+  const item = (isDirectory: boolean) => ({ kind: 'file', webkitGetAsEntry: () => ({ isDirectory }) });
+
+  it('takes the one file that was dropped', () => {
+    const file = fileFromDrop({ files: [dropped('notes.txt')], items: [item(false)] });
+    expect(file?.name).toBe('notes.txt');
+  });
+
+  it('says a folder is a folder, instead of failing on its bytes later', () => {
+    // A browser reports a dropped directory in `files` as an ordinary File and only
+    // refuses when its bytes are asked for, with a DOMException that names no cause.
+    // webkitGetAsEntry knows before anything is read.
+    expect(() => fileFromDrop({ files: [dropped('config')], items: [item(true)] })).toThrow(PodFileError);
+    try {
+      fileFromDrop({ files: [dropped('config')], items: [item(true)] });
+    } catch (e) {
+      expect(noticeFor(e, 'write').title).toBe('A folder cannot be uploaded');
+      expect(noticeFor(e, 'write').hint).toContain('one file at a time');
+    }
+  });
+
+  it('refuses several files rather than silently uploading the first', () => {
+    const many = { files: [dropped('a.txt'), dropped('b.txt')], items: [item(false), item(false)] };
+    expect(() => fileFromDrop(many)).toThrow(/2 files were dropped/);
+  });
+
+  it('ignores a drop that carries no file at all', () => {
+    expect(fileFromDrop({ files: [], items: [{ kind: 'string' }] })).toBeNull();
+    expect(fileFromDrop(null)).toBeNull();
+  });
+
+  it('names an unreadable file instead of leaking a DOMException', async () => {
+    // The fallback for a browser that does not report a directory: it gets as far as
+    // arrayBuffer(), which rejects.
+    const unreadable = {
+      name: 'config',
+      size: 4096,
+      arrayBuffer: () => Promise.reject(new Error('NotFoundError')),
+    };
+    await expect(readUpload('/srv/app', unreadable, null)).rejects.toMatchObject({ code: 'dropped-unreadable' });
+    expect(noticeFor(new PodFileError(400, 'dropped-unreadable', 'x')).tone).toBe('blocked');
+  });
+
+  it('learns nothing about the server from a refusal the browser made', () => {
+    // Nothing was sent, so the feature's state is still whatever it was.
+    filesFeature.noteFailure(new PodFileError(400, 'dropped-a-folder', 'x'));
+    expect(filesFeature.state.value).toBe('unknown');
+  });
+});
+
+describe('allowed roots', () => {
+  beforeEach(() => filesFeature.reset());
+
+  it('opens at the first root when the deployment is confined', () => {
+    expect(startPath([])).toBe('/');
+    expect(startPath(['/srv/data'])).toBe('/srv/data');
+    expect(startPath(['/var/log/'])).toBe('/var/log');
+  });
+
+  it('mirrors the server on what is inside a root', () => {
+    expect(withinRoots('/etc', [])).toBe(true);
+    expect(withinRoots('/srv/data', ['/srv/data'])).toBe(true);
+    expect(withinRoots('/srv/data/sub/x', ['/srv/data'])).toBe(true);
+    expect(withinRoots('/', ['/srv/data'])).toBe(false);
+    expect(withinRoots('/etc', ['/srv/data'])).toBe(false);
+    // A prefix match on the string alone would let /srv/database through.
+    expect(withinRoots('/srv/database', ['/srv/data'])).toBe(false);
+    expect(withinRoots('/anything', ['/'])).toBe(true);
+  });
+
+  it('takes the roots off /about, and forgets them on reset', () => {
+    filesFeature.noteAbout({ podFiles: { enabled: true, writable: true, allowedRoots: ['/srv/data'] } });
+    expect(filesFeature.allowedRoots.value).toEqual(['/srv/data']);
+    // A server that predates the field is unconfined as far as the UI is concerned; the
+    // server still refuses anything it will not serve.
+    filesFeature.noteAbout({ podFiles: { enabled: true, writable: true } });
+    expect(filesFeature.allowedRoots.value).toEqual([]);
   });
 });
 

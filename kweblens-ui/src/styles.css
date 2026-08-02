@@ -3287,6 +3287,20 @@ body.dragging {
   cursor: default;
 }
 
+/*
+ * A crumb above kweblens.files.allowed-roots. It keeps --muted rather than fading further:
+ * it is still the path you are standing in and has to stay readable, so it reads as "not a
+ * link" (no accent, no underline, default cursor) rather than as greyed-out furniture.
+ */
+.files-crumb:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.files-crumb:disabled:hover {
+  text-decoration: none;
+}
+
 .files-crumb-sep {
   color: var(--muted);
 }

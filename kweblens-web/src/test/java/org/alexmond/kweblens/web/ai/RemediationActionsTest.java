@@ -1,6 +1,8 @@
 package org.alexmond.kweblens.web.ai;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
@@ -13,6 +15,7 @@ import io.fabric8.kubernetes.api.model.apps.ReplicaSet;
 import io.fabric8.kubernetes.api.model.apps.ReplicaSetBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import io.fabric8.mockwebserver.http.RecordedRequest;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,14 +59,42 @@ class RemediationActionsTest {
 	void previewSendsDryRunAllSoTheServerDiscardsTheResult() throws InterruptedException {
 		// What the mock CAN prove: the request carries dryRun=All. It cannot prove the
 		// change is discarded, because the CRUD mock does not implement dry-run semantics
-		// — it applies the patch regardless, which is a property of the harness and not
-		// of
+		// —
+		// it applies the patch regardless, which is a property of the harness and not of
 		// the code. The no-mutation invariant was checked against the real cluster
-		// instead: a rollout-restart preview on a live Deployment left generation at 1
-		// with no restartedAt annotation.
+		// instead:
+		// a rollout-restart preview on a live Deployment left generation at 1 with no
+		// restartedAt annotation.
+		//
+		// This DRAINS the queue and searches it rather than reading getLastRequest().
+		// That
+		// is the whole point: getLastRequest() is one slot of shared mock state, so any
+		// request arriving after the one under test wins it. It passed locally for a
+		// while
+		// and then failed in CI on someone else's branch — an order-dependent test that
+		// blames whoever happens to be next.
+		drain();
 		remediation.preview("test", NS, "scale-up", "Deployment/idle");
 
-		assertThat(server.getLastRequest().getPath()).contains("dryRun=All");
+		assertThat(pathsSince()).anySatisfy((path) -> assertThat(path).contains("dryRun=All"));
+	}
+
+	/** Discard whatever the mock has already seen, so the next drain is only ours. */
+	private void drain() throws InterruptedException {
+		while (this.server.takeRequest(50, TimeUnit.MILLISECONDS) != null) {
+			// Discarding on purpose.
+		}
+	}
+
+	/** Every request path since the last {@link #drain()}. */
+	private List<String> pathsSince() throws InterruptedException {
+		List<String> paths = new ArrayList<>();
+		RecordedRequest request = this.server.takeRequest(200, TimeUnit.MILLISECONDS);
+		while (request != null) {
+			paths.add(String.valueOf(request.getPath()));
+			request = this.server.takeRequest(50, TimeUnit.MILLISECONDS);
+		}
+		return paths;
 	}
 
 	@Test

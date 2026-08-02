@@ -252,7 +252,21 @@ public class DiagnosticsService {
 	 * How this instance is configured and built. Never includes a secret: no admin
 	 * password, no AI key, no kubeconfig contents — only whether each is set.
 	 */
-	public Map<String, Object> appDiagnostics() {
+	/**
+	 * The instance's effective configuration.
+	 *
+	 * <p>
+	 * Some of it is operationally sensitive and is withheld from an unauthenticated
+	 * caller. In open-mode this endpoint is a public GET, and it was handing out the
+	 * admin username (which halves a guessing attempt), a host filesystem path including
+	 * the deploying user's name, and — once the pod file browser gained
+	 * {@code allowed-roots} — the paths that surface is confined to. None of it grants
+	 * access on its own, since every write and the whole file-browser family require the
+	 * login regardless. But there is no reason a stranger should have it: the UI only
+	 * needs these fields once someone is signed in.
+	 * @param authenticated whether the caller has signed in
+	 */
+	public Map<String, Object> appDiagnostics(boolean authenticated) {
 		Map<String, Object> out = new LinkedHashMap<>();
 		BuildProperties build = this.buildProperties.getIfAvailable();
 		out.put("version", (build != null) ? build.getVersion() : "unknown");
@@ -265,7 +279,7 @@ public class DiagnosticsService {
 		// way credentials always are here: what holds them and whether it survives a
 		// restart, never what is in it.
 		Map<String, Object> store = new LinkedHashMap<>();
-		store.put("backend", this.clusterStore.describe());
+		store.put("backend", authenticated ? this.clusterStore.describe() : "(sign in to see)");
 		store.put("persistent", this.clusterStore.persistent());
 		store.put("runtimeClusters", runtimeClusterCount());
 		out.put("clusterStore", store);
@@ -273,7 +287,7 @@ public class DiagnosticsService {
 		// panel should not soften it.
 		Map<String, Object> sec = new LinkedHashMap<>();
 		sec.put("mode", this.security.isOpenMode() ? "open (reads public, writes require login)" : "closed");
-		sec.put("adminUsername", this.security.getAdminUsername());
+		sec.put("adminUsername", authenticated ? this.security.getAdminUsername() : "(sign in to see)");
 		sec.put("adminPasswordConfigured",
 				this.security.getAdminPassword() != null && !this.security.getAdminPassword().isBlank());
 		sec.put("perUserIdentity", false);
@@ -293,6 +307,12 @@ public class DiagnosticsService {
 		// limit,
 		// and the same number already appears in the 413 the server sends.
 		podFiles.put("maxWriteBytes", this.files.getMaxWriteBytes());
+		// Where the browser may go when it is confined; empty means the whole disk.
+		// Reported because otherwise the UI opens on "/", which every confined deployment
+		// refuses — the confinement works, but the browser cannot know where to start.
+		// This is deployment policy, not a secret: the path-outside-roots refusal already
+		// quotes the list verbatim to anyone who asks for a path outside it.
+		podFiles.put("allowedRoots", !authenticated ? List.of() : List.copyOf(this.files.getAllowedRoots()));
 		out.put("podFiles", podFiles);
 		Map<String, Object> sim = new LinkedHashMap<>();
 		sim.put("enabled", this.simulator.isEnabled());

@@ -18,6 +18,7 @@ import { podFiles } from '../api';
 import {
   breadcrumbs,
   containerChoices,
+  fileFromDrop,
   filesFeature,
   formatMode,
   formatModified,
@@ -29,7 +30,9 @@ import {
   parentPath,
   isAuthFailure,
   readUpload,
+  startPath,
   uploadConflict,
+  withinRoots,
 } from '../podFiles';
 import type { FileDirection, FileNotice as FileNoticeShape, UploadPlan } from '../podFiles';
 import type { KubeObject, PodDirectoryListing, PodFileEntry } from '../types';
@@ -41,7 +44,11 @@ const emit = defineEmits<{ (e: 'auth-required'): void }>();
 
 const containers = computed(() => containerChoices(props.obj));
 const container = ref(containers.value.find((c) => !c.init)?.name ?? containers.value[0]?.name ?? '');
-const path = ref('/');
+// Confined deployments (kweblens.files.allowed-roots) open at the first root: `/` is a
+// path such a server refuses, so opening there greeted every reader with a refusal for a
+// directory they never asked for. Unconfined this is still `/`.
+const roots = computed(() => filesFeature.allowedRoots.value);
+const path = ref(startPath(filesFeature.allowedRoots.value));
 const listing = shallowRef<PodDirectoryListing | null>(null);
 const notice = ref<FileNoticeShape | null>(null);
 const loading = ref(false);
@@ -58,7 +65,11 @@ const dragging = ref(false);
 /** Upload is offered only where a write can actually succeed (kweblens.files.writable). */
 const canUpload = computed(() => filesFeature.writable.value);
 
-const crumbs = computed(() => breadcrumbs(path.value));
+// A crumb above the configured roots is shown but not offered: it is part of the path,
+// and hiding it would misrepresent where you are, but clicking it could only ever 403.
+const crumbs = computed(() =>
+  breadcrumbs(path.value).map((c) => ({ ...c, reachable: withinRoots(c.path, roots.value) })),
+);
 /** Identifies the request in flight, so a slow answer for a directory you have left is dropped. */
 const requestKey = () => `${container.value}:${path.value}`;
 const entryName = (e: PodFileEntry) => (e.linkTarget ? `${e.name} → ${e.linkTarget}` : e.name);
@@ -122,7 +133,13 @@ function open(entry: PodFileEntry) {
   }
 }
 
+/** True while the parent is a directory this deployment would actually serve. */
+const canGoUp = computed(() => path.value !== '/' && withinRoots(parentPath(path.value), roots.value));
+
 function goUp() {
+  if (!canGoUp.value) {
+    return;
+  }
   selected.value = null;
   path.value = parentPath(path.value);
 }
@@ -190,9 +207,16 @@ function onDrop(event: DragEvent) {
   if (!canUpload.value) {
     return;
   }
-  const file = event.dataTransfer?.files?.[0];
-  if (file) {
-    offer(file);
+  // `fileFromDrop` refuses a folder or a multi-file drop with its own explained notice; a
+  // drop carrying nothing usable (dragged text, a link) is ignored rather than reported,
+  // because nothing was asked for.
+  try {
+    const file = fileFromDrop(event.dataTransfer);
+    if (file) {
+      offer(file);
+    }
+  } catch (e: unknown) {
+    fail(e, 'write');
   }
 }
 </script>
@@ -231,7 +255,7 @@ function onDrop(event: DragEvent) {
             {{ uploading ? 'Uploading…' : 'Upload' }}
           </button>
         </template>
-        <button type="button" class="btn" :disabled="loading || path === '/'" @click="goUp()">Up</button>
+        <button type="button" class="btn" :disabled="loading || !canGoUp" @click="goUp()">Up</button>
         <button type="button" class="btn" :disabled="loading" @click="load()">Refresh</button>
       </header>
 
@@ -242,6 +266,8 @@ function onDrop(event: DragEvent) {
             type="button"
             class="files-crumb"
             :class="{ current: c.path === path }"
+            :disabled="!c.reachable"
+            :title="c.reachable ? undefined : 'Outside kweblens.files.allowed-roots'"
             @click="
               selected = null;
               path = c.path;
