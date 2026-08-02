@@ -138,18 +138,42 @@ for (let pass = 0; pass < 2; pass++) {
       .$$eval(
         sel,
         (els) => {
-          // Walk up to whatever actually paints behind the element, so a translucent
-          // background can be composited over its real backdrop.
+          // What is actually painted behind the element, as an OPAQUE colour.
+          //
+          // This used to return the first non-transparent ancestor and stop. When that
+          // ancestor was itself translucent — a tinted panel inside a tinted panel — the
+          // caller composited against a colour that was never on screen, and the verdict
+          // could be far off: a real 8.12:1 was reported as 1.78:1. A checker that fails
+          // things that are fine is worse than none, because people learn to ignore it.
+          //
+          // So: collect every translucent layer up to the first opaque one, then composite
+          // them bottom-up, which is what the browser does.
           const behind = (el) => {
+            const nums = (c) => (c || '').match(/[\d.]+/g)?.map(Number) ?? null;
+            const layers = [];
             let node = el.parentElement;
+            let base = [255, 255, 255];
             while (node) {
-              const bg = getComputedStyle(node).backgroundColor;
-              if (bg && bg !== 'transparent' && !bg.startsWith('rgba(0, 0, 0, 0)')) {
-                return bg;
+              const p = nums(getComputedStyle(node).backgroundColor);
+              if (p && p.length >= 3) {
+                const a = (p.length > 3) ? p[3] : 1;
+                if (a >= 0.999) {
+                  base = p.slice(0, 3);
+                  break;
+                }
+                if (a > 0) {
+                  layers.push([p.slice(0, 3), a]);
+                }
               }
               node = node.parentElement;
             }
-            return 'rgb(255, 255, 255)';
+            // Nearest ancestor is painted last, so apply the collected layers in reverse.
+            let out = base;
+            for (let i = layers.length - 1; i >= 0; i -= 1) {
+              const [c, a] = layers[i];
+              out = out.map((v, j) => Math.round(c[j] * a + v * (1 - a)));
+            }
+            return `rgb(${out[0]}, ${out[1]}, ${out[2]})`;
           };
           return els.slice(0, 1).map((el) => {
             const cs = getComputedStyle(el);
