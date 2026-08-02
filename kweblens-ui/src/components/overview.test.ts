@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import type { KubeObject } from '../types';
-import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS } from './overview';
+import type { SectionRank } from './overview';
+import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS, rankOf } from './overview';
+import { relationSections } from './relations';
 
 // The Environment section encodes a SECURITY decision, so it is pinned here: a value sourced
 // from a Secret is rendered as a REFERENCE (secret <name>/<key>) and the secret's value is
@@ -294,5 +296,52 @@ describe('Service fields', () => {
     const field = (label: string) => OVERVIEW_FIELDS.find((f) => f.label === label)?.get(svc);
     expect(field('External')).toMatchObject({ text: '192.0.2.77' });
     expect(field('Session Affinity')).toBeNull();
+  });
+});
+
+// ---- primary / secondary (#231) ----
+// The classification a wide pane's layout depends on: what the object IS goes in the main
+// column, what is merely recorded ABOUT it goes to the sidebar. Pinned here because it is a
+// judgement, and a judgement that moved silently would move content between columns.
+describe('section rank', () => {
+  const sectionRanks = (): Record<string, SectionRank> =>
+    Object.fromEntries(OVERVIEW_SECTIONS.map((s) => [s.title, rankOf(s)]));
+  const fieldRanks = (): Record<string, SectionRank> =>
+    Object.fromEntries(OVERVIEW_FIELDS.map((f) => [f.label, rankOf(f)]));
+
+  it('ranks provenance secondary — and only provenance', () => {
+    const secondary = OVERVIEW_SECTIONS.filter((s) => rankOf(s) === 'secondary').map((s) => s.title);
+    expect(secondary).toEqual(['Labels', 'Annotations']);
+  });
+
+  it('ranks the object’s own substance primary', () => {
+    const ranks = sectionRanks();
+    for (const title of ['Containers', 'Ports', 'Selector', 'Rules', 'Resources', 'Probes', 'Conditions']) {
+      expect(ranks[title]).toBe('primary');
+    }
+  });
+
+  it('ranks the bookkeeping summary rows secondary, and the identity rows primary', () => {
+    const ranks = fieldRanks();
+    expect(ranks['Created']).toBe('secondary');
+    expect(ranks['Managed By']).toBe('secondary');
+    for (const label of ['Kind', 'Name', 'Namespace', 'Status', 'Controlled By']) {
+      expect(ranks[label]).toBe('primary');
+    }
+  });
+
+  it('ranks relation tables primary — they are what the object is wired to', () => {
+    const [endpoints] = relationSections({
+      endpoints: { items: [], truncated: false, error: null, notPermitted: false },
+    });
+    expect(rankOf(endpoints)).toBe('primary');
+  });
+
+  it('gives every entry one of the two ranks, so nothing is unclassified', () => {
+    const all = [...Object.values(sectionRanks()), ...Object.values(fieldRanks())];
+    expect(all.length).toBeGreaterThan(0);
+    for (const rank of all) {
+      expect(['primary', 'secondary']).toContain(rank);
+    }
   });
 });

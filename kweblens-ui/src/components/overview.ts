@@ -57,10 +57,33 @@ type OvValue =
   | { kind: 'helm'; rel: string; rns: string }
   | { kind: 'owners'; owners: { kind: string; name: string; ns?: string }[] };
 
+/**
+ * Whether a row or section is the object's own SUBSTANCE or bookkeeping ABOUT it (#231).
+ *
+ * - `primary` — what the object is and does: its spec, ports, selector, containers, status,
+ *   and the relation tables. This is what a reader opened the drawer for.
+ * - `secondary` — provenance: labels, annotations, when it was created, what manages it.
+ *   True of every object, rarely the question being asked.
+ *
+ * It lives here, next to the registries, rather than in the template, so a section carries
+ * its own answer and a consumer (#232 moves the secondary set into a sidebar when the pane
+ * is wide) does not re-derive it from titles. Everything is primary unless it says
+ * otherwise — the safe default, since a mis-defaulted section is merely in the main column.
+ * Read it through {@link rankOf}, never off `.rank`, so the default lives in one place.
+ */
+export type SectionRank = 'primary' | 'secondary';
+
+/** The rank of a field, section or relation section. Unmarked means `primary`. */
+export function rankOf(entry: { rank?: SectionRank }): SectionRank {
+  return entry.rank ?? 'primary';
+}
+
 // A summary key/value row. `get` returns null to hide the row.
 export interface OverviewField {
   label: string;
   mono?: boolean;
+  /** See {@link SectionRank}. Omit for primary. */
+  rank?: SectionRank;
   get: (o: KubeObject) => OvValue | null;
 }
 
@@ -164,13 +187,18 @@ export const OVERVIEW_FIELDS: OverviewField[] = [
   { label: 'Secret Type', mono: true, get: (o) => ((o.type as string) ? text(o.type as string) : null) },
   {
     label: 'Created',
+    rank: 'secondary',
     get: (o) => {
       const t = ovMeta(o).creationTimestamp;
       return text(age(t) + (t ? ` · ${t}` : ''));
     },
   },
   {
+    // Which Helm release owns this object — provenance, not what the object does. `Controlled
+    // By` below stays primary by contrast: an owner reference is a navigable part of the
+    // object's own story ("this pod belongs to that ReplicaSet"), not a stamp on it.
     label: 'Managed By',
+    rank: 'secondary',
     get: (o) => {
       const a = ovMeta(o).annotations ?? {};
       const rel = a['meta.helm.sh/release-name'];
@@ -211,6 +239,8 @@ type OvBody =
 export interface OverviewSection {
   title: string;
   defaultOpen?: boolean;
+  /** See {@link SectionRank}. Omit for primary. */
+  rank?: SectionRank;
   count?: (o: KubeObject) => number;
   applies: (o: KubeObject) => boolean;
   body: (o: KubeObject) => OvBody;
@@ -751,9 +781,12 @@ function bindingBody(o: KubeObject): OvBody {
 }
 
 export const OVERVIEW_SECTIONS: OverviewSection[] = [
+  // Labels and Annotations are the two sections every object has and few readers came for —
+  // the secondary set #231 names, and the sidebar #232 builds.
   {
     title: 'Labels',
     defaultOpen: false,
+    rank: 'secondary',
     applies: (o) => Object.keys(ovMeta(o).labels ?? {}).length > 0,
     count: (o) => Object.keys(ovMeta(o).labels ?? {}).length,
     body: (o) => ({ type: 'chips', map: ovMeta(o).labels ?? {} }),
@@ -761,6 +794,7 @@ export const OVERVIEW_SECTIONS: OverviewSection[] = [
   {
     title: 'Annotations',
     defaultOpen: false,
+    rank: 'secondary',
     applies: (o) => Object.keys(ovMeta(o).annotations ?? {}).length > 0,
     count: (o) => Object.keys(ovMeta(o).annotations ?? {}).length,
     body: (o) => ({ type: 'annotations', map: ovMeta(o).annotations ?? {} }),

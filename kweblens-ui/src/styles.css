@@ -46,6 +46,38 @@
   pointer-events: auto;
 }
 
+/* ---- Responsive primitive: named container breakpoints (#231) ----------------------------
+   Responsive rules here are `@container`, never `@media`. The detail drawer is 520px or
+   1605px wide at the SAME viewport width because the user expanded it (#230), so a viewport
+   query cannot see how much room a pane actually has.
+
+   Two names, one boundary — `narrow` (under 900px) and `wide` (900px and up). The number and
+   the reasoning behind it live in `src/responsive.ts`; `responsive.test.ts` fails the build
+   if an `@container` rule appears here with any other width, so the surfaces cannot drift
+   apart into private breakpoints.
+
+   A surface opts in by putting `kw-pane` on the element whose width should be measured;
+   everything inside it can then ask "am I wide?" without measuring anything itself. */
+.kw-pane {
+  container-type: inline-size;
+  container-name: kw-pane;
+}
+
+/* The two helpers that answer the question in a template. Written as "hide at the wrong
+   width" rather than "show at the right one" so an element keeps whatever `display` its own
+   styling gives it — `display: revert` inside the query would throw that away. */
+@container kw-pane not (min-width: 900px) {
+  .kw-when-wide {
+    display: none;
+  }
+}
+
+@container kw-pane (min-width: 900px) {
+  .kw-when-narrow {
+    display: none;
+  }
+}
+
 /* Dark theme for the bespoke (non-Naive) surfaces. Toggled by App.vue adding `kw-dark`
    to <html>; Naive UI components are darkened separately via NConfigProvider's darkTheme. */
 html.kw-dark {

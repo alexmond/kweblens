@@ -134,7 +134,12 @@ watch(
         </div>
       </template>
 
-      <NTabs v-model:value="tab" type="line" size="small" pane-class="drawer-body">
+      <!-- `kw-pane` makes each tab pane a container-query container (#231), so what a pane
+           renders can respond to the width the USER gave the drawer — 520px or expanded —
+           which no viewport media query can see. The pane, not its content, is the container:
+           a container query never styles the container itself, so the content is free to
+           become the two-column layout. -->
+      <NTabs v-model:value="tab" type="line" size="small" pane-class="drawer-body kw-pane">
         <NTabPane name="overview" tab="Overview" display-directive="if">
           <Overview
             :obj="obj"
