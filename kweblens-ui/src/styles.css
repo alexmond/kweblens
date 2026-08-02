@@ -3528,6 +3528,7 @@ body.dragging {
 }
 
 .dx-h {
+  max-width: 90ch;
   margin: 10px 0 4px;
   font-size: 13px;
   font-weight: 600;
@@ -3541,6 +3542,7 @@ body.dragging {
   margin: 3px 0;
   font-size: 13px;
   line-height: 1.5;
+  max-width: 90ch;
 }
 
 .dx-li {
@@ -3633,11 +3635,19 @@ body.dragging {
   color: var(--muted);
 }
 
+/* Bounded to a readable measure, in `ch` so it tracks the font rather than a guess at
+   pixels. Sentences only — the finding rows, object names and the table around them still
+   take the full width; it is prose that becomes unreadable when stretched.
+
+   Measured at a 2560px viewport before this: ~338 characters a line, nearly four times the
+   45-90 that is comfortable. Scheduler messages and image-pull errors are the longest text
+   in the app and the text most likely to be read word by word. */
 .dx-detail,
 .dx-fix {
   margin: 6px 0 0;
   font-size: 13px;
   line-height: 1.5;
+  max-width: 90ch;
 }
 
 .dx-detail {
