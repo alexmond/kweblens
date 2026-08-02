@@ -10,7 +10,7 @@
 import { computed } from 'vue';
 
 import { api } from '../api';
-import { countLine, type DiagnoseResult, parseSummary, severityOf, sortFindings } from '../diagnosis';
+import { countLine, type DiagnoseResult, groupFindings, parseSummary, sortFindings } from '../diagnosis';
 import { useAsyncData } from '../composables/useAsyncData';
 import ErrorNotice from './ErrorNotice.vue';
 
@@ -22,6 +22,7 @@ const { data, loading, error, reload } = useAsyncData<DiagnoseResult>(
 );
 
 const findings = computed(() => sortFindings(data.value?.findings ?? []));
+const groups = computed(() => groupFindings(data.value?.findings ?? []));
 const blocks = computed(() => parseSummary(data.value?.summary));
 const enriched = computed(() => data.value?.aiEnriched === true);
 </script>
@@ -52,15 +53,20 @@ const enriched = computed(() => data.value?.aiEnriched === true);
         <p class="dx-attrib">Written by a language model from the findings below.</p>
       </div>
 
-      <ul v-if="findings.length" class="dx-list">
-        <li v-for="(f, i) in findings" :key="i" :class="'dx-item dx-' + severityOf(f)">
+      <!-- Grouped by title so one repeated check cannot crowd out the rest. Nothing is
+           hidden: every finding is still listed under its heading. -->
+      <ul v-if="groups.length" class="dx-list">
+        <li v-for="(g, gi) in groups" :key="gi" :class="'dx-item dx-' + g.severity">
           <div class="dx-item-head">
-            <span :class="'dx-sev dx-sev-' + severityOf(f)">{{ severityOf(f) }}</span>
-            <span class="dx-item-title">{{ f.title }}</span>
+            <span :class="'dx-sev dx-sev-' + g.severity">{{ g.severity }}</span>
+            <span class="dx-item-title">{{ g.title }}</span>
+            <span v-if="g.findings.length > 1" class="dx-times">×{{ g.findings.length }}</span>
           </div>
-          <div class="dx-obj">{{ f.object }}</div>
-          <p v-if="f.detail" class="dx-detail">{{ f.detail }}</p>
-          <p v-if="f.suggestedFix" class="dx-fix"><strong>Try:</strong> {{ f.suggestedFix }}</p>
+          <div v-for="(f, i) in g.findings" :key="i" class="dx-one">
+            <div class="dx-obj">{{ f.object }}</div>
+            <p v-if="f.detail" class="dx-detail">{{ f.detail }}</p>
+          </div>
+          <p v-if="g.findings[0].suggestedFix" class="dx-fix"><strong>Try:</strong> {{ g.findings[0].suggestedFix }}</p>
         </li>
       </ul>
       <p v-else class="dx-note">Nothing looks wrong in this scope.</p>
