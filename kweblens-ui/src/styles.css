@@ -587,9 +587,12 @@ body {
   font-weight: 500;
 }
 
-/* Favorites: star toggle + pinned section */
+/* Favorites: star toggle + pinned section.
+
+   No margin: `.leaf`'s own 6px flex gap spaces the star from the count that follows it. The
+   star renders before the badge (see NavLeaf) so the badge can end at the row's padding edge
+   and align with the category counts. */
 .fav-star {
-  margin-left: 6px;
   font-size: 12px;
   line-height: 1;
   color: var(--muted);
