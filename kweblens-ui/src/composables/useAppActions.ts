@@ -32,6 +32,8 @@ export function useAppActions(a: {
   setObjects: (updater: (prev: KubeObject[]) => KubeObject[]) => void;
   setShowLogin: (v: boolean) => void;
   setAuthUser: (v: string | null) => void;
+  /** `objKey` of the object the drawer is showing — see RowActionDeps.detailKey. */
+  detailKey: Ref<string | null>;
 }) {
   const signOut = () => {
     auth.clear();
@@ -56,6 +58,7 @@ export function useAppActions(a: {
       setError: a.setError,
       setObjects: a.setObjects,
       setShowLogin: a.setShowLogin,
+      detailKey: a.detailKey.value,
     });
   };
 

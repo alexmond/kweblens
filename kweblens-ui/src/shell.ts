@@ -145,7 +145,16 @@ export interface RowActionDeps {
     workload?: { resourceId: string; name: string },
   ) => void;
   setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
-  setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean }) => void;
+  setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean } | null) => void;
+  /**
+   * `objKey` of whatever the detail drawer is showing, or null when it is shut.
+   *
+   * Needed because deleting is now reachable FROM the drawer (#233), and a drawer left
+   * open on an object that no longer exists is a detail view of nothing — it keeps
+   * offering actions against a deleted object. Deleting a different row from the list
+   * must not close it, which is why this is a key to compare rather than a flag.
+   */
+  detailKey?: string | null;
   setError: (e: string) => void;
   setObjects: (updater: (prev: KubeObject[]) => KubeObject[]) => void;
   setShowLogin: (v: boolean) => void;
@@ -195,7 +204,13 @@ export function dispatchRowAction(
     setForward: deps.setForward,
     setDetail: deps.setDetail,
     setError: deps.setError,
-    removeObject: (o) => deps.setObjects((prev) => prev.filter((x) => objKey(x) !== objKey(o))),
+    removeObject: (o) => {
+      deps.setObjects((prev) => prev.filter((x) => objKey(x) !== objKey(o)));
+      // Close the drawer only when it is showing THIS object.
+      if (deps.detailKey && deps.detailKey === objKey(o)) {
+        deps.setDetail(null);
+      }
+    },
     confirmRun,
   });
 }

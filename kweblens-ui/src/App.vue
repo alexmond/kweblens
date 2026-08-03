@@ -167,6 +167,10 @@ const { navigateToKind, navigateToPortForwards, navigateToHelmRelease, knowsKind
   },
 );
 
+// What the drawer is showing: the row the table highlights, and the object a delete has to
+// close the drawer for (#233 put delete inside the drawer). One declaration, two consumers.
+const selectedKey = computed(() => (detail.value ? objKey(detail.value.obj) : null));
+
 const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDelete } = useAppActions({
   cluster,
   authUser,
@@ -184,6 +188,7 @@ const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDele
   setObjects,
   setShowLogin: (v) => (showLogin.value = v),
   setAuthUser: (v) => (authUser.value = v),
+  detailKey: selectedKey,
 });
 
 // A pod clicked in a node's Pods tab: swap the drawer to that pod's detail. `pods` is the
@@ -271,7 +276,6 @@ const helmViewName = computed(() =>
   id.value === NAV.helmCharts ? 'charts' : id.value === NAV.helmRepositories ? 'repositories' : 'releases',
 );
 const showList = computed(() => selected.value && !isSynthetic(selected.value.id));
-const selectedKey = computed(() => (detail.value ? objKey(detail.value.obj) : null));
 const fetchChildrenFn = computed(() => (selected.value?.expandable ? fetchPods : undefined));
 
 /**
