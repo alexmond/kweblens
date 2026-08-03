@@ -137,6 +137,15 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-02 — **`--leaf <label>` failed on every run, and the error named the leaf.**
+  `openLeaf` clicked a `.leaf-label` that was inside a *collapsed* `<details>` category —
+  present in the DOM, so the locator resolved, then "element is not stable" / "element is
+  not visible". The collapsed state is remembered in prefs (#237), so it survived reloads
+  and looked like a broken selector. → `openLeaf` now expands the rail and the categories
+  until the leaf is visible, and waits out the disclosure animation. `discoverLeaves`
+  already did this; the earlier #237 entry fixed `perf-sweep`'s walk and left this path
+  behind it. **When a fix is for a UI behaviour rather than one script, check every script
+  that touches the same element.**
 - 2026-08-02 — **A PREPARE that opens a modal broke the theme loop in two scripts.** Both
   `ui-shot` and `contrast-check` run PREPARE *inside* the per-theme loop, so
   `PREPARE='press:Control+k;…'` (checking the command palette — the surface already got
