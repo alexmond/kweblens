@@ -200,17 +200,20 @@ decision, not a missing guardrail. See §5.
 Severity (§4) is not build order. Build order is leverage: do the cheap thing that unblocks
 an epic before the expensive thing that unblocks a module.
 
-### First: T1 — write-path integrity  *(mostly done; one slice left)*
+### ~~First: T1 — write-path integrity~~  *(DONE — #209, #212, #274)*
 
 Originally one slice: `dryRun=All` on `apply` and `patch`; the same for the remediation
 actions; surface it as the Review Changes tab's second diff (**live → would-be**, alongside
 today's edited-vs-loaded); and make the audit log durable.
 
-**Shipped:** the remediation half (#209) and the durable audit (#210 → #212).
+**Shipped — T1 is DONE.** The remediation half (#209), the durable audit (#210 → #212), and
+now `dryRun=All` on the YAML apply path with the Review Changes second diff that consumes it
+(#274). The differentiator is no longer partly narrative.
 
-**Remaining:** `dryRun=All` on the YAML **apply** path, and the Review Changes second diff
-that consumes it. Still days rather than weeks, and still worth doing first — it is the last
-place where a stated differentiator is partly narrative.
+**Worth knowing about the last slice:** it also closed two gaps that only appeared once the
+dry run existed — the API server's refusal was flattened into a 500 (no
+`KubernetesClientException` mapping) and then discarded again client-side, so the webhook's
+message, which is the entire point, never reached the screen.
 
 **Consequence for the rest of this plan:** the D4 gate has largely lifted. The argument for
 blocking write-capable agent tools was "a guardrail whose dry-run is prose and whose audit
@@ -218,8 +221,7 @@ dies with the pod", and neither is true any more — remediation previews are se
 and the audit trail survives a restart. Anything gated on T1 for *those* reasons should be
 re-read as unblocked; only work that leans specifically on the **editor's** diff still waits.
 
-**Blocks:** the Review Changes second diff. No longer blocks GH#142's write half or further
-remediation actions — those inherit a chain that now works.
+**Blocks:** nothing. T2 (bounded lists) is now the first open item in this plan.
 
 ### Second: T2 — bounded lists, designed with filtering and with the watch topology
 
