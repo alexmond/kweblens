@@ -47,6 +47,15 @@
 // PREPARE runs simple actions before sampling, semicolon-separated:
 //   press:<key>   click:<selector>   fill:<selector>=<text>   wait:<ms>
 //   upload:<file-input selector>=<path on this machine>
+//   scroll:<selector>            bring a below-the-fold surface into the viewport
+//   leaf:<nav label>             open a nav leaf, expanding the rail and categories first
+//
+// `scroll:` and `leaf:` exist because this tool measures a RENDERED PIXEL, so anything below
+// the fold or behind the nav could not be measured at all — it reported `outside the viewport`
+// or died in a 30s "element is not visible" retry. Between them the app has no un-measurable
+// screen left:
+//   PREPARE='leaf:Deployments;click:.n-data-table-tbody tr' node scripts/contrast-check.mjs '.mini th'
+//   PREPARE='scroll:.warn-table' node scripts/contrast-check.mjs '.warn-table .n-data-table-td'
 //
 // Prefix a step with `?` to skip it when its selector is not on screen. PREPARE runs once
 // per theme, so a step that only applies the first time — signing in — otherwise stalls the
@@ -363,6 +372,38 @@ async function openNav(page) {
   });
 }
 
+/**
+ * Open a nav leaf by label, expanding the rail and every category first.
+ *
+ * Until this existed, NOTHING behind the nav could have its colour measured here: the app has
+ * no deep links (every route is in-page state), `ui-shot`/`ui-measure` reach a list with
+ * `--leaf`, and this tool had only PREPARE — whose `click:` cannot see a leaf inside a
+ * collapsed category (#237) and dies after a 30s "element is not visible" retry loop. So every
+ * list, drawer and detail surface in the app was un-measurable for contrast, which is exactly
+ * the set of screens colour bugs have shipped in.
+ */
+async function openLeafHere(page, label) {
+  const rail = page.locator('.tile-nav');
+  if (await rail.isVisible().catch(() => false)) {
+    await rail.click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  // Only the CLOSED categories: clicking every summary TOGGLES, so on the normal case (all
+  // open) it shuts them and the leaf stops being clickable.
+  const closed = page.locator('.group:not([open]) > summary');
+  for (let i = 0, n = await closed.count(); i < n; i += 1) {
+    await closed
+      .nth(i)
+      .click()
+      .catch(() => {});
+    await page.waitForTimeout(60);
+  }
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  await page.locator('.leaf-label', { hasText: new RegExp(`^${escaped}$`) }).first().click({ timeout: 5000 });
+  await page.waitForSelector('.n-data-table-tbody tr, .empty', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(500);
+}
+
 async function runPrepare(page, spec) {
   for (const raw of (spec || '').split(';').map((s) => s.trim()).filter(Boolean)) {
     const optional = raw.startsWith('?');
@@ -377,6 +418,12 @@ async function runPrepare(page, spec) {
     if (verb === 'press') await page.keyboard.press(arg);
     else if (verb === 'click') await page.click(arg);
     else if (verb === 'wait') await page.waitForTimeout(Number(arg));
+    // Below the fold is not the same as absent. This tool refuses to sample an element that
+    // is off screen — rightly, since the backdrop comes from a rendered pixel — so a surface
+    // like the overview's Warnings table (y≈1220 in a 900px viewport) reported `outside the
+    // viewport` for every selector, which is a failed run wearing a caveat (#257).
+    else if (verb === 'scroll') await page.locator(arg).first().scrollIntoViewIfNeeded();
+    else if (verb === 'leaf') await openLeafHere(page, arg);
     else if (verb === 'fill') {
       const at = arg.lastIndexOf('=');
       await page.fill(arg.slice(0, at), arg.slice(at + 1));

@@ -125,6 +125,12 @@ const selectorOf = (verb, arg) =>
  *
  *   press:<key>   click:<selector>   fill:<selector>=<text>   wait:<ms>
  *   goto:<path>   upload:<file input selector>=<path on this machine>
+ *   scroll:<selector>
+ *
+ * `scroll:` exists because contrast-check refuses to sample an element that is off screen —
+ * correctly, since a pixel needs the element rendered — and the cluster overview's Warnings
+ * table sits at y≈1220 in a 900px viewport. Without it, every selector below the fold reads
+ * `outside the viewport`, which is a FAILED measurement dressed as a caveat (#257).
  *
  * Prefix a step with `?` to skip it when its selector is absent. That matters whenever
  * PREPARE runs more than once (per theme, per viewport): a step like signing in applies
@@ -147,6 +153,7 @@ export async function runPrepare(page, spec) {
     if (verb === 'press') await page.keyboard.press(arg);
     else if (verb === 'click') await page.click(arg);
     else if (verb === 'wait') await page.waitForTimeout(Number(arg));
+    else if (verb === 'scroll') await page.locator(arg).first().scrollIntoViewIfNeeded();
     else if (verb === 'goto') {
       await page.goto(new URL(arg, BASE_URL).href, { waitUntil: 'networkidle' });
       await page.waitForTimeout(600);
@@ -168,21 +175,27 @@ export async function runPrepare(page, spec) {
  * a run can arrive with no tree at all. Re-expand it first, or every leaf lookup fails
  * with a misleading "not found".
  */
-export async function discoverLeaves(page, only = []) {
-  const expand = page.locator('.tile-nav');
-  if (await expand.isVisible().catch(() => false)) {
-    await expand.click().catch(() => {});
+export async function expandNav(page) {
+  const rail = page.locator('.tile-nav'); // rendered only while the whole nav is collapsed
+  if (await rail.isVisible().catch(() => false)) {
+    await rail.click().catch(() => {});
     await page.waitForTimeout(300);
   }
-  const cats = page.locator('.group > summary');
-  const n = await cats.count();
-  for (let i = 0; i < n; i += 1) {
-    await cats
-      .nth(i)
-      .click()
-      .catch(() => {});
-    await page.waitForTimeout(80);
-  }
+  // Set `.open` rather than clicking each summary. Two reasons, both learned by breaking it:
+  // a click TOGGLES, so an earlier version that clicked every `.group > summary` shut every
+  // category on the normal case (all open) and the leaf it was about to click stopped being
+  // clickable; and a click starts the disclosure ANIMATION, which is what Playwright's
+  // "element is not stable" means when you then click through it. Setting the property is
+  // instant and idempotent.
+  await page.evaluate(() => {
+    for (const d of document.querySelectorAll('details.group')) {
+      d.open = true;
+    }
+  });
+}
+
+export async function discoverLeaves(page, only = []) {
+  await expandNav(page);
   const labels = await page
     .locator('.leaf-label')
     .allInnerTexts()
@@ -194,54 +207,25 @@ export async function discoverLeaves(page, only = []) {
 /**
  * Click a nav leaf by its exact label and wait for the list to render.
  *
- * The rail and every category are opened first, for the same reason `discoverLeaves` does
- * it: the nav collapses (#237) and each category is a `<details>` whose open state is
- * remembered in prefs, so a run can arrive with the leaf present in the DOM but inside a
- * closed parent.
+ * The rail and every category are opened first (`expandNav`), for the same reason
+ * `discoverLeaves` does it: the nav collapses (#237) and each category is a `<details>`
+ * whose open state is remembered in prefs, so a run can arrive with the leaf present in the
+ * DOM but inside a closed parent.
  *
  * A COLLAPSED category still has its leaves in the DOM, so the locator resolves and the
  * click is attempted — and Playwright reports "element is not stable" and then "element is
  * not visible". Neither message mentions the shut `<details>` actually responsible, which
- * reads as a missing or renamed leaf and sends you looking at the nav registry. Because
- * the collapsed state survives reloads, an earlier version failed every `--leaf` run on
- * this box, twice, with the error pointing at the leaf.
+ * reads as a missing or renamed leaf and sends you looking at the nav registry. Because the
+ * collapsed state survives reloads, an earlier version failed every `--leaf` run on this
+ * box, twice, with the error pointing at the leaf.
  *
- * Setting `.open` rather than clicking each summary is deliberate: a click would toggle
- * shut whatever happened to be open already. The click loop below is only a fallback for
- * a leaf still not visible after that.
+ * `discoverLeaves` was taught this and `openLeaf` was not, so every script that opens ONE
+ * leaf kept hitting it. Both go through `expandNav` now — one expansion, one place to fix.
  */
 export async function openLeaf(page, label) {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const expand = page.locator('.tile-nav'); // only rendered while the nav is collapsed
-  if (await expand.isVisible().catch(() => false)) {
-    await expand.click().catch(() => {});
-    await page.waitForTimeout(300);
-  }
-  await page.evaluate(() => {
-    for (const d of document.querySelectorAll('details.group')) {
-      d.open = true;
-    }
-  });
+  await expandNav(page);
   const leaf = page.locator('.leaf-label', { hasText: new RegExp(`^${escaped}$`) }).first();
-  if (!(await leaf.isVisible().catch(() => false))) {
-    const rail = page.locator('.tile-nav');
-    if (await rail.isVisible().catch(() => false)) {
-      await rail.click().catch(() => {});
-      await page.waitForTimeout(300);
-    }
-    const summaries = page.locator('.group > summary');
-    const n = await summaries.count();
-    for (let i = 0; i < n; i += 1) {
-      if (await leaf.isVisible().catch(() => false)) break;
-      await summaries
-        .nth(i)
-        .click()
-        .catch(() => {});
-      await page.waitForTimeout(120);
-    }
-    // The disclosure animates; clicking mid-transition is what "not stable" means.
-    await page.waitForTimeout(400);
-  }
   await leaf.click({ timeout: 4000 });
   await page
     .waitForSelector('.n-data-table-tbody tr, .cluster-overview, .empty', { timeout: 8000 })

@@ -15,7 +15,8 @@
  *   node scripts/perf-sweep.mjs
  *
  * Env (all optional):
- *   BASE_URL   default http://localhost:8080/ui/
+ *   PORT       default 8080 — the instance to sweep
+ *   BASE_URL   overrides PORT entirely; default http://localhost:$PORT/
  *   KWEBLENS_USER / KWEBLENS_PASS   default admin / admin  (blank USER = skip sign-in)
  *   BLOCK_MS   max acceptable main-thread block, default 1500. This is a HANG threshold, not
  *              a jank budget: a big table's initial render is legitimately one ~300-800ms
@@ -31,7 +32,11 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const BASE_URL = process.env.BASE_URL ?? 'http://localhost:8080/ui/';
+// PORT, like every other script here. This one alone took only BASE_URL, so `PORT=8128
+// node scripts/perf-sweep.mjs` silently swept :8080 — or, with nothing there, died on
+// ERR_CONNECTION_REFUSED naming a port the caller had not asked for. Parallel instances on
+// non-default ports are the normal case (dev-run.sh --port), so this is not an edge.
+const BASE_URL = process.env.BASE_URL ?? `http://localhost:${process.env.PORT ?? 8080}/`;
 const USER = process.env.KWEBLENS_USER ?? 'admin';
 const PASS = process.env.KWEBLENS_PASS ?? 'admin';
 const BLOCK_MS = Number(process.env.BLOCK_MS ?? 1500);

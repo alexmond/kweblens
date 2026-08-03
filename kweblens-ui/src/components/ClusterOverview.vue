@@ -12,10 +12,11 @@ import type { DataTableColumns } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { ageToSeconds, eventObjectKind } from '../kube';
+import { eventObjectKind } from '../kube';
 import type { EventSummary, KubeObject } from '../types';
 import MetricChart from './MetricChart.vue';
 import StatCard from './StatCard.vue';
+import { WARN_TABLE_MIN_WIDTH, warnColumns } from './warningsTable';
 
 const props = defineProps<{
   cluster: string;
@@ -80,12 +81,8 @@ const nodeReady = (o: KubeObject): boolean => {
 };
 const readyNodes = computed(() => (nodes.value ?? []).filter(nodeReady).length);
 
-const warnColumns: DataTableColumns<EventSummary> = [
-  { title: 'Reason', key: 'reason', sorter: 'default' },
-  { title: 'Object', key: 'object', sorter: 'default' },
-  { title: 'Message', key: 'message', sorter: 'default' },
-  { title: 'Age', key: 'age', sorter: (a, b) => ageToSeconds(a.age) - ageToSeconds(b.age), defaultSortOrder: 'ascend' },
-];
+// Column widths and the reasoning behind them live in warningsTable.ts (#257).
+const columns = warnColumns() as DataTableColumns<EventSummary>;
 // Capped for rendering, but the cap is REPORTED. Previously the stat card showed the true
 // total while the table showed 30, so the page contradicted itself.
 const WARNING_LIMIT = 30;
@@ -137,13 +134,18 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
         Showing the {{ WARNING_LIMIT }} most recent of {{ warnings?.length }} warnings.
       </div>
       <div v-if="warnings && warnings.length === 0" class="empty">No warnings.</div>
+      <!-- `table-layout="fixed"` is what makes the declared widths binding and hands the
+           remainder to Message; `scroll-x` is the floor below which it scrolls instead. -->
       <NDataTable
         v-else
-        :columns="warnColumns"
+        class="warn-table"
+        :columns="columns"
         :data="warnRows"
         :loading="warnings === null"
         :row-key="(w) => `${w.object}/${w.reason}/${w.age}`"
         :row-props="rowProps"
+        :scroll-x="WARN_TABLE_MIN_WIDTH"
+        table-layout="fixed"
         size="small"
       />
     </section>

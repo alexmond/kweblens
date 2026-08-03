@@ -256,7 +256,7 @@ export type OvBody =
   | { type: 'annotations'; map: Record<string, string> }
   | { type: 'secret'; data: Record<string, string> }
   | { type: 'kv'; pairs: [string, string][] }
-  | { type: 'table'; headers: string[]; rows: OvCell[][]; tls?: string[] };
+  | { type: 'table'; headers: string[]; rows: OvCell[][]; tls?: string[]; note?: string };
 
 // A collapsible section. `applies` decides visibility; `body` renders its content.
 export interface OverviewSection {
@@ -283,9 +283,76 @@ function ovSelectorEntries(o: KubeObject): [string, string][] {
   return Object.entries(sel).filter(([, v]) => typeof v === 'string') as [string, string][];
 }
 
+/**
+ * NOT APPLICABLE vs KNOWN FALSE — the distinction #248 turned on.
+ *
+ * `Ready` and `Restarts` are per-POD runtime facts, read off `status.containerStatuses`. Only a
+ * Pod has those. Every other kind the Containers section applies to (Deployment, StatefulSet,
+ * DaemonSet, ReplicaSet, Job, CronJob) resolves its containers from the pod TEMPLATE — a spec,
+ * which by definition has no runtime state — so the old code's `st?.ready ? 'Yes' : 'No'` and
+ * `st?.restartCount ?? 0` printed `No` / `0` for every one of them. That is not a missing value
+ * rendered conservatively; it is an INVENTED one, and it read as an alarm: a healthy Deployment
+ * said `Ready: No` four lines above a Rollout section saying `Desired 1 / Ready 1`.
+ *
+ * Two rules follow, and both are needed — one alone leaves a hole:
+ *
+ *   1. {@link hasContainerRuntime} — when the object carries no container statuses at all, the
+ *      two columns are DROPPED, not blanked, and the table says why. A column of em dashes is
+ *      still a column: it invites "why is this empty?" about a question that was never asked
+ *      here, and costs width in a drawer that is 520px by default. Dropping it says
+ *      structurally what is true — this object has a template, not a status.
+ *   2. {@link readyText} / {@link restartsText} — a Pod DOES have the columns, but may not yet
+ *      have a status for a given container (one still being created, an ephemeral container
+ *      just attached). That cell is `—`: absent, not false.
+ */
+export function hasContainerRuntime(o: KubeObject): boolean {
+  return ovArr(ovStatus(o).containerStatuses).length > 0;
+}
+
+/** Readiness as the object actually states it — `—` when it does not state it. */
+export function readyText(st: Record<string, unknown> | undefined): string {
+  if (st?.ready === undefined) {
+    return '—';
+  }
+  return st.ready ? 'Yes' : 'No';
+}
+
+/** Restart count as the object actually states it — `—` when it does not state it. */
+export function restartsText(st: Record<string, unknown> | undefined): string {
+  return st?.restartCount === undefined ? '—' : String(Number(st.restartCount));
+}
+
+/**
+ * Whether these containers came from a pod TEMPLATE rather than the object's own spec. Asked
+ * of the SPEC rather than by comparing object identity with {@link ovPodSpec}, whose fallback
+ * returns a fresh `{}` for a spec-less object and would make identity say "template".
+ */
+export function fromPodTemplate(o: KubeObject): boolean {
+  const spec = ovSpec(o);
+  return !Array.isArray(spec.containers) && (!!spec.template || !!spec.jobTemplate);
+}
+
+/**
+ * Said out loud under the table, so a reader is not left to notice two absent columns — and
+ * said DIFFERENTLY for the two ways of having no runtime status, because they are different
+ * facts. A Deployment will never have one; a Pending pod does not have one YET.
+ */
+function containersNote(o: KubeObject): string {
+  if (fromPodTemplate(o)) {
+    return (
+      'Ready and restart counts are per-pod runtime state. This object carries a pod template, ' +
+      'so it has none of its own — the pods it creates do.'
+    );
+  }
+  return 'This pod has not reported any container status yet, so readiness and restart counts are not available.';
+}
+
+const CONTAINER_SPEC_HEADERS = ['Name', 'Image', 'Ports', 'Requests'];
+
 function containersBody(o: KubeObject): OvBody {
   const containers = ovArr(ovPodSpec(o).containers);
   const cs = ovArr(ovStatus(o).containerStatuses);
+  const runtime = hasContainerRuntime(o);
   const statusFor = (n: string) => cs.find((s) => s.name === n);
   const ports = (cc: Record<string, unknown>) =>
     ovArr(cc.ports)
@@ -301,16 +368,13 @@ function containersBody(o: KubeObject): OvBody {
   const rows = containers.map((cc) => {
     const cn = String(cc.name ?? '');
     const st = statusFor(cn);
-    return [
-      plain(cn),
-      mono(String(cc.image ?? '')),
-      plain(ports(cc) || '—'),
-      plain(resources(cc)),
-      plain(st?.ready ? 'Yes' : 'No'),
-      plain(String(Number(st?.restartCount ?? 0))),
-    ];
+    const spec = [plain(cn), mono(String(cc.image ?? '')), plain(ports(cc) || '—'), plain(resources(cc))];
+    return runtime ? [...spec, plain(readyText(st)), plain(restartsText(st))] : spec;
   });
-  return { type: 'table', headers: ['Name', 'Image', 'Ports', 'Requests', 'Ready', 'Restarts'], rows };
+  if (!runtime) {
+    return { type: 'table', headers: CONTAINER_SPEC_HEADERS, rows, note: containersNote(o) };
+  }
+  return { type: 'table', headers: [...CONTAINER_SPEC_HEADERS, 'Ready', 'Restarts'], rows };
 }
 
 function portsBody(o: KubeObject): OvBody {
@@ -455,10 +519,11 @@ function containerStateBody(o: KubeObject): OvBody {
   const rows: OvCell[][] = [];
   const all = [...ovArr(ovStatus(o).containerStatuses), ...ovArr(ovStatus(o).initContainerStatuses)];
   for (const cs of all) {
+    // Same rule as the Containers table: a status that does not say `ready` is `—`, not `No`.
     rows.push([
       plain(str(cs.name)),
-      plain(cs.ready ? 'Yes' : 'No'),
-      plain(String(cs.restartCount ?? 0)),
+      plain(readyText(cs)),
+      plain(restartsText(cs)),
       plain(stateText(cs.state)),
       plain(stateText(cs.lastState)),
     ]);
