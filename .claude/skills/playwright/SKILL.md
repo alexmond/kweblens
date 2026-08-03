@@ -141,6 +141,26 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-03 — **"Click the row" does not open the drawer, and fails silently.**
+  `ResourceTable`'s `rowProps` ignores a click whose target is inside a checkbox, button,
+  anchor or dropdown. So a row-CENTRE click lands on the Namespace **link** — which filters
+  the list instead of opening anything — and `td` alone is the checkbox column. Either way
+  the drawer stays shut, every following `?` step skips because its selector is absent, and
+  the run reports `not present` for a surface it never navigated to. → Scenes click
+  `td:nth-child(2)`, the Name cell. **A chain of optional steps degrades to "measured
+  nothing" with no error; the unmeasured count is the only thing that says so.**
+- 2026-08-03 — **No surface behind the admin login had ever been colour-checked.** The YAML
+  editor's dialog gates its Form / Warnings / Review tabs on `v-if="!readonly"`, so a
+  signed-out run does not fail to measure them — it never renders them, and open-mode makes
+  that invisible because everything else loads normally. → `signin:` is a PREPARE verb now,
+  idempotent (it looks for the Sign in link and does nothing if absent), plus a signed-in
+  scene. It immediately found `.review-recheck` at **2.17:1** in light.
+- 2026-08-03 — That 2.17:1 was reusing `.linkbtn`, which hard-codes `#9fb3bf` because it is
+  a BRAND BAR control and that bar is dark in both themes — the reason #272 deliberately left
+  it alone. Borrowing it for a button on a light modal put light grey on white. → **A class
+  being "the link one" is not a licence to use it on a different surface.** Check what a
+  shared class was designed to sit on before reusing it.
+
 - 2026-08-03 — **The shared `PREPARE` had no `leaf:` verb, so `click:` walked into the
   collapsed-category trap for the third time.** `contrast-check` grew `leaf:` when #257 hit
   it; `lib/kw-playwright.mjs`'s `runPrepare` — which is what `ui-measure` and `ui-shot` use —

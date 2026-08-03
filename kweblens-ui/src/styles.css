@@ -4150,3 +4150,77 @@ body.dragging {
   padding-top: 6px;
   border-top: 1px solid var(--border);
 }
+
+/* Review Changes: two diffs, side by side when there is room (T1).
+
+   Uses the #249 container primitive rather than a media query, and rather than a new
+   literal: the dialog's width is what decides, and `responsive.test.ts` fails the build if
+   a second breakpoint appears here. Below the boundary they stack, because two 300px diffs
+   are worse than one 620px one — a diff you cannot read is not a check. */
+.review-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.review-half {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.review-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Its own colour rather than `.linkbtn`'s.
+   `.linkbtn` hard-codes #9fb3bf because it is a BRAND BAR control and that bar is dark in
+   both themes — which is exactly why #272 left it alone. Borrowing it for a button on the
+   editor's modal put it on white at 2.17:1. A class being "the link one" is not a licence
+   to use it on a different surface. */
+.review-recheck {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.review-recheck:hover {
+  text-decoration: underline;
+}
+
+.review-cap {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 70ch;
+}
+
+.review-cap-refused {
+  color: var(--danger-fg);
+}
+
+/* The refusal is the answer, not an aside — it gets the room the diff would have had. */
+.review-refused {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-line);
+  border-radius: 6px;
+  background: var(--danger-wash);
+  color: var(--danger-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}

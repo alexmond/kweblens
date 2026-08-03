@@ -2,6 +2,8 @@ package org.alexmond.kweblens.web.api;
 
 import java.util.Map;
 
+import io.fabric8.kubernetes.client.KubernetesClientException;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -79,6 +81,38 @@ public class ApiExceptionHandler {
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
 		problem.setTitle("Helm action failed");
 		problem.setProperties(Map.of("code", "helm-failed"));
+		return problem;
+	}
+
+	/**
+	 * The API server's own refusal, passed through instead of flattened into a 500.
+	 *
+	 * <p>
+	 * This matters most for the apply dry run (#209/T1), whose whole purpose is to
+	 * surface an admission-webhook rejection, an exhausted quota or a validation failure
+	 * BEFORE the write lands. Without this mapping the operator got "500 kweblens broke"
+	 * and the webhook's message — the one piece of information they needed — was
+	 * discarded.
+	 *
+	 * <p>
+	 * The server's status code is reused where it is a sane HTTP status, so a 403 from
+	 * RBAC stays a 403 and a 422 from a validating webhook stays a 422. fabric8 reports 0
+	 * when the request never reached the server (DNS, TLS, connection refused); that is
+	 * not the caller's fault, so it maps to 502 — the cluster is the upstream that
+	 * failed.
+	 */
+	@ExceptionHandler(KubernetesClientException.class)
+	public ProblemDetail kubernetesRefused(KubernetesClientException ex) {
+		int code = ex.getCode();
+		HttpStatus status = (code >= 400 && code < 600) ? HttpStatus.valueOf(code) : HttpStatus.BAD_GATEWAY;
+		// getStatus().getMessage() is the human-readable reason ("admission webhook
+		// denied
+		// the request: …"); getMessage() wraps it in fabric8's own framing.
+		String detail = (ex.getStatus() != null && ex.getStatus().getMessage() != null) ? ex.getStatus().getMessage()
+				: ex.getMessage();
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+		problem.setTitle("The cluster refused the request");
+		problem.setProperties(Map.of("code", "cluster-refused"));
 		return problem;
 	}
 

@@ -173,7 +173,10 @@ of its own` (a wrapper whose text belongs to a child), `covered by another layer
 behind the open drawer) and `outside the viewport`. Treat a screenful of those as a failed
 run — use `PREPARE`, a wider `--view`, or close the drawer, and measure again.
 
-`PREPARE` steps are `press:` / `click:` / `fill:<sel>=<text>` / `upload:<sel>=<path>` /
+`PREPARE` steps include `signin:<password>` — one verb for the admin login, idempotent, and
+the only way to reach a surface gated on being signed in (the YAML editor's Form / Warnings /
+Review tabs are `v-if="!readonly"`, so a signed-out run never renders them at all). Plus
+`press:` / `click:` / `fill:<sel>=<text>` / `upload:<sel>=<path>` /
 `wait:<ms>`, and a step prefixed with `?` is skipped when its selector is not on screen.
 The `?` matters for anything behind the login: `PREPARE` runs once per theme, so a sign-in
 that only applies to the first pass would otherwise stall the second one until it times
