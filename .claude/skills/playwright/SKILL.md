@@ -44,7 +44,7 @@ and the reason is in its own header comment — read that before changing one.
 |---|---|
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
-| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line. Exits 1 over budget. |
+| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
@@ -77,7 +77,8 @@ ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
 ```
 
 `PREPARE` brings a surface on screen before it is sampled — `press:` `click:`
-`fill:<sel>=<text>` `upload:<sel>=<path>` `wait:<ms>` `goto:<path>`, semicolon-separated.
+`fill:<sel>=<text>` `upload:<sel>=<path>` `wait:<ms>` `goto:<path>` `scroll:<sel>`
+`leaf:<nav label>`, semicolon-separated.
 Prefix a step with `?` to skip it when its selector is absent; that matters because
 `PREPARE` runs once per theme and per viewport, and a step like signing in applies only
 the first time — without `?` the second pass waits for a modal that is already dealt with
@@ -171,6 +172,31 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   `contrast-check` bug. The sample was taken at `x+1, y+1` — inside the border-radius
   cut-out, where the panel behind shows through. Sampling the vertical centre of the padding
   agreed exactly. → **A pixel probe needs a sampling point argued for, not a corner.**
+- 2026-08-02 — #257 ("headers break mid-word while Message hoards the width") was found by
+  eye, reported twice, and **no script would have caught it**: nothing overflowed, no line was
+  long, contrast was fine. The cause was Naive's `word-break: break-word` on table cells, which
+  makes a column's minimum content width ONE GLYPH, so a squeezed column shreds its own label
+  rather than refusing to shrink. → `ui-measure` now reports `words`: the longest *unbreakable*
+  run (a browser may break after `/` and `-`) laid out in the element's own font vs its content
+  box, over EVERY match rather than the first, and fails the run. `--self-test` pins four
+  controls against a fixture, **including one that must fire** — the check was written after
+  the app was already fixed, where a clean run proves only that a check is quiet.
+- 2026-08-02 — `contrast-check` could not measure a single surface behind the nav or below the
+  fold: the app has no deep links, so a list or drawer is only reachable by clicking, and
+  PREPARE's `click:` dies after a 30s "element is not visible" retry on a collapsed category.
+  The overview's own Warnings table (y≈1220 in a 900px viewport) reported `outside the
+  viewport` for every selector. → PREPARE gained `scroll:<sel>` and `leaf:<label>` in both
+  runners. With them, `.rel-note.dim` measured **2.56:1 in light** — a real failure in text
+  that had been on screen for weeks (fixed here; the rest of the `#94a3b8` family filed as
+  #265). **A tool that cannot reach a screen is not passing that screen.**
+- 2026-08-02 — `openLeaf`/`discoverLeaves` expanded the nav by clicking every
+  `.group > summary`, which TOGGLES: on the normal case (categories already open) it shut all
+  of them, and the leaf it was about to click stopped being clickable. `discoverLeaves` never
+  noticed because a collapsed category still has its labels in the DOM. → One `expandNav()` used by both and mirrored in
+  `contrast-check`, which sets `details.group.open = true` rather than clicking at all: a
+  click toggles AND starts the disclosure animation, which is what "element is not stable"
+  means when you click through it. **An idempotent-looking helper built on a toggle is not
+  idempotent — set the state, do not flip it.**
 
 - 2026-08-02 — `contrast-check` read `color(srgb 0.89 0.91 0.93 / 0.75)` — which is what
   Naive UI's controls actually compute to — as channels 0.89/255, i.e. near-black, and

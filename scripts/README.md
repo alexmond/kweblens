@@ -88,6 +88,11 @@ node scripts/perf-sweep.mjs                            # needs a cluster or --si
 node scripts/ui-shot.mjs                               # 3 widths x 2 themes of the shell
 node scripts/ui-shot.mjs --leaf Pods --view wide
 node scripts/ui-measure.mjs --view wide '.n-drawer' '.drawer-title'
+node scripts/ui-measure.mjs --self-test                # positive controls; no running app
+
+# Below the fold, or behind the nav — neither could be measured for colour before #257
+PREPARE='scroll:.warn-table' node scripts/contrast-check.mjs '.warn-table .n-data-table-td'
+PREPARE='leaf:Deployments;click:.n-data-table-tbody tr' node scripts/contrast-check.mjs '.mini th'
 ```
 
 `ui-shot.mjs` defaults to the **matrix**, not one image, because captures here were taken
@@ -98,9 +103,17 @@ black-on-black stat cards survived because the captures were light-mode. Output 
 live cluster and carry its API-server hostname, node names and namespaces.
 
 `ui-measure.mjs` settles size the way `contrast-check.mjs` settles colour — box, overflow
-against the nearest clipping ancestor, and characters per line — and exits non-zero over
-budget. An `absent` selector is a **failed** measurement, not a pass, the same trap as
-`not present` above.
+against the nearest clipping ancestor, characters per line, and whether any **word is wider
+than the box holding it** — and exits non-zero over budget. An `absent` selector is a
+**failed** measurement, not a pass, the same trap as `not present` above.
+
+The `words` line was added after #257, where the overview's Warnings table rendered its
+`Reason` header as "Reas / on" while a sibling column sat mostly empty: nothing overflowed,
+no line was long, and every existing check passed. It lays the longest **unbreakable** run
+out in the element's own font (a browser may break after `/` and `-`, so `Pod/kw251-bad-a`
+is three runs) and compares it with the content box, over every match rather than the first.
+`--self-test` pins it against a fixture whose answer is arithmetic, including the case where
+it must FIRE — a clean run against an already-fixed app proves only that a check is quiet.
 
 Both take `--view narrow|normal|wide` (1024/1400/1900), `--theme`, `--leaf`, `--path` and
 `PREPARE`. Shared plumbing lives in [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs);

@@ -42,6 +42,9 @@ const clip = (v: string) => (v.length > 48 ? v.slice(0, 48) + '…' : v);
       <div v-if="body.tls && body.tls.length > 0" class="chips" :style="{ marginTop: '8px' }">
         <span v-for="(h, ti) in body.tls" :key="ti + h" class="chip">TLS: {{ h }}</span>
       </div>
+      <!-- Why a column a reader might expect is absent (#248). A table that quietly drops
+           `Ready`/`Restarts` is honest; one that also says why is useful. -->
+      <div v-if="body.note" class="rel-note dim">{{ body.note }}</div>
     </template>
   </Accordion>
 </template>

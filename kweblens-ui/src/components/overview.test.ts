@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import type { KubeObject } from '../types';
 import type { SectionRank } from './overview';
-import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS, rankOf, splitByRank } from './overview';
+import {
+  OVERVIEW_FIELDS,
+  OVERVIEW_SECTIONS,
+  fromPodTemplate,
+  hasContainerRuntime,
+  rankOf,
+  readyText,
+  restartsText,
+  splitByRank,
+} from './overview';
 import { relationSections } from './relations';
 
 // The Environment section encodes a SECURITY decision, so it is pinned here: a value sourced
@@ -93,6 +102,88 @@ describe('Container Status section', () => {
 
   it('includes init containers and renders terminated state', () => {
     expect(rowsOf('Container Status', pod)).toContainEqual(['migrate', 'Yes', '0', 'Completed (exit 0)', '—']);
+  });
+});
+
+// ---- #248: the Containers table must not state runtime facts it does not have ----
+
+const tableOf = (title: string, o: KubeObject) => {
+  const body = section(title).body(o);
+  if (body.type !== 'table') {
+    throw new Error('expected a table body');
+  }
+  return body;
+};
+
+describe('Containers section: absent runtime status is not "not ready"', () => {
+  it('reports a Pod’s real readiness and restarts', () => {
+    const t = tableOf('Containers', pod);
+    expect(t.headers).toEqual(['Name', 'Image', 'Ports', 'Requests', 'Ready', 'Restarts']);
+    expect(t.rows[0].map((c) => c.text).slice(-2)).toEqual(['Yes', '3']);
+    expect(t.note).toBeUndefined();
+  });
+
+  it('drops both columns for a kind whose containers come from a pod template', () => {
+    // The bug: `Ready: No` / `Restarts: 0` on a healthy Deployment, four lines above a Rollout
+    // section reading `Desired 3 / Ready 2`. Neither number existed to be read.
+    const t = tableOf('Containers', deployment);
+    expect(t.headers).toEqual(['Name', 'Image', 'Ports', 'Requests']);
+    expect(t.rows.every((r) => r.length === 4)).toBe(true);
+    expect(t.rows.flat().map((c) => c.text)).not.toContain('No');
+    expect(t.note).toMatch(/per-pod runtime state/);
+  });
+
+  it('does not call a Pod a template when it simply has not started yet', () => {
+    // Both cases drop the columns, but for different reasons, so they must not share a
+    // sentence: a Deployment will never have container status; a Pending pod does not have it
+    // YET. Saying "this object carries a pod template" of a Pod is a new false statement.
+    const pending: KubeObject = {
+      kind: 'Pod',
+      metadata: { name: 'p' },
+      spec: { containers: [{ name: 'app', image: 'nginx:latest' }] },
+      status: { phase: 'Pending' },
+    };
+    const t = tableOf('Containers', pending);
+    expect(t.headers).toEqual(['Name', 'Image', 'Ports', 'Requests']);
+    expect(fromPodTemplate(pending)).toBe(false);
+    expect(t.note).toMatch(/has not reported any container status yet/);
+    expect(t.note).not.toMatch(/template/);
+  });
+
+  it('holds for every template-backed kind, not just Deployment', () => {
+    for (const kind of ['StatefulSet', 'DaemonSet', 'ReplicaSet', 'Job']) {
+      const o: KubeObject = {
+        kind,
+        metadata: { name: 'x' },
+        spec: { template: { spec: { containers: [{ name: 'app', image: 'nginx:latest' }] } } },
+      };
+      expect(hasContainerRuntime(o)).toBe(false);
+      expect(tableOf('Containers', o).headers).not.toContain('Ready');
+    }
+  });
+
+  it('keeps the columns for a Pod but dashes the container that has no status yet', () => {
+    // A Pod DOES answer these questions — for the containers it has started. A second
+    // container with no status is unknown, not failing.
+    const starting: KubeObject = {
+      kind: 'Pod',
+      metadata: { name: 'p' },
+      spec: { containers: [{ name: 'app' }, { name: 'sidecar' }] },
+      status: { containerStatuses: [{ name: 'app', ready: false, restartCount: 2 }] },
+    };
+    const rows = tableOf('Containers', starting).rows.map((r) => r.map((c) => c.text));
+    expect(rows[0].slice(-2)).toEqual(['No', '2']);
+    expect(rows[1].slice(-2)).toEqual(['—', '—']);
+  });
+
+  it('distinguishes known-false from absent in the cell helpers', () => {
+    expect(readyText({ ready: true })).toBe('Yes');
+    expect(readyText({ ready: false })).toBe('No');
+    expect(readyText({})).toBe('—');
+    expect(readyText(undefined)).toBe('—');
+    expect(restartsText({ restartCount: 0 })).toBe('0');
+    expect(restartsText({})).toBe('—');
+    expect(restartsText(undefined)).toBe('—');
   });
 });
 

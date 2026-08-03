@@ -3042,8 +3042,15 @@ body.dragging {
   border-radius: 4px;
 }
 
+/* `var(--muted)`, not a literal slate. The hardcoded #94a3b8 was picked against the dark
+   theme and never re-checked against the light one: measured 5.41:1 dark but 2.56:1 on white
+   — under the AA floor, for text that is now load-bearing (this is where the Containers table
+   explains an absent column, #248, next to the existing "None." and "Loading related
+   objects…"). --muted is the theme-aware pair and measures 5.54:1 dark / 5.95:1 light.
+   Other selectors still carry that literal over a light background — .ov-scope-note measures
+   2.37:1 — and are filed separately rather than swept in here. */
 .rel-note.dim {
-  color: #94a3b8;
+  color: var(--muted);
   padding-left: 0;
 }
 
@@ -3066,6 +3073,23 @@ body.dragging {
   font-size: 11px;
   color: #94a3b8;
   margin-bottom: 6px;
+}
+
+/* Cluster overview Warnings table (#257): the WRAP POLICY, alongside the column widths in
+   warningsTable.ts. Naive puts `word-break: break-word` on every cell, which makes a column's
+   minimum content width one glyph — so before this the headers rendered "Reas / on" and
+   "Ag / e" and object names broke mid-token. `overflow-wrap: break-word` breaks a token only
+   when it genuinely cannot fit its column, and leaves the minimum at a whole word, so a header
+   can no longer be squeezed under its own label. Headers never break at all: they are three
+   short fixed labels, and a wrapped header is always a sizing bug rather than long content. */
+.warn-table .n-data-table-th__title {
+  white-space: nowrap;
+}
+
+.warn-table .n-data-table-td,
+.warn-table .n-data-table-th {
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 /* "Needs attention" table on the Workloads overview. Leads the page, so it is allowed to be
