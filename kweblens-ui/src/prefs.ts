@@ -53,6 +53,26 @@ export function saveHiddenCols(resourceId: string | undefined, hidden: Set<strin
   }
 }
 
+/**
+ * Columns the user asked to KEEP whatever the width (#238), keyed by kind like the hidden set.
+ *
+ * A second set rather than a flag on the first, because "not hidden" stopped meaning "on
+ * screen" the moment width could take a column away. `hidden` is the user saying no; this is
+ * the user saying yes to something the fit rule would otherwise drop. A column in neither is
+ * one nobody has an opinion about, and is the only kind the width is allowed to decide.
+ * Persisted for the same reason as the hidden set: a choice that vanishes on the next
+ * navigation is the papercut #27 fixed.
+ */
+export function loadKeptCols(resourceId: string | undefined): Set<string> {
+  return new Set(resourceId ? (read<string[]>(`colsKeep.${resourceId}`, []) ?? []) : []);
+}
+
+export function saveKeptCols(resourceId: string | undefined, keep: Set<string>): void {
+  if (resourceId) {
+    write(`colsKeep.${resourceId}`, [...keep]);
+  }
+}
+
 /** The cluster to reopen on load. Global: it is the last thing you were working on. */
 export const loadCluster = (): string | null => read<string | null>('cluster', null);
 export const saveCluster = (id: string | null): void => write('cluster', id);

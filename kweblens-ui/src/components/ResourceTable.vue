@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NDropdown } from 'naive-ui';
 import type { DataTableColumns, DropdownOption } from 'naive-ui';
-import { shallowRef, computed, h } from 'vue';
+import { shallowRef, computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
+import { COL_WIDTH, autoHiddenCols, chromeWidth, tableWidth } from '../columnFit';
 import { age } from '../columns';
 import { objKey, objName, objNs } from '../kube';
 import type { RowAction } from '../rowActions';
@@ -25,12 +26,16 @@ const props = defineProps<{
   selectedKey: string | null;
   selection: Set<string>;
   fetchChildren?: (obj: KubeObject) => Promise<KubeObject[]>;
+  /** Columns the Columns picker pinned: never taken away by width (#238). */
+  keptCols?: Set<string>;
 }>();
 const emit = defineEmits<{
   (e: 'update:selection', keys: string[]): void;
   (e: 'open', obj: KubeObject): void;
   (e: 'namespace-click', ns: string): void;
   (e: 'row-action', action: RowAction, obj: KubeObject, container?: string): void;
+  /** Which columns the width took away, so the picker can say so. */
+  (e: 'auto-hidden', keys: string[]): void;
 }>();
 
 const showNs = computed(() => props.namespaced && props.objects.some((o) => objNs(o)));
@@ -61,16 +66,56 @@ const onMenu = (key: string, row: KubeObject) => {
 // Age "7d") hog space while long names wrap over several lines. Give Name a generous
 // min-width + ellipsis (truncate with a tooltip, never wrap), keep other columns above a
 // readable floor, and let the table scroll horizontally when the total exceeds the viewport.
-const NAME_MIN_WIDTH = 260;
-const NS_MIN_WIDTH = 150;
-const DATA_MIN_WIDTH = 110;
-const AGE_WIDTH = 80;
-const MENU_WIDTH = 44;
-const SELECT_WIDTH = 40;
-const EXPAND_EXTRA = 34;
+// The widths themselves live in `columnFit.ts`, which is also what decides — from these
+// same numbers — which columns fit the space the table actually has (#238).
+
+// ---- How much room the table has (#238) ----
+//
+// A number, not a breakpoint: the fit depends on the kind's column set, and `columnFit.ts`
+// says why at length. The measurement is a ResizeObserver on the table's own root, which is
+// the container width and NOT the width of the columns: with `scroll-x` set, Naive keeps
+// the root at the container's width and scrolls the inner table, so hiding a column cannot
+// change what is measured and the observer cannot chase its own tail. `0` until the first
+// layout, which `autoHiddenCols` reads as "no width known yet" and answers by hiding
+// nothing — a table that blinks down to one column for a frame is not an improvement.
+const tableRef = ref<{ $el?: HTMLElement } | null>(null);
+const availableWidth = ref(0);
+let observer: ResizeObserver | null = null;
+onMounted(() => {
+  const el = tableRef.value?.$el;
+  if (!el || typeof ResizeObserver === 'undefined') {
+    return;
+  }
+  observer = new ResizeObserver(([entry]) => {
+    availableWidth.value = Math.round(entry.contentRect.width);
+  });
+  observer.observe(el);
+  availableWidth.value = Math.round(el.getBoundingClientRect().width);
+});
+onBeforeUnmount(() => observer?.disconnect());
+
+const chrome = computed(() =>
+  chromeWidth({ expandable: !!props.fetchChildren, namespace: showNs.value, age: showAge.value }),
+);
+
+const autoHidden = computed(() =>
+  autoHiddenCols(props.columns, {
+    available: availableWidth.value,
+    chrome: chrome.value,
+    keep: props.keptCols,
+  }),
+);
+
+/** The columns actually rendered: what the caller asked for, minus what does not fit. */
+const fitCols = computed(() => props.columns.filter((c) => !autoHidden.value.has(c.key)));
+
+// The picker is a different component and needs to say which columns the width took away.
+// Emitted on change rather than exposed, so there is one owner of the set (the shell) and
+// the table stays the only thing that knows how wide it is.
+watch(autoHidden, (keys) => emit('auto-hidden', [...keys]), { immediate: true });
 
 const columns = computed<DataTableColumns<KubeObject>>(() => {
-  const cols: DataTableColumns<KubeObject> = [{ type: 'selection', width: SELECT_WIDTH }];
+  const cols: DataTableColumns<KubeObject> = [{ type: 'selection', width: COL_WIDTH.select }];
   // Name is the tree column: when fetchChildren is set, Naive renders the expand
   // arrow + indent here, so child pods align under this column and every other one.
   cols.push({
@@ -79,7 +124,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
     sorter: 'default',
     // Explicit width (not minWidth): with scroll-x set, Naive honours widths — a bare
     // minWidth collapsed Name to ~130px and over-truncated names.
-    width: NAME_MIN_WIDTH + (props.fetchChildren ? EXPAND_EXTRA : 0),
+    width: COL_WIDTH.name + (props.fetchChildren ? COL_WIDTH.expand : 0),
     ellipsis: { tooltip: true },
     render: (row) => objName(row),
   });
@@ -87,7 +132,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
     cols.push({
       title: 'Namespace',
       key: 'namespace',
-      width: NS_MIN_WIDTH,
+      width: COL_WIDTH.namespace,
       ellipsis: { tooltip: true },
       sorter: (a, b) => (objNs(a) ?? '').localeCompare(objNs(b) ?? ''),
       render: (row) =>
@@ -106,12 +151,12 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
           : '—',
     });
   }
-  props.columns.forEach((c) => {
+  fitCols.value.forEach((c) => {
     cols.push({
       title: c.header,
       key: c.key,
       // A column's own `width` (short values like Taints) wins; otherwise a readable floor.
-      width: c.width ?? DATA_MIN_WIDTH,
+      width: c.width ?? COL_WIDTH.data,
       align: c.numeric ? 'right' : undefined,
       className: c.numeric ? 'kw-num' : undefined,
       ellipsis: { tooltip: true },
@@ -126,7 +171,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
     cols.push({
       title: 'Age',
       key: 'age',
-      width: AGE_WIDTH,
+      width: COL_WIDTH.age,
       sorter: (a, b) =>
         (Date.parse(a.metadata?.creationTimestamp ?? '') || 0) - (Date.parse(b.metadata?.creationTimestamp ?? '') || 0),
       render: (row) => age(row.metadata?.creationTimestamp),
@@ -135,7 +180,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
   cols.push({
     title: '',
     key: '_menu',
-    width: MENU_WIDTH,
+    width: COL_WIDTH.menu,
     // Stop the click bubbling to the row (which opens the detail drawer), so the kebab
     // dropdown actually opens instead of being pre-empted / overlapped by the drawer.
     render: (row) =>
@@ -176,18 +221,10 @@ const virtual = computed(() => props.objects.length >= VIRTUAL_FROM);
 
 // Total width the columns want. Handed to NDataTable as scroll-x so a wide column set
 // scrolls horizontally instead of being squeezed (which is what forced text to wrap).
-const scrollX = computed(() => {
-  const dataWidth = props.columns.reduce((sum, c) => sum + (c.width ?? DATA_MIN_WIDTH), 0);
-  return (
-    SELECT_WIDTH +
-    NAME_MIN_WIDTH +
-    (props.fetchChildren ? EXPAND_EXTRA : 0) +
-    (showNs.value ? NS_MIN_WIDTH : 0) +
-    dataWidth +
-    (showAge.value ? AGE_WIDTH : 0) +
-    MENU_WIDTH
-  );
-});
+// Computed from the columns actually rendered, so hiding one for width genuinely returns
+// its pixels — a scroll-x left at the full column set would keep the horizontal scrollbar
+// #238 is about, with fewer columns behind it.
+const scrollX = computed(() => tableWidth(fitCols.value, chrome.value));
 
 // Tree data: expandable workloads carry their child pods as real rows so they line up
 // under every column and are individually clickable. Pods are lazy-loaded on expand and
@@ -235,6 +272,7 @@ const rowProps = (row: KubeObject) => ({
 
 <template>
   <NDataTable
+    ref="tableRef"
     :columns="columns"
     :data="treeData"
     :loading="loading"

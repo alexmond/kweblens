@@ -4,7 +4,8 @@ import { auth } from '../auth';
 import type { DialogApi } from '../dialog';
 import type { LogScope } from '../dock';
 import type { RowAction } from '../rowActions';
-import { saveHiddenCols } from '../prefs';
+import { nextColumnChoice } from '../columnFit';
+import { saveHiddenCols, saveKeptCols } from '../prefs';
 import { dispatchRowAction, fetchWorkloadPods, runBulkDelete, saveFavorites, toggleInSet } from '../shell';
 import type { DockKind, KubeObject, NavItem } from '../types';
 
@@ -16,6 +17,9 @@ export function useAppActions(a: {
   selection: Ref<Set<string>>;
   objects: Ref<KubeObject[]>;
   hiddenCols: Ref<Set<string>>;
+  /** Columns pinned against the width rule, and the ones the width took away (#238). */
+  keptCols: Ref<Set<string>>;
+  autoHiddenCols: Ref<Set<string>>;
   favorites: Ref<string[]>;
   dialog: DialogApi;
   openDock: (kind: DockKind, ns: string, pod: string, containers: string[], attach?: boolean) => void;
@@ -73,10 +77,19 @@ export function useAppActions(a: {
   };
 
   // Persist as well as apply: a column choice that vanishes on the next navigation is the
-  // papercut #27 set out to fix.
+  // papercut #27 set out to fix. The decision itself is in `columnFit.ts` — checking a
+  // column the WIDTH removed has to pin it, not merely un-hide it, or the next fit takes it
+  // away again and the picker looks broken (#238).
   const toggleCol = (key: string) => {
-    a.hiddenCols.value = toggleInSet(a.hiddenCols.value, key);
-    saveHiddenCols(a.selected.value?.id, a.hiddenCols.value);
+    const next = nextColumnChoice(key, {
+      hidden: a.hiddenCols.value,
+      keep: a.keptCols.value,
+      autoHidden: a.autoHiddenCols.value,
+    });
+    a.hiddenCols.value = next.hidden;
+    a.keptCols.value = next.keep;
+    saveHiddenCols(a.selected.value?.id, next.hidden);
+    saveKeptCols(a.selected.value?.id, next.keep);
   };
   const toggleRow = (key: string) => (a.selection.value = toggleInSet(a.selection.value, key));
   const toggleAll = (keys: string[]) => {

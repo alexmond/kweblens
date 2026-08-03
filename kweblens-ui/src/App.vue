@@ -15,7 +15,7 @@ import { useResourceData } from './composables/useResourceData';
 import { defaultHiddenCols } from './columns';
 import { useDialog } from './dialog';
 import { objKey } from './kube';
-import { loadDark, loadHiddenCols, loadNamespace, saveCluster, saveDark, saveNamespace } from './prefs';
+import { loadDark, loadHiddenCols, loadKeptCols, loadNamespace, saveCluster, saveDark, saveNamespace } from './prefs';
 import { HELM_VIEW_IDS, NAV, filterObjects, isSynthetic } from './shell';
 import { buildResourceColumns } from './table';
 import type { KubeObject, NavItem } from './types';
@@ -46,6 +46,11 @@ const helmRelease = ref<{ namespace: string; name: string } | null>(null);
 const selected = ref<NavItem | null>(null);
 const detail = ref<{ resourceId: string; obj: KubeObject; edit?: boolean } | null>(null);
 const hiddenCols = ref<Set<string>>(new Set());
+// The other two thirds of "which columns are on screen" (#238): what the user pinned against
+// the width rule, and what the width took away. The table computes the second — it is the only
+// thing that knows how wide it is — and reports it here so the Columns picker can say so.
+const keptCols = ref<Set<string>>(new Set());
+const autoHiddenCols = ref<Set<string>>(new Set());
 const selection = ref<Set<string>>(new Set());
 const query = ref('');
 const authUser = ref<string | null>(null);
@@ -150,6 +155,8 @@ watch([selected, namespace], () => {
   // this always re-seeded from the defaults, so enabling an opt-in column was lost on the
   // next navigation.
   hiddenCols.value = loadHiddenCols(selected.value?.id, defaultHiddenCols(selected.value?.id));
+  keptCols.value = loadKeptCols(selected.value?.id);
+  autoHiddenCols.value = new Set();
   selection.value = new Set();
   if (cluster.value && namespace.value !== undefined) {
     saveNamespace(cluster.value, namespace.value);
@@ -178,6 +185,8 @@ const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDele
   selection,
   objects,
   hiddenCols,
+  keptCols,
+  autoHiddenCols,
   favorites,
   dialog,
   openDock,
@@ -413,12 +422,15 @@ const onForwardStarted = () => {
               :table-cols="tableCols"
               :visible-cols="visibleCols"
               :hidden-cols="hiddenCols"
+              :kept-cols="keptCols"
+              :auto-hidden-cols="autoHiddenCols"
               :selection="selection"
               :selected-key="selectedKey"
               :loading="loading"
               :fetch-children="fetchChildrenFn"
               @update:query="(v) => (query = v)"
               @toggle-col="toggleCol"
+              @auto-hidden="(keys) => (autoHiddenCols = new Set(keys))"
               @clear-selection="selection = new Set()"
               @bulk-delete="bulkDelete"
               @update:selection="(keys) => (selection = new Set(keys))"

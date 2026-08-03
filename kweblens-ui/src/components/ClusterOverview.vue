@@ -94,31 +94,42 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
   <div class="overview">
     <h1 class="ov-title">{{ name }}</h1>
     <div class="ov-scope-note">{{ namespace ? `Namespace: ${namespace}` : 'All namespaces' }}</div>
-    <div class="ov-cards">
-      <StatCard
-        :value="nodes ? nodes.length : '…'"
-        :label="`Nodes${nodes ? ` · ${readyNodes} ready` : ''}`"
-        clickable
-        @select="emit('navigate', 'Node')"
-      />
-      <StatCard :value="namespaceCount" label="Namespaces" clickable @select="emit('navigate', 'Namespace')" />
-      <StatCard
-        :value="warnings ? warnings.length : '…'"
-        label="Warnings"
-        :danger="!!(warnings && warnings.length > 0)"
-      />
-    </div>
-    <!-- Nodes and the charts below are cluster-scoped. Saying so is the honest alternative to
-         either ignoring the filter silently or pretending these can be narrowed. -->
-    <div v-if="namespace" class="ov-scope-note">Nodes and cluster metrics are cluster-wide and ignore this filter.</div>
-    <div v-if="masterUrl" class="ov-api">
-      API server: <span class="mono">{{ masterUrl }}</span>
+    <!-- Cards and charts share one band (#236). Three 260px cards left 1445px of a 2560px
+         screen empty while the charts sat on their own row below; side by side, the charts
+         take that space and the page is shorter. The band WRAPS rather than switching at a
+         width: see `.ov-band` in styles.css for why this one is not a container query. -->
+    <div class="ov-band">
+      <div class="ov-band-cards">
+        <div class="ov-cards">
+          <StatCard
+            :value="nodes ? nodes.length : '…'"
+            :label="`Nodes${nodes ? ` · ${readyNodes} ready` : ''}`"
+            clickable
+            @select="emit('navigate', 'Node')"
+          />
+          <StatCard :value="namespaceCount" label="Namespaces" clickable @select="emit('navigate', 'Namespace')" />
+          <StatCard
+            :value="warnings ? warnings.length : '…'"
+            label="Warnings"
+            :danger="!!(warnings && warnings.length > 0)"
+          />
+        </div>
+        <!-- Nodes and the charts beside them are cluster-scoped. Saying so is the honest
+             alternative to either ignoring the filter silently or pretending these can be
+             narrowed. -->
+        <div v-if="namespace" class="ov-scope-note">
+          Nodes and cluster metrics are cluster-wide and ignore this filter.
+        </div>
+        <div v-if="masterUrl" class="ov-api">
+          API server: <span class="mono">{{ masterUrl }}</span>
+        </div>
+      </div>
+      <div class="charts">
+        <MetricChart :cluster="cluster" target="cluster-cpu" label="Cluster CPU (cores)" />
+        <MetricChart :cluster="cluster" target="cluster-mem" label="Cluster Memory" />
+      </div>
     </div>
     <div v-if="err" class="error">{{ err }}</div>
-    <div class="charts">
-      <MetricChart :cluster="cluster" target="cluster-cpu" label="Cluster CPU (cores)" />
-      <MetricChart :cluster="cluster" target="cluster-mem" label="Cluster Memory" />
-    </div>
     <!-- Diagnosis sits above Warnings: warnings are raw events, diagnosis is the reading
          of them plus what to do. Reason before evidence. -->
     <DiagnosisPanel

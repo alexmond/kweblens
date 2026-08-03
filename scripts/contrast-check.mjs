@@ -398,8 +398,19 @@ async function openLeafHere(page, label) {
       .catch(() => {});
     await page.waitForTimeout(60);
   }
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  await page.locator('.leaf-label', { hasText: new RegExp(`^${escaped}$`) }).first().click({ timeout: 5000 });
+  // `Category/Leaf` scopes the lookup: every category dashboard is a leaf called `Overview`,
+  // so a bare label resolves the first one in the DOM and measures the wrong page without
+  // ever failing. Mirrored from lib/kw-playwright.mjs — see openNav above for why this file
+  // keeps its own copy.
+  const slash = label.indexOf('/');
+  const exact = (s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  const root = slash > 0
+    ? page.locator('details.group', { has: page.locator('.cat-label', { hasText: exact(label.slice(0, slash)) }) }).first()
+    : page;
+  await root
+    .locator('.leaf-label', { hasText: exact(slash > 0 ? label.slice(slash + 1) : label) })
+    .first()
+    .click({ timeout: 5000 });
   await page.waitForSelector('.n-data-table-tbody tr, .empty', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(500);
 }

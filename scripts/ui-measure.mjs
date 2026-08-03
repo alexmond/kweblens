@@ -18,6 +18,7 @@
 //   overflow  width vs the nearest scrollable/clipping ancestor, and vs the viewport
 //   measure   approximate characters per line, for text-bearing elements
 //   words     a word too wide for its own box — i.e. one the browser must break mid-word
+//   row       how much of a container's width its own children actually reach
 //   count     how many matched (a selector matching 0 is reported, never silently passed)
 //
 // Exit code is 1 if anything overflows its container or the viewport, so it can gate a
@@ -29,7 +30,8 @@
 //   node scripts/ui-measure.mjs --view wide --leaf Pods '.n-data-table'
 //   PREPARE='click:.n-data-table-tbody tr' node scripts/ui-measure.mjs --leaf Pods '.n-drawer'
 //
-// Options: --view <name> (narrow|normal|wide, default normal), --theme <name>,
+// Options: --view <name|px> (narrow|normal|wide, default normal; a bare number is the
+//          bottom-end escape hatch — see `viewport` in lib/kw-playwright.mjs), --theme <name>,
 //          --leaf <label>, --path <path>. Env: PORT, BASE_URL, PREPARE.
 //
 // A selector reported as `absent` is a FAILED measurement, not a pass — the same trap
@@ -163,9 +165,49 @@ function measureOne(els) {
     return worst && { run: worst.run, w: worst.w, inner: worst.inner };
   };
 
+  // ---- How much of a row its children actually reach (#236) ----
+  //
+  // The opposite defect to overflow, and the one nothing here could see: the cluster
+  // overview's three stat cards sat in a 2225px row and used 804px of it, leaving 1421px of
+  // trailing emptiness. Nothing overflowed, no line was long, contrast was fine — the box
+  // line reported a healthy 2225px-wide container and said nothing about the void inside
+  // it. The audit for #234 found it only by measuring `.ov-cards` and `.ov-card` separately
+  // and doing the arithmetic by hand.
+  //
+  // Measured per LINE, not over the whole box: a wrapping container's last line is short by
+  // design, so the honest number is the SMALLEST trailing gap any of its lines leaves. If
+  // even the fullest line stops well short of the container, the container is wider than
+  // anything in it — which is the finding. Absolutely positioned children are excluded
+  // (they are out of flow and reach nothing), and so are zero-sized ones.
+  const rowFill = () => {
+    const kids = [...el.children].filter((k) => {
+      const kr = k.getBoundingClientRect();
+      return kr.width > 0 && kr.height > 0 && getComputedStyle(k).position !== 'absolute';
+    });
+    if (kids.length < 2) return null;
+    const px = (v) => parseFloat(v) || 0;
+    const left = r.left + px(cs.borderLeftWidth) + px(cs.paddingLeft);
+    const right = r.right - px(cs.borderRightWidth) - px(cs.paddingRight);
+    const inner = right - left;
+    if (inner <= 0) return null;
+
+    // Cluster children into lines by their top edge with an 8px tolerance, so children of
+    // different heights or a non-stretch align-items still count as one line.
+    const lines = [];
+    for (const k of [...kids].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)) {
+      const kr = k.getBoundingClientRect();
+      const line = lines.find((l) => Math.abs(l.top - kr.top) <= 8);
+      if (line) line.right = Math.max(line.right, kr.right);
+      else lines.push({ top: kr.top, right: kr.right });
+    }
+    const unused = Math.min(...lines.map((l) => right - l.right));
+    return { kids: kids.length, lines: lines.length, inner: Math.round(inner), unused: Math.round(unused) };
+  };
+
   return {
     count: els.length,
     word: widestWord(),
+    row: rowFill(),
     box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
     scrollW: el.scrollWidth,
     // Reaching documentElement means nothing between here and the top clips, so
@@ -180,12 +222,15 @@ function measureOne(els) {
 }
 
 /**
- * Positive controls for the `words` check, against a fixture whose answer is arithmetic.
+ * Positive controls for the `words` and `row` checks, against a fixture whose answer is
+ * arithmetic.
  *
- * Written because the check was added off the back of #257 and there was no way to see it FIRE
+ * Written because `words` was added off the back of #257 and there was no way to see it FIRE
  * — the app had already been fixed, so a clean run proved only that it was quiet. A metric with
  * no case whose answer is known ahead of time is the shape of every wrong conclusion in this
- * repo's history. Needs no running app: `node scripts/ui-measure.mjs --self-test`.
+ * repo's history. `row` (#236) is pinned the same way, including the wrapping case, where the
+ * naive "container width minus the widest line" reading invents a defect on every wrapped
+ * layout. Needs no running app: `node scripts/ui-measure.mjs --self-test`.
  */
 const SELF_TEST_FIXTURE = `
 <style>
@@ -195,18 +240,33 @@ const SELF_TEST_FIXTURE = `
   #roomy    { width: 400px; }
   #nowrap   { width: 40px; white-space: nowrap; }
   #hyphen   { width: 90px; }
+  .rowbox { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; width: 1000px; }
+  .rowbox > i { height: 30px; background: #ccc; display: block; }
+  #empty-row > i  { width: 100px; }
+  #full-row  > i  { width: 320px; }
+  #wrapped   > i  { width: 320px; }
 </style>
 <div id="squeezed">Reason</div>
 <div id="roomy">Reason</div>
 <div id="nowrap">Reason</div>
-<div id="hyphen">Pod/kw251-bad-a</div>`;
+<div id="hyphen">Pod/kw251-bad-a</div>
+<div id="empty-row" class="rowbox"><i></i><i></i><i></i></div>
+<div id="full-row" class="rowbox"><i></i><i></i><i></i></div>
+<div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>`;
 
+// [selector, metric, must-fire?, why]
 const SELF_TEST_CASES = [
-  ['#squeezed', true, 'a 40px box cannot hold "Reason" — the defect #257 shipped'],
-  ['#roomy', false, 'the same word in a 400px box is fine'],
-  ['#nowrap', false, 'white-space: nowrap cannot break, so it is not a word-break defect'],
-  ['#hyphen', false, '"Pod/kw251-bad-a" breaks legally after / and -, so only "kw251-" must fit'],
+  ['#squeezed', 'word', true, 'a 40px box cannot hold "Reason" — the defect #257 shipped'],
+  ['#roomy', 'word', false, 'the same word in a 400px box is fine'],
+  ['#nowrap', 'word', false, 'white-space: nowrap cannot break, so it is not a word-break defect'],
+  ['#hyphen', 'word', false, '"Pod/kw251-bad-a" breaks legally after / and -, so only "kw251-" must fit'],
+  ['#empty-row', 'row', true, '3x100px + gaps = 320px of a 1000px row — the shape of #236'],
+  ['#full-row', 'row', false, '3x320px + gaps = 1000px, so the row is used'],
+  ['#wrapped', 'row', false, '4x320px wraps to a second line; a short LAST line is not waste'],
 ];
+
+/** The reporting threshold for `row`: a third of the container AND more than a gap's worth. */
+const rowIsEmpty = (row) => !!row && row.unused > Math.max(200, row.inner * 0.33);
 
 if (argv.includes('--self-test')) {
   const { chromium } = await import(`${process.env.HOME}/.local/lib/playwright/node_modules/playwright/index.mjs`);
@@ -214,13 +274,20 @@ if (argv.includes('--self-test')) {
   const p = await b.newPage({ viewport: { width: 800, height: 600 } });
   await p.setContent(SELF_TEST_FIXTURE);
   let bad = 0;
-  for (const [sel, wantDefect, why] of SELF_TEST_CASES) {
+  for (const [sel, metric, wantDefect, why] of SELF_TEST_CASES) {
     const got = await p.$$eval(sel, measureOne);
-    const fired = !!got?.word;
+    const fired = metric === 'row' ? rowIsEmpty(got?.row) : !!got?.word;
     const ok = fired === wantDefect;
     if (!ok) bad += 1;
-    const detail = got?.word ? `"${got.word.run}" ${got.word.w}px in ${got.word.inner}px` : 'no word defect';
-    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${sel.padEnd(10)} ${detail.padEnd(34)} ${why}`);
+    const detail =
+      metric === 'row'
+        ? got?.row
+          ? `${got.row.unused}px unused of ${got.row.inner}px`
+          : 'no row measured'
+        : got?.word
+          ? `"${got.word.run}" ${got.word.w}px in ${got.word.inner}px`
+          : 'no word defect';
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${sel.padEnd(11)} ${metric.padEnd(5)} ${detail.padEnd(30)} ${why}`);
   }
   await b.close();
   console.log(bad ? `\n${bad} control(s) failed.` : '\nAll positive controls hold.');
@@ -264,6 +331,15 @@ try {
       const verdict = m.measure > 200 ? ' <-- DEFECT' : m.measure > 90 ? ' <-- uncomfortable' : '';
       console.log(`  measure  ~${m.measure} chars/line at ${m.fontSize}${verdict}`);
       if (m.measure > 200) failed = true;
+    }
+    if (m.row) {
+      // Reported whenever the element has children in flow, not only when it is over the
+      // threshold: "this row is full" is the answer half the responsive questions here need,
+      // and a number that only appears when it is bad cannot be used as a before/after.
+      console.log(
+        `  row      ${m.row.kids} children on ${m.row.lines} line(s) leave ${m.row.unused}px` +
+          ` of ${m.row.inner}px unused${rowIsEmpty(m.row) ? '  <-- trailing emptiness' : ''}`,
+      );
     }
     if (m.word) {
       console.log(
