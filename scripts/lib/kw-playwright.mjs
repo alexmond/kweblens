@@ -191,10 +191,39 @@ export async function discoverLeaves(page, only = []) {
   return only.length ? uniq.filter((l) => only.includes(l)) : uniq;
 }
 
-/** Click a nav leaf by its exact label and wait for the list to render. */
+/**
+ * Click a nav leaf by its exact label and wait for the list to render.
+ *
+ * It expands the tree first when the leaf is not on screen. The nav is a tree of
+ * `<details>`, and a COLLAPSED category still has its leaves in the DOM — so the locator
+ * resolves, the click is attempted, and Playwright reports "element is not stable" and then
+ * "element is not visible". Neither message mentions the closed group actually responsible,
+ * and since the collapsed state is remembered in prefs (#237) it survives reloads: an
+ * earlier version failed every `--leaf` run on this box for that reason, twice, and the
+ * error pointed at the leaf. Same fix `discoverLeaves` already carries.
+ */
 export async function openLeaf(page, label) {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const leaf = page.locator('.leaf-label', { hasText: new RegExp(`^${escaped}$`) }).first();
+  if (!(await leaf.isVisible().catch(() => false))) {
+    const rail = page.locator('.tile-nav');
+    if (await rail.isVisible().catch(() => false)) {
+      await rail.click().catch(() => {});
+      await page.waitForTimeout(300);
+    }
+    const summaries = page.locator('.group > summary');
+    const n = await summaries.count();
+    for (let i = 0; i < n; i += 1) {
+      if (await leaf.isVisible().catch(() => false)) break;
+      await summaries
+        .nth(i)
+        .click()
+        .catch(() => {});
+      await page.waitForTimeout(120);
+    }
+    // The disclosure animates; clicking mid-transition is what "not stable" means.
+    await page.waitForTimeout(400);
+  }
   await leaf.click({ timeout: 4000 });
   await page
     .waitForSelector('.n-data-table-tbody tr, .cluster-overview, .empty', { timeout: 8000 })
