@@ -192,14 +192,26 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
   **decided** — do not open work to "fix" it, and do not describe it as a gap. Do keep saying it
   plainly in user-facing text; the ADR requires that honesty. SSAR is sanctioned only as a UI
   affordance (grey out what won't work), never as an authorization gate — it fails open.
-- **"Suggest → preview → confirm → apply" is weaker than it sounds — know which link is real.**
-  Helm mutations take a genuine jhelm `dryRun`. But `ResourceService` applies with
-  `forceConflicts().serverSideApply()` and **never sends `dryRun=All`**, so the Review Changes
-  diff is "my edit vs what I loaded", not "live vs what the server would accept"; and
-  `RemediationService`'s `preview` is a hand-written English sentence, not a server round-trip.
-  `AuditService` is a bounded **in-memory** 500-entry deque, so "always audited" holds only
-  within one process lifetime. Don't repeat the stronger claim in docs or commit messages, and
-  see roadmap item T1 before building anything that leans on it.
+- **"Suggest → preview → confirm → apply" — know which link is real, per surface.** This used
+  to be uniformly weaker than it sounded; two thirds of it has since been fixed, so the
+  *specific* remaining gap is what matters:
+  - **Helm** — a genuine jhelm `dryRun`. Always was.
+  - **Remediation** — `scale-up` and `rollout-restart` take a real server-side `dryRun=All`
+    via `ResourceService.dryRunPatch` (#209). `restart-pod` and `rollback` **cannot** — a
+    DELETE and a revision lookup are not patches — so `RemediationService.preview` returns
+    `notChecked` naming the reason instead of prose that reads like a server answer. Saying
+    "we did not check" is the design, not an omission.
+  - **The YAML apply path is still the weak link.** `ResourceService` applies with
+    `forceConflicts().serverSideApply()` and sends no `dryRun`, so the editor's Review Changes
+    diff is "my edit vs what I loaded", **not** "live vs what the server would accept". That
+    claim still must not be overstated.
+  - **Audit survives a restart** (#210/#212): every entry is written to a dedicated
+    `kweblens.audit` logger *as well as* the in-memory 500-entry ring, so the ring is only the
+    live view behind `/audit` and eviction no longer loses the record. Values are quoted and
+    escaped and control characters stripped, because a target can carry attacker-influenceable
+    text (a pod file path, a Helm release name) and a newline could otherwise forge a second,
+    fake audit line. The category is pinned to INFO so `logging.level.root=WARN` cannot
+    silently switch the trail off.
 - **fabric8 version is BOM-pinned.** `kubernetes-client-bom` (`${fabric8.version}`) aligns
   client + model + mock-server; bump the one property, never individual fabric8 artifacts.
 - **kubeconfigs are secrets.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig`, `.kube/` — never

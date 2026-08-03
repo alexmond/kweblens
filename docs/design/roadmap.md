@@ -119,16 +119,24 @@ Ranked by *severity for a single operator*, which is not the same as the order t
 
 ### Table stakes we lack
 
-**T1 — The write path cannot be previewed against the cluster, and its audit is volatile.**
-`apply` is server-side apply with `forceConflicts()` — a deliberate choice, but it means a
-field owned by another manager is silently overwritten, and there is no way to ask the API
-server what the object *would* become. Consequently the Review Changes tab diffs "my edit vs
-what I loaded", never "live vs what the cluster would accept": it cannot show defaulting, it
-cannot show another controller's fields, and it cannot catch an admission-webhook rejection
-before the write lands. `dryRun=All` on SSA returns exactly the merged object needed to close
-all three, and fabric8 supports it. This is ranked first because it is the one place where a
-stated differentiator is partly narrative, because it is small, and because everything
-write-shaped downstream inherits it.
+**T1 — ~~The write path cannot be previewed against the cluster, and its audit is
+volatile.~~ MOSTLY LANDED — the remainder is the YAML editor.** Re-checked against the code
+2026-08-03. Two of the three parts shipped:
+
+- **Remediation preview is real** (#209). `ResourceService.dryRunPatch` sends `dryRun=All`,
+  and `scale-up` / `rollout-restart` return the server's answer. `restart-pod` and `rollback`
+  *cannot* — a DELETE and a revision lookup are not patches — so they return `notChecked`
+  naming the reason rather than prose that reads like a server response. That is the right
+  answer, not a gap to close.
+- **The audit survives a restart** (#210 → #212). Every entry goes to a dedicated
+  `kweblens.audit` logger as well as the in-memory ring, with values escaped against
+  log injection and the category pinned to INFO.
+- **Still open: the YAML apply path.** `apply` is server-side apply with `forceConflicts()`
+  and sends no `dryRun`, so the Review Changes tab still diffs "my edit vs what I loaded",
+  never "live vs what the cluster would accept" — it cannot show defaulting, cannot show
+  another controller's fields, and cannot catch an admission-webhook rejection before the
+  write lands. `dryRun=All` on SSA returns exactly the merged object needed to close all
+  three, and fabric8 supports it; `dryRunPatch` is the pattern to follow.
 
 **T2 — Nothing in the list path is bounded.** Every list is a full LIST into the JVM heap and
 then to the browser; `/counts` is `listRaw().size()`. This is k9s
@@ -181,27 +189,37 @@ ConfigMap and ServiceAccount it references) — is exactly what `RelationService
 cheap. Ranked below D1 because it depends on D1's joins.
 
 **D4 — Guarded MCP write tools.** Every 2026 entrant ships them; Radar's scoping
-(destructive-annotated, no delete tool, no shell) is the precedent. **Gated on T1** — see §5.
+(destructive-annotated, no delete tool, no shell) is the precedent. **The T1 gate has largely
+lifted** (2026-08-03): it existed because the dry-run was prose and the audit died with the
+pod, and neither is true now — remediation previews are server-validated (#209) and the audit
+trail survives a restart (#212). What remains before shipping write tools is a scoping
+decision, not a missing guardrail. See §5.
 
 ## 5. The cut plan
 
 Severity (§4) is not build order. Build order is leverage: do the cheap thing that unblocks
 an epic before the expensive thing that unblocks a module.
 
-### First: T1 — write-path integrity
+### First: T1 — write-path integrity  *(mostly done; one slice left)*
 
-One slice: `dryRun=All` on `apply` and `patch`; the same for the remediation actions, so the
-`preview` field carries a real server response instead of a sentence; surface it as the
-Review Changes tab's second diff (**live → would-be**, alongside today's edited-vs-loaded);
-and make the audit log durable.
+Originally one slice: `dryRun=All` on `apply` and `patch`; the same for the remediation
+actions; surface it as the Review Changes tab's second diff (**live → would-be**, alongside
+today's edited-vs-loaded); and make the audit log durable.
 
-Why first: it is days, not weeks. It repairs a claim already made in the README and in the
-competitive review, which is a different kind of debt from a missing feature. And it is the
-**blocker for D4** — shipping write-capable agent tools on a guardrail whose dry-run is prose
-and whose audit dies with the pod is how a safety story becomes an advisory. Also unblocks
-any further remediation action, since each one inherits the same chain.
+**Shipped:** the remediation half (#209) and the durable audit (#210 → #212).
 
-**Blocks:** GH#142's write half, all future remediation actions.
+**Remaining:** `dryRun=All` on the YAML **apply** path, and the Review Changes second diff
+that consumes it. Still days rather than weeks, and still worth doing first — it is the last
+place where a stated differentiator is partly narrative.
+
+**Consequence for the rest of this plan:** the D4 gate has largely lifted. The argument for
+blocking write-capable agent tools was "a guardrail whose dry-run is prose and whose audit
+dies with the pod", and neither is true any more — remediation previews are server-validated
+and the audit trail survives a restart. Anything gated on T1 for *those* reasons should be
+re-read as unblocked; only work that leans specifically on the **editor's** diff still waits.
+
+**Blocks:** the Review Changes second diff. No longer blocks GH#142's write half or further
+remediation actions — those inherit a chain that now works.
 
 ### Second: T2 — bounded lists, designed with filtering and with the watch topology
 
