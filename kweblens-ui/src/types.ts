@@ -301,6 +301,42 @@ export interface ObjectDetail {
   relations: Record<string, Relation>;
 }
 
+/**
+ * One object matched by global search (GH#259).
+ *
+ * `resourceId` is the nav route id of the hit's OWN kind, not of whatever list is on screen —
+ * that is how a hit is opened by its own kind rather than the list's (GH#187). `namespace` is
+ * part of the row because names collide across namespaces and a bare name is not addressable.
+ */
+export interface SearchHit {
+  resourceId: string;
+  kind: string;
+  namespace: string | null;
+  name: string;
+  status: string | null;
+  age: string;
+  score: number;
+}
+
+/**
+ * A global-search response, including what it did NOT do.
+ *
+ * `total` counts every match in the searched kinds, so "showing 20 of 137" is measured rather
+ * than capped; `unsearchedKinds` names the kinds outside the bounded set, so a CRD-backed
+ * object missing from the results reads as "not looked at" instead of "not there".
+ */
+export interface SearchResponse {
+  query: string;
+  namespace: string | null;
+  hits: SearchHit[];
+  total: number;
+  truncated: boolean;
+  searchedKinds: string[];
+  unsearchedKinds: string[];
+  skippedKinds: { kind: string; reason: string }[];
+  tookMs: number;
+}
+
 /** One object needing attention, with the reason — from the workload-health endpoint. */
 interface UnhealthyItem {
   kind: string;

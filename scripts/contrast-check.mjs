@@ -563,6 +563,23 @@ let worst = { r: Infinity };
 
 for (let pass = 0; pass < 2; pass++) {
   if (pass === 1) {
+    // Dismiss whatever pass 0's PREPARE opened before reaching for the toggle. PREPARE runs
+    // INSIDE this loop, so a spec like `press:Control+k` leaves a modal mask over the whole
+    // shell — and Naive's mask intercepts the click on `.theme-toggle`. An earlier version
+    // did not do this, and checking the command palette's own colours (the surface that has
+    // been got wrong twice, #200) died on the dark pass with a 30-second timeout whose
+    // message named the toggle rather than the modal actually in the way. Escape is what the
+    // app binds to close the palette and the drawer, so this is the reader's own exit.
+    if (
+      await page
+        .locator('.n-modal-mask, .n-drawer-mask')
+        .first()
+        .isVisible()
+        .catch(() => false)
+    ) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+    }
     await page.click('.theme-toggle');
     await page.waitForTimeout(700);
   }

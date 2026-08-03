@@ -222,8 +222,37 @@ const runCommand = (command: Command) => {
   paletteOpen.value = false;
   if (command.kind === 'cluster') {
     cluster.value = command.target;
+  } else if (command.kind === 'object' && command.hit) {
+    void openSearchHit(command.hit);
   } else if (command.item) {
     selected.value = command.item;
+  }
+};
+
+/**
+ * Open a global-search hit (GH#259).
+ *
+ * The hit is addressed by its OWN kind — `hit.resourceId` — never by whatever list happens to be
+ * on screen. Addressing a row by the list's kind is the bug GH#187 fixed for expanded workload
+ * rows, and a search result is that same shape of mistake waiting to happen: the reader is by
+ * definition somewhere else when they pick one.
+ *
+ * The list is navigated to first, so closing the drawer leaves the reader somewhere that makes
+ * sense rather than on the page they searched from. The object itself is fetched rather than
+ * waited for: the list load is a separate request that may not have landed, and picking the row
+ * out of it once it does would make opening a drawer depend on a race.
+ */
+const openSearchHit = async (hit: { resourceId: string; kind: string; namespace: string | null; name: string }) => {
+  const clusterId = cluster.value;
+  if (!clusterId) {
+    return;
+  }
+  navigateToKind(hit.kind, hit.namespace ?? undefined);
+  try {
+    const obj = await api.object(clusterId, hit.resourceId, hit.name, hit.namespace);
+    detail.value = { resourceId: hit.resourceId, obj };
+  } catch (e) {
+    setError(`Could not open ${hit.kind} ${hit.name}: ${String(e)}`);
   }
 };
 
@@ -449,6 +478,7 @@ const onForwardStarted = () => {
         :clusters="clusters"
         :nav="nav"
         :active-cluster="cluster"
+        :namespace="namespace"
         @pick="runCommand"
         @cancel="paletteOpen = false"
       />

@@ -94,9 +94,21 @@ export const currentTheme = (page) =>
  * Toggles and re-reads rather than counting clicks: the app remembers the last theme in
  * prefs, so "click once for dark" is wrong roughly half the time, and a run that thinks
  * it measured dark mode while looking at light is worse than no run at all.
+ *
+ * It dismisses any open overlay first. Callers loop themes with PREPARE INSIDE the loop
+ * (ui-shot, contrast-check), so a PREPARE that opens the command palette or a drawer
+ * leaves a modal mask over the whole shell — and the second theme's click on
+ * `.theme-toggle` is then intercepted by that mask. An earlier version did not do this and
+ * `PREPARE='press:Control+k;…'` failed on the dark pass with a 30-second timeout whose
+ * message named the toggle, not the modal actually in the way. Escape is what the app
+ * itself binds to close both, so this is the same exit the reader would take.
  */
 export async function setTheme(page, want) {
   if ((await currentTheme(page)) === want) return;
+  if (await page.locator('.n-modal-mask, .n-drawer-mask').first().isVisible().catch(() => false)) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
   await page.click('.theme-toggle');
   await page.waitForTimeout(700);
   const got = await currentTheme(page);
@@ -179,10 +191,39 @@ export async function discoverLeaves(page, only = []) {
   return only.length ? uniq.filter((l) => only.includes(l)) : uniq;
 }
 
-/** Click a nav leaf by its exact label and wait for the list to render. */
+/**
+ * Click a nav leaf by its exact label and wait for the list to render.
+ *
+ * It expands the tree first when the leaf is not on screen. The nav is a tree of
+ * `<details>`, and a COLLAPSED category still has its leaves in the DOM — so the locator
+ * resolves, the click is attempted, and Playwright reports "element is not stable" and then
+ * "element is not visible". Neither message mentions the closed group actually responsible,
+ * and since the collapsed state is remembered in prefs (#237) it survives reloads: an
+ * earlier version failed every `--leaf` run on this box for that reason, twice, and the
+ * error pointed at the leaf. Same fix `discoverLeaves` already carries.
+ */
 export async function openLeaf(page, label) {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const leaf = page.locator('.leaf-label', { hasText: new RegExp(`^${escaped}$`) }).first();
+  if (!(await leaf.isVisible().catch(() => false))) {
+    const rail = page.locator('.tile-nav');
+    if (await rail.isVisible().catch(() => false)) {
+      await rail.click().catch(() => {});
+      await page.waitForTimeout(300);
+    }
+    const summaries = page.locator('.group > summary');
+    const n = await summaries.count();
+    for (let i = 0; i < n; i += 1) {
+      if (await leaf.isVisible().catch(() => false)) break;
+      await summaries
+        .nth(i)
+        .click()
+        .catch(() => {});
+      await page.waitForTimeout(120);
+    }
+    // The disclosure animates; clicking mid-transition is what "not stable" means.
+    await page.waitForTimeout(400);
+  }
   await leaf.click({ timeout: 4000 });
   await page
     .waitForSelector('.n-data-table-tbody tr, .cluster-overview, .empty', { timeout: 8000 })

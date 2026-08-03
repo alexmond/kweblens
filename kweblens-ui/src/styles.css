@@ -3168,6 +3168,38 @@ body.dragging {
   color: var(--muted);
 }
 
+/* An object row's status sits between the name and the Kind · namespace hint, so the eye
+   reads name → state → where it lives. Kept at full text strength rather than a semantic
+   colour: the palette already carries one accent (the armed row), and a second colour
+   competing with it is what made .palette-row.active's first two stylings unreadable
+   (#200). Colour here would also have to clear 4.5:1 over the active row's tint, which the
+   muted grey does not (3.63:1 — the same trap .palette-hint fell into above). */
+.palette-status {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* The scope line: what the search covered and what it did not. Muted because it is
+   secondary to the rows, but it is prose the reader is meant to act on, so it stays at the
+   --muted token that measures 4.38:1 on the panel rather than being dimmed further. */
+.palette-scope {
+  margin: 10px 2px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.palette-scope-error {
+  color: var(--danger-fg);
+}
+
+/* A note with a `title` gets the dotted underline that says "there is more here" — the full
+   list of unsearched kinds is a hundred names, which cannot live on one line. */
+.palette-note[title] {
+  cursor: help;
+  border-bottom: 1px dotted currentcolor;
+}
+
 /* Clusters page (GH#141 W1) — the surface that replaces growing the rail.
    Colours come from tokens so both themes follow; text stays at full strength rather than
    accent-on-tint, which measured under the 4.5:1 floor when the palette tried it (#200). */
