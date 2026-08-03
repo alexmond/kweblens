@@ -44,7 +44,7 @@ and the reason is in its own header comment — read that before changing one.
 |---|---|
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
-| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box. Exits 1 over budget; `--self-test` checks the instrument. |
+| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
@@ -78,7 +78,8 @@ ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
 
 `PREPARE` brings a surface on screen before it is sampled — `press:` `click:`
 `fill:<sel>=<text>` `upload:<sel>=<path>` `wait:<ms>` `goto:<path>` `scroll:<sel>`
-`leaf:<nav label>`, semicolon-separated.
+`leaf:<nav label>` (or `leaf:<Category>/<label>` — `Overview` is a leaf in every category),
+semicolon-separated.
 Prefix a step with `?` to skip it when its selector is absent; that matters because
 `PREPARE` runs once per theme and per viewport, and a step like signing in applies only
 the first time — without `?` the second pass waits for a modal that is already dealt with
@@ -137,6 +138,29 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-03 — **The shared `PREPARE` had no `leaf:` verb, so `click:` walked into the
+  collapsed-category trap for the third time.** `contrast-check` grew `leaf:` when #257 hit
+  it; `lib/kw-playwright.mjs`'s `runPrepare` — which is what `ui-measure` and `ui-shot` use —
+  did not, and the SKILL documented the verb as if it were universal. A
+  `PREPARE='click::nth-match(.leaf-label…)'` step to reach the Workloads dashboard resolved
+  its element and then spent 30s on "element is not stable" / "element is not visible",
+  naming the leaf and never the shut `<details>`. → `leaf:` is in the shared runner now, via
+  the same `openLeaf` that already expands the rail. **The 2026-08-02 rule ("fix EVERY
+  walker") applies to the runners too, not just the walkers they call.**
+- 2026-08-03 — **A nav label is not unique, and `.first()` hid it.** Every category dashboard
+  is a leaf called `Overview`, so `--leaf Overview` and `leaf:Overview` silently opened the
+  Cluster one and measured the wrong page — a wrong answer with no error anywhere. → Both
+  `openLeaf`s take `Category/Leaf` (`leaf:Workloads/Overview`). **When a lookup ends in
+  `.first()`, ask what else it matches before believing the number it produced.**
+- 2026-08-03 — #236 (three 260px cards using 804px of a 2225px row) was found by the #234
+  audit doing arithmetic by hand over two selectors, because **no script measured emptiness**.
+  Overflow was covered from the start; its mirror image was not, and a container that is
+  wider than everything in it reports a perfectly healthy `box`. → `ui-measure` reports `row`:
+  children in flow, clustered into lines, and the smallest trailing gap any line leaves.
+  Per-line because a wrapping container's last line is short by design — the naive "width
+  minus the widest line" reading calls every wrapped layout a defect. Three new `--self-test`
+  controls, including the wrapped one that must NOT fire.
 
 - 2026-08-02 — **The collapsible nav (#237) broke every script that walks the tree, and each
   one blamed the leaf.** `openLeaf`, `ui-measure --leaf`, and `contrast-check`'s

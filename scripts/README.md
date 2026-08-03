@@ -9,7 +9,7 @@ once — the reason is in the header comment of each script.
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
 | [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
-| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line. |
+| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, unused row width. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
@@ -115,8 +115,20 @@ is three runs) and compares it with the content box, over every match rather tha
 `--self-test` pins it against a fixture whose answer is arithmetic, including the case where
 it must FIRE — a clean run against an already-fixed app proves only that a check is quiet.
 
+The `row` line is the opposite defect, added after #236: how much of a container's width its
+own children actually reach. The cluster overview's three stat cards sat in a 2225px row and
+used 804px of it, and nothing here could see that — the box line reported a healthy
+full-width container and said nothing about the void inside it. It is measured **per line**,
+so a wrapping layout's short last line is not mistaken for waste, and reported for every
+container with children in flow rather than only when it is bad, so it works as a
+before/after. Informational: it does not fail a run.
+
 Both take `--view narrow|normal|wide` (1024/1400/1900), `--theme`, `--leaf`, `--path` and
-`PREPARE`. Shared plumbing lives in [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs);
+`PREPARE`. `--view` also accepts a bare pixel width — the escape hatch for "at what width
+does this stop working?" (#234's question, whose answer was 847px), not for everyday use:
+a finding is reproducible only at a width someone wrote down, which is what the names are
+for. `PREPARE`'s `leaf:` verb takes `Category/Leaf` as well as a bare label, because every
+category dashboard is a leaf called `Overview` and a bare label always resolved the first. Shared plumbing lives in [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs);
 `contrast-check.mjs` and `perf-sweep.mjs` predate it and deliberately still carry their own
 copies — they are the instruments that caught real defects, and rewriting a working
 measuring tool for tidiness is how you end up with one you cannot trust.

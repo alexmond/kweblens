@@ -42,8 +42,14 @@ export const VIEWPORTS = {
 };
 
 export function viewport(name) {
+  // A bare number is an ESCAPE HATCH for one question the three names cannot answer: "at what
+  // width does this stop working?" (#234 asks for that number and it is not 1024, 1400 or
+  // 1900). Findings at a named width stay the norm — a number in a report is reproducible
+  // only if it is written down, which is what the names are for — so sweep with a number,
+  // then re-state the finding at the nearest name.
+  if (/^\d+$/.test(String(name))) return { width: Number(name), height: 900 };
   const v = VIEWPORTS[name];
-  if (!v) throw new Error(`unknown viewport '${name}' — one of: ${Object.keys(VIEWPORTS).join(', ')}`);
+  if (!v) throw new Error(`unknown viewport '${name}' — one of: ${Object.keys(VIEWPORTS).join(', ')}, or a width in px`);
   return v;
 }
 
@@ -125,7 +131,7 @@ const selectorOf = (verb, arg) =>
  *
  *   press:<key>   click:<selector>   fill:<selector>=<text>   wait:<ms>
  *   goto:<path>   upload:<file input selector>=<path on this machine>
- *   scroll:<selector>
+ *   scroll:<selector>   leaf:<nav label>  (or leaf:<Category>/<label>)
  *
  * `scroll:` exists because contrast-check refuses to sample an element that is off screen —
  * correctly, since a pixel needs the element rendered — and the cluster overview's Warnings
@@ -154,6 +160,13 @@ export async function runPrepare(page, spec) {
     else if (verb === 'click') await page.click(arg);
     else if (verb === 'wait') await page.waitForTimeout(Number(arg));
     else if (verb === 'scroll') await page.locator(arg).first().scrollIntoViewIfNeeded();
+    // `leaf:` rather than `click:.leaf-label…`, for the reason recorded on openLeaf: a
+    // collapsed category (#237) keeps its leaves in the DOM, so the click resolves and then
+    // burns the whole timeout on "element is not visible" without ever naming the shut
+    // `<details>`. contrast-check grew this verb when it hit that; the SHARED runner did not,
+    // so ui-measure and ui-shot kept walking into it — and `--leaf` cannot help when a step
+    // has to open a category-qualified leaf (`leaf:Workloads/Overview`) or navigate twice.
+    else if (verb === 'leaf') await openLeaf(page, arg);
     else if (verb === 'goto') {
       await page.goto(new URL(arg, BASE_URL).href, { waitUntil: 'networkidle' });
       await page.waitForTimeout(600);
@@ -223,9 +236,19 @@ export async function discoverLeaves(page, only = []) {
  * leaf kept hitting it. Both go through `expandNav` now — one expansion, one place to fix.
  */
 export async function openLeaf(page, label) {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   await expandNav(page);
-  const leaf = page.locator('.leaf-label', { hasText: new RegExp(`^${escaped}$`) }).first();
+  // `Category/Leaf` scopes the search to one category. Needed because the label alone is NOT
+  // unique: every category dashboard is a leaf called `Overview`, so an unqualified lookup
+  // always resolved the Cluster one and silently measured the wrong page — the failure a
+  // `.first()` produces instead of an error.
+  const slash = label.indexOf('/');
+  const category = slash > 0 ? label.slice(0, slash) : null;
+  const name = slash > 0 ? label.slice(slash + 1) : label;
+  const exact = (s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  const root = category
+    ? page.locator('details.group', { has: page.locator('.cat-label', { hasText: exact(category) }) }).first()
+    : page;
+  const leaf = root.locator('.leaf-label', { hasText: exact(name) }).first();
   await leaf.click({ timeout: 4000 });
   await page
     .waitForSelector('.n-data-table-tbody tr, .cluster-overview, .empty', { timeout: 8000 })

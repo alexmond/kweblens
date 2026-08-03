@@ -935,6 +935,65 @@ body {
   align-items: stretch;
 }
 
+/* ---- The cluster overview's top band: cards and charts, side by side when they fit (#236)
+   The cards are capped at 260px each and rightly so (#185 sized their proportion bar for
+   that width), so three of them used 804px of a 2225px row and left 1421px empty while the
+   two metric charts sat on their own row underneath. Putting the charts in the same band
+   fills the row at width and shortens the page; below a certain width they wrap back under
+   the cards and the page reads exactly as it did.
+
+   NOT a container query, and deliberately so. The primitive in `responsive.ts` names one
+   boundary — 900px — and this layout cannot use it: at a 900px pane the cards alone take
+   804px, leaving 82px, i.e. two 34px charts. The width where a chart pair becomes worth
+   showing is ~620px MORE than the cards, which is a content minimum, not a breakpoint. So
+   it is expressed as one: `flex-basis` on the charts plus `flex-wrap`, which reflows
+   continuously and cannot drift out of step with the 900px boundary because it never names
+   a width the pane also names. A second `@container` literal here would have failed
+   `responsive.test.ts`, and it would have deserved to. */
+.ov-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+/* The cards ask for exactly the room three of them want: 3 x 260px + 2 x 12px of gap. It
+   shrinks (`flex-shrink: 1`) so a narrow band still fits three cards across, exactly as the
+   full-width row did before this change.
+
+   A stated basis rather than `auto`, measured twice because `auto` was wrong twice. A
+   shrink-to-fit flex item sizes to its MAX-CONTENT, and Chrome derives a flex item's
+   max-content contribution from its CONTENT clamped to its min/max-width — not from its
+   flex-basis. The cards hold short text over a 190px floor, so the column came out 594px
+   wide: first with three 190px cards (smaller than #185 designed them), then, after the
+   basis was restated as 260px, with the third card wrapped onto a second line. Neither is
+   what `auto` looks like it should do, and both were only visible in a measurement.
+
+   It also fixes the band's wrap point at one arithmetic width — the charts drop below the
+   cards under 1438px of band (804 + 14 + 620) — instead of leaving it at the mercy of the
+   longest line in the column: this column carries the API-server line, and an unwrappable
+   EKS endpoint would otherwise have sized the column to the URL and taken the room off the
+   charts. */
+.ov-band > .ov-band-cards {
+  flex: 0 1 804px;
+  min-width: 0;
+}
+
+/* The API-server URL has no spaces, so it must be allowed to break inside the column rather
+   than push it wider. */
+.ov-band .ov-api {
+  overflow-wrap: anywhere;
+}
+
+/* 620px is two charts at their own 280px minimum plus the gap and a little slack: below it
+   a chart says nothing, so the pair drops to the next line instead of being squeezed. */
+.ov-band > .charts {
+  flex: 1 1 620px;
+  min-width: 0;
+  margin: 0;
+}
+
 /* `color` is NOT decoration here. StatCard renders a <button> when the card is clickable
    (#154) and a <div> otherwise, and a <button> does not inherit color — the UA stylesheet
    gives it `buttontext`, i.e. black. So the clickable cards were black-on-dark-panel in
