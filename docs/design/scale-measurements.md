@@ -31,6 +31,30 @@ Re-measured at 3 000 while the browser was struggling: pods **145 ms / 272 KB**,
 Linear in object count, ~88 bytes/row. Extrapolating to 15 000 pods gives roughly 600 ms and
 1.3 MB — slow enough to want paging eventually, nowhere near the thing that breaks first.
 
+> **CORRECTION, 2026-08-03 (#276). That extrapolation is wrong, because the simulator's
+> objects do not resemble real ones.** Re-measured against the live cluster on an idle box
+> (load 2.45): **~8 KB per pod and ~43 KB per secret**, 50–500× the 88 bytes/row above. The
+> simulator generates objects with no annotations, no real `data` and trivial
+> `managedFields`; a real one carries all three. The same 15 000-pod extrapolation on real
+> objects is **~120 MB**, not 1.3 MB.
+>
+> | kind | objects | payload | of which `data` | of which `managedFields` |
+> |---|---:|---:|---:|---:|
+> | pods | 87 | 750 KB | — | 276 KB |
+> | replicasets | 168 | 1.08 MB | — | 525 KB |
+> | configmaps | 97 | 1.63 MB | 1.54 MB | 37 KB |
+> | secrets | 150 | **6.55 MB** | 6.41 MB | 56 KB |
+>
+> So "the API is comfortable" held for the simulator and not for the cluster. It also changes
+> what T2 should do first: **88% of those bytes are fields nothing on screen consumes**, and
+> projecting them away needs no pagination contract and no renegotiation of filter semantics.
+> Paging is still the eventual answer for genuinely large kinds; it is no longer the first
+> move. See #276.
+>
+> The lesson is the one this document already makes about latency, applied to payload: **a
+> rig whose objects are unrepresentative measures the rig.** Recommendation 3 below — make
+> the seeder realistic or stop calling it the scale rig — was right, and understated.
+
 ## The thing that breaks first
 
 At **300** objects, on the pods list:
