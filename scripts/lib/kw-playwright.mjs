@@ -131,7 +131,14 @@ const selectorOf = (verb, arg) =>
  *
  *   press:<key>   click:<selector>   fill:<selector>=<text>   wait:<ms>
  *   goto:<path>   upload:<file input selector>=<path on this machine>
- *   scroll:<selector>   leaf:<nav label>  (or leaf:<Category>/<label>)
+ *   scroll:<selector>   hover:<selector>   leaf:<nav label>  (or leaf:<Category>/<label>)
+ *
+ * `hover:` exists because a `:hover` rule is a whole surface no tool here could reach, and
+ * hover backgrounds are where one-theme colour literals hide: `.btn:hover` hard-coded a light
+ * `#f0f4f7` with no dark override, so in the dark theme a button's own `var(--text)` label sat
+ * on a near-white pad at 1.16:1 — invisible, on every button in the app, and unmeasurable until
+ * this verb existed (#265). The pointer stays parked after the step, so the state survives into
+ * both the computed-style read and the backdrop screenshot.
  *
  * `scroll:` exists because contrast-check refuses to sample an element that is off screen —
  * correctly, since a pixel needs the element rendered — and the cluster overview's Warnings
@@ -160,6 +167,7 @@ export async function runPrepare(page, spec) {
     else if (verb === 'click') await page.click(arg);
     else if (verb === 'wait') await page.waitForTimeout(Number(arg));
     else if (verb === 'scroll') await page.locator(arg).first().scrollIntoViewIfNeeded();
+    else if (verb === 'hover') await page.locator(arg).first().hover();
     // `leaf:` rather than `click:.leaf-label…`, for the reason recorded on openLeaf: a
     // collapsed category (#237) keeps its leaves in the DOM, so the click resolves and then
     // burns the whole timeout on "element is not visible" without ever naming the shut
@@ -207,6 +215,41 @@ export async function expandNav(page) {
   });
 }
 
+/**
+ * Resolve one nav leaf, by `Label` or by `Category/Label`, refusing to guess.
+ *
+ * Exported because `contrast-check.mjs` keeps its own copy of the click-through but must not
+ * keep its own copy of the disambiguation — that is the rule this whole family of bugs keeps
+ * teaching. The nav must already be expanded.
+ */
+export async function resolveLeaf(page, spec) {
+  const cut = spec.lastIndexOf('/');
+  const cat = cut > 0 ? spec.slice(0, cut).trim() : null;
+  const label = (cut > 0 ? spec.slice(cut + 1) : spec).trim();
+  // Anchored on `.cat-label` / `.leaf-label`, never on the row: a category `<summary>` also
+  // holds the chevron and the count badge, so its innerText is `▸Network200` and an exact
+  // match against `Network` finds nothing at all — which reads as "no such category" when
+  // the category is right there.
+  const rx = (s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  const scope = cat
+    ? page.locator('details.group', { has: page.locator('.cat-label').filter({ hasText: rx(cat) }) })
+    : page;
+  const leaves = scope.locator('.leaf-label').filter({ hasText: rx(label) });
+  const n = await leaves.count();
+  if (n === 0) throw new Error(`nav leaf not found: ${spec}`);
+  if (n > 1) {
+    const cats = await page
+      .locator('details.group', { has: page.locator('.leaf-label').filter({ hasText: rx(label) }) })
+      .locator('.cat-label')
+      .allInnerTexts();
+    throw new Error(
+      `nav leaf "${label}" is ambiguous (${n} matches). Qualify it as Category/Label, e.g. ` +
+        cats.map((c) => `"${c.trim()}/${label}"`).join(', '),
+    );
+  }
+  return leaves.first();
+}
+
 export async function discoverLeaves(page, only = []) {
   await expandNav(page);
   const labels = await page
@@ -234,21 +277,23 @@ export async function discoverLeaves(page, only = []) {
  *
  * `discoverLeaves` was taught this and `openLeaf` was not, so every script that opens ONE
  * leaf kept hitting it. Both go through `expandNav` now — one expansion, one place to fix.
+ *
+ * A label that is NOT unique must be qualified `Category/Label`. Six categories each have a
+ * leaf called `Overview`, and an earlier version took `.first()` unconditionally: asking for
+ * `Overview` to reach the Network overview silently opened the CLUSTER one, which renders the
+ * same `.ov-*` classes, so the run produced plausible numbers for a page nobody asked for.
+ * Ambiguity now throws and names the categories to choose from — a walker that guesses is
+ * worse than one that stops, because its output is indistinguishable from a correct run.
  */
 export async function openLeaf(page, label) {
   await expandNav(page);
-  // `Category/Leaf` scopes the search to one category. Needed because the label alone is NOT
-  // unique: every category dashboard is a leaf called `Overview`, so an unqualified lookup
-  // always resolved the Cluster one and silently measured the wrong page — the failure a
-  // `.first()` produces instead of an error.
-  const slash = label.indexOf('/');
-  const category = slash > 0 ? label.slice(0, slash) : null;
-  const name = slash > 0 ? label.slice(slash + 1) : label;
-  const exact = (s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-  const root = category
-    ? page.locator('details.group', { has: page.locator('.cat-label', { hasText: exact(category) }) }).first()
-    : page;
-  const leaf = root.locator('.leaf-label', { hasText: exact(name) }).first();
+  // `Category/Leaf` scopes the search to one category, and an UNQUALIFIED label that matches
+  // more than one leaf throws rather than taking `.first()`. Qualification alone was not
+  // enough: it only helps the caller who already knows to qualify, and the caller who does not
+  // still gets the Cluster overview when they asked for the Network one, with plausible
+  // numbers and no error. `resolveLeaf` is shared with contrast-check's own click-through so
+  // the two walkers cannot disagree about which leaf a spec names.
+  const leaf = await resolveLeaf(page, label);
   await leaf.click({ timeout: 4000 });
   await page
     .waitForSelector('.n-data-table-tbody tr, .cluster-overview, .empty', { timeout: 8000 })

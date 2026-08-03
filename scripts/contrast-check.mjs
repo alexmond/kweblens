@@ -48,7 +48,12 @@
 //   press:<key>   click:<selector>   fill:<selector>=<text>   wait:<ms>
 //   upload:<file-input selector>=<path on this machine>
 //   scroll:<selector>            bring a below-the-fold surface into the viewport
+//   hover:<selector>             park the pointer on an element and measure its :hover state
+//   close                        shut an open drawer/modal if there is one (no argument)
 //   leaf:<nav label>             open a nav leaf, expanding the rail and categories first
+//                                `Category/Label` where the label is not unique — six
+//                                categories have an `Overview`, and an ambiguous one throws
+//                                rather than silently opening the first (e.g. `leaf:Network/Overview`)
 //
 // `scroll:` and `leaf:` exist because this tool measures a RENDERED PIXEL, so anything below
 // the fold or behind the nav could not be measured at all — it reported `outside the viewport`
@@ -69,6 +74,8 @@
 
 import { createRequire } from 'module';
 
+import { resolveLeaf } from './lib/kw-playwright.mjs';
+
 const require = createRequire(process.env.HOME + '/.local/lib/playwright/node_modules/');
 const { chromium } = require('playwright');
 
@@ -84,16 +91,12 @@ const AGREE_TOLERANCE = 2;
 // Text-bearing things whose colours have been wrong before, or are easy to get wrong.
 const DEFAULT_SELECTORS = [
   '.leaf.active',
-  '.leaf.active .nav-badge',
   '.ov-card.danger',
   '.ov-card.warn',
-  '.badge',
   '.nav-badge',
-  // The count pills all hardcode a light background and need a dark override each. `.count`
-  // was missing one and rendered at 2.13:1 in dark mode; the other two are here so the next
-  // omission is caught by the tool rather than by a person noticing.
-  '.count',
-  '.acc-count',
+  // `.count` and `.acc-count` are the other two pills, and both are checked — in the scenes
+  // below, on the list and the drawer where they actually render. They used to sit here, where
+  // they could only ever report `not present`.
   // Plain .ov-card, not just its .danger variant: the variant matched a <div> and passed
   // while the clickable <button> cards sat at 1.34:1 in dark mode. Measure the base class.
   '.ov-card',
@@ -105,13 +108,103 @@ const DEFAULT_SELECTORS = [
   // follow.
   '.app-footer .ver-line',
   '.app-footer .repo-link',
+  // The secondary-text family that hard-coded slate-400 instead of --muted and failed the
+  // LIGHT theme at 2.37:1 while looking correct in the dark one it was picked against (#265).
+  // `.ov-scope-note` is on every cluster and category overview.
+  '.ov-scope-note',
+];
+
+/**
+ * Screens the default run walks to before sampling, each `{ prepare, selectors }`.
+ *
+ * A watchlist is only a watchlist for what the run can SEE. Everything the colour bugs of
+ * #260/#264/#265 lived on — the drawer's chips, the read-only YAML tab, a cluster-scoped
+ * list's pill, the diagnostics modal, a button's hover pad — sits behind a click, so adding
+ * those selectors to `DEFAULT_SELECTORS` would have printed a column of `not present`: the
+ * "green line with half the run unmeasured" this file's own summary warns about, which is
+ * indistinguishable from a pass. Each scene carries the PREPARE that brings its surface on
+ * screen, so `node scripts/contrast-check.mjs` with no arguments measures all of them.
+ *
+ * Scenes run in order, in each theme, from whatever the previous one left behind — hence the
+ * leading `close` to shut a drawer or modal. Requires the simulator's fixtures
+ * (annotations, a TLS Ingress); against a cluster without them those rows say `not present`,
+ * which is honest and counted.
+ */
+const SCENES = [
+  {
+    // Pods rather than ConfigMaps: the same annotation chips, plus a Containers table for
+    // `.mini th`, plus a YAML document with LISTS in it — without which the next scene's
+    // `.yk-dash` is `not present` and the run is quietly one selector short.
+    name: 'drawer chips',
+    prepare:
+      'close;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
+      '?click:.n-collapse-item__header:has-text("Annotations");wait:400',
+    // `.n-tag` is the drawer's `<NTag type="info">Helm</NTag>`, which measured 3.36:1 in the
+    // light theme on Naive's own info palette (#269) — a component-library colour rather than
+    // one of ours, fixed in App.vue's `themeOverrides`. It is watched here because nothing
+    // else in the app renders a Naive tag on a bespoke surface.
+    selectors: ['.chip.subtle', '.acc-count', '.mini th', '.n-tag'],
+  },
+  {
+    name: 'read-only YAML tab',
+    prepare: '?click:.n-tabs-tab:has-text("YAML");wait:1200',
+    // 1.42:1 in dark before #265: a fixed GitHub-LIGHT palette on a block that has a dark
+    // override, so the whole tab was unreadable in the theme it was never checked in.
+    selectors: ['.yaml .yk-key', '.yaml .yk-str', '.yaml .yk-num', '.yaml .yk-dash'],
+  },
+  {
+    name: 'TLS chips on an Ingress',
+    prepare: 'close;leaf:Ingresses;click:.n-data-table-tbody tr;wait:900',
+    selectors: ['.chip'],
+  },
+  {
+    // A resource LIST. `.count`, the status pill and the ACTIVE leaf's count badge only exist
+    // here — on the overview the base pass samples they are all `not present`, so leaving them
+    // in `DEFAULT_SELECTORS` bought a permanently-unmeasured row rather than a check.
+    //
+    // `.badge` was dropped from the watchlist here rather than moved: this file carried it
+    // from the era when StatusBadge had its own class, and it has rendered a Naive `NTag`
+    // since — so the entry had been matching nothing for months while reporting the same
+    // `not present` a healthy cluster legitimately produces. Its live form is watched as
+    // `.n-tag` in the drawer scene. The row-level STATUS pill is still unwatched: the
+    // simulator renders none (no pod reaches a state StatusBadge tones), so there is nothing
+    // here to measure it against — a real gap, recorded rather than papered over with a
+    // selector that always says `not present`.
+    name: 'resource list',
+    prepare: 'close;leaf:Pods;wait:800',
+    selectors: ['.count', '.leaf.active .nav-badge'],
+  },
+  {
+    // `.ns-note` is the "Cluster-scoped" pill, so it needs a cluster-scoped kind.
+    name: 'cluster-scoped list',
+    prepare: 'close;leaf:Namespaces;wait:800',
+    selectors: ['.ns-note'],
+  },
+  {
+    name: 'diagnostics modal',
+    prepare: 'close;click:.linkbtn[title^="Diagnostics"];wait:900',
+    selectors: ['.diag-dim', '.diag-detail', '.diag-kv dt', '.diag-caps li.off .diag-name', '.diag-warn'],
+  },
+  {
+    // A `:hover` pad, which nothing here could reach before the `hover:` verb: `.btn:hover`
+    // hard-coded a light background and put the button's own label at 1.16:1 in dark mode.
+    // Needs the pod file browser (`dev-run.sh --files`); without it the `.btn` is absent and
+    // this row is counted as unmeasured rather than passed.
+    name: 'button hover',
+    prepare:
+      'close;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
+      '?click:.n-tabs-tab:has-text("Files");wait:1200;?hover:.btn',
+    selectors: ['.btn'],
+  },
 ];
 
 const args = process.argv.slice(2);
 const SELF_TEST = args.includes('--self-test');
-const selectors = args.filter((a) => !a.startsWith('--')).length
-  ? args.filter((a) => !a.startsWith('--'))
-  : DEFAULT_SELECTORS;
+const explicit = args.filter((a) => !a.startsWith('--'));
+const selectors = explicit.length ? explicit : DEFAULT_SELECTORS;
+// Named selectors, or an explicit PREPARE, mean "measure exactly this" — the scene walk would
+// then navigate away from whatever the caller set up.
+const scenes = explicit.length || process.env.PREPARE ? [] : SCENES;
 
 const channel = (v) => {
   const c = v / 255;
@@ -398,20 +491,14 @@ async function openLeafHere(page, label) {
       .catch(() => {});
     await page.waitForTimeout(60);
   }
-  // `Category/Leaf` scopes the lookup: every category dashboard is a leaf called `Overview`,
-  // so a bare label resolves the first one in the DOM and measures the wrong page without
-  // ever failing. Mirrored from lib/kw-playwright.mjs — see openNav above for why this file
-  // keeps its own copy.
-  const slash = label.indexOf('/');
-  const exact = (s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-  const root = slash > 0
-    ? page.locator('details.group', { has: page.locator('.cat-label', { hasText: exact(label.slice(0, slash)) }) }).first()
-    : page;
-  await root
-    .locator('.leaf-label', { hasText: exact(slash > 0 ? label.slice(slash + 1) : label) })
-    .first()
-    .click({ timeout: 5000 });
-  await page.waitForSelector('.n-data-table-tbody tr, .empty', { timeout: 10000 }).catch(() => {});
+  // Refuse to guess between same-named leaves. SIX categories have an `Overview`, and this
+  // took `.first()`: `leaf:Overview`, meant to reach the Network overview, opened the CLUSTER
+  // one instead. Both render `.ov-scope-note` and `.ov-truncated`, so the run returned real
+  // numbers for the wrong page — the failure mode that looks exactly like a clean pass. The
+  // resolver lives in lib/kw-playwright.mjs so the two walkers cannot disagree about it.
+  const leaf = await resolveLeaf(page, label);
+  await leaf.click({ timeout: 5000 });
+  await page.waitForSelector('.n-data-table-tbody tr, .empty, .ov-scope-note', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(500);
 }
 
@@ -434,7 +521,28 @@ async function runPrepare(page, spec) {
     // like the overview's Warnings table (y≈1220 in a 900px viewport) reported `outside the
     // viewport` for every selector, which is a failed run wearing a caveat (#257).
     else if (verb === 'scroll') await page.locator(arg).first().scrollIntoViewIfNeeded();
-    else if (verb === 'leaf') await openLeafHere(page, arg);
+    // A `:hover` rule was unreachable here, and hover backgrounds are exactly where a
+    // one-theme literal survives: `.btn:hover` hard-coded `#f0f4f7` with no dark override, so
+    // in dark mode a button's `var(--text)` label sat on a near-white pad at 1.13:1 — on every
+    // button in the app. The pointer stays parked, so the state holds through the backdrop
+    // screenshot as well as the computed-style read.
+    else if (verb === 'hover') await page.locator(arg).first().hover();
+    // `close` (no argument) shuts an open drawer or modal if there is one. `?press:Escape`
+    // cannot express this — `?` needs a selector to test — and an unconditional Escape is not
+    // safe either, since the app also uses it to leave surfaces the caller may have opened on
+    // purpose. Scenes need it because each one starts from wherever the previous one stopped,
+    // and a Naive modal mask silently intercepts the next click.
+    else if (verb === 'close') {
+      const open = await page
+        .locator('.n-modal-mask, .n-drawer')
+        .first()
+        .isVisible()
+        .catch(() => false);
+      if (open) {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+      }
+    } else if (verb === 'leaf') await openLeafHere(page, arg);
     else if (verb === 'fill') {
       const at = arg.lastIndexOf('=');
       await page.fill(arg.slice(0, at), arg.slice(at + 1));
@@ -673,10 +781,32 @@ for (let pass = 0; pass < 2; pass++) {
   await openNav(page);
   await runPrepare(page, process.env.PREPARE);
 
+  // The shell watchlist is measured on the cluster overview. Pass 1 inherits whatever pass 0's
+  // last scene left on screen, so without this the dark pass would sample the base selectors
+  // on a resource list and report `not present` for half of them — the two themes measuring
+  // different pages, which is worse than measuring neither.
+  if (scenes.length) await runPrepare(page, 'close;leaf:Cluster/Overview;wait:800');
+
   const out = await measure(page, theme, selectors);
   rows.push(...out.rows);
   disagreements.push(...out.disagreements);
   for (const r of out.rows) if (r.r !== null && r.r < worst.r) worst = r;
+
+  // Then walk the scenes, in this same theme. A scene that cannot be reached (a leaf this
+  // cluster does not have, a modal that failed to open) must not take the run down with it —
+  // its selectors then report `not present` and are counted as unmeasured, which is the
+  // truthful outcome and is visible in the summary.
+  for (const scene of scenes) {
+    try {
+      await runPrepare(page, scene.prepare);
+    } catch (e) {
+      console.error(`scene "${scene.name}" could not be reached: ${e.message.split('\n')[0]}`);
+    }
+    const s = await measure(page, theme, scene.selectors);
+    rows.push(...s.rows);
+    disagreements.push(...s.disagreements);
+    for (const r of s.rows) if (r.r !== null && r.r < worst.r) worst = r;
+  }
 }
 
 const pad = (s, n) => String(s).padEnd(n);

@@ -29,6 +29,15 @@ class SimulatorSeederTest {
 		assertThat(client.pods().inAnyNamespace().list().getItems()).hasSize(5);
 		assertThat(client.apps().replicaSets().inAnyNamespace().list().getItems()).hasSize(5);
 		assertThat(client.apps().deployments().inAnyNamespace().list().getItems()).hasSize(5);
+		assertThat(client.network().v1().ingresses().inAnyNamespace().list().getItems()).hasSize(5);
+		// Annotations and a TLS host are what make the drawer's two chip styles
+		// renderable
+		// without a live cluster; a simulator without them cannot be used to check their
+		// colours.
+		assertThat(client.configMaps().inAnyNamespace().list().getItems().getFirst().getMetadata().getAnnotations())
+			.containsKey("meta.helm.sh/release-name");
+		assertThat(client.network().v1().ingresses().inAnyNamespace().list().getItems().getFirst().getSpec().getTls())
+			.isNotEmpty();
 		// Objects spread across both namespaces (index % 2).
 		assertThat(client.configMaps().inNamespace("sim-ns-0").list().getItems()).hasSize(3);
 		assertThat(client.configMaps().inNamespace("sim-ns-1").list().getItems()).hasSize(2);
