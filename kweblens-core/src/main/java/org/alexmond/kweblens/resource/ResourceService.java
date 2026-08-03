@@ -175,12 +175,50 @@ public class ResourceService {
 	 */
 	public ResourceSummary apply(String clusterId, String yaml) {
 		KubernetesClient client = clusters.require(clusterId);
+		HasMetadata applied = client.resource(forApply(yaml)).forceConflicts().serverSideApply();
+		return new ResourceSummary(applied.getKind(), namespace(applied), name(applied), null, "-");
+	}
+
+	/**
+	 * Ask the API server what {@link #apply} <em>would</em> produce, without producing
+	 * it.
+	 *
+	 * <p>
+	 * The editor's Review Changes tab could only ever diff the edited text against the
+	 * text it loaded — an honest answer to "what did I type", and no answer at all to
+	 * "what will the cluster do with it". Three things live in that gap and all of them
+	 * are invisible until the write lands: <b>defaulting</b> (the fields the server fills
+	 * in), <b>another manager's fields</b> (which {@code forceConflicts()} silently takes
+	 * over), and <b>admission</b> — a validating webhook that rejects this, a quota that
+	 * blocks it, or a mutating webhook that rewrites it into something other than what
+	 * was typed.
+	 *
+	 * <p>
+	 * {@code dryRun=All} runs the whole chain and returns the object that would have been
+	 * persisted, then discards it. Crucially it goes through {@link #forApply} — the same
+	 * normalisation the real apply uses — because a preview that differs from the apply
+	 * in even one field is worse than no preview: it would be believed.
+	 * @return the object the server says would result, serialised as YAML
+	 */
+	public String dryRunApply(String clusterId, String yaml) {
+		KubernetesClient client = clusters.require(clusterId);
+		HasMetadata result = client.resource(forApply(yaml)).dryRun().forceConflicts().serverSideApply();
+		return Serialization.asYaml(result);
+	}
+
+	/**
+	 * Parse a manifest and strip the server-managed metadata that would make it fail to
+	 * apply cleanly.
+	 *
+	 * <p>
+	 * Editing a fetched manifest carries {@code managedFields}, {@code resourceVersion}
+	 * and friends back with it. Shared between {@link #apply} and {@link #dryRunApply}
+	 * rather than duplicated, for the same reason {@link #restartPatch} takes its
+	 * timestamp: the preview and the write must be made of the same bytes, or the preview
+	 * is describing a different request from the one that will be sent.
+	 */
+	private static HasMetadata forApply(String yaml) {
 		HasMetadata parsed = Serialization.unmarshal(yaml);
-		// Strip server-managed metadata so editing a fetched manifest (which carries
-		// managedFields/resourceVersion/etc.) applies cleanly; force conflicts so
-		// re-applying
-		// a field owned by another manager wins (kubectl apply --server-side
-		// --force-conflicts).
 		ObjectMeta meta = parsed.getMetadata();
 		if (meta != null) {
 			meta.setManagedFields(null);
@@ -189,8 +227,7 @@ public class ResourceService {
 			meta.setCreationTimestamp(null);
 			meta.setGeneration(null);
 		}
-		HasMetadata applied = client.resource(parsed).forceConflicts().serverSideApply();
-		return new ResourceSummary(applied.getKind(), namespace(applied), name(applied), null, "-");
+		return parsed;
 	}
 
 	/**

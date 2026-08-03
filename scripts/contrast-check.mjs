@@ -186,6 +186,23 @@ const SCENES = [
     selectors: ['.diag-dim', '.diag-detail', '.diag-kv dt', '.diag-caps li.off .diag-name', '.diag-warn'],
   },
   {
+    // The editor dialog's Review Changes tab — the second diff (T1), which asks the cluster
+    // what it WOULD store. Behind the admin login: its tabs are `v-if="!readonly"`, so a
+    // signed-out run does not merely fail to measure them, it never renders them.
+    name: 'editor review (signed in)',
+    // Clicks the NAME cell, not the row. `ResourceTable`'s `rowProps` ignores a click whose
+    // target is inside a checkbox, button, anchor or dropdown — so a row-centre click lands
+    // on the Namespace LINK and filters the list instead of opening anything, and `td` alone
+    // is the checkbox column. Both leave the drawer shut, and every following `?` step then
+    // skips silently: the run reports `not present` for a surface it never navigated to.
+    prepare:
+      'close;signin:admin;leaf:Config Maps;wait:900;' +
+      'click:.n-data-table-tbody tr td:nth-child(2);wait:1200;' +
+      '?click:.n-tabs-tab:has-text("YAML");wait:1200;?click:button:has-text("Edit");wait:1800;' +
+      '?click:.n-tabs-tab:has-text("Review Changes");wait:2500',
+    selectors: ['.review-h', '.review-cap', '.review-recheck'],
+  },
+  {
     // A `:hover` pad, which nothing here could reach before the `hover:` verb: `.btn:hover`
     // hard-coded a light background and put the button's own label at 1.16:1 in dark mode.
     // Needs the pod file browser (`dev-run.sh --files`); without it the `.btn` is absent and
@@ -527,6 +544,26 @@ async function runPrepare(page, spec) {
     // button in the app. The pointer stays parked, so the state holds through the backdrop
     // screenshot as well as the computed-style read.
     else if (verb === 'hover') await page.locator(arg).first().hover();
+    // Signing in, as ONE verb rather than a four-step optional incantation.
+    //
+    // Until this existed, no surface behind the admin login could have its colour measured
+    // here at all — most visibly the YAML editor's own dialog, whose Form / Warnings /
+    // Review tabs are `v-if="!readonly"` and therefore simply absent to a signed-out run.
+    // Open-mode makes that easy to miss: the page renders, the drawer opens, and only the
+    // editing surfaces are quietly gone, so a run looks complete while never having seen
+    // them. Idempotent by construction — if the Sign in link is not there we are already in.
+    else if (verb === 'signin') {
+      const link = page.locator('.linkbtn:has-text("Sign in")').first();
+      if (await link.isVisible().catch(() => false)) {
+        await link.click();
+        await page.waitForTimeout(400);
+        const inputs = page.locator('.n-modal input');
+        await inputs.nth(0).fill(arg || 'admin');
+        await inputs.nth(1).fill(arg || 'admin');
+        await page.getByRole('button', { name: /^sign/i }).last().click();
+        await page.waitForTimeout(1800);
+      }
+    }
     // `close` (no argument) shuts an open drawer or modal if there is one. `?press:Escape`
     // cannot express this — `?` needs a selector to test — and an unconditional Escape is not
     // safe either, since the app also uses it to leave surfaces the caller may have opened on

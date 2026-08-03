@@ -64,6 +64,36 @@ async function postBody<T>(url: string, body: string, contentType: string): Prom
   return (await res.json()) as T;
 }
 
+/**
+ * POST a body and read the response as TEXT, keeping the server's explanation on failure.
+ *
+ * `postBody` throws `${status} ${statusText}` and discards the response, which is fine when
+ * the status is the whole story. It is not fine for the apply dry run: the entire point of
+ * that call is the API server's sentence — "admission webhook … denied the request: no owner
+ * label" — and "422 Unprocessable Entity" is exactly the part the operator already knew.
+ * So this reads the ProblemDetail `detail` when there is one.
+ */
+async function postText(url: string, body: string, contentType: string, accept: string): Promise<string> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { ...auth.header(), Accept: accept, 'Content-Type': contentType },
+    body,
+  });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const problem = (await res.json()) as { detail?: string };
+      if (problem?.detail) {
+        detail = problem.detail;
+      }
+    } catch {
+      // Not a ProblemDetail (a proxy error page, an empty body) — keep the status line.
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return await res.text();
+}
+
 async function postNoContent(url: string, body?: string, contentType?: string): Promise<void> {
   const headers: Record<string, string> = { ...auth.header() };
   if (contentType) {
@@ -437,6 +467,14 @@ export const api = {
   // --- Mutating actions (HTTP Basic auth required) ---
   apply: (cluster: string, manifest: string) =>
     postBody<ResourceRow>(`${clusterBase(cluster)}/apply`, manifest, 'application/yaml'),
+  /**
+   * What the cluster says this manifest WOULD become — server-side apply with `dryRun=All`,
+   * so defaulting, another manager's fields and admission all show up before the write.
+   * A POST (it carries a body, and it is the write's own request with one flag flipped), so
+   * it needs the admin login just as the apply does.
+   */
+  applyDryRun: (cluster: string, manifest: string) =>
+    postText(`${clusterBase(cluster)}/apply/dry-run`, manifest, 'application/yaml', 'application/yaml'),
   del: (cluster: string, resourceId: string, namespace: string, name: string, force = false) =>
     postJson<ActionResult>(actionUrl(cluster, resourceId, namespace, name, 'delete') + (force ? '?force=true' : '')),
   scale: (cluster: string, resourceId: string, namespace: string, name: string, replicas: number) =>

@@ -49,4 +49,26 @@ public class YamlApiController {
 		return applied;
 	}
 
+	/**
+	 * What the apply <em>would</em> produce, from the API server, without producing it.
+	 *
+	 * <p>
+	 * A <b>POST</b> rather than a GET, and deliberately so on two counts. It carries a
+	 * manifest body, which a GET cannot; and although it changes nothing, it is the same
+	 * request as the write with one flag flipped, so it belongs on the side of the
+	 * security model that the write is on. In open-mode every non-GET requires the admin
+	 * login, which means the preview cannot be used to probe a cluster that the caller
+	 * could not already write to.
+	 *
+	 * <p>
+	 * <b>Not audited.</b> The audit trail records what was changed; nothing was.
+	 * Recording dry runs would dilute the log that exists to answer "who changed this" —
+	 * the apply that follows is what gets the entry.
+	 */
+	@PostMapping(value = "/api/v1/clusters/{clusterId}/apply/dry-run",
+			consumes = { MediaType.TEXT_PLAIN_VALUE, "application/yaml" }, produces = "application/yaml")
+	public ResponseEntity<String> applyDryRun(@PathVariable String clusterId, @RequestBody String manifest) {
+		return ResponseEntity.ok(resources.dryRunApply(clusterId, manifest));
+	}
+
 }
