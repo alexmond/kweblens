@@ -54,6 +54,9 @@ Linear in object count, ~88 bytes/row. Extrapolating to 15 000 pods gives roughl
 > The lesson is the one this document already makes about latency, applied to payload: **a
 > rig whose objects are unrepresentative measures the rig.** Recommendation 3 below — make
 > the seeder realistic or stop calling it the scale rig — was right, and understated.
+>
+> **Followed up:** #276 shipped the projection this correction argued for. What it actually
+> removed, measured the same way, is [at the end of this document](#what-the-projection-removed-276).
 
 ## The thing that breaks first
 
@@ -122,6 +125,37 @@ objects" claim need re-running on an idle box before anyone quotes them.
 
 Also unmeasured: memory. The heap readings collected alongside the table above were pure GC
 timing noise (683 MB at 200 objects, 149 MB at 3 000) and are omitted rather than reported.
+
+## What the projection removed (#276)
+
+The correction above argued for projecting the payload before paging it. That shipped;
+here is what it actually removed, measured the same way — same cluster, same endpoint, idle
+box (load 3.9 for both runs), HTTP body bytes.
+
+| kind | objects | before | after | saving | bytes/row before → after |
+|---|---:|---:|---:|---:|---|
+| pods | 87 | 678.8 KB | 430.9 KB | 36.5% | 7 990 → 5 072 |
+| replicasets | 168 | 980.6 KB | 508.0 KB | 48.2% | 5 977 → 3 096 |
+| deployments | 59 | 351.5 KB | 187.1 KB | 46.8% | 6 102 → 3 248 |
+| services | 62 | 97.9 KB | 57.5 KB | 41.3% | 1 617 → 950 |
+| configmaps | 97 | 1.55 MB | 54.3 KB | 96.6% | 16 761 → 573 |
+| secrets | 150 | 6.24 MB | 72.9 KB | 98.8% | 43 622 → 498 |
+| **total** | | **9.85 MB** | **1.28 MB** | **87.0%** | |
+
+(The absolute figures differ by a few percent from the correction's table because the cluster
+moved between the two passes; the shares do not.)
+
+`ListProjection` (`web/api`) drops `managedFields` from every list payload and ships
+ConfigMap/Secret keys without their values. The cost is moved, not removed: opening a
+ConfigMap or Secret drawer now fetches the whole object — 16–26 ms and ~1.3 KB for a typical
+one, 60 ms and 948 KB for the largest Secret on this cluster — and every other kind's drawer
+fetches nothing extra. **A row is no longer the object**, which is the thing to remember before
+reading a field off one.
+
+Two conclusions stand unchanged. Payload claims have to be taken against a real API server,
+because the simulator's objects are not the ones the product serves. And the DOM finding above
+is untouched: one row per object is still one row per object, so virtualisation is still the
+first thing to build — this bought room, not a fix.
 
 ## Recommended change to the plan
 

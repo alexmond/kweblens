@@ -47,7 +47,7 @@ class ObjectEndpointsTest {
 				.withName("cm1")
 				.withNamespace("default")
 				.endMetadata()
-				.addToData("k", "v")
+				.addToData("k", "only-in-the-single-object-payload")
 				.build())
 			.create();
 	}
@@ -59,6 +59,29 @@ class ObjectEndpointsTest {
 			.andExpect(jsonPath("$[0].kind").value("ConfigMap"))
 			.andExpect(jsonPath("$[0].metadata.name").value("cm1"))
 			.andExpect(content().string(Matchers.containsString("\"data\"")));
+	}
+
+	/**
+	 * The list is projected (GH#276) — the keys are there so the Keys column still counts
+	 * them, the values are not. Asserted through the controller and not only on
+	 * {@code ListProjection}, because the wiring is the half that can be forgotten.
+	 */
+	@Test
+	void objectsShipsConfigMapKeysWithoutTheirValues() throws Exception {
+		mvc.perform(get("/api/v1/clusters/test/resources/configmaps/objects").param("namespace", "default"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].data.k").value(Matchers.nullValue()))
+			.andExpect(content().string(Matchers.containsString("\"k\"")))
+			.andExpect(content().string(Matchers.not(Matchers.containsString("only-in-the-single-object-payload"))));
+	}
+
+	/** ...and the single-object endpoint the drawer calls still carries them. */
+	@Test
+	void objectReturnsTheValuesTheListDropped() throws Exception {
+		mvc.perform(get("/api/v1/clusters/test/resources/configmaps/object").param("namespace", "default")
+			.param("name", "cm1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.k").value("only-in-the-single-object-payload"));
 	}
 
 	@Test

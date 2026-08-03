@@ -55,18 +55,20 @@ public class ObjectApiController {
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/nodes/{node}/pods", produces = MediaType.APPLICATION_JSON_VALUE)
 	public String podsOnNode(@PathVariable String clusterId, @PathVariable String node) {
-		return Serialization.asJson(resources.listPodsOnNode(clusterId, node));
+		return Serialization.asJson(ListProjection.forList(resources.listPodsOnNode(clusterId, node)));
 	}
 
 	/**
-	 * The full objects of a kind as a JSON array (namespaced kinds honour the filter).
+	 * The objects of a kind as a JSON array (namespaced kinds honour the filter),
+	 * projected for a list by {@link ListProjection} — see there for what is dropped and
+	 * why the single-object endpoint below is not.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/objects",
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	public String objects(@PathVariable String clusterId, @PathVariable String resourceId,
 			@RequestParam(required = false) String namespace) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		return Serialization.asJson(resources.listRaw(clusterId, descriptor, namespace));
+		return Serialization.asJson(ListProjection.forList(resources.listRaw(clusterId, descriptor, namespace)));
 	}
 
 	/**
@@ -83,6 +85,11 @@ public class ObjectApiController {
 	 * <p>
 	 * {@code namespace} is optional so the same call addresses cluster-scoped kinds,
 	 * which ignore it.
+	 *
+	 * <p>
+	 * Deliberately <b>not</b> passed through {@link ListProjection}: this is the endpoint
+	 * the detail drawer calls precisely to get back what the list dropped — a ConfigMap's
+	 * or Secret's values. One object at a time, when the operator opened it.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/object",
 			produces = MediaType.APPLICATION_JSON_VALUE)
@@ -98,7 +105,9 @@ public class ObjectApiController {
 
 	/**
 	 * Live object stream: each SSE event is named ADDED/MODIFIED/DELETED with the object
-	 * JSON.
+	 * JSON, projected by {@link ListProjection} exactly as the initial list is. The two
+	 * are separate code paths feeding the same table, so a strip applied to only one of
+	 * them would be undone by the first watch event to arrive.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/objects/watch",
 			produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -108,7 +117,8 @@ public class ObjectApiController {
 		SseEmitter emitter = new SseEmitter(0L);
 		Watch watch;
 		try {
-			watch = resources.watchRaw(clusterId, descriptor, namespace, (type, obj) -> send(emitter, type, obj));
+			watch = resources.watchRaw(clusterId, descriptor, namespace,
+					(type, obj) -> send(emitter, type, ListProjection.forList(obj)));
 		}
 		catch (RuntimeException ex) {
 			emitter.completeWithError(ex);

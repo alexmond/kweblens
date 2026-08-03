@@ -217,6 +217,19 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
     text (a pod file path, a Helm release name) and a newline could otherwise forge a second,
     fake audit line. The category is pinned to INFO so `logging.level.root=WARN` cannot
     silently switch the trail off.
+- **A list row is not the whole object (#276).** `web/api/ListProjection` strips `managedFields`
+  from every list payload and ships ConfigMap/Secret `data`/`stringData`/`binaryData` as **keys
+  with `null` values** — 9.85 MB → 1.28 MB across six kinds on the real cluster, 98.8% of it on
+  Secrets alone. It sits at the **web boundary**, like `ToolRedaction` does for MCP, and
+  deliberately *not* in `ResourceService.listRaw`, which the health checks, overviews,
+  `RelationService` and the MCP tools share and which legitimately needs those values. Both the
+  `objects` endpoint **and** the `objects/watch` SSE stream go through it — separate code paths,
+  same table. So: the drawer refetches the full object via `GET …/object` when
+  `needsFullObject(row)` (`kube.ts`) sees a `null` value, which is why that predicate reads the
+  row rather than a list of kinds — a hard-coded kind list here would be a second copy of the
+  server's rule and the copy that goes stale silently. A `null` value renders as `—`, never as
+  an empty string: "we did not send it" and "it is empty" are different claims. This is **not**
+  redaction — the drawer still shows every value, per ADR-001.
 - **fabric8 version is BOM-pinned.** `kubernetes-client-bom` (`${fabric8.version}`) aligns
   client + model + mock-server; bump the one property, never individual fabric8 artifacts.
 - **kubeconfigs are secrets.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig`, `.kube/` — never
