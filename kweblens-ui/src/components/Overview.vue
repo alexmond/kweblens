@@ -2,19 +2,31 @@
 // Renders the detail drawer's Overview tab purely by mapping the field + section
 // registries in `overview.ts` — no per-kind markup lives here.
 //
+// LAYOUT (#232). The same DOM renders two ways, decided by the width of the `kw-pane` this
+// sits in (`responsive.ts`), never by measuring anything here:
+//
+//   narrow  one stacked column, exactly as before — `.ov-main` and `.ov-aside` are
+//           `display: contents`, so their children flow as if the wrappers were not there.
+//   wide    a main column with the object's substance, and an aside with provenance.
+//
+// Which is which comes from `rankOf` via `splitByRank`, so a section's own registry entry
+// decides where it lands and nothing is re-derived from its title. Every section exists in
+// both layouts — the wide one MOVES sections, it never hides one — and because the reflow
+// is pure CSS over one set of components, a section collapsed by the reader stays collapsed
+// across it.
+//
 // Emits (mirrors the React `onNavigate` / `onHelmRelease` callback props):
 //   navigate     (kind: string, ns?: string)         — open another kind/object list
 //   helm-release (namespace: string, name: string)   — open a Helm release's resources
-import { NTag } from 'naive-ui';
 import { computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { objName, objNs } from '../kube';
 import type { KubeObject, Relation } from '../types';
-import Accordion from './Accordion.vue';
-import Chips from './Chips.vue';
-import SecretData from './SecretData.vue';
-import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS } from './overview';
+import OverviewField from './OverviewField.vue';
+import OverviewSection from './OverviewSection.vue';
+import RelationSectionView from './RelationSectionView.vue';
+import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS, splitByRank } from './overview';
 import { relationSections } from './relations';
 
 const props = defineProps<{ obj: KubeObject; cluster?: string; resourceId?: string }>();
@@ -65,116 +77,74 @@ watch(
 
 const relSections = computed(() => relationSections(relations.value));
 
-const clip = (v: string) => (v.length > 48 ? v.slice(0, 48) + '…' : v);
+// The rank split, run over all three kinds of entry through the one call. Relation sections
+// carry no rank and so are primary by definition (see `relations.ts`) — running them through
+// `splitByRank` anyway is what keeps that a property of the registry rather than a rule
+// spelled out again here.
+const fieldSplit = computed(() => splitByRank(fields.value, (f) => f.field));
+const sectionSplit = computed(() => splitByRank(sections.value, (s) => s.section));
+const relationSplit = computed(() => splitByRank(relSections.value, (r) => r));
+
+// Without an aside there is nothing to put in a second column, so the wide layout does not
+// reserve one — an object with no labels, no annotations and no provenance would otherwise
+// get 320px of empty gutter.
+const hasAside = computed(
+  () => fieldSplit.value.aside.length + sectionSplit.value.aside.length + relationSplit.value.aside.length > 0,
+);
 </script>
 
 <template>
-  <div class="ov">
-    <dl class="kv">
-      <template v-for="{ field, value } in fields" :key="field.label">
-        <dt>{{ field.label }}</dt>
-        <dd :class="field.mono ? 'mono' : undefined">
-          <template v-if="value!.kind === 'text'">{{ value!.text }}</template>
-          <button
-            v-else-if="value!.kind === 'nav'"
-            class="cell-link"
-            @click="emit('navigate', value!.navKind, value!.navNs)"
-          >
-            {{ value!.text }}
-          </button>
-          <template v-else-if="value!.kind === 'helm'">
-            <NTag size="small" type="info" :bordered="false">Helm</NTag>{{ ' ' }}
-            <button
-              class="cell-link"
-              title="Open this release's resources"
-              @click="emit('helm-release', value!.rns, value!.rel)"
-            >
-              {{ value!.rel }}{{ value!.rns ? ` (${value!.rns})` : '' }}
-            </button>
-          </template>
-          <template v-else-if="value!.kind === 'owners'">
-            <span v-for="(o, i) in value!.owners" :key="o.kind + '/' + o.name">
-              {{ i > 0 ? ', ' : '' }}
-              <button class="cell-link" @click="emit('navigate', o.kind, o.ns)">{{ o.kind }}/{{ o.name }}</button>
-            </span>
-          </template>
-        </dd>
-      </template>
+  <div class="ov" :class="hasAside ? 'ov-split' : undefined">
+    <dl class="kv ov-kv">
+      <OverviewField
+        v-for="{ field, value } in fieldSplit.main"
+        :key="field.label"
+        :field="field"
+        :value="value!"
+        @navigate="(k, n) => emit('navigate', k, n)"
+        @helm-release="(nsp, nm) => emit('helm-release', nsp, nm)"
+      />
     </dl>
 
-    <Accordion
-      v-for="({ section, count, body }, i) in sections"
-      :key="section.title + i"
-      :title="section.title"
-      :count="count"
-      :default-open="section.defaultOpen"
-    >
-      <Chips v-if="body.type === 'chips'" :map="body.map" />
-      <div v-else-if="body.type === 'annotations'" class="chips">
-        <span v-for="(v, k) in body.map" :key="k" class="chip subtle" :title="`${k}=${v}`">{{ k }}={{ clip(v) }}</span>
-      </div>
-      <SecretData v-else-if="body.type === 'secret'" :data="body.data" />
-      <dl v-else-if="body.type === 'kv'" class="kv">
-        <template v-for="[k, v] in body.pairs" :key="k">
-          <dt>{{ k }}</dt>
-          <dd>{{ v }}</dd>
-        </template>
+    <!-- Provenance and bookkeeping. Sits here in the DOM, between the summary rows and the
+         sections, because at narrow the wrappers are `display: contents` and this is where
+         Labels and Annotations have always appeared. -->
+    <aside v-if="hasAside" class="ov-aside">
+      <dl v-if="fieldSplit.aside.length > 0" class="kv ov-aside-kv">
+        <OverviewField
+          v-for="{ field, value } in fieldSplit.aside"
+          :key="field.label"
+          :field="field"
+          :value="value!"
+          @navigate="(k, n) => emit('navigate', k, n)"
+          @helm-release="(nsp, nm) => emit('helm-release', nsp, nm)"
+        />
       </dl>
-      <template v-else-if="body.type === 'table'">
-        <table class="mini">
-          <thead>
-            <tr>
-              <th v-for="h in body.headers" :key="h">{{ h }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, ri) in body.rows" :key="ri">
-              <td v-for="(cell, ci) in row" :key="ci" :class="cell.mono ? 'mono' : undefined">{{ cell.text }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="body.tls && body.tls.length > 0" class="chips" :style="{ marginTop: '8px' }">
-          <span v-for="(h, ti) in body.tls" :key="ti + h" class="chip">TLS: {{ h }}</span>
-        </div>
-      </template>
-    </Accordion>
+      <OverviewSection
+        v-for="({ section, count, body }, i) in sectionSplit.aside"
+        :key="section.title + i"
+        :title="section.title"
+        :count="count"
+        :default-open="section.defaultOpen"
+        :body="body"
+      />
+      <RelationSectionView v-for="rel in relationSplit.aside" :key="'rel:' + rel.title" :section="rel" />
+    </aside>
 
-    <!-- Relation-backed sections. Each carries its own state, so one unreadable kind degrades
-         to a message in its own section instead of blanking the drawer. -->
-    <Accordion
-      v-for="rel in relSections"
-      :key="'rel:' + rel.title"
-      :title="rel.title"
-      :count="rel.count"
-      :default-open="true"
-    >
-      <div v-if="rel.message" :class="rel.notPermitted ? 'rel-note rel-denied' : 'rel-note rel-error'">
-        {{ rel.message }}
-      </div>
-      <template v-else-if="rel.rows.length === 0">
-        <div class="rel-note dim">None.</div>
-      </template>
-      <template v-else>
-        <table class="mini">
-          <thead>
-            <tr>
-              <th v-for="h in rel.headers" :key="h">{{ h }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, ri) in rel.rows" :key="ri">
-              <td v-for="(cell, ci) in row" :key="ci" :class="cell.mono ? 'mono' : undefined">{{ cell.text }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="rel.truncated" class="rel-note rel-error">
-          Showing the first {{ rel.rows.length }} only — there are more.
-        </div>
-      </template>
-    </Accordion>
-    <!-- The joins cost a round trip, so say the view is still filling in rather than briefly
-         implying an object has no relations. -->
-    <div v-if="relationsLoading" class="rel-note dim">Loading related objects…</div>
-    <div v-if="relationsError" class="rel-note rel-error">Could not load related objects: {{ relationsError }}</div>
+    <div class="ov-main">
+      <OverviewSection
+        v-for="({ section, count, body }, i) in sectionSplit.main"
+        :key="section.title + i"
+        :title="section.title"
+        :count="count"
+        :default-open="section.defaultOpen"
+        :body="body"
+      />
+      <RelationSectionView v-for="rel in relationSplit.main" :key="'rel:' + rel.title" :section="rel" />
+      <!-- The joins cost a round trip, so say the view is still filling in rather than briefly
+           implying an object has no relations. -->
+      <div v-if="relationsLoading" class="rel-note dim">Loading related objects…</div>
+      <div v-if="relationsError" class="rel-note rel-error">Could not load related objects: {{ relationsError }}</div>
+    </div>
   </div>
 </template>

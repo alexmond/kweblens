@@ -340,6 +340,29 @@ async function pixelBackdrops(page, rects) {
 const selectorOf = (verb, arg) =>
   (verb === 'fill' || verb === 'upload') ? arg.slice(0, arg.lastIndexOf('=')) : arg;
 
+/**
+ * Make the nav clickable before PREPARE walks it.
+ *
+ * The rail collapses (#237) and each category is a `<details>` whose open state is remembered
+ * in prefs, so a `click:.leaf-label…` step can resolve its element and then spend the whole
+ * timeout on "element is not visible". That reads as a renamed leaf and sends you to the nav
+ * registry; the only problem is a shut parent. `openLeaf` in lib/kw-playwright.mjs carries the
+ * same fix — this file keeps its own copy on purpose (it is the instrument that has caught the
+ * real colour defects, and sharing it with a helper that changes is how it stops being one).
+ */
+async function openNav(page) {
+  const tile = await page.$('.tile-nav'); // rendered only while the nav is collapsed
+  if (tile) {
+    await tile.click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  await page.evaluate(() => {
+    for (const d of document.querySelectorAll('details.group')) {
+      d.open = true;
+    }
+  });
+}
+
 async function runPrepare(page, spec) {
   for (const raw of (spec || '').split(';').map((s) => s.trim()).filter(Boolean)) {
     const optional = raw.startsWith('?');
@@ -589,6 +612,7 @@ for (let pass = 0; pass < 2; pass++) {
     ? 'dark'
     : 'light';
 
+  await openNav(page);
   await runPrepare(page, process.env.PREPARE);
 
   const out = await measure(page, theme, selectors);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { KubeObject } from '../types';
 import type { SectionRank } from './overview';
-import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS, rankOf } from './overview';
+import { OVERVIEW_FIELDS, OVERVIEW_SECTIONS, rankOf, splitByRank } from './overview';
 import { relationSections } from './relations';
 
 // The Environment section encodes a SECURITY decision, so it is pinned here: a value sourced
@@ -343,5 +343,58 @@ describe('section rank', () => {
     for (const rank of all) {
       expect(['primary', 'secondary']).toContain(rank);
     }
+  });
+});
+
+// ---- The wide drawer's two columns (#232) ----
+// What these pin is that the split is a consequence of the registries' own ranks rather than
+// a second list of titles kept in the layout: change a `rank` in this file and the column an
+// entry lands in changes with it. That is the whole reason `rankOf` is a function and the
+// layout consumes it instead of matching on section titles.
+describe('splitByRank', () => {
+  it('sends secondary entries to the aside and everything else to the main column', () => {
+    const items = [
+      { id: 'a' },
+      { id: 'b', rank: 'secondary' as SectionRank },
+      { id: 'c', rank: 'primary' as SectionRank },
+      { id: 'd', rank: 'secondary' as SectionRank },
+    ];
+    const { main, aside } = splitByRank(items, (i) => i);
+    expect(main.map((i) => i.id)).toEqual(['a', 'c']);
+    expect(aside.map((i) => i.id)).toEqual(['b', 'd']);
+  });
+
+  it('reads the rank through the accessor, so a wrapped entry needs no unwrapping first', () => {
+    const rows = OVERVIEW_FIELDS.map((field) => ({ field, value: null }));
+    const { main, aside } = splitByRank(rows, (r) => r.field);
+    expect(aside.map((r) => r.field.label)).toEqual(['Created', 'Managed By']);
+    expect(main.map((r) => r.field.label)).toContain('Controlled By');
+  });
+
+  it('puts Labels and Annotations, and only those, in the aside of the section list', () => {
+    const { main, aside } = splitByRank(OVERVIEW_SECTIONS, (s) => s);
+    expect(aside.map((s) => s.title)).toEqual(['Labels', 'Annotations']);
+    expect(main.map((s) => s.title)).toContain('Containers');
+  });
+
+  it('keeps relation tables in the main column — the object is what it is wired to', () => {
+    const rels = relationSections({
+      endpoints: { items: [], truncated: false, error: null, notPermitted: false },
+    });
+    const { main, aside } = splitByRank(rels, (r) => r);
+    expect(main.map((r) => r.title)).toEqual(['Endpoints']);
+    expect(aside).toEqual([]);
+  });
+
+  it('loses nothing: every entry lands in exactly one column', () => {
+    const { main, aside } = splitByRank(OVERVIEW_SECTIONS, (s) => s);
+    expect(main.length + aside.length).toBe(OVERVIEW_SECTIONS.length);
+    expect(main.filter((s) => aside.includes(s))).toEqual([]);
+  });
+
+  it('preserves order within a column — the wide layout moves sections, it does not sort them', () => {
+    const { main } = splitByRank(OVERVIEW_SECTIONS, (s) => s);
+    const expected = OVERVIEW_SECTIONS.filter((s) => rankOf(s) === 'primary').map((s) => s.title);
+    expect(main.map((s) => s.title)).toEqual(expected);
   });
 });

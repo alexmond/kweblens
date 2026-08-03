@@ -74,15 +74,23 @@
 
 /* The two helpers that answer the question in a template. Written as "hide at the wrong
    width" rather than "show at the right one" so an element keeps whatever `display` its own
-   styling gives it — `display: revert` inside the query would throw that away. */
+   styling gives it — `display: revert` inside the query would throw that away.
+
+   The class is DOUBLED to raise specificity to (0,2,0). A container query does nothing for
+   specificity, so `.kw-when-wide { display: none }` ties with any ordinary one-class rule and
+   loses to the one written later in this file — which is exactly what happened the first time
+   a helper met an element with a `display` of its own: `.drawer-badges { display: flex }`
+   sits ~1000 lines below and the badges rendered at 520px, adding two lines to a header the
+   whole point of #219 was to keep on one. Doubling makes the helper win wherever it is used
+   rather than making every future caller remember not to set `display`. */
 @container kw-pane not (min-width: 900px) {
-  .kw-when-wide {
+  .kw-when-wide.kw-when-wide {
     display: none;
   }
 }
 
 @container kw-pane (min-width: 900px) {
-  .kw-when-narrow {
+  .kw-when-narrow.kw-when-narrow {
     display: none;
   }
 }
@@ -1189,6 +1197,117 @@ body {
   white-space: nowrap;
 }
 
+/* ---- The drawer header, laid out for the width it has (#233) -----------------------------
+   The header is not inside a tab pane, so it needs a `kw-pane` of its own to have a width to
+   query. The container is this WRAPPER rather than `.drawer-title`, because a container query
+   never styles the container it queries and `.drawer-title` is the element that has to change.
+   `min-width: 0` for the same reason as `.n-drawer-header__main` above: this is a block inside
+   an already-shrinkable flex child, and inline-size containment must not be handed a width
+   that the content grew. */
+.drawer-head-pane {
+  min-width: 0;
+}
+
+/* Identity chips under the title. `kw-when-wide` in the template keeps them off the narrow
+   header entirely, where there is no room for a second line. */
+.drawer-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.drawer-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.7;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.drawer-badge.tone-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 700;
+}
+
+.drawer-badge.tone-helm {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The object's actions, in the band to the right of the tab row. */
+.drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drawer-action {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 2px 9px;
+}
+
+.drawer-action:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.drawer-action-menu {
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  padding: 0 7px;
+}
+
+.drawer-action-menu:hover {
+  border-color: var(--accent);
+}
+
+@container kw-pane (min-width: 900px) {
+  /* Name on its own line with the expand toggle beside it, and the kind/namespace/Helm
+     badges beneath — rather than all of them competing for one row and the name being
+     ellipsised while 1000px sits unused to its right. */
+  .drawer-title {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    row-gap: 5px;
+  }
+
+  .drawer-title > .drawer-name {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 15px;
+  }
+
+  .drawer-title > .drawer-expand {
+    grid-column: 2;
+    grid-row: 1;
+    margin-left: 0;
+  }
+
+  .drawer-title > .drawer-badges {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
 .drawer-close {
   border: 0;
   background: transparent;
@@ -1253,6 +1372,79 @@ body {
   margin: 0;
   font-size: 13px;
   word-break: break-word;
+}
+
+/* ---- The Overview's metadata sidebar (#232) ----------------------------------------------
+   One DOM, two layouts. At narrow the two wrappers are `display: contents`, so their children
+   flow as though the wrappers were not written — the drawer stacks exactly as it always has,
+   in the order `overview.ts` lists things. At wide the wrappers become grid areas and the
+   secondary set (see `rankOf`) moves into an aside, which is the whole point of expanding.
+
+   Explicit `grid-row`/`grid-column` rather than auto-placement: with auto-placement each
+   aside item would claim a row of its own beside a main-column item, and the taller of the
+   pair would set the row height — which spreads the layout out with exactly the whitespace
+   this ticket exists to remove. */
+.ov-main,
+.ov-aside {
+  display: contents;
+}
+
+/* At narrow the aside's summary rows land directly under the main list's, as a second `dl`.
+   A grid has no rows to inherit the row-gap from across that boundary, so restate it. */
+.ov-aside-kv {
+  margin-top: 6px;
+}
+
+@container kw-pane (min-width: 900px) {
+  /* Every label-value list in the main column pairs up rather than running ONE row across the
+     whole width — `Kind → ConfigMap` on a 1200px band is the complaint #230 opens with, and
+     `Desired 1` / `Ready 1` stacked down a 1200px Rollout section is the same thing again.
+     Halving each list's height is what brings the sections below it above the fold. The
+     aside's own list is put back to a single pair further down: 300px has room for one. */
+  .ov .kv {
+    grid-template-columns: 120px minmax(0, 1fr) 120px minmax(0, 1fr);
+    column-gap: 28px;
+  }
+
+  .ov-split {
+    display: grid;
+    /* 900 (the boundary) minus the gutter and the aside leaves ~556px of main column, which
+       is the width the Containers table needs before its image column starts wrapping —
+       the reasoning behind the number, recorded in `responsive.ts`. */
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+    column-gap: 24px;
+    align-items: start;
+  }
+
+  .ov-split > .ov-kv {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .ov-split > .ov-main {
+    display: block;
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .ov-split > .ov-aside {
+    display: block;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: start;
+    padding-left: 20px;
+    border-left: 1px solid var(--border);
+  }
+
+  /* One pair, not two: 300px has room for a 96px label and its value, and no more. */
+  .ov-split > .ov-aside .kv {
+    grid-template-columns: minmax(0, 96px) minmax(0, 1fr);
+    column-gap: 12px;
+  }
+
+  .ov-split > .ov-aside .ov-aside-kv {
+    margin-top: 0;
+  }
 }
 
 .ov-sec {
@@ -1494,16 +1686,11 @@ body {
   transform: translateX(14px);
 }
 
-/* Drawer actions footer */
-.drawer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-  background: #fafbfc;
-}
+/* NOTE: a second `.drawer-actions` rule stood here — a footer bar left behind by the deleted
+   Thymeleaf UI, with no element in the SPA carrying the class. It is gone because #233 gives
+   the name a live consumer (the tab row's action band, defined above): a dead rule that
+   silently repainted a new element with a hard-coded #fafbfc background and 10px of padding
+   is worse than no rule, and it did exactly that before this was measured. */
 
 .act {
   display: inline-flex;

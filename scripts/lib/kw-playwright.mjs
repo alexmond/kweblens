@@ -194,16 +194,34 @@ export async function discoverLeaves(page, only = []) {
 /**
  * Click a nav leaf by its exact label and wait for the list to render.
  *
- * It expands the tree first when the leaf is not on screen. The nav is a tree of
- * `<details>`, and a COLLAPSED category still has its leaves in the DOM — so the locator
- * resolves, the click is attempted, and Playwright reports "element is not stable" and then
- * "element is not visible". Neither message mentions the closed group actually responsible,
- * and since the collapsed state is remembered in prefs (#237) it survives reloads: an
- * earlier version failed every `--leaf` run on this box for that reason, twice, and the
- * error pointed at the leaf. Same fix `discoverLeaves` already carries.
+ * The rail and every category are opened first, for the same reason `discoverLeaves` does
+ * it: the nav collapses (#237) and each category is a `<details>` whose open state is
+ * remembered in prefs, so a run can arrive with the leaf present in the DOM but inside a
+ * closed parent.
+ *
+ * A COLLAPSED category still has its leaves in the DOM, so the locator resolves and the
+ * click is attempted — and Playwright reports "element is not stable" and then "element is
+ * not visible". Neither message mentions the shut `<details>` actually responsible, which
+ * reads as a missing or renamed leaf and sends you looking at the nav registry. Because
+ * the collapsed state survives reloads, an earlier version failed every `--leaf` run on
+ * this box, twice, with the error pointing at the leaf.
+ *
+ * Setting `.open` rather than clicking each summary is deliberate: a click would toggle
+ * shut whatever happened to be open already. The click loop below is only a fallback for
+ * a leaf still not visible after that.
  */
 export async function openLeaf(page, label) {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const expand = page.locator('.tile-nav'); // only rendered while the nav is collapsed
+  if (await expand.isVisible().catch(() => false)) {
+    await expand.click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  await page.evaluate(() => {
+    for (const d of document.querySelectorAll('details.group')) {
+      d.open = true;
+    }
+  });
   const leaf = page.locator('.leaf-label', { hasText: new RegExp(`^${escaped}$`) }).first();
   if (!(await leaf.isVisible().catch(() => false))) {
     const rail = page.locator('.tile-nav');

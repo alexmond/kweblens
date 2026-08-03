@@ -61,6 +61,24 @@ describe('the stylesheet agrees with responsive.ts', () => {
     }
   });
 
+  it('gives the width helpers enough specificity to survive a later one-class rule', () => {
+    // A container query contributes NOTHING to specificity, so `.kw-when-wide { display:none }`
+    // merely ties with any ordinary one-class rule and loses to the one written later in the
+    // file. Not hypothetical: `.drawer-badges { display: flex }` sits ~1000 lines below and
+    // beat it, putting the wide-only identity badges on the 520px header (#233). The doubled
+    // class is what makes the helper win wherever a caller uses it.
+    expect(css).toMatch(/@container[^{]*\{\s*\.kw-when-wide\.kw-when-wide\s*\{\s*display:\s*none/);
+    expect(css).toMatch(/@container[^{]*\{\s*\.kw-when-narrow\.kw-when-narrow\s*\{\s*display:\s*none/);
+  });
+
+  it('keeps the drawer wide layout a reflow of ONE dom, not a second copy of it', () => {
+    // #232 moves the secondary sections into an aside at wide. Both wrappers must exist at
+    // narrow too — as `display: contents`, so their children stack exactly as before. If
+    // either were laid out only inside the wide query, a section would be reachable at one
+    // width and invisible at the other, which is the failure the ticket names first.
+    expect(css).toMatch(/\.ov-main,\s*\.ov-aside\s*\{[^}]*display:\s*contents/);
+  });
+
   it('lays nothing out on the VIEWPORT width', () => {
     // #230's finding: the drawer is 520px or 1605px at the same viewport width, so a
     // viewport width query cannot see the space a pane has. This fails the build if one

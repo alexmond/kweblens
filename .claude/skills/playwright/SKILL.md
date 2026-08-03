@@ -137,34 +137,40 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
-- 2026-08-02 — **`--leaf <label>` failed on every run, and the error named the leaf.**
-  `openLeaf` clicked a `.leaf-label` that was inside a *collapsed* `<details>` category —
-  present in the DOM, so the locator resolved, then "element is not stable" / "element is
-  not visible". The collapsed state is remembered in prefs (#237), so it survived reloads
-  and looked like a broken selector. → `openLeaf` now expands the rail and the categories
-  until the leaf is visible, and waits out the disclosure animation. `discoverLeaves`
-  already did this; the earlier #237 entry fixed `perf-sweep`'s walk and left this path
-  behind it. **When a fix is for a UI behaviour rather than one script, check every script
-  that touches the same element.**
+- 2026-08-02 — **The collapsible nav (#237) broke every script that walks the tree, and each
+  one blamed the leaf.** `openLeaf`, `ui-measure --leaf`, and `contrast-check`'s
+  `click:.leaf-label…` all resolved the leaf — it is in the DOM even inside a *collapsed*
+  `<details>` — then burned the whole timeout on "element is not stable" / "element is not
+  visible". Nothing in either message names the shut `<details>` responsible, so it reads as
+  a renamed or missing leaf and sends you to `NavCatalog`. The collapsed state is remembered
+  in prefs, so it survives reloads and looks like a broken selector. → `openLeaf` and a new
+  `openNav` in `contrast-check.mjs` re-open the rail and set `details.group.open = true`
+  first — setting `.open` rather than clicking each summary, so nothing already open is
+  toggled shut. `discoverLeaves` had the fix all along; the entry points people actually use
+  did not. **When a UI feature hides things, fix EVERY walker, not the one that failed
+  first.**
 - 2026-08-02 — **A PREPARE that opens a modal broke the theme loop in two scripts.** Both
   `ui-shot` and `contrast-check` run PREPARE *inside* the per-theme loop, so
   `PREPARE='press:Control+k;…'` (checking the command palette — the surface already got
   wrong twice in #200) left Naive's `.n-modal-mask` over the shell, and the second theme's
   click on `.theme-toggle` was intercepted. Both died after 30s with a message naming the
-  toggle, not the modal actually in the way — the failure pointed at the wrong element.
-  → `setTheme` in `lib/kw-playwright.mjs` and `contrast-check`'s own toggle now press
-  Escape first when a modal or drawer mask is visible. **When a script loops over a
-  dimension, every step inside the loop has to be able to run from the state the previous
-  iteration left behind.**
+  toggle, not the modal actually in the way. → `setTheme` and `contrast-check`'s own toggle
+  press Escape first when a mask is visible. **When a script loops over a dimension, every
+  step inside the loop has to run from the state the previous iteration left behind.**
 - 2026-08-02 — **The armed row moved under a stationary mouse, and only an end-to-end
   click-through caught it.** Typing `sim-pod-7` in the palette and pressing Enter opened
-  `sim-pod-77`. Cause: the modal is vertically centred, so async results arriving make it
-  grow and slide the list *up* under a cursor that has not moved; the browser fires
-  `mouseenter` on whatever row lands beneath it, which re-armed row 8. Screenshots showed
-  the right list and were no help — the defect lives between what is drawn and what Enter
-  does. → Fixed in the component (`@mousemove`, which only fires on real pointer movement).
-  **A surface whose content arrives asynchronously needs a script that types, waits, and
-  presses Enter, then asserts what it actually opened.**
+  `sim-pod-77`. The modal is vertically centred, so async results arriving make it grow and
+  slide the list *up* under a cursor that has not moved; the browser fires `mouseenter` on
+  whatever row lands beneath it, re-arming row 8. Screenshots showed the right list and were
+  no help — the defect lives between what is drawn and what Enter does. → Fixed with
+  `@mousemove`, which only fires on real pointer movement. **A surface whose content arrives
+  asynchronously needs a script that types, waits, presses Enter, and asserts what it
+  actually opened.**
+- 2026-08-02 — A decoded-pixel check of a chip's background disagreed with
+  `getComputedStyle` (`[44,44,50]` vs `rgb(238,241,244)`) and briefly looked like a third
+  `contrast-check` bug. The sample was taken at `x+1, y+1` — inside the border-radius
+  cut-out, where the panel behind shows through. Sampling the vertical centre of the padding
+  agreed exactly. → **A pixel probe needs a sampling point argued for, not a corner.**
 
 - 2026-08-02 — `contrast-check` read `color(srgb 0.89 0.91 0.93 / 0.75)` — which is what
   Naive UI's controls actually compute to — as channels 0.89/255, i.e. near-black, and
