@@ -54,15 +54,41 @@ function square(cs: Record<string, unknown>, role: ContainerRole): { tone: strin
 }
 
 /**
- * Statuses for one role, falling back to the spec so a pod that has not started yet still shows
- * a square per declared container rather than an em dash.
+ * Squares for one role: one per DECLARED container, carrying its status where there is one.
+ *
+ * <p>The spec is the authority on how many containers a pod has and in what order — the status
+ * list is only what the kubelet has reported so far, and it arrives incrementally. An earlier
+ * version returned the status list whenever it was non-empty and fell back to the spec only
+ * when it was completely empty, so a pod declaring three containers with statuses for two drew
+ * **two** squares (#266). The third was not shown as waiting; it was not shown at all, and the
+ * list therefore disagreed with the detail drawer about how many containers the pod has.
+ *
+ * <p>Merging by name rather than picking a list is what makes both true at once: every declared
+ * container gets a square, and the ones the kubelet has not reported yet get the neutral `wait`
+ * tone that the whole-list fallback already used. The window is small — kubelet normally
+ * reports within seconds — but it is exactly the window a stuck pod sits in, which is when
+ * someone is looking.
+ *
+ * <p>A status with no matching spec entry is appended rather than dropped. It should not happen,
+ * but silently hiding a container the API server told us about is the bug this fixes.
  */
 function statusesFor(obj: KubeObject, statusKey: string, specKey: string): Record<string, unknown>[] {
   const statuses = arr((obj.status as Record<string, unknown>)?.[statusKey]);
-  if (statuses.length > 0) {
+  const declared = arr((obj.spec as Record<string, unknown>)?.[specKey]);
+  if (declared.length === 0) {
+    // No spec (a projection that omits it, or a kind that has none) — the statuses are all
+    // there is to go on.
     return statuses;
   }
-  return arr((obj.spec as Record<string, unknown>)?.[specKey]).map((c) => ({ name: c.name, ready: false, state: {} }));
+  const byName = new Map(statuses.filter((s) => s.name !== undefined).map((s) => [String(s.name), s]));
+  const out = declared.map((c) => byName.get(String(c.name)) ?? { name: c.name, ready: false, state: {} });
+  const declaredNames = new Set(declared.map((c) => String(c.name)));
+  for (const s of statuses) {
+    if (s.name === undefined || !declaredNames.has(String(s.name))) {
+      out.push(s);
+    }
+  }
+  return out;
 }
 
 /**
