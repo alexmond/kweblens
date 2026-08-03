@@ -201,10 +201,15 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
     DELETE and a revision lookup are not patches — so `RemediationService.preview` returns
     `notChecked` naming the reason instead of prose that reads like a server answer. Saying
     "we did not check" is the design, not an omission.
-  - **The YAML apply path is still the weak link.** `ResourceService` applies with
-    `forceConflicts().serverSideApply()` and sends no `dryRun`, so the editor's Review Changes
-    diff is "my edit vs what I loaded", **not** "live vs what the server would accept". That
-    claim still must not be overstated.
+  - **The YAML editor** now shows two diffs (#274): the edit against what was loaded, and
+    live against what `dryRun=All` says the cluster would store — so defaulting, another
+    manager's fields and admission all surface before the write. `dryRunApply` shares
+    `apply`'s normalisation via `forApply`; a preview made of different bytes describes a
+    different request. A refusal is rendered as a **result**, not an error.
+  - **What is still not covered:** the `apply` that actually writes is unchanged — it is
+    still `forceConflicts().serverSideApply()` with no `dryRun`, because that is the write.
+    The preview is a separate request the operator can choose to run; nothing forces them to
+    look at it before pressing Apply.
   - **Audit survives a restart** (#210/#212): every entry is written to a dedicated
     `kweblens.audit` logger *as well as* the in-memory 500-entry ring, so the ring is only the
     live view behind `/audit` and eviction no longer loses the record. Values are quoted and
