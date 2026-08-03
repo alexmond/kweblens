@@ -93,7 +93,21 @@ node scripts/ui-measure.mjs --self-test                # positive controls; no r
 # Below the fold, or behind the nav — neither could be measured for colour before #257
 PREPARE='scroll:.warn-table' node scripts/contrast-check.mjs '.warn-table .n-data-table-td'
 PREPARE='leaf:Deployments;click:.n-data-table-tbody tr' node scripts/contrast-check.mjs '.mini th'
+
+# A :hover rule, unreachable before #265 — `.btn:hover` sat at 1.16:1 in dark mode
+PREPARE='leaf:Pods;click:.n-data-table-tbody tr;hover:.btn' node scripts/contrast-check.mjs '.btn'
+
+# Six categories have a leaf called `Overview`; an ambiguous label throws rather than guessing
+PREPARE='leaf:Network/Overview' node scripts/contrast-check.mjs '.ov-notes'
 ```
+
+With **no arguments and no `PREPARE`**, `contrast-check.mjs` walks a short list of *scenes*
+(defined at the top of the file) as well as the flat watchlist: the drawer's chips, the
+read-only YAML tab, a resource list, the diagnostics modal, a hovered button. Everything that
+matters is behind a click, so a watchlist alone could only ever report `not present` for it —
+and the summary's "N of M samples measured" line is the number to read, not the green verdict.
+Run it against `dev-run.sh --sim --files`; the simulator seeds the annotations, TLS Ingress and
+pod-file surface the scenes need.
 
 `ui-shot.mjs` defaults to the **matrix**, not one image, because captures here were taken
 ad hoc at roughly one width in one theme and that shaped what got found: a 338-character

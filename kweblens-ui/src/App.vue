@@ -88,6 +88,18 @@ const themeOverrides = computed(() => {
       primaryColorPressed: pressed,
       primaryColorSuppl: hover,
     },
+    // `<NTag type="info">` paints Naive's info blue on a 12% tint of ITSELF, which in the
+    // light theme is rgb(32,128,240) on rgb(228,240,253) — 3.36:1, under AA, on the drawer's
+    // "Managed By … Helm" marker (#269). Same-hue-on-its-own-tint is the mistake the nav and
+    // the command palette each made with the accent (3.80:1 / 3.02:1, #200/#201); here the
+    // pair came from the component library rather than from our palette, so the fix belongs
+    // in the theme override and not in styles.css — there is no literal of ours to change.
+    //
+    // The value is the relationship `.chip` uses (the theme's accent mixed toward the theme's
+    // text), so the drawer's Naive tag and the drawer's hand-rolled chips read as one thing.
+    // Unlike `primaryColor` above, Naive derives no shades from `textColorInfo` — it is
+    // applied verbatim — so a computed colour is safe here where it is not there.
+    Tag: { textColorInfo: 'color-mix(in srgb, var(--accent) 45%, var(--text))' },
   };
 });
 const toggleTheme = () => {

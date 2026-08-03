@@ -12,6 +12,8 @@ import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
 import io.fabric8.kubernetes.api.model.apps.ReplicaSet;
 import io.fabric8.kubernetes.api.model.apps.ReplicaSetBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
+import io.fabric8.kubernetes.api.model.networking.v1.IngressBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 
 /**
@@ -42,6 +44,7 @@ public final class SimulatorSeeder {
 			client.pods().resource(pod(i, ns)).create();
 			client.apps().replicaSets().resource(replicaSet(i, ns)).create();
 			client.apps().deployments().resource(deployment(i, ns)).create();
+			client.network().v1().ingresses().resource(ingress(i, ns)).create();
 		}
 	}
 
@@ -58,8 +61,49 @@ public final class SimulatorSeeder {
 			.withName("sim-config-" + i)
 			.withNamespace(ns)
 			.addToLabels("app", "sim")
+			.addToAnnotations("meta.helm.sh/release-name", "sim-release")
+			.addToAnnotations("meta.helm.sh/release-namespace", ns)
 			.endMetadata()
 			.addToData("key", "value-" + i)
+			.build();
+	}
+
+	/**
+	 * An Ingress with a TLS host, so the drawer's Rules section renders its TLS chips.
+	 * Every real cluster's objects carry annotations and most have TLS ingresses; a
+	 * simulator that omitted both left the two chip styles unrenderable, which is how
+	 * they shipped unreadable in the dark theme (#260).
+	 */
+	private static Ingress ingress(int i, String ns) {
+		return new IngressBuilder().withNewMetadata()
+			.withName("sim-ingress-" + i)
+			.withNamespace(ns)
+			.addToLabels("app", "sim")
+			.addToAnnotations("meta.helm.sh/release-name", "sim-release")
+			.endMetadata()
+			.withNewSpec()
+			.addNewTl()
+			.withHosts("sim-" + i + ".example.test")
+			.withSecretName("sim-tls-" + i)
+			.endTl()
+			.addNewRule()
+			.withHost("sim-" + i + ".example.test")
+			.withNewHttp()
+			.addNewPath()
+			.withPath("/")
+			.withPathType("Prefix")
+			.withNewBackend()
+			.withNewService()
+			.withName("sim-svc-" + i)
+			.withNewPort()
+			.withNumber(80)
+			.endPort()
+			.endService()
+			.endBackend()
+			.endPath()
+			.endHttp()
+			.endRule()
+			.endSpec()
 			.build();
 	}
 
@@ -79,6 +123,8 @@ public final class SimulatorSeeder {
 			.withName("sim-pod-" + i)
 			.withNamespace(ns)
 			.addToLabels("app", "sim")
+			.addToAnnotations("meta.helm.sh/release-name", "sim-release")
+			.addToAnnotations("kweblens.sim/note", "seeded by the built-in simulator")
 			.endMetadata()
 			.withNewSpec()
 			.addNewContainer()

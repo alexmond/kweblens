@@ -67,19 +67,21 @@ node scripts/ui-measure.mjs --view wide '.n-drawer' '.drawer-title'
 node scripts/ui-measure.mjs --view narrow --leaf Pods '.n-data-table'
 
 # Colour — both themes, exits non-zero under AA
-node scripts/contrast-check.mjs
+node scripts/contrast-check.mjs            # watchlist AND the scene walk (drawer, YAML, modal, hover)
 node scripts/contrast-check.mjs '.leaf.active' '.ov-card'
 PREPARE='press:Control+k' node scripts/contrast-check.mjs '.palette-row.active'
+PREPARE='leaf:Pods;click:.n-data-table-tbody tr;hover:.btn' node scripts/contrast-check.mjs '.btn'
 
 # Hangs and slow loads
 node scripts/perf-sweep.mjs
 ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
 ```
 
-`PREPARE` brings a surface on screen before it is sampled — `press:` `click:`
+`PREPARE` brings a surface on screen before it is sampled — `press:` `click:` `hover:<sel>`
 `fill:<sel>=<text>` `upload:<sel>=<path>` `wait:<ms>` `goto:<path>` `scroll:<sel>`
-`leaf:<nav label>` (or `leaf:<Category>/<label>` — `Overview` is a leaf in every category),
-semicolon-separated.
+`leaf:<nav label>` (or `leaf:<Category>/<label>` — `Overview` is a leaf in every category, and
+an ambiguous label THROWS rather than opening the first match), plus `close` in
+`contrast-check` only (shut an open drawer/modal), semicolon-separated.
 Prefix a step with `?` to skip it when its selector is absent; that matters because
 `PREPARE` runs once per theme and per viewport, and a step like signing in applies only
 the first time — without `?` the second pass waits for a modal that is already dealt with
@@ -161,6 +163,38 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   Per-line because a wrapping container's last line is short by design — the naive "width
   minus the widest line" reading calls every wrapped layout a defect. Three new `--self-test`
   controls, including the wrapped one that must NOT fire.
+- 2026-08-03 — **Qualification alone did not stop the wrong page being measured; only an
+  error did.** #270 taught both `openLeaf`s `Category/Leaf`, which helps the caller who already
+  knows the label is ambiguous — but an UNQUALIFIED `leaf:Overview` still took `.first()` and
+  still opened the Cluster overview when the Network one was asked for. Both pages render the
+  same `.ov-*` classes, so the run returned real, plausible ratios for a page nobody wanted,
+  with nothing in the output to say so. → One shared `resolveLeaf` (exported, used by
+  `openLeaf` and by contrast-check's own click-through) **throws on ambiguity** and names the
+  categories to choose from. It fired immediately: measuring the Network overview for real
+  exposed `.ov-notes` at 2.37:1 in light, which the wrong page had been hiding. It also anchors
+  on `.cat-label`, not the `<summary>` — a category row's innerText is `▸Network200`, so
+  matching `^Network$` against it finds nothing and reads as "no such category".
+- 2026-08-03 — **No script here could reach a `:hover` rule, and a hover pad is a whole class
+  of one-theme colour literal.** `.btn:hover` hard-coded `#f0f4f7` with no dark override, so in
+  the dark theme every button's own `var(--text)` label sat on a near-white pad at **1.16:1** —
+  invisible the moment the pointer touched it, app-wide, and unmeasurable. → PREPARE gained
+  `hover:<selector>` in both dispatchers. The pointer stays parked, so the state survives into
+  the computed-style read *and* the backdrop screenshot.
+- 2026-08-03 — **A watchlist is only a watchlist for what the run can SEE.** The colour bugs of
+  #260/#264/#265 all lived behind a click, so adding their selectors to `DEFAULT_SELECTORS`
+  would have bought a column of `not present` — the "green line with half the run unmeasured"
+  the summary itself warns about. Two entries were already exactly that: `.badge` had been
+  matching nothing since StatusBadge became a Naive `NTag`, and `.count`/`.acc-count` never
+  render on the page the base pass samples. → `contrast-check.mjs` now walks named **scenes**
+  (a PREPARE plus its selectors) on a bare run, and returns to the cluster overview between
+  themes so both passes sample the same page. Unmeasured fell from 14 to 4 of 60.
+- 2026-08-03 — The simulator could not render two of the three surfaces under investigation:
+  no object had **annotations** and there were no **Ingresses**, so `.chip.subtle` and `.chip`
+  had no markup at all, leaving only "reason about the CSS" or "test against a live cluster".
+  → `SimulatorSeeder` seeds annotations on ConfigMaps and Pods and a TLS Ingress per index.
+  `.chip` then measured **1.75:1 in dark** — a real failure that had never once been rendered.
+  **When a fixture cannot produce the state, fix the fixture: a headless simulator that omits
+  what every real cluster has is not a simulator of the defect.**
 
 - 2026-08-02 — **The collapsible nav (#237) broke every script that walks the tree, and each
   one blamed the leaf.** `openLeaf`, `ui-measure --leaf`, and `contrast-check`'s
