@@ -1591,12 +1591,60 @@ body {
   overflow: hidden;
 }
 
+/* The escape hatch for the wrap policy below, and the reason it can be a MINIMUM rather than
+   a fixed width: when even the sum of the columns' longest words does not fit the pane, this
+   table — and only this table — scrolls sideways, instead of spilling out of a 360px drawer.
+   Every `.mini` is wrapped in one (`miniTable.test.ts` fails the build if one is not), except
+   the pod file listing, which already sits in its own `.files-list` scroller. */
+.mini-scroll {
+  overflow-x: auto;
+}
+
 .mini th,
 .mini td {
   text-align: left;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
+}
+
+/* ---- The wrap policy: no column shrinks below its own longest word (#278) ------------------
+   Naive's `.n-drawer` sets `word-break: break-word` on the whole drawer, and that INHERITS
+   into every cell of every `.mini` inside it. `break-word` is the deprecated alias for
+   `overflow-wrap: anywhere`, and `anywhere` counts toward MIN-CONTENT — so a column's minimum
+   width is one glyph and the auto table layout is free to squeeze a column below its own
+   values. Measured in the drawer dragged to its 360px minimum, before this rule: the
+   Mounted By table's Status column rendered `Runnin`/`g` (48px of word in a 44px box) and its
+   Node column split `0.sim.example.test` mid-token (106px in an 87px box). It still takes two
+   lines there afterwards — but it breaks after `node-`, which is a break opportunity the
+   browser is entitled to take. Same failure as #257, a different rule causing it —
+   which is exactly why that fix (`.warn-table`, a Naive NDataTable) did not reach here.
+
+   The answer is NOT #257's declared column widths. That table has four KNOWN columns in a
+   ~1400px band, so a width can be picked once and be right. `.mini` renders whatever headers
+   the data carries — relation sections, overview sections, secret keys, file listings — in a
+   pane the user sizes anywhere between 360px and 1605px. A fixed minimum chosen for the wide
+   end would put a permanent horizontal scrollbar in the 520px default drawer, which trades a
+   mid-word break for something worse in a narrow panel.
+
+   So the floor is derived from the CONTENT: `word-break: normal` restores "min-content = the
+   longest word", so no column can be squeezed under its own value at any pane width, and
+   `overflow-wrap: break-word` keeps the last-resort break for a token too long for the column
+   even at its widest. A scrollbar (`.mini-scroll`) appears only when the sum of those minimums
+   genuinely does not fit — which is the difference from declaring a minimum up front. */
+.mini th,
+.mini td {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* A mono cell holds a base64 secret value, an absolute path or a comma-joined list of IPs:
+   one token, with no break opportunity anywhere in it. Preferring whole words there would
+   make every secret's Value column demand its full width and put a scrollbar on the drawer's
+   commonest table, so `.mono`'s own `break-all` stands. Restated rather than left to `.mono`
+   because `.mini td` (0,1,1) outranks `.mono` (0,1,0) and would otherwise silently win. */
+.mini td.mono {
+  word-break: break-all;
 }
 
 .mini td {

@@ -19,18 +19,23 @@ defineProps<{ section: RelationSection }>();
       <div class="rel-note dim">None.</div>
     </template>
     <template v-else>
-      <table class="mini">
-        <thead>
-          <tr>
-            <th v-for="h in section.headers" :key="h">{{ h }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, ri) in section.rows" :key="ri">
-            <td v-for="(cell, ci) in row" :key="ci" :class="cell.mono ? 'mono' : undefined">{{ cell.text }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- The wrapper is the table's own scroller (#278): at the drawer's 360px minimum the
+           columns' longest words can add up to more than the pane, and this table scrolling
+           beats it spilling out of the drawer or shredding a node name mid-token. -->
+      <div class="mini-scroll">
+        <table class="mini">
+          <thead>
+            <tr>
+              <th v-for="h in section.headers" :key="h">{{ h }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in section.rows" :key="ri">
+              <td v-for="(cell, ci) in row" :key="ci" :class="cell.mono ? 'mono' : undefined">{{ cell.text }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="section.truncated" class="rel-note rel-error">
         Showing the first {{ section.rows.length }} only — there are more.
       </div>

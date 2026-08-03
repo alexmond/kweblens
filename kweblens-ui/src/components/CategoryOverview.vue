@@ -121,31 +121,35 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
       <h3>{{ copy.attention }}</h3>
       <div v-if="attention.length === 0" class="empty">{{ copy.clean }}</div>
       <template v-else>
-        <table class="mini attention-table">
-          <thead>
-            <tr>
-              <th>Kind</th>
-              <th>Namespace</th>
-              <th>Name</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(it, i) in attention"
-              :key="i"
-              tabindex="0"
-              :title="`Show ${it.kind} in ${it.namespace ?? 'this cluster'}`"
-              @click="emit('navigate', it.kind, it.namespace ?? undefined)"
-              @keydown.enter="emit('navigate', it.kind, it.namespace ?? undefined)"
-            >
-              <td>{{ it.kind }}</td>
-              <td>{{ it.namespace ?? '—' }}</td>
-              <td>{{ it.name }}</td>
-              <td class="attention-reason">{{ it.reason }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <!-- `.mini-scroll` is the table's own sideways scroller — see the wrap policy in
+             styles.css (#278). -->
+        <div class="mini-scroll">
+          <table class="mini attention-table">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(it, i) in attention"
+                :key="i"
+                tabindex="0"
+                :title="`Show ${it.kind} in ${it.namespace ?? 'this cluster'}`"
+                @click="emit('navigate', it.kind, it.namespace ?? undefined)"
+                @keydown.enter="emit('navigate', it.kind, it.namespace ?? undefined)"
+              >
+                <td>{{ it.kind }}</td>
+                <td>{{ it.namespace ?? '—' }}</td>
+                <td>{{ it.name }}</td>
+                <td class="attention-reason">{{ it.reason }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <div v-if="attentionTruncated" class="ov-truncated">Some kinds have more affected objects than shown.</div>
       </template>
       <!-- A kind that could not be listed is called out, because a missing check must not be

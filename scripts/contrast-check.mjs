@@ -54,6 +54,7 @@
 //                                `Category/Label` where the label is not unique — six
 //                                categories have an `Overview`, and an ambiguous one throws
 //                                rather than silently opening the first (e.g. `leaf:Network/Overview`)
+//   drawer:<px>                  drag the open drawer to a width in its own 360..1400 range
 //
 // `scroll:` and `leaf:` exist because this tool measures a RENDERED PIXEL, so anything below
 // the fold or behind the nav could not be measured at all — it reported `outside the viewport`
@@ -74,7 +75,7 @@
 
 import { createRequire } from 'module';
 
-import { resolveLeaf } from './lib/kw-playwright.mjs';
+import { resizeDrawer, resolveLeaf } from './lib/kw-playwright.mjs';
 
 const require = createRequire(process.env.HOME + '/.local/lib/playwright/node_modules/');
 const { chromium } = require('playwright');
@@ -580,6 +581,10 @@ async function runPrepare(page, spec) {
         await page.waitForTimeout(300);
       }
     } else if (verb === 'leaf') await openLeafHere(page, arg);
+    // `drawer:<px>` drags the open drawer to a width inside its own 360..1400 resize range.
+    // Shared with the other runner rather than copied — the rule this file's history keeps
+    // teaching is that two copies of a walker drift and then disagree silently (#278).
+    else if (verb === 'drawer') await resizeDrawer(page, Number(arg));
     else if (verb === 'fill') {
       const at = arg.lastIndexOf('=');
       await page.fill(arg.slice(0, at), arg.slice(at + 1));
