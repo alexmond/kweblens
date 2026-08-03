@@ -1,0 +1,94 @@
+package org.alexmond.kweblens.web.api;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+
+/**
+ * Strips from a <b>list</b> payload the fields no list column renders.
+ *
+ * <p>
+ * <b>Why here and not in the access layer.</b> {@code ResourceService.listRaw} is shared
+ * by the health checks, the overviews, {@code RelationService} and the MCP tools, and
+ * several of them legitimately need exactly what this removes — the config-usage check
+ * compares a ConfigMap's keys against what the pods mount, and a diagnosis is allowed to
+ * say a Secret is missing a key. Projecting deeper would break those. So this sits at the
+ * web boundary, for the same reason {@code ToolRedaction} sits at the MCP one: the rule
+ * belongs to the consumer, not to the data.
+ *
+ * <p>
+ * <b>What goes, and why it is safe.</b> {@code managedFields} is per-manager
+ * field-ownership bookkeeping; nothing in the SPA renders it, and the YAML tab fetches
+ * its own text through a different endpoint, so removing it here cannot empty that view.
+ * It is 37-48% of a real pods or replicasets payload.
+ *
+ * <p>
+ * A ConfigMap's or Secret's {@code data} is 96-99% of those payloads and the list shows
+ * only a key <em>count</em> ({@code columns.ts}'s {@code keys}). The keys are therefore
+ * <b>kept</b> and only the values dropped, so the count — and any future column that
+ * names the keys — still has what it needs. A value becomes JSON {@code null}, which is
+ * distinguishable from a genuinely empty value ({@code ""}); the drawer refetches the
+ * whole object and renders the real values, and until it arrives the UI shows a dash
+ * rather than inventing an empty one.
+ *
+ * <p>
+ * The value strip is deliberately restricted to ConfigMap and Secret rather than applied
+ * to any top-level {@code data}: on a custom resource {@code data} can be the whole spec,
+ * and a CRD's printer columns are free to render it.
+ *
+ * <p>
+ * This is not a redaction and must not be described as one. Per ADR-001 the operator may
+ * read any Secret they can reach, and the drawer still shows every value. What changes is
+ * that listing a kind no longer pushes every Secret in the cluster into the browser.
+ */
+final class ListProjection {
+
+	private static final List<String> VALUE_FIELDS = List.of("data", "stringData", "binaryData");
+
+	private static final List<String> BULKY_KINDS = List.of("ConfigMap", "Secret");
+
+	private ListProjection() {
+	}
+
+	/**
+	 * Project every object in a list. Mutates and returns the same instances: they were
+	 * deserialised for this request by {@code listRaw} and are not shared or cached.
+	 */
+	static List<GenericKubernetesResource> forList(List<GenericKubernetesResource> resources) {
+		if (resources == null) {
+			return List.of();
+		}
+		resources.forEach(ListProjection::forList);
+		return resources;
+	}
+
+	/**
+	 * Project one object — the watch stream's per-event equivalent of {@link #forList}.
+	 */
+	static GenericKubernetesResource forList(GenericKubernetesResource resource) {
+		if (resource == null) {
+			return null;
+		}
+		if (resource.getMetadata() != null) {
+			resource.getMetadata().setManagedFields(null);
+		}
+		if (BULKY_KINDS.contains(resource.getKind())) {
+			VALUE_FIELDS.forEach((field) -> keysOnly(resource, field));
+		}
+		return resource;
+	}
+
+	@SuppressWarnings("unchecked")
+	private static void keysOnly(GenericKubernetesResource resource, String field) {
+		Object raw = resource.getAdditionalProperties().get(field);
+		if (!(raw instanceof Map<?, ?> map)) {
+			return;
+		}
+		Map<String, Object> stripped = new LinkedHashMap<>();
+		((Map<String, Object>) map).keySet().forEach((key) -> stripped.put(key, null));
+		resource.getAdditionalProperties().put(field, stripped);
+	}
+
+}

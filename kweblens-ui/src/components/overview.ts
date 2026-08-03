@@ -16,6 +16,9 @@ const ovSpec = objSpec;
 const ovStatus = objStatus;
 const ovArr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
 const ovMap = (v: unknown): Record<string, string> => (v && typeof v === 'object' ? (v as Record<string, string>) : {});
+/** Same, for the data maps whose values may be `null` when the row came from a list (GH#276). */
+const ovDataMap = (v: unknown): Record<string, string | null> =>
+  v && typeof v === 'object' ? (v as Record<string, string | null>) : {};
 
 /**
  * The POD SPEC behind an object — its own for a Pod, otherwise the pod template it creates.
@@ -254,7 +257,7 @@ interface OvCell {
 export type OvBody =
   | { type: 'chips'; map: Record<string, string> }
   | { type: 'annotations'; map: Record<string, string> }
-  | { type: 'secret'; data: Record<string, string> }
+  | { type: 'secret'; data: Record<string, string | null> }
   | { type: 'kv'; pairs: [string, string][] }
   | { type: 'table'; headers: string[]; rows: OvCell[][]; tls?: string[]; note?: string };
 
@@ -409,11 +412,40 @@ function rulesBody(o: KubeObject): OvBody {
   return { type: 'table', headers: ['Host', 'Path', 'Backend'], rows, tls: tlsHosts };
 }
 
+/**
+ * A ConfigMap/Secret value that came from a LIST payload is `null` — the keys are shipped, the
+ * values are not (GH#276), and the drawer fetches the whole object to fill them in. Until that
+ * answer arrives (or if it fails) the cell must say "not loaded", NOT render an empty string:
+ * an empty cell is indistinguishable from a key whose value genuinely IS empty, which would be
+ * an invented fact of exactly the kind #248 was about.
+ */
+export const dataValueText = (v: unknown): string => {
+  if (typeof v !== 'string') {
+    return '—';
+  }
+  return v.length > 200 ? v.slice(0, 200) + '…' : v;
+};
+
+/**
+ * A Secret cell: masked, revealed (base64-decoded), or "not loaded" — see
+ * {@link dataValueText} for why the third state is not rendered as an empty value.
+ */
+export const secretValueText = (v: string | null | undefined, revealed: boolean): string => {
+  if (typeof v !== 'string') {
+    return '—';
+  }
+  if (!revealed) {
+    return '••••••••';
+  }
+  try {
+    return atob(v);
+  } catch {
+    return '‹binary›';
+  }
+};
+
 function configMapDataBody(o: KubeObject): OvBody {
-  const rows = Object.entries(ovMap(o.data)).map(([k, v]) => [
-    mono(k),
-    mono(v.length > 200 ? v.slice(0, 200) + '…' : v),
-  ]);
+  const rows = Object.entries(ovDataMap(o.data)).map(([k, v]) => [mono(k), mono(dataValueText(v))]);
   return { type: 'table', headers: ['Key', 'Value'], rows };
 }
 
@@ -968,15 +1000,15 @@ export const OVERVIEW_SECTIONS: OverviewSection[] = [
   },
   {
     title: 'Data',
-    applies: (o) => o.kind === 'ConfigMap' && Object.keys(ovMap(o.data)).length > 0,
-    count: (o) => Object.keys(ovMap(o.data)).length,
+    applies: (o) => o.kind === 'ConfigMap' && Object.keys(ovDataMap(o.data)).length > 0,
+    count: (o) => Object.keys(ovDataMap(o.data)).length,
     body: configMapDataBody,
   },
   {
     title: 'Data',
-    applies: (o) => o.kind === 'Secret' && Object.keys(ovMap(o.data)).length > 0,
-    count: (o) => Object.keys(ovMap(o.data)).length,
-    body: (o) => ({ type: 'secret', data: ovMap(o.data) }),
+    applies: (o) => o.kind === 'Secret' && Object.keys(ovDataMap(o.data)).length > 0,
+    count: (o) => Object.keys(ovDataMap(o.data)).length,
+    body: (o) => ({ type: 'secret', data: ovDataMap(o.data) }),
   },
   {
     title: 'Node Selector',

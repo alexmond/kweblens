@@ -5,11 +5,13 @@ import type { SectionRank } from './overview';
 import {
   OVERVIEW_FIELDS,
   OVERVIEW_SECTIONS,
+  dataValueText,
   fromPodTemplate,
   hasContainerRuntime,
   rankOf,
   readyText,
   restartsText,
+  secretValueText,
   splitByRank,
 } from './overview';
 import { relationSections } from './relations';
@@ -487,5 +489,52 @@ describe('splitByRank', () => {
     const { main } = splitByRank(OVERVIEW_SECTIONS, (s) => s);
     const expected = OVERVIEW_SECTIONS.filter((s) => rankOf(s) === 'primary').map((s) => s.title);
     expect(main.map((s) => s.title)).toEqual(expected);
+  });
+});
+
+// A list payload ships ConfigMap/Secret KEYS with `null` values (GH#276); the drawer refetches
+// the whole object. What is pinned here is the state in between — and, more importantly, the
+// state after a refetch that FAILED, which is the only way this change could quietly lie:
+// rendering a null as an empty string would say "this key's value is empty", which is a claim
+// nobody made.
+describe('data values that were not shipped with the list', () => {
+  const dataSection = (kind: string, o: KubeObject) => {
+    const s = OVERVIEW_SECTIONS.find((x) => x.title === 'Data' && x.applies({ ...o, kind }));
+    if (!s) {
+      throw new Error(`no applicable Data section for ${kind}`);
+    }
+    return s;
+  };
+
+  it('renders a not-yet-loaded ConfigMap value as a dash, never as empty', () => {
+    const o: KubeObject = { kind: 'ConfigMap', metadata: { name: 'cm' }, data: { a: null, b: '' } } as KubeObject;
+    const body = dataSection('ConfigMap', o).body(o);
+    expect(body.type).toBe('table');
+    if (body.type !== 'table') {
+      return;
+    }
+    expect(body.rows.map((r) => r.map((c) => c.text))).toEqual([
+      ['a', '—'],
+      ['b', ''],
+    ]);
+  });
+
+  it('still counts the keys, so the section header matches the list column', () => {
+    const o: KubeObject = { kind: 'Secret', metadata: { name: 's' }, data: { a: null, b: null } } as KubeObject;
+    expect(dataSection('Secret', o).count?.(o)).toBe(2);
+    expect(dataSection('Secret', o).applies(o)).toBe(true);
+  });
+
+  it('masks, decodes, or admits it does not have the value', () => {
+    expect(secretValueText('YWRtaW4=', false)).toBe('••••••••');
+    expect(secretValueText('YWRtaW4=', true)).toBe('admin');
+    expect(secretValueText(null, true)).toBe('—');
+    expect(secretValueText(null, false)).toBe('—');
+  });
+
+  it('truncates a long ConfigMap value but leaves a short one alone', () => {
+    expect(dataValueText('x'.repeat(250))).toBe('x'.repeat(200) + '…');
+    expect(dataValueText('short')).toBe('short');
+    expect(dataValueText(null)).toBe('—');
   });
 });

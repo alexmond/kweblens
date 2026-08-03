@@ -15,7 +15,7 @@ import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { useEscapeKey } from '../composables/useEscapeKey';
-import { objName, objNs } from '../kube';
+import { needsFullObject, objName, objNs } from '../kube';
 import { filesFeature } from '../podFiles';
 import type { RowAction } from '../rowActions';
 import { parseRowActionKey } from '../rowActions';
@@ -62,16 +62,36 @@ const isNode = computed(() => kind.value === 'Node');
 const name = computed(() => objName(props.obj));
 const ns = computed(() => objNs(props.obj) ?? '');
 
+// ---- The whole object, when the row is not enough (GH#276) ----
+// List payloads ship ConfigMap/Secret keys without their values, so a drawer opened from such
+// a row would render a Data section of dashes. `needsFullObject` reads that off the row itself
+// rather than off a kind list, so only the rows that were actually stripped pay for a request:
+// a Pod, Deployment or Service drawer makes none, and opens exactly as fast as before.
+//
+// The fetch does not block: the drawer renders from the row immediately and swaps in the full
+// object when it lands. A failure is deliberately silent and leaves the row in place — every
+// other section is complete, and the Data cells already say "—" rather than claiming a value.
+// The parent keys this component on resourceId + object, so it remounts per object and this
+// runs once per drawer.
+const full = shallowRef<KubeObject | null>(null);
+if (needsFullObject(props.obj)) {
+  api
+    .object(props.cluster, props.resourceId, name.value, ns.value || undefined)
+    .then((o) => (full.value = o))
+    .catch(() => undefined);
+}
+const view = computed<KubeObject>(() => full.value ?? props.obj);
+
 // ---- Header, laid out for the width it has (#233) ----
 // Both decisions come from `drawerHeader.ts`; this component only renders them and lets the
 // container query choose. The menu is the FULL action list at every width — the buttons are
 // a shortcut to three of them when there is room, never the only way to reach one.
-const badges = computed(() => drawerBadges(props.obj));
-const actions = computed(() => drawerActions(props.obj));
+const badges = computed(() => drawerBadges(view.value));
+const actions = computed(() => drawerActions(view.value));
 const menuOptions = computed(() => actions.value.menu as unknown as DropdownOption[]);
 const onMenu = (key: string) => {
   const { action, container } = parseRowActionKey(key);
-  emit('row-action', action, props.obj, container);
+  emit('row-action', action, view.value, container);
 };
 
 // Expand-to-fill: the drawer is mounted into the content column (see `to` below), so 100%
@@ -180,7 +200,7 @@ watch(
               :key="a.id"
               type="button"
               class="drawer-action kw-when-wide"
-              @click="emit('row-action', a.id, obj)"
+              @click="emit('row-action', a.id, view)"
             >
               {{ a.label }}
             </button>
@@ -193,7 +213,7 @@ watch(
         </template>
         <NTabPane name="overview" tab="Overview" display-directive="if">
           <Overview
-            :obj="obj"
+            :obj="view"
             :cluster="cluster"
             :resource-id="resourceId"
             @navigate="(k, n) => emit('navigate', k, n)"
@@ -223,7 +243,7 @@ watch(
             :cluster="cluster"
             :namespace="ns"
             :pod="name"
-            :obj="obj"
+            :obj="view"
             :authed="authed"
             @auth-required="emit('require-auth')"
           />

@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { reactive } from 'vue';
 
-// Secret data table — base64 values are masked until per-key Reveal decodes them.
-defineProps<{ data: Record<string, string> }>();
+import { secretValueText } from './overview';
+
+// Secret data table — base64 values are masked until per-key Reveal decodes them. The masking
+// and decoding are in `overview.ts` so they can be tested without a DOM; this file renders.
+//
+// A value is `null` when the row came from a LIST payload, which ships the keys without the
+// values (GH#276). The drawer refetches the whole object, so that is a brief state, but it
+// renders as "not loaded" rather than as an empty value, and Reveal is withheld — a button
+// that can only ever decode nothing is worse than no button.
+defineProps<{ data: Record<string, string | null> }>();
 
 const revealed = reactive<Record<string, boolean>>({});
-const decode = (v: string): string => {
-  try {
-    return atob(v);
-  } catch {
-    return '‹binary›';
-  }
-};
 </script>
 
 <template>
@@ -26,9 +27,11 @@ const decode = (v: string): string => {
     <tbody>
       <tr v-for="(val, k) in data" :key="k">
         <td class="mono">{{ k }}</td>
-        <td class="mono">{{ revealed[k] ? decode(val) : '••••••••' }}</td>
+        <td class="mono">{{ secretValueText(val, revealed[k] ?? false) }}</td>
         <td>
-          <button class="linkbtn" @click="revealed[k] = !revealed[k]">{{ revealed[k] ? 'Hide' : 'Reveal' }}</button>
+          <button v-if="val !== null" class="linkbtn" @click="revealed[k] = !revealed[k]">
+            {{ revealed[k] ? 'Hide' : 'Reveal' }}
+          </button>
         </td>
       </tr>
     </tbody>

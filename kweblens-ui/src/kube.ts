@@ -176,9 +176,37 @@ export function ageToSeconds(age: string): number {
   return Number(m[1]) * (mult[m[2]] ?? 1);
 }
 
+/** The top-level maps a list payload ships keys-only (see ListProjection.java). */
+const PROJECTED_FIELDS = ['data', 'stringData', 'binaryData'] as const;
+
+/**
+ * Whether this row came out of a LIST payload with its values stripped, so the drawer has to
+ * fetch the whole object before it can render them (GH#276).
+ *
+ * <p>Deliberately derived from the row itself rather than from a list of kinds. The server
+ * marks a stripped value by setting it to `null` — which a real value never is, since these
+ * maps are `map[string]string` — so this predicate stays true to whatever the server actually
+ * decided to strip. A hard-coded `kind === 'Secret' || kind === 'ConfigMap'` here would be a
+ * second copy of that rule, and the copy that goes stale silently: the drawer would show an
+ * empty Data section for the next kind added server-side and nothing would say why.
+ *
+ * <p>An object with no such map at all — every Pod, Deployment, Service — answers false, which
+ * is the point: the common case must not pay for a re-fetch it has no use for.
+ */
+export function needsFullObject(o: KubeObject): boolean {
+  return PROJECTED_FIELDS.some((f) => {
+    const v = (o as Record<string, unknown>)[f];
+    return !!v && typeof v === 'object' && Object.values(v as Record<string, unknown>).some((x) => x === null);
+  });
+}
+
 /**
  * Remove the noisy metadata.managedFields block from a manifest (text-level, so it works
  * without a YAML parser). Drops the `managedFields:` key and its whole nested/sequence body.
+ *
+ * <p>Still needed after GH#276 stripped `managedFields` from list payloads: this operates on
+ * the YAML TEXT that the YAML tab and the editor's Review Changes diff fetch from their own
+ * endpoints (`/yaml`, and the server's dry-run answer), neither of which is a list payload.
  */
 export function stripManagedFields(yaml: string): string {
   const lines = yaml.split('\n');

@@ -6,6 +6,7 @@ import {
   eventObjectKind,
   gib,
   initials,
+  needsFullObject,
   objKey,
   objName,
   objNs,
@@ -150,6 +151,33 @@ describe('kube accessors', () => {
     expect(out).not.toContain('manager: a');
     expect(out).toContain('name: x');
     expect(out).toContain('spec:');
+  });
+});
+
+// GH#276. The predicate that decides whether opening a drawer costs an extra request. Both
+// halves matter: a false negative renders a Secret's Data section as dashes forever, and a
+// false positive puts a request on every Pod drawer for nothing.
+describe('needsFullObject', () => {
+  it('is true when a data map has a value the list did not ship', () => {
+    expect(needsFullObject({ kind: 'Secret', data: { password: null } })).toBe(true);
+    expect(needsFullObject({ kind: 'ConfigMap', data: { 'app.conf': null, 'other.conf': null } })).toBe(true);
+    expect(needsFullObject({ kind: 'Secret', stringData: { 'api-key': null } })).toBe(true);
+    expect(needsFullObject({ kind: 'ConfigMap', binaryData: { blob: null } })).toBe(true);
+  });
+
+  it('is false for the kinds nothing was stripped from — they must not pay for a re-fetch', () => {
+    expect(needsFullObject({ kind: 'Pod', spec: { containers: [] } })).toBe(false);
+    expect(needsFullObject({ kind: 'Deployment', metadata: { name: 'web' } })).toBe(false);
+    expect(needsFullObject({})).toBe(false);
+  });
+
+  it('is false once the whole object has been fetched, so it cannot loop', () => {
+    expect(needsFullObject({ kind: 'Secret', data: { 'ca.crt': 'c3VwZXJzZWNyZXQ=' } })).toBe(false);
+  });
+
+  it('is false for an empty data map, and for a value that is genuinely the empty string', () => {
+    expect(needsFullObject({ kind: 'ConfigMap', data: {} })).toBe(false);
+    expect(needsFullObject({ kind: 'ConfigMap', data: { blank: '' } })).toBe(false);
   });
 });
 
