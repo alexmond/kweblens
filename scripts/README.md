@@ -190,7 +190,7 @@ out. `upload:` reaches UI that only exists once a file has been picked. Measurin
 file browser's save confirmation, for instance, means signing in and walking to a file:
 
 ```bash
-PREPARE='?click:.linkbtn:has-text("Sign in");?fill:.n-modal input[type=password]=admin;…' \
+PREPARE='?click:.bar-btn:has-text("Sign in");?fill:.n-modal input[type=password]=admin;…' \
   node scripts/contrast-check.mjs '.files-saved'
 ```
 

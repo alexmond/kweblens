@@ -316,7 +316,13 @@ body {
   background: #3fb950;
 }
 
-.linkbtn {
+/* A text button ON THE BRAND BAR — which is dark in BOTH themes, which is why this hard-codes
+   its colour and why #272's sweep deliberately left it alone.
+   Renamed from `.linkbtn` (#280). Under the old name it read as "the generic link button" and
+   got borrowed three times onto ordinary panels, where a colour picked for a dark bar lands on
+   white: the Review tab's Re-check at 2.17:1, and the Secret drawer's Reveal at the same value.
+   The name now says where it belongs. A text button anywhere else wants `var(--accent)`. */
+.bar-btn {
   border: 0;
   background: transparent;
   color: #9fb3bf;
@@ -325,14 +331,9 @@ body {
   padding: 0;
 }
 
-.linkbtn:hover {
+.bar-btn:hover {
   color: var(--bar-fg);
   text-decoration: underline;
-}
-
-.linkbtn.strong {
-  color: var(--accent);
-  font-weight: 600;
 }
 
 /* Login modal */
@@ -4227,11 +4228,10 @@ body.dragging {
   color: var(--text);
 }
 
-/* Its own colour rather than `.linkbtn`'s.
-   `.linkbtn` hard-codes #9fb3bf because it is a BRAND BAR control and that bar is dark in
-   both themes — which is exactly why #272 left it alone. Borrowing it for a button on the
-   editor's modal put it on white at 2.17:1. A class being "the link one" is not a licence
-   to use it on a different surface. */
+/* `var(--accent)`, the colour a text button on an ordinary panel wants.
+   This used to borrow `.bar-btn` (then named `.linkbtn`), which hard-codes #9fb3bf for the
+   always-dark brand bar, and landed at 2.17:1 on the editor's white modal. The class was
+   renamed in #280 so the next person cannot make the same mistake by reading the name. */
 .review-recheck {
   border: 0;
   padding: 0;
@@ -4271,4 +4271,22 @@ body.dragging {
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-x: auto;
+}
+
+/* Reveal / Hide on a Secret's value (#280).
+   The third place `.linkbtn` was borrowed onto an ordinary panel: its brand-bar #9fb3bf
+   measured 2.17:1 on the drawer's white background, the same value and the same cause as the
+   editor's Re-check. Uses the accent, like every other text button that is not on the bar. */
+.reveal-btn {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.reveal-btn:hover {
+  text-decoration: underline;
 }

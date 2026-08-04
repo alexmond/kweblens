@@ -72,14 +72,14 @@ const onHelm = (v: string) => {
     </div>
     <div class="bar-right">
       <button
-        class="linkbtn theme-toggle"
+        class="bar-btn theme-toggle"
         :title="dark ? 'Switch to light' : 'Switch to dark'"
         @click="emit('toggle-theme')"
       >
         {{ dark ? '☀' : '☾' }}
       </button>
       <button
-        class="linkbtn"
+        class="bar-btn"
         title="Diagnostics — detected capabilities and effective config"
         @click="emit('show-diagnostics')"
       >
@@ -87,9 +87,9 @@ const onHelm = (v: string) => {
       </button>
       <span v-if="authUser" class="authbox">
         <i class="user-dot" /> {{ authUser }}
-        <button class="linkbtn" @click="emit('sign-out')">Sign out</button>
+        <button class="bar-btn" @click="emit('sign-out')">Sign out</button>
       </span>
-      <button v-else class="linkbtn" @click="emit('sign-in')">Sign in</button>
+      <button v-else class="bar-btn" @click="emit('sign-in')">Sign in</button>
     </div>
   </header>
 </template>
