@@ -206,13 +206,33 @@ const ROW_HEIGHT = 40;
 /**
  * Below this many rows, render the old way.
  *
- * <p>Windowing costs something — it fixes row height and re-renders on scroll — and a list
- * of eighty pods was never the problem. The measured problem (#215) is that the table put
- * one DOM row on the page per object: 300 objects meant 14,353 nodes and a 12,000px table,
- * which extrapolates to roughly 715,000 nodes at 15,000 objects. Above the threshold the
- * DOM cost becomes a constant instead.
+ * <p>The original problem (#215) was one DOM row per object: 300 objects meant 14,353 nodes
+ * and a 12,000px table, extrapolating to ~715,000 nodes at 15,000 objects. Windowing makes
+ * that a constant.
+ *
+ * <p><b>This was 150, on the stated assumption that "a list of eighty pods was never the
+ * problem". Measured against the live cluster, that was wrong</b> — 88 pods blocked the main
+ * thread for 1,519 ms, which is a visible freeze, while a 168-object Replica Sets list
+ * blocked 687 ms precisely because it was over the threshold and windowed. `perf-sweep`, six
+ * kinds, budget block&lt;1500 ms:
+ *
+ * <pre>
+ *              rows            150          50
+ *   Events      99 -&gt; 20   1707 ms      441 ms
+ *   Pods        88 -&gt; 20   1519 ms      391 ms
+ *   Deployments 60 -&gt; 20   1729 ms      295 ms
+ *   ConfigMaps  99 -&gt; 20    953 ms      185 ms
+ * </pre>
+ *
+ * Three of six were over budget at 150; none are at 50.
+ *
+ * <p>50 rather than the 30 that also passed (441 vs 462 ms — noise): at a 40px row a ~900px
+ * viewport shows ~20 rows, so 50 is about two and a half screens. Past that most rows are
+ * off-screen and windowing is paying for itself; below it, fixing the row height constrains
+ * a list that was never expensive. The number is a screenful argument, not the first value
+ * that passed.
  */
-const VIRTUAL_FROM = 150;
+const VIRTUAL_FROM = 50;
 
 // Tree rows are opt-in per kind (workload -> its pods). Naive windows the FLAT rendered
 // list, so an expanded parent's children are windowed too — but the row-height assumption
