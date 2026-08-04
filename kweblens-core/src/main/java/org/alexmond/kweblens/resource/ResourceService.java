@@ -9,7 +9,11 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.GenericKubernetesResourceList;
 import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.ListMeta;
+import io.fabric8.kubernetes.api.model.ListOptions;
+import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
@@ -63,6 +67,65 @@ public class ResourceService {
 			return op.inAnyNamespace().list().getItems();
 		}
 		return op.inNamespace(namespace).list().getItems();
+	}
+
+	/**
+	 * How many objects of a kind exist, <em>without</em> fetching them.
+	 *
+	 * <p>
+	 * The obvious implementation — {@code listRaw(...).size()} — pulls every object of
+	 * every kind out of the API server to produce an integer. Measured on a small real
+	 * cluster (1 561 objects across 118 kinds) that is about 23 MB of JSON decoded per
+	 * call, 10 MB of it the CustomResourceDefinitions' own OpenAPI schemas and 6.5 MB the
+	 * Secrets' data, for 118 numbers on a sidebar that is re-fetched on every namespace
+	 * switch. The cost scales with the cluster's total content; the numbers do not.
+	 *
+	 * <p>
+	 * So ask for one item and let the server say how many more there are.
+	 * {@code metadata.remainingItemCount} is <b>best-effort</b> — the API server may omit
+	 * it, and a count that silently becomes wrong would be worse than one that is slow —
+	 * so every branch is explicit:
+	 * <ul>
+	 * <li><b>{@code remainingItemCount} present</b> — the answer is that plus what came
+	 * back.</li>
+	 * <li><b>absent, and no continue token</b> — the page IS the whole collection, so its
+	 * size is exact. This also covers a server that ignored {@code limit} outright
+	 * (ComponentStatus on this cluster does exactly that, and still counts
+	 * correctly).</li>
+	 * <li><b>absent, but truncated</b> — the only genuinely unknown case. Fall back to
+	 * the full list rather than guess.</li>
+	 * </ul>
+	 * Verified against a live API server (k3s 1.35) for many/one/zero objects, namespaced
+	 * and cluster-scoped kinds, and a CRD-backed kind; every derived count matched
+	 * {@code kubectl}.
+	 */
+	public int count(String clusterId, ResourceDescriptor descriptor, String namespace) {
+		GenericKubernetesResourceList page = listPage(clusterId, descriptor, namespace);
+		int returned = (page.getItems() != null) ? page.getItems().size() : 0;
+		ListMeta meta = page.getMetadata();
+		Long remaining = (meta != null) ? meta.getRemainingItemCount() : null;
+		if (remaining != null) {
+			return Math.toIntExact(returned + remaining);
+		}
+		String token = (meta != null) ? meta.getContinue() : null;
+		if (token == null || token.isBlank()) {
+			return returned;
+		}
+		log.debug("No remainingItemCount for '{}'; falling back to a full list", descriptor.id());
+		return listRaw(clusterId, descriptor, namespace).size();
+	}
+
+	/** The single-item page {@link #count} reasons about. */
+	private GenericKubernetesResourceList listPage(String clusterId, ResourceDescriptor descriptor, String namespace) {
+		ListOptions options = new ListOptionsBuilder().withLimit(1L).build();
+		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
+		if (!descriptor.namespaced()) {
+			return op.list(options);
+		}
+		if (namespace == null || namespace.isBlank()) {
+			return op.inAnyNamespace().list(options);
+		}
+		return op.inNamespace(namespace).list(options);
 	}
 
 	/**

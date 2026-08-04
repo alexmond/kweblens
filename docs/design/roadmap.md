@@ -230,6 +230,25 @@ genuinely cheap `/counts` via `limit=1` + `metadata.remainingItemCount`, and a d
 watch fan-out (share one watch per cluster+kind across subscribers, or accept N and document
 the ceiling).
 
+**Three of the four are done.** The list projection (#276), the cheap `/counts` and the
+fan-out decision have landed; measurements for all three are in
+[`scale-measurements.md`](scale-measurements.md).
+
+- **`/counts` is no longer a full LIST per kind.** `ResourceService.count` asks for one item
+  and reads `metadata.remainingItemCount`, with the absence of that best-effort field handled
+  explicitly rather than guessed. On the live cluster: 330 ms → 112 ms, and 22.1 MB → 111 KB
+  of API-server traffic per call, for the same 118 badge numbers (verified against the full
+  lists: 0 mismatches out of 118).
+- **Fan-out: accept N, do not share** — argued with the numbers in
+  [`watch-fanout.md`](watch-fanout.md). The measurement moved the question: the ratio was
+  already 1 watch per subscriber, but a watch on a *quiet* kind outlived its departed
+  subscriber by over five minutes, so one operator walking twenty kinds held 22 open watches.
+  A 15 s SSE keepalive (`SseKeepAlive`) makes the ceiling "one per list view on screen,
+  released within ~30 s"; at that ceiling a shared watch's lifecycle risk (refcounting, close
+  policy, slow-subscriber policy) buys nothing for a single-operator product.
+- **Still open: `limit`/continue paging on the list path itself**, with the server-side
+  label/field selectors that must land with it (see the sequencing constraint below).
+
 Why second and not first: it is the largest item here and the only one that changes a
 contract three future consumers read. Why not later: **it must precede GH#143 (TUI) and
 GH#148 (server-side columns)**, because both are new clients of the list contract, and

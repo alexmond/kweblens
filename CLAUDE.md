@@ -230,6 +230,24 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
   server's rule and the copy that goes stale silently. A `null` value renders as `—`, never as
   an empty string: "we did not send it" and "it is empty" are different claims. This is **not**
   redaction — the drawer still shows every value, per ADR-001.
+- **An SSE stream that never writes never notices a disconnect.** `SseEmitter` learns its
+  client is gone only from a *failed write*; nothing polls the socket. The resource-list watch
+  writes only when the watched kind produces an event, so on a quiet kind a departed subscriber
+  was never noticed and its API-server watch stayed open — measured at **5 min+** for `pods`,
+  and **22 open watches for one operator** who walked twenty kinds in one tab. `SseKeepAlive`
+  (`web/api`) writes a `:keepalive` comment every 15 s, which fails, completes the emitter and
+  runs the `onCompletion` hook that closes the watch. **Any new `SseEmitter` whose writes are
+  data-driven needs it** (the log streams still don't have it). The fan-out decision this
+  produced — accept one watch per open list view, don't share — is
+  `docs/design/watch-fanout.md`.
+- **A count is not a list.** `/counts` computes its 118 badge numbers with one `limit=1`
+  request per kind plus `metadata.remainingItemCount` (`ResourceService.count`), not
+  `listRaw().size()` — that was 22.1 MB of API-server traffic per call on the real cluster, and
+  it is re-fetched on every namespace switch. `remainingItemCount` is **best-effort**, so its
+  absence is branched on explicitly: no continue token means the page is the whole collection
+  (exact), truncated-without-the-field falls back to a full list. The fabric8 CRUD mock
+  **ignores `limit`**, so `ResourceCountTest` asserts on the exact outgoing query string — a
+  test that seeded objects and counted them would pass whether or not the flag was sent.
 - **fabric8 version is BOM-pinned.** `kubernetes-client-bom` (`${fabric8.version}`) aligns
   client + model + mock-server; bump the one property, never individual fabric8 artifacts.
 - **kubeconfigs are secrets.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig`, `.kube/` — never

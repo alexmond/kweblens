@@ -42,6 +42,13 @@ import org.alexmond.kweblens.web.nav.NavCategory;
  *
  * <p>
  * A kind that cannot be listed is simply omitted, never failing the whole response.
+ *
+ * <p>
+ * The counting itself is {@link ResourceService#count} — one {@code limit=1} request per
+ * kind, not a full LIST. Before that it fetched every object of every kind to produce
+ * these integers: about 23 MB of JSON per call on a small real cluster, re-fetched on
+ * every namespace switch. See that method for how an absent
+ * {@code metadata.remainingItemCount} is handled.
  */
 @Slf4j
 @RestController
@@ -101,8 +108,9 @@ public class CountApiController {
 	private void count(String clusterId, ResourceDescriptor descriptor, String namespace, Map<String, Integer> into) {
 		try {
 			// Namespaced kinds count within the selected namespace; cluster-scoped kinds
-			// ignore it (listRaw does this), so the badge stays cluster-wide.
-			into.put(descriptor.id(), this.resources.listRaw(clusterId, descriptor, namespace).size());
+			// ignore it (ResourceService.count does this), so the badge stays
+			// cluster-wide.
+			into.put(descriptor.id(), this.resources.count(clusterId, descriptor, namespace));
 		}
 		catch (RuntimeException ex) {
 			log.debug("Count skipped for '{}': {}", descriptor.id(), ex.getMessage());
