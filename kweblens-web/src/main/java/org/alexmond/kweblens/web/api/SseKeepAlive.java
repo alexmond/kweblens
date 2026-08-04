@@ -40,10 +40,18 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 final class SseKeepAlive {
 
 	/**
-	 * One shared daemon scheduler. These tasks do one small write each; a thread per
-	 * stream would cost more than the streams do.
+	 * A small shared daemon pool. These tasks do one tiny write each, so a thread per
+	 * stream would cost far more than the streams do — but not ONE thread either.
+	 *
+	 * <p>
+	 * {@link SseEmitter#send} can block: it writes through to the response, and a client
+	 * that has stopped reading fills the socket buffer. On a single thread that stalls
+	 * every other stream's probe, which would let the very leak this class exists to
+	 * close reopen for everyone else while one subscriber is slow. Two threads do not
+	 * make that impossible, they make it need two simultaneously-stuck clients — which,
+	 * for the single operator ADR-001 describes, is the right place to stop paying.
 	 */
-	private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor((runnable) -> {
+	private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(2, (runnable) -> {
 		Thread thread = new Thread(runnable, "sse-keepalive");
 		thread.setDaemon(true);
 		return thread;
