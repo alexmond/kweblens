@@ -107,18 +107,36 @@ final class SseKeepAlive {
 			// The subscriber is gone (or the stream is already finished). Completing is
 			// what runs the onCompletion hook that closes the underlying watch.
 			log.debug("SSE keepalive failed ({}); completing the stream", ex.getMessage());
-			complete(emitter, ex);
+			completeQuietly(emitter, ex);
 			return false;
 		}
 	}
 
-	private static void complete(SseEmitter emitter, Exception cause) {
+	/**
+	 * End a stream whose write has just failed, from a thread that is not the
+	 * container's.
+	 *
+	 * <p>
+	 * The naked {@code completeWithError} is not safe there. Tomcat rejects any use of
+	 * the {@code AsyncContext} once it has run {@code AsyncListener.onError()} — "a
+	 * non-container (application) thread attempted to use the AsyncContext after an error
+	 * had occurred" — and every SSE stream here completes from a watch callback, a log
+	 * reader or the keepalive scheduler. Losing that race threw <b>out of</b> the log
+	 * reader thread, so a disconnect from a chatty pod printed an uncaught
+	 * {@code Exception in thread "log-sse-…"} to stderr. It released the watch anyway
+	 * (the try-with-resources had already closed it), which is why it survived: a noisy
+	 * stack trace on a path nobody was reading.
+	 *
+	 * <p>
+	 * The container has already torn the response down in that case, so there is nothing
+	 * to do but say so at trace level.
+	 */
+	static void completeQuietly(SseEmitter emitter, Throwable cause) {
 		try {
 			emitter.completeWithError(cause);
 		}
 		catch (IllegalStateException ex) {
-			// Already completed by the send path; nothing left to do.
-			log.trace("SSE stream was already complete: {}", ex.getMessage());
+			log.trace("SSE stream was already finished by the container: {}", ex.getMessage());
 		}
 	}
 

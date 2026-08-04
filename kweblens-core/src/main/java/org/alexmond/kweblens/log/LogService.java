@@ -1,5 +1,7 @@
 package org.alexmond.kweblens.log;
 
+import java.io.IOException;
+
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.ContainerResource;
@@ -57,6 +59,53 @@ public class LogService {
 	 */
 	public LogWatch watchWithTimestamps(String clusterId, String namespace, String pod, String container) {
 		return loggable(clusterId, namespace, pod, container).usingTimestamps().tailingLines(0).watchLog();
+	}
+
+	/**
+	 * Stop following, for real.
+	 *
+	 * <p>
+	 * <b>{@link LogWatch#close()} on its own does nothing here.</b> fabric8 has two
+	 * flavours of log watch: the one that writes into an {@code OutputStream} you supply,
+	 * and the one that hands you an {@link LogWatch#getOutput() InputStream}. Only the
+	 * first completes the internal {@code asyncBody} future, and {@code close()} is
+	 * implemented as {@code asyncBody.thenAccept(AsyncBody::cancel)} — so on the
+	 * {@code watchLog()} flavour this project uses, that future is never completed, the
+	 * cancel never runs, and close() sets a flag and returns. The HTTP request to the API
+	 * server stays open and a reader parked in {@code HttpClientReadableByteChannel.read}
+	 * stays parked.
+	 *
+	 * <p>
+	 * Measured, and this is not a subtle amount: three subscribers left a quiet pod's log
+	 * stream, the SSE keepalive noticed within 15 s and completed the emitter, the
+	 * {@code onCompletion} hook called {@code watch.close()} — and all three connections
+	 * and all three reader threads were still there five minutes later. It survived
+	 * because a <em>chatty</em> pod releases anyway: the failed SSE write throws out of
+	 * the read loop and the try-with-resources closes the <em>reader</em>, which is what
+	 * actually tears the connection down. So the working path was never {@code close()}.
+	 *
+	 * <p>
+	 * Closing the stream is what signals the channel's condition and cancels the body.
+	 * The watch is closed too, so its executor is shut down.
+	 */
+	public void release(LogWatch watch) {
+		if (watch == null) {
+			return;
+		}
+		try {
+			if (watch.getOutput() != null) {
+				watch.getOutput().close();
+			}
+		}
+		catch (IOException | RuntimeException ex) {
+			log.debug("Closing a log stream failed: {}", ex.getMessage());
+		}
+		try {
+			watch.close();
+		}
+		catch (RuntimeException ex) {
+			log.debug("Closing a log watch failed: {}", ex.getMessage());
+		}
 	}
 
 	/**

@@ -48,6 +48,16 @@ spring:
         name: kweblens
         version: 0.1.0
         type: SYNC
+        # The MCP SSE transport is the same "a stream learns of a disconnect only from a
+        # failed write" family as our own SSE endpoints, and the SDK ships this OFF.
+        # Measured on a live server: three MCP clients disconnected and all three
+        # McpServerSession instances were still in the heap 240 s later, with their
+        # sockets parked in CLOSE_WAIT — nothing had noticed. The SDK has its own
+        # KeepAliveScheduler (it sends MCP pings), so this is a knob rather than a second
+        # heartbeat of ours; SseKeepAlive is for the endpoints we write.
+        # Unlike a watch stream this holds no cluster-side resource — a leaked session is
+        # bounded process memory — which is why it is a setting and not a code change.
+        keep-alive-interval: 30s
 
   threads:
     virtual:

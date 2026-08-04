@@ -140,7 +140,7 @@ The reasoning, in the order it carries weight:
   `MultiLogStream` are also `SseEmitter`s whose only writes are data-driven, so a quiet pod
   leaves its log watch open on a departed subscriber for the same reason. Not fixed here
   because it was not measured here; `SseKeepAlive` is reusable and this is the obvious next
-  user of it.
+  user of it. *(They did. See part 2 — and so did a fourth endpoint not listed here.)*
 - **Teardown timing was measured on this box against a three-replica control plane.** The
   socket counts (`ss` against the JVM) are unambiguous; the `apiserver_longrunning_requests`
   figures are scraped through a load balancer and their *tails* are noisier than their
@@ -148,3 +148,271 @@ The reasoning, in the order it carries weight:
 - **The API server's own watch timeout was never reached** in any of these runs, so what
   fabric8 does when the server ends a watch — reconnect, or surface it — is unverified.
   It matters only for streams that live for tens of minutes.
+
+---
+
+# Part 2 — the same question, asked of every stream
+
+Date: 2026-08-04. Part 1 ended with a "not covered": the log streams *looked* like they had
+the same exposure and were not measured. They did. So did a fourth SSE endpoint that the
+note did not mention at all. This part is the audit that should have run then — **every
+long-lived surface in the app, enumerated rather than assumed**, with what it holds, how it
+learns the client is gone, and how long that took.
+
+The headline: **three of the four SSE endpoints leaked and now do not. Nothing else does,
+and that negative result is the more useful half** — exec over WebSocket and port-forward
+were both checked and both need no heartbeat, for reasons that do not transfer from SSE.
+
+## Method
+
+Same box, same cluster (`default`, k3s 1.35), same instrument as part 1: connect N clients,
+kill them, and count the JVM's ESTABLISHED sockets to the API server
+(`ss -tn 'dst :6443' -p`, filtered to the app's pid). **Deltas over a baseline taken
+immediately before, never absolute tails** — fabric8 retires idle pooled connections on its
+own ~60 s timer, which moves the absolute number by ±2 with nothing connected at all.
+
+Two fixtures in a `kweblens-audit` namespace, because the entire mechanism turns on whether
+the stream has anything to write: a **`chatty`** pod (one line a second) and a **`quiet`**
+pod (one line at startup, then nothing). The simulator was not used —
+[`scale-measurements.md`](scale-measurements.md) records why its objects are not
+representative, and a simulated pod does not log at all.
+
+Thread counts (`jcmd Thread.print`, names `log-sse-*` / `multi-log`) corroborate but are
+**not** the headline. An early run counted OkHttp's pool threads too and wandered by ±4 with
+nothing connected — noise that would have been read as a result.
+
+## Every long-lived surface
+
+| Surface | Held per client | Learns the client is gone from | Release, quiet | Verdict |
+|---|---|---|---|---|
+| `GET …/resources/{id}/objects/watch` | 1 API-server WATCH | 15 s `SseKeepAlive` comment | **≤30 s** (held at t+15 s, clear at t+30 s) | fixed in #283, **still fixed** |
+| `GET …/resources/{id}/watch` | 1 API-server WATCH | a watch event, and nothing else | **never** (+3 at t+300 s) | **leaked** → keepalive attached |
+| `GET …/pods/{ns}/{pod}/log/stream` | 1 log follow + 1 reader thread | a log line, and nothing else | **never** (+3 at t+300 s) | **leaked twice over** → keepalive + a close that closes |
+| `GET …/logs/stream` (multi-log) | 1 log follow + 1 reader thread **per source**, + a dispatcher, + a 4 s refresh loop | a log line or a change in the source set | **never** (+3 at t+300 s) | **leaked twice over** → keepalive + a close that closes |
+| `ws://…/ws/exec` | 1 exec session to the API server | the WebSocket close frame, or the FIN | **~1.3 s** | fine, no change |
+| `POST …/port-forwards` | 1 listener; an API-server connection only while carrying traffic | nothing — it is not client-scoped | n/a, by design | fine, no change |
+| `GET /sse` (MCP) | an `McpServerSession` + an async request. **No cluster resource** | nothing was configured to notice | **never** (3 of 3 alive at t+240 s) | leaked memory → SDK keepalive turned on |
+| `GET …/metrics/*` | nothing — a plain request/response | n/a | n/a | fine |
+
+## The three that leaked, and how badly
+
+The mechanism is part 1's, unchanged: an `SseEmitter` learns of a disconnect only from a
+failed write, and all three wrote only when the cluster produced something.
+
+The **chatty** control makes it unmistakable. The same endpoint, the same clients, the same
+teardown — only the pod differs:
+
+| endpoint | quiet pod | chatty pod |
+|---|---|---|
+| `log/stream` | +3 sockets still held at t+300 s | 0 by t+5 s |
+| `logs/stream` | +3 sockets still held at t+300 s | 0 by t+5 s |
+
+Nothing about the disconnect changed. The next log line did.
+
+Two pieces of corroboration are worth keeping, because they are what make the size of it
+obvious:
+
+* **A five-second smoke test outlived the session.** A `timeout 5 curl` against
+  `logs/stream`, run once at the start to check the endpoint answered, left three
+  `multi-log` threads that `jcmd` still found alive **98 minutes later**, holding a log
+  connection to a pod nobody was reading.
+* **The server side had noticed nothing at all.** With nine abandoned SSE streams in the
+  JVM, `ss` on the listen port showed **nine sockets in CLOSE-WAIT and, apart from LISTEN,
+  nothing else**. The client had sent its FIN; the server had never called `close()`. That
+  is the same leak stated from the other end of the wire.
+
+**The multi-log stream is the expensive one**, and not only because it is per-source. Its
+source set is re-resolved every four seconds so that pods created by a rollout join a stream
+already in flight — which means a *departed* subscriber kept re-listing its workload against
+the API server every four seconds for the life of the process. The others held a connection;
+this one also generated load.
+
+### The log streams had a second bug underneath the first, and it hid
+
+Attaching the keepalive fixed both watch endpoints outright — `resources/{id}/watch` went
+from "never" to clear at t+30 s on the first try. It did **nothing at all** for the log
+streams: re-measured after the change, three departed subscribers still held three
+connections and three parked reader threads at t+90 s.
+
+The keepalive was working. The debug log showed it noticing within 15 s —
+`SSE keepalive failed (ServletResponse failed to flushBuffer: Broken pipe); completing the
+stream` — and `jcmd` showed the reader still parked in
+`HttpClientReadableByteChannel.read` afterwards. So the disconnect was detected, the emitter
+completed, `onCompletion` ran `watch.close()`, and **nothing happened**.
+
+`LogWatch.close()` does not stop a log follow of the kind this project opens. fabric8's
+`LogWatchCallback` has two paths: if you hand it an `OutputStream` it completes an internal
+`asyncBody` future, and if you let it hand *you* an `InputStream` — `watchLog()`, which is
+what `LogService.watch` uses because fabric8 rejects a piped stream of ours — it never
+completes that future. `close()` is implemented as
+`asyncBody.thenAccept(AsyncBody::cancel)`. On a future that is never completed, that
+registers a callback that never runs. The method sets a flag and returns.
+
+What actually tears the connection down is closing the **stream**: that signals the
+channel's condition (waking the parked reader) and cancels the body.
+
+This is the part worth remembering, because it is why the bug survived: **the chatty pod
+released correctly the whole time**, before and after. Not through `close()` — through
+`pump`'s `try-with-resources`, which closes the *reader* when a failed SSE write throws out
+of the read loop. A test, a demo, or any pod that logs exercises only that path. The path
+that `close()` was responsible for had, as far as the measurements can tell, never once
+worked.
+
+`LogService.release(LogWatch)` now closes the stream and then the watch, and both log
+surfaces call it — from the completion hooks and from the reader's `finally`, because the
+reader can exit by several routes and every one of them has to leave the follow closed.
+
+## The three that did not leak
+
+These are results, not omissions. A defensive heartbeat on any of them would be cargo.
+
+**Exec over WebSocket does not need one, because a WebSocket is not an SSE stream.** It has
+a close handshake, and Tomcat delivers `afterConnectionClosed` — which is where
+`PodExecWebSocketHandler` closes the `ExecWatch`. Measured with a real headless Chromium
+against the `quiet` pod: opening the terminal costs **exactly +1** socket to the API server,
+and
+
+* the tab is closed, so the browser sends a **close frame** → released after **~1.3 s**;
+* the browser process is **SIGKILLed**, so no close frame is ever sent and only the kernel's
+  FIN arrives → released after **~1.4 s**.
+
+The rude case matters more than the polite one, and it is the same number. This is exactly
+the asymmetry the SSE conclusion must not be carried across: SSE has no framing layer that
+reports a close, so it needs a write to discover one; a WebSocket has one.
+
+**A port-forward is not client-scoped at all.** It is started by a `POST`, held in a
+server-side map, listed by id and stopped by another `POST` — a named resource that is
+*meant* to outlive the tab that created it, exactly like `kubectl port-forward` in a
+detached shell. Measured: it holds **no** API-server connection while idle (fabric8 dials on
+demand — the socket count moves only while a request is in flight), it survives the `curl`
+that created it, and `POST /{id}/stop` removes the listener and returns the socket count to
+baseline. Everything is closed on shutdown by `PortForwardService.close()`. There is
+deliberately no reaper: a forward that vanished because a browser tab closed would be a
+worse product than one the operator has to stop.
+
+**The metrics endpoints are plain reads.** `MetricApiController` is `@GetMapping` all the
+way down and the UI polls. Nothing to leak.
+
+**The pod file browser's exec is synchronous and time-boxed.** `ExecService.run` is one
+command to completion under `command-timeout`; a client that disconnects mid-call does not
+extend it, because nothing about it is driven by the client. It is in this list only so that
+the enumeration is complete — the four SSE endpoints, the exec WebSocket, port-forwards, MCP,
+metrics and one-shot exec are everything in the app that holds anything past a single
+request/response.
+
+## MCP's `/sse` — a leak, but a different one
+
+The MCP transport is the same `SseEmitter` family, and an assistant that disconnects is
+precisely the quiet-stream case. Three clients connected and were killed; all three
+`McpServerSession` instances were **still in the heap 240 s later** (counted with a
+forced-GC class histogram, so unreachable ones would already have gone), sockets parked in
+CLOSE-WAIT. Nothing had been sent on the stream since the initial `event:endpoint`.
+
+But it is a **different severity**, and the distinction is worth keeping: the session holds
+no cluster-side resource. The cost is bounded process memory plus a servlet async context,
+per MCP client connect — so it grows with how often an assistant reconnects, not with the
+cluster.
+
+It is also somebody else's stream. `SseKeepAlive` is for the endpoints we write; the MCP SDK
+ships its own `KeepAliveScheduler`, off by default, so the fix is that knob rather than a
+second heartbeat of ours: `spring.ai.mcp.server.keep-alive-interval: 30s`. Re-measured with
+it on, same three clients:
+
+| | before | after |
+|---|---|---|
+| sockets in CLOSE-WAIT after the clients die | 3, indefinitely | released between t+5 s and t+15 s |
+| `McpServerSession` instances in the heap | 3 at t+240 s | **0** by t+120 s |
+
+(The property is marked deprecated in Spring AI 2.0's metadata, along with the SSE transport
+it belongs to — but it is the knob that exists for the transport kweblens actually serves,
+and the deprecation names no replacement. If it disappears, this measurement is the reason
+to look for its successor rather than to drop the setting.)
+
+## What was changed
+
+* `SseKeepAlive.attach(...)` on `LogApiController`, `MultiLogApiController` and
+  `ResourceWatchApiController` — after the completion hooks, never before, because
+  completing the emitter is what runs the hook that closes the watch.
+* **`LogService.release(LogWatch)`** — closes the log *stream* and then the watch, because
+  `LogWatch.close()` alone does not stop a `watchLog()` follow (see above). It lives in
+  `kweblens-core` next to the call that opens the watch: the quirk belongs to the layer that
+  knows fabric8, not to two controllers that would each have to remember it. Both log
+  surfaces now call it from their completion hooks *and* from the reader's `finally`.
+* **`SseEndpointKeepAliveTest`** — a structural guard, because this is an omission that
+  passes every test and every demo. It scans the controllers for handlers returning an
+  `SseEmitter` and requires the declaring class to reference `SseKeepAlive`, so a new
+  streaming endpoint fails on the day it is written. It also asserts the scan still sees all
+  four known controllers, so a scan that silently stops finding them fails rather than
+  quietly shrinking.
+* **`SseKeepAlive.completeQuietly`**, now used by every failed-send path. A bare
+  `completeWithError` from a non-container thread races Tomcat's `AsyncListener.onError` and
+  throws `IllegalStateException`; observed live, a disconnect from the chatty pod threw
+  **out of** the log reader thread and printed an uncaught
+  `Exception in thread "log-sse-…"`. The watch was released anyway — try-with-resources had
+  already closed it — which is why a stack trace on the disconnect path went unnoticed.
+* **The single-pod reader catches `RuntimeException` too.** Now that the keepalive completes
+  the emitter from another thread, the reader can wake holding a line and get
+  `IllegalStateException("already completed")` from `send()` — which, uncaught, leaves an
+  `Exception in thread "log-sse-…"` on stderr for an ordinary disconnect.
+* **`MultiLogStream.close()` is re-runnable.** It used to return early on a second call, so
+  a source whose watch was still being opened when the client left registered itself *after*
+  the sweep and was then never closed — the one watch nobody could cancel. `attach()` now
+  rechecks after registering.
+* `spring.ai.mcp.server.keep-alive-interval: 30s`.
+
+## Re-measured, after
+
+Same box, same cluster, same fixtures, same probe. `objects/watch` is carried through as a
+control — it was already fixed and had to stay fixed.
+
+| endpoint (quiet fixture) | before | keepalive only | after both changes |
+|---|---|---|---|
+| `resources/{id}/watch`, 3 clients | +3 at t+300 s | **0 by t+30 s** | 0 by t+30 s |
+| `objects/watch`, 3 clients *(control)* | 0 by t+30 s | — | 0 by t+30 s |
+| `log/stream`, 3 clients | +3 at t+300 s | +3 at t+90 s | readers **0 by t+30 s**, connections 0 by t+60 s |
+| `logs/stream`, 2 clients | +3 at t+300 s | still held at t+60 s | readers gone by t+30 s, everything **0 by t+90 s** |
+| MCP `/sse`, 3 clients | 3 sessions at t+240 s | — | sockets clear t+5–15 s, sessions 0 by t+120 s |
+
+One caveat on reading the multi-log row, because it nearly caused a wrong conclusion. Its
+readers run on a `newCachedThreadPool`, so at t+60 s six `multi-log` threads were still
+present and the run looked half-fixed. They were **idle workers parked on
+`SynchronousQueue.poll`** — the pool waiting for work, reaped on its own 60 s timer — not
+streams being followed. A raw thread count cannot tell those apart. The check that can is
+`jcmd Thread.print | grep -c HttpClientReadableByteChannel`, i.e. "how many threads are
+parked reading a log": **0**, immediately. Everything was clear at t+90 s.
+
+## Where this leaves the ceiling
+
+Part 1's ceiling now holds for the log streams too, with the same shape and the same ~30 s:
+
+- **One API-server watch per open list view, and one log connection per followed source, per
+  browser tab** — released within ~30 s of the tab going away.
+- **One exec session per open terminal**, released within ~2 s.
+- **Port-forwards are however many the operator started**, and stay until stopped or
+  shutdown.
+
+## What a keepalive still cannot see
+
+`SseKeepAlive` detects a **closed** peer, not a **stalled** one. Its evidence is a failed
+write, and a write only fails once the peer is gone. A client whose TCP connection stays open
+but stops being read — a laptop that lost wifi without sending a FIN, or a proxy holding the
+connection — absorbs a 20-byte comment every 15 s into its receive window for a very long
+time before anything fails. Nothing in the app would notice until the API server or the OS
+gave up first.
+
+That case was **not measured** here and is not claimed to be handled. It needs a different
+instrument (an idle timeout, or TCP keepalive on the server socket), and per
+[ADR-001](adr-001-identity-model.md) it deserves about as much attention as one operator's
+flaky wifi — which is why it is recorded rather than built.
+
+The same stall has a second-order cost that is worth knowing about before it is diagnosed
+from scratch. `SseKeepAlive`'s scheduler is **two threads for the whole process**, and its
+probe writes through the emitter's write lock — which the multi-log dispatcher holds while
+it flushes a batch. Sized when one endpoint used it, it now serves four. Two simultaneously
+stuck subscribers would stall every other stream's probe, i.e. reopen this leak for
+everyone else. That is a bound, not a bug, at one operator's tab count; it is written down
+here so that a future report of "the keepalive stopped firing" starts in the right place.
+
+Also unverified, carried forward from part 1: the API server's own watch timeout was never
+reached in any of these runs, so what fabric8 does when the *server* ends a stream is still
+unknown. It matters only for streams that live for tens of minutes.

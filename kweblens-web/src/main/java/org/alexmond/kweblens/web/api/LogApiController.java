@@ -51,8 +51,18 @@ public class LogApiController {
 			emitter.completeWithError(ex);
 			return emitter;
 		}
-		emitter.onCompletion(watch::close);
-		emitter.onTimeout(watch::close);
+		// logs.release, not watch::close — LogWatch.close() does not stop a watchLog()
+		// follow, and the reader below would stay parked on it forever. See
+		// LogService.release for the measurement.
+		Runnable release = () -> logs.release(watch);
+		emitter.onCompletion(release);
+		emitter.onTimeout(release);
+		emitter.onError((ex) -> release.run());
+		// After the completion hooks, never before — see SseKeepAlive. A pod that is not
+		// logging writes nothing, so without a probe a departed subscriber left this log
+		// follow open: measured at 3 clients gone and 3 API-server connections plus 3
+		// reader threads still held five minutes later.
+		SseKeepAlive.attach(emitter);
 		Thread reader = new Thread(() -> pump(emitter, watch.getOutput(), watch), "log-sse-" + pod);
 		reader.setDaemon(true);
 		reader.start();
@@ -60,16 +70,29 @@ public class LogApiController {
 	}
 
 	private void pump(SseEmitter emitter, InputStream source, LogWatch watch) {
-		try (watch; BufferedReader reader = new BufferedReader(new InputStreamReader(source, StandardCharsets.UTF_8))) {
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(source, StandardCharsets.UTF_8))) {
 			String line;
 			while ((line = reader.readLine()) != null) {
 				emitter.send(SseEmitter.event().data(line));
 			}
 			emitter.complete();
 		}
-		catch (IOException ex) {
+		catch (IOException | RuntimeException ex) {
+			// RuntimeException too, and not defensively: the keepalive now completes the
+			// emitter from another thread, so this one can wake with a line in hand and
+			// get IllegalStateException("already completed") from send(). Uncaught, that
+			// leaves an "Exception in thread log-sse-…" on stderr for an ordinary
+			// disconnect.
 			log.debug("Log stream ended: {}", ex.getMessage());
-			emitter.completeWithError(ex);
+			SseKeepAlive.completeQuietly(emitter, ex);
+		}
+		finally {
+			// Was a try-with-resources on the watch. It is here instead because the
+			// reader
+			// exits by several routes — end of stream, a failed SSE write, the release
+			// above closing the stream underneath it — and every one of them has to leave
+			// the follow closed.
+			this.logs.release(watch);
 		}
 	}
 

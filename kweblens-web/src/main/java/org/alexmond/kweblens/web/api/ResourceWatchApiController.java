@@ -51,6 +51,11 @@ public class ResourceWatchApiController {
 			watch.close();
 			emitter.complete();
 		});
+		// After the completion hooks, never before — see SseKeepAlive. This is the same
+		// watch-behind-a-quiet-stream shape as the objects watch, and it leaked the same
+		// way: measured, three departed subscribers still held three API-server watches
+		// five minutes on.
+		SseKeepAlive.attach(emitter);
 		return emitter;
 	}
 
@@ -60,7 +65,7 @@ public class ResourceWatchApiController {
 		}
 		catch (IOException | IllegalStateException ex) {
 			log.debug("Watch SSE send failed ({}); closing", ex.getMessage());
-			emitter.completeWithError(ex);
+			SseKeepAlive.completeQuietly(emitter, ex);
 		}
 	}
 
