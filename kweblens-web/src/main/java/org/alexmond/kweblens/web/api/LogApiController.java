@@ -77,7 +77,12 @@ public class LogApiController {
 			}
 			emitter.complete();
 		}
-		catch (IOException ex) {
+		catch (IOException | RuntimeException ex) {
+			// RuntimeException too, and not defensively: the keepalive now completes the
+			// emitter from another thread, so this one can wake with a line in hand and
+			// get IllegalStateException("already completed") from send(). Uncaught, that
+			// leaves an "Exception in thread log-sse-…" on stderr for an ordinary
+			// disconnect.
 			log.debug("Log stream ended: {}", ex.getMessage());
 			SseKeepAlive.completeQuietly(emitter, ex);
 		}

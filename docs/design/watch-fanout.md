@@ -187,8 +187,8 @@ nothing connected — noise that would have been read as a result.
 |---|---|---|---|---|
 | `GET …/resources/{id}/objects/watch` | 1 API-server WATCH | 15 s `SseKeepAlive` comment | **≤30 s** (held at t+15 s, clear at t+30 s) | fixed in #283, **still fixed** |
 | `GET …/resources/{id}/watch` | 1 API-server WATCH | a watch event, and nothing else | **never** (+3 at t+300 s) | **leaked** → keepalive attached |
-| `GET …/pods/{ns}/{pod}/log/stream` | 1 log follow + 1 reader thread | a log line, and nothing else | **never** (+3 at t+300 s) | **leaked** → keepalive attached |
-| `GET …/logs/stream` (multi-log) | 1 log follow + 1 reader thread **per source**, + a dispatcher, + a 4 s refresh loop | a log line or a change in the source set | **never** (+3 at t+300 s) | **leaked** → keepalive attached |
+| `GET …/pods/{ns}/{pod}/log/stream` | 1 log follow + 1 reader thread | a log line, and nothing else | **never** (+3 at t+300 s) | **leaked twice over** → keepalive + a close that closes |
+| `GET …/logs/stream` (multi-log) | 1 log follow + 1 reader thread **per source**, + a dispatcher, + a 4 s refresh loop | a log line or a change in the source set | **never** (+3 at t+300 s) | **leaked twice over** → keepalive + a close that closes |
 | `ws://…/ws/exec` | 1 exec session to the API server | the WebSocket close frame, or the FIN | **~1.3 s** | fine, no change |
 | `POST …/port-forwards` | 1 listener; an API-server connection only while carrying traffic | nothing — it is not client-scoped | n/a, by design | fine, no change |
 | `GET /sse` (MCP) | an `McpServerSession` + an async request. **No cluster resource** | nothing was configured to notice | **never** (3 of 3 alive at t+240 s) | leaked memory → SDK keepalive turned on |
@@ -293,6 +293,13 @@ worse product than one the operator has to stop.
 **The metrics endpoints are plain reads.** `MetricApiController` is `@GetMapping` all the
 way down and the UI polls. Nothing to leak.
 
+**The pod file browser's exec is synchronous and time-boxed.** `ExecService.run` is one
+command to completion under `command-timeout`; a client that disconnects mid-call does not
+extend it, because nothing about it is driven by the client. It is in this list only so that
+the enumeration is complete — the four SSE endpoints, the exec WebSocket, port-forwards, MCP,
+metrics and one-shot exec are everything in the app that holds anything past a single
+request/response.
+
 ## MCP's `/sse` — a leak, but a different one
 
 The MCP transport is the same `SseEmitter` family, and an assistant that disconnects is
@@ -343,11 +350,36 @@ to look for its successor rather than to drop the setting.)
   **out of** the log reader thread and printed an uncaught
   `Exception in thread "log-sse-…"`. The watch was released anyway — try-with-resources had
   already closed it — which is why a stack trace on the disconnect path went unnoticed.
+* **The single-pod reader catches `RuntimeException` too.** Now that the keepalive completes
+  the emitter from another thread, the reader can wake holding a line and get
+  `IllegalStateException("already completed")` from `send()` — which, uncaught, leaves an
+  `Exception in thread "log-sse-…"` on stderr for an ordinary disconnect.
 * **`MultiLogStream.close()` is re-runnable.** It used to return early on a second call, so
   a source whose watch was still being opened when the client left registered itself *after*
   the sweep and was then never closed — the one watch nobody could cancel. `attach()` now
   rechecks after registering.
 * `spring.ai.mcp.server.keep-alive-interval: 30s`.
+
+## Re-measured, after
+
+Same box, same cluster, same fixtures, same probe. `objects/watch` is carried through as a
+control — it was already fixed and had to stay fixed.
+
+| endpoint (quiet fixture) | before | keepalive only | after both changes |
+|---|---|---|---|
+| `resources/{id}/watch`, 3 clients | +3 at t+300 s | **0 by t+30 s** | 0 by t+30 s |
+| `objects/watch`, 3 clients *(control)* | 0 by t+30 s | — | 0 by t+30 s |
+| `log/stream`, 3 clients | +3 at t+300 s | +3 at t+90 s | readers **0 by t+30 s**, connections 0 by t+60 s |
+| `logs/stream`, 2 clients | +3 at t+300 s | still held at t+60 s | readers gone by t+30 s, everything **0 by t+90 s** |
+| MCP `/sse`, 3 clients | 3 sessions at t+240 s | — | sockets clear t+5–15 s, sessions 0 by t+120 s |
+
+One caveat on reading the multi-log row, because it nearly caused a wrong conclusion. Its
+readers run on a `newCachedThreadPool`, so at t+60 s six `multi-log` threads were still
+present and the run looked half-fixed. They were **idle workers parked on
+`SynchronousQueue.poll`** — the pool waiting for work, reaped on its own 60 s timer — not
+streams being followed. A raw thread count cannot tell those apart. The check that can is
+`jcmd Thread.print | grep -c HttpClientReadableByteChannel`, i.e. "how many threads are
+parked reading a log": **0**, immediately. Everything was clear at t+90 s.
 
 ## Where this leaves the ceiling
 
