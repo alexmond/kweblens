@@ -129,6 +129,12 @@ public class ObjectApiController {
 			watch.close();
 			emitter.complete();
 		});
+		// After the completion hooks, never before: the keepalive is what discovers a
+		// departed subscriber, and closing the watch is that discovery's whole point. See
+		// SseKeepAlive for the measurement — without it a watch on a quiet kind outlived
+		// its subscriber by minutes, so one operator walking the nav accumulated one
+		// API-server watch per list view visited.
+		SseKeepAlive.attach(emitter);
 		return emitter;
 	}
 

@@ -157,6 +157,53 @@ because the simulator's objects are not the ones the product serves. And the DOM
 is untouched: one row per object is still one row per object, so virtualisation is still the
 first thing to build — this bought room, not a fix.
 
+## What `/counts` cost, and what it costs now (T2, 2026-08-03)
+
+`/counts` computed every badge as `listRaw(...).size()` — a full LIST of every kind to
+produce an integer. Measured on the live cluster (`default`, 118 kinds, 1 561 objects), not
+the simulator:
+
+| | before | after |
+|---|---:|---:|
+| `GET /counts`, warm | 330 ms | **112 ms** |
+| `GET /counts`, first call after start | 1.66 s | 1.44 s |
+| bytes pulled from the API server (39 measurable kinds) | **22.1 MB** | **111 KB** |
+| kinds returned | 118 | 118 |
+
+The latency was never the scandal — 330 ms for a sidebar is survivable. The 22 MB is: half
+of it is the CustomResourceDefinitions' own OpenAPI schemas (10.3 MB for 79 objects) and
+6.5 MB is Secret data, all decoded into heap and thrown away to keep 118 integers, on an
+endpoint the client re-fetches on **every namespace switch**. And the cost scales with the
+cluster's total content while the numbers do not: the same endpoint on a cluster ten times
+this size costs ten times as much to produce the same 118 badges.
+
+The replacement asks each kind for one item and reads `metadata.remainingItemCount`
+(`ResourceService.count`). That field is **best-effort** — the API server may omit it — so
+the absence is handled explicitly rather than guessed at: a page with no continue token is
+the whole collection and its size is exact (this also covers a server that ignores `limit`
+outright, which `componentstatuses` on this cluster does), and a page that *is* truncated
+without a `remainingItemCount` falls back to the full list. All three branches were probed
+against the live API server; every derived count matched `kubectl`, and a sweep comparing
+all **118** badge numbers against the full object list for the same kind found **0
+mismatches**.
+
+Two things this does not change. It is still a full LIST per kind when the API server
+refuses to say how many remain — the fallback is deliberate, because a count that silently
+becomes wrong is worse than one that is slow. And the fabric8 CRUD mock **ignores `limit`**,
+so the test that proves the flag is sent asserts on the exact outgoing query string
+(`ResourceCountTest`), not on a seeded object count, which would pass either way.
+
+## Watch fan-out (T2, 2026-08-03)
+
+Measured, decided and written up separately in [`watch-fanout.md`](watch-fanout.md). The
+short version: the ratio is exactly one API-server watch per SSE subscriber — but that was
+not the number that mattered, because a watch on a *quiet* kind outlived its departed
+subscriber by over five minutes (an `SseEmitter` discovers a disconnect only from a failed
+write). One operator walking twenty kinds in one tab held **22 open watches**. A 15 s
+keepalive turns the ceiling back into "one per list view currently on screen, released
+within ~30 s", and at that ceiling sharing a watch across subscribers is not worth its
+lifecycle risk for a single-operator product.
+
 ## Recommended change to the plan
 
 1. **Virtualise the resource list.** Highest ratio of symptom removed to risk taken, needs no
