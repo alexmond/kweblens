@@ -14,7 +14,15 @@ const emit = defineEmits<{ (e: 'select', item: NavItem): void; (e: 'toggle-favor
     nothing shifts on hover.
   -->
   <button :class="'leaf' + (item.id === selected ? ' active' : '')" @click="emit('select', item)">
-    <span class="leaf-label">{{ item.label }}</span>
+    <!--
+      `title` on the label, not the button: CSS truncates the label with an ellipsis, and the
+      pair that made this necessary (#281) — Validating Admission Policies and Validating
+      Admission Policy Bindings — collapse to the same visible "Validating Admissio…", so the
+      only way to tell them apart was to click one and read the heading. Applied to every leaf
+      rather than the ambiguous pair, because which labels truncate depends on the nav width
+      and on whatever CRDs the cluster has, neither of which is known here.
+    -->
+    <span class="leaf-label" :title="item.label">{{ item.label }}</span>
     <span
       :class="'fav-star' + (favorited ? ' on' : '')"
       :title="favorited ? 'Unpin' : 'Pin to Favorites'"
