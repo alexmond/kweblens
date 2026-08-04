@@ -246,6 +246,11 @@ fan-out decision have landed; measurements for all three are in
   A 15 s SSE keepalive (`SseKeepAlive`) makes the ceiling "one per list view on screen,
   released within ~30 s"; at that ceiling a shared watch's lifecycle risk (refcounting, close
   policy, slow-subscriber policy) buys nothing for a single-operator product.
+  **Part 2 of that note** ran the same audit across *every* long-lived surface: two more SSE
+  endpoints (both log streams) and a third nobody had listed (`resources/{id}/watch`) leaked
+  the same way and now attach the keepalive, with a structural test that fails the build if a
+  new SSE endpoint does not. Exec-over-WebSocket (~1.3 s to release, close frame *or* SIGKILL)
+  and port-forward (not client-scoped by design) were measured and need nothing.
 - **Still open: `limit`/continue paging on the list path itself**, with the server-side
   label/field selectors that must land with it (see the sequencing constraint below).
 

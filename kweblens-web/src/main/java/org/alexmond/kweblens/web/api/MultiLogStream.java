@@ -148,12 +148,10 @@ final class MultiLogStream {
 	void close() {
 		this.closed.set(true);
 		for (LogWatch watch : this.watches) {
-			try {
-				watch.close();
-			}
-			catch (RuntimeException ex) {
-				log.debug("Closing log watch failed: {}", ex.getMessage());
-			}
+			// logs.release, not watch.close(): the latter does not stop a watchLog()
+			// follow, so every reader below would stay parked on a connection this
+			// method claims to have closed. See LogService.release.
+			this.logs.release(watch);
 		}
 		this.watches.clear();
 	}
@@ -250,9 +248,8 @@ final class MultiLogStream {
 		if (this.tracker.attached(source)) {
 			send("source-recovered", Map.of("source", source.id()));
 		}
-		try (watch;
-				BufferedReader reader = new BufferedReader(
-						new InputStreamReader(watch.getOutput(), StandardCharsets.UTF_8))) {
+		try (BufferedReader reader = new BufferedReader(
+				new InputStreamReader(watch.getOutput(), StandardCharsets.UTF_8))) {
 			String raw;
 			boolean first = true;
 			while ((raw = reader.readLine()) != null && !this.closed.get()) {
@@ -279,6 +276,11 @@ final class MultiLogStream {
 			}
 		}
 		finally {
+			// The reader owns the release on every exit route it has; close() owns it for
+			// the routes it does not (a client that left while this was parked).
+			// Releasing
+			// twice is harmless, releasing never is the leak.
+			this.logs.release(watch);
 			this.watches.remove(watch);
 			this.tracker.detached(source);
 		}

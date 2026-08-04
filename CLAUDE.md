@@ -246,6 +246,16 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
   port-forward are fine and deliberately have no heartbeat** (a WebSocket close frame arrives
   in under a second; a port-forward is a named server-side resource that is *meant* to outlive
   the tab that started it).
+- **`LogWatch.close()` does not stop a log follow — close the stream.** fabric8 implements it
+  as `asyncBody.thenAccept(AsyncBody::cancel)`, and the `watchLog()` flavour this project uses
+  (the one that hands *you* an `InputStream`) never completes that future, so the cancel never
+  runs: the API-server connection stays open and the reader stays parked in
+  `HttpClientReadableByteChannel.read`. Always release a log follow through
+  **`LogService.release(watch)`** (core), which closes `getOutput()` first. This hid for a long
+  time because a pod that *is* logging releases anyway — the failed SSE write throws out of the
+  read loop and the try-with-resources closes the reader — so only a **quiet** pod exposes it,
+  and only against a live cluster. Attaching the SSE keepalive alone did not fix the log
+  streams; this is the half that did.
 - **A count is not a list.** `/counts` computes its 118 badge numbers with one `limit=1`
   request per kind plus `metadata.remainingItemCount` (`ResourceService.count`), not
   `listRaw().size()` — that was 22.1 MB of API-server traffic per call on the real cluster, and
