@@ -57,6 +57,8 @@ Linear in object count, ~88 bytes/row. Extrapolating to 15 000 pods gives roughl
 >
 > **Followed up:** #276 shipped the projection this correction argued for. What it actually
 > removed, measured the same way, is [at the end of this document](#what-the-projection-removed-276).
+> The rig itself was then rebuilt to produce representative objects — measured side by side
+> against the live cluster [further down](#the-rig-rebuilt-2026-08-04).
 
 ## The thing that breaks first
 
@@ -204,6 +206,148 @@ keepalive turns the ceiling back into "one per list view currently on screen, re
 within ~30 s", and at that ceiling sharing a watch across subscribers is not worth its
 lifecycle risk for a single-operator product.
 
+## The rig, rebuilt (2026-08-04)
+
+Recommendation 3 below said to make the seeder realistic or stop calling this the scale rig.
+It has now been made realistic. This section is the evidence, because the claim "the
+simulator is representative" is exactly the kind that got believed once already without
+being checked.
+
+**How to re-check it.** `scripts/payload-bytes.mjs` against any running instance. It reports
+two different numbers per kind and the difference matters: `B/row` is the **projected** list
+payload (`/objects`) divided by its row count — what the browser pulls, post-#276, so
+without `managedFields` or ConfigMap/Secret values — while `obj mean/p50/p90/max` is the
+**full** single object (`/object`), sampled, which is the object as the cluster stores it and
+the number to compare across rigs. `mf%` is the `managedFields` share, the most reliable tell
+that a generated object is not a real one.
+
+```
+PORT=8131 CLUSTER=default node scripts/payload-bytes.mjs   # the live cluster
+PORT=8132 CLUSTER=sim     node scripts/payload-bytes.mjs   # the simulator
+```
+
+### Bytes per object, live cluster vs simulator, before and after
+
+Same box, same afternoon, load 1.2–5.5; simulator at the default `size=200`, sample 60
+objects per kind. "before" is the seeder as it stood at #282.
+
+| kind | live mean | sim **before** | sim **after** | after ÷ live |
+|---|---:|---:|---:|---:|
+| pods | 7.8K | 739 B | 8.4K | 1.08 |
+| deployments | 5.9K | 429 B | 6.1K | 1.03 |
+| replicasets | 5.9K | 425 B | 6.5K | 1.10 |
+| services | 1.6K | *kind absent* | 2.1K | 1.31 |
+| configmaps | 16.9K | 376 B | 21.2K | 1.25 |
+| secrets | 53.4K | 289 B | 44.6K | 0.84 |
+| ingresses | 1.7K | 559 B | 2.0K | 1.18 |
+| nodes | 10.3K | 809 B | 9.8K | 0.95 |
+| events | 1.1K | *kind absent* | 1.1K | 1.00 |
+
+The before column is the finding, not the after: every kind was out by **6× to 185×**, and
+two of the nine did not exist at all. Afterwards no kind is out by more than 1.31×.
+
+The distribution matters more than the mean, and it was the part that was completely absent
+— every seeded object was within a byte or two of every other object of its kind:
+
+| kind | live p50 / p90 / max | sim **before** | sim **after** |
+|---|---|---|---|
+| pods | 7.3K / 11.4K / 19.5K | 740 / 741 / 741 | 7.4K / 11.6K / 17.3K |
+| replicasets | 5.2K / 9.1K / 14.4K | 425 / 425 / 426 | 5.6K / 10.4K / 12.8K |
+| configmaps | 2.0K / 31.9K / 267.7K | 377 / 377 / 378 | 3.3K / 88.1K / 151.1K |
+| secrets | 9.8K / 80.2K / 673.3K | 289 / 289 / 290 | 15.7K / 78.5K / 743.5K |
+
+And the composition, which is what makes the sizes reproduce rather than merely match — the
+`managedFields` share was **0% on every seeded kind** and is 25–48% on real workloads:
+
+| kind | live mf% | sim before | sim after |
+|---|---:|---:|---:|
+| pods | 37 | 0 | 29 |
+| deployments | 46 | 0 | 42 |
+| replicasets | 48 | 0 | 41 |
+| services | 40 | — | 43 |
+| nodes | 25 | 0 | 24 |
+| events | 29 | — | 27 |
+
+Projected list bytes per row track the same way: pods 5 028 live vs 739 before vs 5 976
+after; secrets 498 vs 284 vs 882; nodes 7 878 vs 810 vs 7 581.
+
+### What still does not match, and why
+
+- **Services and Ingresses have almost no spread** (sim p50 ≈ p90 ≈ max), where the live
+  cluster's range 1.6–2.7K and 1.8–2.2K. Both are generated from one template with a single
+  optional port; nothing else about them varies. It is a small absolute gap on two small
+  kinds, and it is the honest remaining hole in "distribution matters".
+- **ConfigMaps and Secrets are 25% high / 16% low respectively**, and their tails are drawn
+  from four fixed buckets rather than from anything real. The tail is present and the right
+  shape; its exact quantiles are a fit, not a measurement.
+- **The live cluster is one home-lab k3s cluster**, 90 pods and 4 nodes. It is the only real
+  cluster available here, so "representative" means "representative of that". A cluster with
+  a service mesh (sidecars, injected annotations, large CRDs) has bigger pods than either.
+- **The mock API server still ignores `limit`** — completely unchanged by this work, because
+  it is a property of `KubernetesCrudDispatcher`, not of the objects. See below.
+
+### Seeding cost, which got worse
+
+| objects/kind | objects seeded | **before** | **after** | after, per object |
+|---:|---:|---:|---:|---:|
+| 200 | 1 206 → 1 641 | 8.8 s | 13.6 s | 8.3 ms |
+| 1 000 | ~6 000 → 8 070 | 43 s * | 74 s | 9.2 ms |
+| 3 000 | ~18 000 → 23 933 | 134 s * | **431 s** | 18.0 ms |
+
+\* the 2026-08-01 figures at the top of this document, on the same box.
+
+Two things in that table. The seeder now creates **8 kinds per index instead of 6** (Services
+and Endpoints are new), so some of the increase is more objects rather than slower ones. And
+the per-object cost is no longer flat: 8.3 ms at 200 against 18.0 ms at 3 000, where the old
+rig was ~7.4 ms at both. Bigger objects mean more serialisation per `POST` and more GC
+pressure, and both grow with what is already stored.
+
+**The obvious lever does not work.** `kweblens.simulator.payload-scale` shrinks the generated
+ConfigMap/Secret bodies; at `size=3000` with `payload-scale=0.05` seeding took **430 s**, i.e.
+the same 431 s. The data bodies are not the cost — the per-object HTTP round trip and the
+object graph are. `payload-scale` does cut memory (362 MB post-GC at 3 000 with 0.05; the
+generated ConfigMap+Secret data at full scale is ~193 MB by itself), so it is worth having,
+but it must not be sold as a way to seed faster. Heap readings while seeding are GC-timing
+noise, as this document already warns; only the post-forced-GC number above is worth quoting.
+
+**So the trade, stated plainly:** 3 000 objects/kind of *realistic* objects costs 7 minutes of
+startup, against 2¼ minutes for 18 000 unrepresentative ones. Below ~1 000/kind the rig is
+still comfortable (74 s). Above that, waiting seven minutes to get a rig that still cannot
+answer the paging question is a bad trade — that is KWOK's job.
+
+### What the rig now shows that it could not before
+
+At `size=1000` a pods list is **5.88 MB / 499 ms**; at `size=3000` it is **17.6 MB / 1.33 s**,
+against the old rig's 263 KB / 125 ms at the same count. That is the 2026-08-01 headline
+("the API is comfortable, ~88 bytes/row") disappearing: the rig now reproduces the payload
+problem instead of hiding it, and the 15 000-pod extrapolation from it is ~88 MB, in the same
+league as the ~120 MB measured against real objects rather than 50× under it.
+
+It also renders states it never could. About one pod in six is CrashLoopBackOff,
+ImagePullBackOff, unschedulable, OOM-killed, evicted or completed; a tenth of workloads are
+below their replica count; one Service in fourteen has no Endpoints and one in twenty has only
+`notReadyAddresses`; one node is NotReady; there are Warning events. Every state occurs within
+the first hundred indices, so `size=100` exercises all of them, and everything is deterministic
+in the object's index so two runs are comparable. This is what `.ov-card.danger`, `.ov-card.warn`
+and the row status pills need in order to be measurable at all — the contrast checker has
+reported them `not present` for its entire existence.
+
+### Verdict: can the simulator be trusted as the scale rig?
+
+**For payload, rendering and DOM questions: yes, now.** Bytes per object are within 1.31× of
+the live cluster on every kind, the composition is right (managedFields are 24–43% of the
+right kinds), and the distribution has a real tail. A measurement taken here is now a
+statement about kweblens rather than about the seeder. Re-check it with
+`scripts/payload-bytes.mjs` rather than trusting this paragraph.
+
+**For paging: no, and that is unchanged.** `KubernetesCrudDispatcher` still ignores `limit`
+outright, so a paging implementation developed here would appear to work while paging nothing.
+Realistic objects do not fix that and were never going to. **T2 still needs KWOK or the live
+cluster from the first commit** — see "Two things about the rig" above, which stands in full.
+
+**For sizes past ~3 000 objects/kind: no.** Seven minutes of seeding, superlinear, with no
+lever that helps. KWOK is the answer for anything larger.
+
 ## Recommended change to the plan
 
 1. **Virtualise the resource list.** Highest ratio of symptom removed to risk taken, needs no
@@ -212,5 +356,10 @@ lifecycle risk for a single-operator product.
    start because the simulator cannot prove it works. Paging and filtering stay one piece of
    work, as the roadmap says: a substring filter over a truncated page reports "no matches"
    for an object that exists.
-3. **Either make the simulator's seeder bulk, or stop treating it as the scale rig** and
-   document KWOK as the answer. Right now it is quietly both the default and inadequate.
+3. ~~**Either make the simulator's seeder bulk, or stop treating it as the scale rig**~~ —
+   **done, partly.** The seeder now produces objects that resemble real ones (measured above),
+   so it is a trustworthy rig for payload and rendering questions up to ~1 000 objects/kind and
+   a usable one to 3 000. It was *not* made bulk: seeding is still one HTTP `POST` per object
+   and is now slower per object, so the ceiling moved down, not up. **KWOK remains the answer
+   for paging and for anything larger than ~3 000/kind**, and that is now written down here
+   rather than implied.

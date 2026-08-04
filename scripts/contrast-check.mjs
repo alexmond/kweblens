@@ -92,8 +92,14 @@ const AGREE_TOLERANCE = 2;
 // Text-bearing things whose colours have been wrong before, or are easy to get wrong.
 const DEFAULT_SELECTORS = [
   '.leaf.active',
+  // The Warnings card's tinted variant. It reported `not present` for its whole existence, and
+  // only half of that was the styling's fault: `StatCard` applies `danger` when the cluster has
+  // Warning events, and the simulator seeded none, so a cluster-free run could not reach it. It
+  // can now. (A `.ov-card.warn` entry sat here too and was deleted rather than kept: no code
+  // adds that class and no rule styles it, so it was not an unmeasured check — it was a
+  // selector that could never match, which is the "permanently unmeasured row" this file's own
+  // summary warns about, dressed as a pass.)
   '.ov-card.danger',
-  '.ov-card.warn',
   '.nav-badge',
   // `.count` and `.acc-count` are the other two pills, and both are checked — in the scenes
   // below, on the list and the drawer where they actually render. They used to sit here, where
@@ -167,13 +173,19 @@ const SCENES = [
     // from the era when StatusBadge had its own class, and it has rendered a Naive `NTag`
     // since — so the entry had been matching nothing for months while reporting the same
     // `not present` a healthy cluster legitimately produces. Its live form is watched as
-    // `.n-tag` in the drawer scene. The row-level STATUS pill is still unwatched: the
-    // simulator renders none (no pod reaches a state StatusBadge tones), so there is nothing
-    // here to measure it against — a real gap, recorded rather than papered over with a
-    // selector that always says `not present`.
+    // `.n-tag` in the drawer scene.
+    //
+    // The row-level STATUS pill is watched here as `.n-data-table-td .n-tag`. It was unwatched
+    // for exactly as long as the simulator was perfectly healthy: no seeded pod ever reached a
+    // state `StatusBadge` tones, so there was nothing to measure and a selector would have
+    // reported `not present` forever. The seeder now puts about one pod in six into
+    // CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled, Evicted or Completed, so the
+    // tinted pill is on screen in a cluster-free run. Note this samples the first pill with
+    // text, which on a name-sorted list is whichever tone happens to come first — it checks
+    // that the pill family is readable, not that every tone is.
     name: 'resource list',
     prepare: 'close;leaf:Pods;wait:800',
-    selectors: ['.count', '.leaf.active .nav-badge'],
+    selectors: ['.count', '.leaf.active .nav-badge', '.n-data-table-td .n-tag'],
   },
   {
     // `.ns-note` is the "Cluster-scoped" pill, so it needs a cluster-scoped kind.

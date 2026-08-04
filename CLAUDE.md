@@ -92,6 +92,18 @@ header, and log it.
   `node scripts/perf-sweep.mjs`. On-demand, not a per-commit gate. **When you add a
   live-updated list, add its watch to the batching pattern** (buffer + flush per rAF) so it
   can't flood.
+- **A rig whose objects are unrepresentative measures the rig.** The simulator's objects were
+  once a 739-byte pod against a real cluster's 7.8 KB, which is how a scale pass concluded "the
+  API is comfortable, ~88 bytes/row" and was wrong by 50–500×. `web/sim/` now generates objects
+  sized, shaped and distributed like measured live ones (managedFields, real `data` with a long
+  tail, statuses, conditions) and seeds a realistic minority of **unhealthy** ones —
+  crash-looping, unschedulable, evicted pods, Services with no Endpoints, a NotReady node,
+  Warning events — all deterministic in the object's index, so runs are comparable and every
+  state appears within the first 100. Two standing consequences: **check any new kind you seed
+  with `scripts/payload-bytes.mjs` against a live cluster** before quoting a number from it; and
+  the simulator still **cannot validate paging** (the CRUD mock ignores `limit`) and costs 7
+  minutes to seed 3 000/kind, so KWOK remains the answer for paging and for anything larger.
+  Measurements and the verdict: `docs/design/scale-measurements.md`.
 - Tests are **hermetic**: no live cluster. The fabric8 `kubernetes-server-mock`
   (`@EnableKubernetesMockClient(crud = true)`) serves an in-JVM API server; web tests set
   `kweblens.load-kubeconfig=false` so the registry starts empty and the test seeds its own client.
