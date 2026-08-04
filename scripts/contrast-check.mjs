@@ -66,7 +66,7 @@
 // Prefix a step with `?` to skip it when its selector is not on screen. PREPARE runs once
 // per theme, so a step that only applies the first time — signing in — otherwise stalls the
 // second pass until it times out and takes the whole run with it:
-//   PREPARE='?click:.linkbtn:has-text("Sign in");?fill:.n-modal input[type=password]=admin;…'
+//   PREPARE='?click:.bar-btn:has-text("Sign in");?fill:.n-modal input[type=password]=admin;…'
 //
 // Exit code is 1 if anything falls under the AA floor, so it can gate a change.
 //
@@ -183,7 +183,7 @@ const SCENES = [
   },
   {
     name: 'diagnostics modal',
-    prepare: 'close;click:.linkbtn[title^="Diagnostics"];wait:900',
+    prepare: 'close;click:.bar-btn[title^="Diagnostics"];wait:900',
     selectors: ['.diag-dim', '.diag-detail', '.diag-kv dt', '.diag-caps li.off .diag-name', '.diag-warn'],
   },
   {
@@ -554,7 +554,7 @@ async function runPrepare(page, spec) {
     // editing surfaces are quietly gone, so a run looks complete while never having seen
     // them. Idempotent by construction — if the Sign in link is not there we are already in.
     else if (verb === 'signin') {
-      const link = page.locator('.linkbtn:has-text("Sign in")').first();
+      const link = page.locator('.bar-btn:has-text("Sign in")').first();
       if (await link.isVisible().catch(() => false)) {
         await link.click();
         await page.waitForTimeout(400);

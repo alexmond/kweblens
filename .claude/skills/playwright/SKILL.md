@@ -142,6 +142,14 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-04 — **An optional `?click` on an already-open section CLOSES it**, and then the
+  thing you came to measure is `not present` — which reads as "absent from the app". Measuring
+  a Secret's Reveal button, `?click:.n-collapse-item__header:has-text("Data")` toggled shut a
+  section that opens by default, and the run reported 2 of 4 samples measured. Same shape as
+  the nav-expansion bug: **a click toggles.** → Check whether a disclosure is already open
+  before clicking it, or set state rather than clicking. The unmeasured count is what says
+  something went wrong; without it this looks like a passing run.
+
 - 2026-08-03 — **The drawer has 1040px of widths no script could reach, and the defect lived in
   them.** #278 (relation tables breaking a node FQDN and `Running` mid-word) is a function of
   how narrow the pane is, and `Detail.vue` lets the reader drag the drawer anywhere between

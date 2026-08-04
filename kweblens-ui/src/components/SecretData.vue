@@ -33,7 +33,7 @@ const revealed = reactive<Record<string, boolean>>({});
           <td class="mono">{{ k }}</td>
           <td class="mono">{{ secretValueText(val, revealed[k] ?? false) }}</td>
           <td>
-            <button v-if="val !== null" class="linkbtn" @click="revealed[k] = !revealed[k]">
+            <button v-if="val !== null" class="reveal-btn" @click="revealed[k] = !revealed[k]">
               {{ revealed[k] ? 'Hide' : 'Reveal' }}
             </button>
           </td>
