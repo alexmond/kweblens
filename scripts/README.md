@@ -12,6 +12,7 @@ once — the reason is in the header comment of each script.
 | [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, unused row width. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
+| [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
 | [`pr-watch.sh`](pr-watch.sh) | Wait for a PR's checks; optionally merge when they pass. |
 | [`deploy-k8s.sh`](deploy-k8s.sh) | Build/push the image and `helm upgrade --install`. |
@@ -107,7 +108,24 @@ read-only YAML tab, a resource list, the diagnostics modal, a hovered button. Ev
 matters is behind a click, so a watchlist alone could only ever report `not present` for it —
 and the summary's "N of M samples measured" line is the number to read, not the green verdict.
 Run it against `dev-run.sh --sim --files`; the simulator seeds the annotations, TLS Ingress and
-pod-file surface the scenes need.
+pod-file surface the scenes need — and, since the seeder was made realistic, the unhealthy
+pods, Warning events and NotReady node that `.ov-card.danger`, `.ov-card.warn` and the row
+status pills need in order to be on screen at all.
+
+`payload-bytes.mjs` answers "how big is an object, really" per kind, against whatever cluster
+is registered — and exists because the answer was got badly wrong once, at the cost of a whole
+planning pass. It reports the **projected list** bytes per row (what the browser pulls) and the
+**full object** bytes sampled across the list (what the cluster stores), with p50/p90/max and
+the `managedFields` share, which is the most reliable tell that a generated object is not a real
+one. Point it at the simulator and at a live cluster and compare the two columns; that
+comparison is what "the rig is representative" means, and `docs/design/scale-measurements.md`
+records the last one.
+
+```bash
+PORT=8131 CLUSTER=default node scripts/payload-bytes.mjs
+PORT=8132 CLUSTER=sim KINDS=pods,secrets SAMPLE=100 node scripts/payload-bytes.mjs
+JSON=1 node scripts/payload-bytes.mjs > after.json      # for diffing two runs
+```
 
 `ui-shot.mjs` defaults to the **matrix**, not one image, because captures here were taken
 ad hoc at roughly one width in one theme and that shaped what got found: a 338-character

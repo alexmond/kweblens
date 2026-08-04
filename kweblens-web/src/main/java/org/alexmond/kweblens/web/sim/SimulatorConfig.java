@@ -43,10 +43,17 @@ public class SimulatorConfig {
 	ApplicationRunner simSeeder(KubernetesMockServer server, SimulatorProperties props, ClusterRegistry registry) {
 		return (args) -> {
 			KubernetesClient client = server.createClient();
-			SimulatorSeeder.seed(client, props);
+			SimulatorSeeder.Seeded seeded = SimulatorSeeder.seed(client, props);
 			registry.register(props.getClusterId(), "Simulator", client);
-			log.info("Simulator cluster '{}' registered: {} objects/kind across {} namespaces", props.getClusterId(),
-					props.getSize(), props.getNamespaces());
+			// The seeding time is logged, not merely spent: it is the cost that decides
+			// whether this rig or KWOK answers a given scale question, and it is the
+			// first
+			// thing someone raising `size` needs to see.
+			log.info(
+					"Simulator cluster '{}' registered: {} objects/kind across {} namespaces "
+							+ "({} objects seeded in {} ms, payload-scale {})",
+					props.getClusterId(), props.getSize(), props.getNamespaces(), seeded.objects(), seeded.millis(),
+					props.getPayloadScale());
 		};
 	}
 
