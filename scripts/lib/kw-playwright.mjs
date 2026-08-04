@@ -132,6 +132,7 @@ const selectorOf = (verb, arg) =>
  *   press:<key>   click:<selector>   fill:<selector>=<text>   wait:<ms>
  *   goto:<path>   upload:<file input selector>=<path on this machine>
  *   scroll:<selector>   hover:<selector>   leaf:<nav label>  (or leaf:<Category>/<label>)
+ *   drawer:<px>   (drag the open detail drawer to a width in its own 360..1400 range)
  *
  * `hover:` exists because a `:hover` rule is a whole surface no tool here could reach, and
  * hover backgrounds are where one-theme colour literals hide: `.btn:hover` hard-coded a light
@@ -175,6 +176,10 @@ export async function runPrepare(page, spec) {
     // so ui-measure and ui-shot kept walking into it — and `--leaf` cannot help when a step
     // has to open a category-qualified leaf (`leaf:Workloads/Overview`) or navigate twice.
     else if (verb === 'leaf') await openLeaf(page, arg);
+    // `drawer:<px>` drags the open drawer to a width. Its 360..1400 resize range was
+    // unreachable from any script, so the narrow end — where a squeezed table column breaks
+    // its own values mid-word (#278) — could not be measured at all.
+    else if (verb === 'drawer') await resizeDrawer(page, Number(arg));
     else if (verb === 'goto') {
       await page.goto(new URL(arg, BASE_URL).href, { waitUntil: 'networkidle' });
       await page.waitForTimeout(600);
@@ -299,6 +304,52 @@ export async function openLeaf(page, label) {
     .waitForSelector('.n-data-table-tbody tr, .cluster-overview, .empty', { timeout: 8000 })
     .catch(() => {});
   await page.waitForTimeout(400);
+}
+
+/**
+ * Drag the open detail drawer to a width, and return the width it actually reached.
+ *
+ * The drawer is USER-RESIZABLE between 360px and 1400px (`Detail.vue`), and nothing here
+ * could reach any of that: every script measured it at the 520px default or, with the ⤢
+ * control, expanded. So two thirds of the widths a reader can put the drawer at were
+ * unmeasurable — which is how #278 (relation tables shredding a node name mid-token once a
+ * column is squeezed) stayed invisible to the tools while being obvious on screen. The
+ * defect's severity is a function of the pane's width, so a tool that can only see two
+ * widths is not measuring the drawer, it is measuring two of its states.
+ *
+ * Drags the resize handle rather than setting the width: the width lives in a component
+ * `ref` there is no other way in to, and dragging is what a reader does.
+ *
+ * Throws rather than clamping quietly. A request outside 360..1400 would land on the bound
+ * and every following number would describe a width nobody asked for — the "plausible
+ * numbers for the wrong thing" failure this file keeps collecting.
+ */
+export async function resizeDrawer(page, px) {
+  const drawer = page.locator('.n-drawer').first();
+  if (!(await drawer.isVisible().catch(() => false))) {
+    throw new Error('drawer: no drawer is open — open one first, e.g. click:td:nth-child(2)');
+  }
+  if (px < 360 || px > 1400) {
+    throw new Error(`drawer: ${px}px is outside the drawer's own 360..1400 resize range`);
+  }
+  const trigger = page.locator('.n-drawer-resize-trigger, .n-drawer__resize-trigger').first();
+  const handle = await trigger.boundingBox();
+  if (!handle) {
+    throw new Error('drawer: no resize handle — the drawer is expanded (⤢), which disables resizing');
+  }
+  const before = (await drawer.boundingBox()).width;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + (before - px), handle.y + handle.height / 2, { steps: 20 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  const got = Math.round((await drawer.boundingBox()).width);
+  // A few px of drag imprecision is normal; anything more means the drag did not take, and a
+  // silent miss here would be reported as a measurement at the requested width.
+  if (Math.abs(got - px) > 8) {
+    throw new Error(`drawer: asked for ${px}px, the drawer is ${got}px — the drag did not take`);
+  }
+  return got;
 }
 
 /**

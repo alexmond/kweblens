@@ -142,7 +142,13 @@ Both take `--view narrow|normal|wide` (1024/1400/1900), `--theme`, `--leaf`, `--
 does this stop working?" (#234's question, whose answer was 847px), not for everyday use:
 a finding is reproducible only at a width someone wrote down, which is what the names are
 for. `PREPARE`'s `leaf:` verb takes `Category/Leaf` as well as a bare label, because every
-category dashboard is a leaf called `Overview` and a bare label always resolved the first. Shared plumbing lives in [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs);
+category dashboard is a leaf called `Overview` and a bare label always resolved the first.
+`PREPARE`'s `drawer:<px>` verb drags the open detail drawer to a width. The drawer is
+user-resizable between **360px and 1400px**, and until #278 every script could only see it at
+its 520px default or expanded — so most of the widths a reader can put it at were
+unmeasurable, which is where a squeezed table column shredding its own values lives. A width
+outside that range, or a drag that does not take, throws rather than measuring a width nobody
+asked for. Shared plumbing lives in [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs);
 `contrast-check.mjs` and `perf-sweep.mjs` predate it and deliberately still carry their own
 copies — they are the instruments that caught real defects, and rewriting a working
 measuring tool for tidiness is how you end up with one you cannot trust.

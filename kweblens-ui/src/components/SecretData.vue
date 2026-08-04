@@ -16,24 +16,29 @@ const revealed = reactive<Record<string, boolean>>({});
 </script>
 
 <template>
-  <table class="mini">
-    <thead>
-      <tr>
-        <th>Key</th>
-        <th>Value</th>
-        <th />
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-for="(val, k) in data" :key="k">
-        <td class="mono">{{ k }}</td>
-        <td class="mono">{{ secretValueText(val, revealed[k] ?? false) }}</td>
-        <td>
-          <button v-if="val !== null" class="linkbtn" @click="revealed[k] = !revealed[k]">
-            {{ revealed[k] ? 'Hide' : 'Reveal' }}
-          </button>
-        </td>
-      </tr>
-    </tbody>
-  </table>
+  <!-- `.mini-scroll` is the table's own sideways scroller — see the wrap policy in
+       styles.css (#278). The mono cells here keep `break-all`, so a revealed base64 value
+       wraps inside its column instead of demanding one. -->
+  <div class="mini-scroll">
+    <table class="mini">
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Value</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(val, k) in data" :key="k">
+          <td class="mono">{{ k }}</td>
+          <td class="mono">{{ secretValueText(val, revealed[k] ?? false) }}</td>
+          <td>
+            <button v-if="val !== null" class="linkbtn" @click="revealed[k] = !revealed[k]">
+              {{ revealed[k] ? 'Hide' : 'Reveal' }}
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </template>

@@ -27,18 +27,22 @@ const clip = (v: string) => (v.length > 48 ? v.slice(0, 48) + '…' : v);
       </template>
     </dl>
     <template v-else-if="body.type === 'table'">
-      <table class="mini">
-        <thead>
-          <tr>
-            <th v-for="h in body.headers" :key="h">{{ h }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, ri) in body.rows" :key="ri">
-            <td v-for="(cell, ci) in row" :key="ci" :class="cell.mono ? 'mono' : undefined">{{ cell.text }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- `.mini-scroll` is the table's own sideways scroller — see the wrap policy in
+           styles.css (#278). -->
+      <div class="mini-scroll">
+        <table class="mini">
+          <thead>
+            <tr>
+              <th v-for="h in body.headers" :key="h">{{ h }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in body.rows" :key="ri">
+              <td v-for="(cell, ci) in row" :key="ci" :class="cell.mono ? 'mono' : undefined">{{ cell.text }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="body.tls && body.tls.length > 0" class="chips" :style="{ marginTop: '8px' }">
         <span v-for="(h, ti) in body.tls" :key="ti + h" class="chip">TLS: {{ h }}</span>
       </div>

@@ -79,6 +79,7 @@ ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
 
 `PREPARE` brings a surface on screen before it is sampled — `press:` `click:` `hover:<sel>`
 `fill:<sel>=<text>` `upload:<sel>=<path>` `wait:<ms>` `goto:<path>` `scroll:<sel>`
+`drawer:<px>` (drag the open detail drawer inside its own 360..1400 resize range),
 `leaf:<nav label>` (or `leaf:<Category>/<label>` — `Overview` is a leaf in every category, and
 an ambiguous label THROWS rather than opening the first match), plus `close` in
 `contrast-check` only (shut an open drawer/modal), semicolon-separated.
@@ -140,6 +141,26 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-03 — **The drawer has 1040px of widths no script could reach, and the defect lived in
+  them.** #278 (relation tables breaking a node FQDN and `Running` mid-word) is a function of
+  how narrow the pane is, and `Detail.vue` lets the reader drag the drawer anywhere between
+  **360px and 1400px** — but every script here only ever saw 520px (the default) or expanded.
+  In the simulator the failure does not reproduce at 520px at all; at the 360px minimum it is
+  unmissable, `Runnin`/`g` and a 71px-tall row. → `PREPARE` gained `drawer:<px>` in both
+  runners, sharing one `resizeDrawer` in `lib/kw-playwright.mjs`. It drags the handle (the
+  width is a component `ref` with no other way in) and **throws** on a width outside the range
+  or a drag that did not take, rather than measuring the width it happened to land on.
+  **A resizable surface has a RANGE, and a tool that samples two points of it is not measuring
+  the surface.**
+- 2026-08-03 — The same run's other half: **the simulator had 0 Nodes, no `nodeName` on any pod
+  and no pod mounting anything**, so the drawer's whole relation family — "Mounted By" for every
+  ConfigMap and Secret — rendered "None." and its Node column had nothing in it. The exact
+  markup #278 is about could not be produced without a live cluster. → `SimulatorSeeder` seeds
+  three Nodes named as host FQDNs (`node-0.sim.example.test` — a bare `node-1` fits any column
+  and could not reproduce anything), schedules pods onto them and mounts the same-index
+  ConfigMap and Secret. Same rule as the 2026-08-03 chips entry: **fix the fixture; a simulator
+  missing what every real cluster has is not a simulator of the defect.**
 
 - 2026-08-03 — **"Click the row" does not open the drawer, and fails silently.**
   `ResourceTable`'s `rowProps` ignores a click whose target is inside a checkbox, button,
