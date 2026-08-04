@@ -139,13 +139,14 @@ final class MultiLogStream {
 	}
 
 	/**
-	 * Close every watch and complete the response. Idempotent — several paths can call
-	 * it.
+	 * Close every watch and complete the response. Idempotent, and deliberately
+	 * <b>re-runnable</b> rather than "runs once": a source whose watch was still being
+	 * opened when the client left registers itself after the first sweep, and an
+	 * early-return guard would leave exactly that watch — the one nobody is reading —
+	 * open for the life of the process. Closing an already-empty list costs nothing.
 	 */
 	void close() {
-		if (!this.closed.compareAndSet(false, true)) {
-			return;
-		}
+		this.closed.set(true);
 		for (LogWatch watch : this.watches) {
 			try {
 				watch.close();
@@ -238,6 +239,14 @@ final class MultiLogStream {
 			return;
 		}
 		this.watches.add(watch);
+		if (this.closed.get()) {
+			// The client left while this watch was opening, so close() has already
+			// walked the list and will not walk it again on its own. Without this the
+			// read below would block on a quiet source forever, holding the one log
+			// connection nobody can ever cancel.
+			close();
+			return;
+		}
 		if (this.tracker.attached(source)) {
 			send("source-recovered", Map.of("source", source.id()));
 		}
@@ -409,7 +418,7 @@ final class MultiLogStream {
 		catch (IOException | IllegalStateException ex) {
 			log.debug("Multi-log SSE send failed ({}); closing", ex.getMessage());
 			close();
-			this.emitter.completeWithError(ex);
+			SseKeepAlive.completeQuietly(this.emitter, ex);
 		}
 		finally {
 			this.sendLock.unlock();

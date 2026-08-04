@@ -116,6 +116,13 @@ public class MultiLogApiController {
 			emitter.complete();
 		});
 		emitter.onError((ex) -> stream.close());
+		// After the hooks, never before — see SseKeepAlive. This stream is the most
+		// expensive one to leak: a departed subscriber left one API-server log connection
+		// and one blocked reader thread PER SOURCE, and its refresh loop kept re-listing
+		// the workload every four seconds for the life of the process. The probe writes
+		// through the emitter's own write lock, so it does not need this stream's send
+		// lock, which orders lines rather than making a single send atomic.
+		SseKeepAlive.attach(emitter);
 		stream.start(tailLines);
 		return emitter;
 	}

@@ -231,15 +231,21 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
   an empty string: "we did not send it" and "it is empty" are different claims. This is **not**
   redaction — the drawer still shows every value, per ADR-001.
 - **An SSE stream that never writes never notices a disconnect.** `SseEmitter` learns its
-  client is gone only from a *failed write*; nothing polls the socket. The resource-list watch
-  writes only when the watched kind produces an event, so on a quiet kind a departed subscriber
-  was never noticed and its API-server watch stayed open — measured at **5 min+** for `pods`,
-  and **22 open watches for one operator** who walked twenty kinds in one tab. `SseKeepAlive`
-  (`web/api`) writes a `:keepalive` comment every 15 s, which fails, completes the emitter and
-  runs the `onCompletion` hook that closes the watch. **Any new `SseEmitter` whose writes are
-  data-driven needs it** (the log streams still don't have it). The fan-out decision this
-  produced — accept one watch per open list view, don't share — is
-  `docs/design/watch-fanout.md`.
+  client is gone only from a *failed write*; nothing polls the socket. A stream whose writes
+  are data-driven therefore holds its cluster-side resource open on a departed subscriber for
+  as long as the cluster stays quiet — measured at **5 min+** on `pods`, and **22 open watches
+  for one operator** who walked twenty kinds in one tab. `SseKeepAlive` (`web/api`) writes a
+  `:keepalive` comment every 15 s, which fails, completes the emitter and runs the
+  `onCompletion` hook that closes the watch. **All four SSE endpoints now attach it**
+  (`objects/watch`, `resources/{id}/watch`, `log/stream`, `logs/stream`) and
+  `SseEndpointKeepAliveTest` fails the build if a new one does not — it scans the controllers
+  for handlers returning an `SseEmitter` and requires the class to reference `SseKeepAlive`,
+  because the omission is invisible in every test and every demo. The full audit — every
+  streaming surface, what it holds, and the release times — is
+  `docs/design/watch-fanout.md`; the short version is that **exec-over-WebSocket and
+  port-forward are fine and deliberately have no heartbeat** (a WebSocket close frame arrives
+  in under a second; a port-forward is a named server-side resource that is *meant* to outlive
+  the tab that started it).
 - **A count is not a list.** `/counts` computes its 118 badge numbers with one `limit=1`
   request per kind plus `metadata.remainingItemCount` (`ResourceService.count`), not
   `listRaw().size()` — that was 22.1 MB of API-server traffic per call on the real cluster, and

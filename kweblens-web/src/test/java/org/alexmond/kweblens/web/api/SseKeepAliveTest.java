@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 
 /**
  * The keepalive that makes a departed SSE subscriber discoverable.
@@ -95,6 +96,23 @@ class SseKeepAliveTest {
 		// container to run the completion callback: otherwise a probe for a stream that
 		// ended would sit on the shared scheduler for the life of the process.
 		assertThat(probes).hasValue(1);
+	}
+
+	@Test
+	void endingAStreamTheContainerAlreadyToreDownDoesNotThrowAtTheCaller() {
+		SseEmitter emitter = new SseEmitter(0L) {
+			@Override
+			public void completeWithError(Throwable ex) {
+				// Verbatim from Tomcat, because the wording is the whole point: this is
+				// what a non-container thread gets once AsyncListener.onError has run.
+				throw new IllegalStateException("A non-container (application) thread attempted to use "
+						+ "the AsyncContext after an error had occurred");
+			}
+		};
+
+		// Observed live: a disconnect from a chatty pod raced the container and threw out
+		// of the log reader thread, printing an uncaught Exception in thread "log-sse-…".
+		assertThatNoException().isThrownBy(() -> SseKeepAlive.completeQuietly(emitter, new IOException("Broken pipe")));
 	}
 
 }

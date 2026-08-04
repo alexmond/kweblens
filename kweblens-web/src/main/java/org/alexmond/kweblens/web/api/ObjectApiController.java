@@ -144,7 +144,7 @@ public class ObjectApiController {
 		}
 		catch (IOException | IllegalStateException ex) {
 			log.debug("Object watch SSE send failed ({}); closing", ex.getMessage());
-			emitter.completeWithError(ex);
+			SseKeepAlive.completeQuietly(emitter, ex);
 		}
 	}
 

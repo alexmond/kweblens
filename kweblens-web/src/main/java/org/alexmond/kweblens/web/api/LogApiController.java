@@ -53,6 +53,11 @@ public class LogApiController {
 		}
 		emitter.onCompletion(watch::close);
 		emitter.onTimeout(watch::close);
+		// After the completion hooks, never before — see SseKeepAlive. A pod that is not
+		// logging writes nothing, so without a probe a departed subscriber left this log
+		// follow open: measured at 3 clients gone and 3 API-server connections plus 3
+		// reader threads still held five minutes later.
+		SseKeepAlive.attach(emitter);
 		Thread reader = new Thread(() -> pump(emitter, watch.getOutput(), watch), "log-sse-" + pod);
 		reader.setDaemon(true);
 		reader.start();
@@ -69,7 +74,7 @@ public class LogApiController {
 		}
 		catch (IOException ex) {
 			log.debug("Log stream ended: {}", ex.getMessage());
-			emitter.completeWithError(ex);
+			SseKeepAlive.completeQuietly(emitter, ex);
 		}
 	}
 
