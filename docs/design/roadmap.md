@@ -1,385 +1,255 @@
-# Roadmap: thesis, ranked gaps, and the cut plan
+# Roadmap: thesis, what is true now, and what is left
 
-Issue: GH#147. Date: 2026-07-31. Verified against the code at `8668b44`, not against the
-older docs.
+Issue: GH#147. **Re-cut 2026-08-05**, verified against the code at `ffc5039` — not against the
+previous cut of this document, which was written on 2026-07-31 and is superseded in most of its
+load-bearing parts.
 
-This is the synthesis GH#147 asked for. It does **not** restate the research — read
-[`competitor-analysis.md`](../competitive-review/competitor-analysis.md) for the landscape,
-[`adr-001-identity-model.md`](adr-001-identity-model.md) for the identity decision, and the
-per-area design notes for the detail. This document does three things the research
-deliberately did not: it says what kweblens is *for*, it **re-ranks** the research's gap list
-against a decision taken after it was written, and it cuts a sequence with explicit
-non-goals.
+Read [`competitor-analysis.md`](../competitive-review/competitor-analysis.md) for the landscape
+(note: it is a dated snapshot and still describes a 3-tool MCP server; it is 15) and
+[`adr-001-identity-model.md`](adr-001-identity-model.md) for the identity decision. This
+document says what kweblens is *for*, what is actually true of it today, and what is left.
+
+**The short version.** T1 shipped, T2 was measured and answered in the negative, D1 shipped, and
+GH#140 / GH#141 / GH#142 all closed. There is no large missing feature. The two things that
+matter are a measured way to OOM-kill the process (GH#293) and the fact that **nothing has ever
+been released**, so nobody can install what has been built. Everything else is polish. This is a
+harden-and-ship phase and the plan below is short on purpose.
 
 ---
 
 ## 1. The thesis
 
+Unchanged, and still the right one.
+
 **kweblens is the Kubernetes IDE for one trusted operator who wants it in a browser *and* in
-their coding agent.** One JVM process holds one cluster-access layer and puts two front-ends
-on it: a Freelens-grade web UI for the human, and an MCP tool surface for the agent the
-operator already runs. It is self-hosted, needs no kubeconfig on the client, no desktop
-install and no account, and it treats writes as suggest → preview → confirm → audit. It is
-explicitly **not** a fleet platform and **not** multi-tenant: ADR-001 settled that
-authentication exists to stop drive-by writes, not to separate people.
+their coding agent.** One JVM process holds one cluster-access layer and puts two front-ends on
+it: a Freelens-grade web UI for the human, and an MCP tool surface for the agent the operator
+already runs. It is self-hosted, needs no kubeconfig on the client, no desktop install and no
+account, and it treats writes as suggest → preview → confirm → audit. It is explicitly **not** a
+fleet platform and **not** multi-tenant: ADR-001 settled that authentication exists to stop
+drive-by writes, not to separate people.
 
-Who it is for: the platform engineer or homelab-to-small-team operator who administers a
-handful of clusters, especially in a JVM shop where Actuator/Micrometer/`application.yml`/
-Spring Security are the operating vocabulary. Who it is **not** for, and we should say so:
-a team that needs per-user RBAC (Headlamp), a fleet operator (Rancher), or anyone buying
-SaaS observability (Komodor/Datadog).
+Who it is for: the platform engineer or homelab-to-small-team operator who administers a handful
+of clusters, especially in a JVM shop. Who it is **not** for, and we should say so: a team that
+needs per-user RBAC (Headlamp), a fleet operator (Rancher), or anyone buying SaaS observability.
 
-The defensible ground, per the review and unchanged by it: **IDE depth** — schema-driven
-YAML from the cluster's own OpenAPI, a schema-generated form editor, diff-before-apply, the
-tabbed exec/log dock, in-browser port-forward, jhelm — plus **one access layer, two
-surfaces**. Not MCP (table stakes since H1 2026) and not the apiserver-proxy metrics trick
-(Lens has always done it).
+The defensible ground: **IDE depth** — schema-driven YAML from the cluster's own OpenAPI, a
+schema-generated form editor, diff-before-apply against what the server *would store*, the tabbed
+exec/log dock, in-browser port-forward, jhelm — plus **one access layer, two surfaces**. Not MCP
+(table stakes since H1 2026) and not the apiserver-proxy metrics trick (Lens has always done it).
 
-## 2. What ADR-001 changed, and why the research's ranking cannot be inherited
+## 2. What ADR-001 settled
 
-The competitive review ranked the disqualifiers: **identity → RBAC-awareness → pagination →
-server-side dry-run → per-kind depth → diff quality → extensibility → keyboard**.
+The competitive review ranked the disqualifiers **identity → RBAC-awareness → pagination →
+server-side dry-run → per-kind depth → diff quality → extensibility → keyboard**. ADR-001 deleted
+#1 (a position, not a gap) and demoted #2 (with one shared credential there is no user whose
+permissions we could reflect; `SelfSubjectAccessReview` would only answer "can kweblens's own
+service account do this", which is a UI affordance). Measurement has since deleted #3 and shipped
+#4. **Five of the review's eight ranked disqualifiers are now decided or done.** That is the
+single most important fact about this document: the ranking it inherited no longer exists.
 
-ADR-001 was signed off *after* that review with three answers: multi-tenancy is **not** a
-goal, identity sources are **deferred**, impersonation is sanctioned **when** identity
-arrives. That deletes #1 from the plan and demotes #2:
+## 3. The 2026-07-31 plan, item by item
 
-- **#1 identity is not a gap; it is a position.** The README still calls it "the gap that
-  matters", which now contradicts an accepted ADR. Fix the words, not the code.
-- **#2 RBAC-awareness collapses from an enforcement problem to a small UX one.** With one
-  shared credential there is no user whose permissions we could reflect. `SelfSubjectAccess
-  Review` would only answer "can *kweblens's own service account* do this" — genuinely useful
-  when the deployment is given a read-only role and the UI still offers Delete, and worth a
-  ticket eventually, but it is polish, not the second-biggest thing wrong with the product.
+Each row is checked against the code, not the tracker.
 
-Everything below is therefore a **re-derived** ranking for a single-operator product, not the
-review's ranking with two rows struck out.
-
-## 3. Current state, verified
-
-Verified by reading the code at `8668b44`. The recent shipping rate is high enough that any
-plan built on a document older than a week is wrong.
-
-**Shipped since the competitive review was written (do not re-propose these):**
-
-| Review said we lacked | Actually now | Evidence |
+| Old item | Verdict | Evidence |
 |---|---|---|
-| MCP tool breadth: "3 read tools vs Radar's 28" | **15 read tools**, secret-redacted at the tool boundary | `web/mcp/{ClusterTools,DiagnosticTools,HealthTools}.java`, `ToolRedaction.java` |
-| "Keyboard: `Escape` only" | Command palette on **Ctrl/⌘-K** (switch cluster, jump to kind) | `kweblens-ui/src/commandPalette.ts` |
-| "AI analyzer coverage: pods + events only" | Workload / network / storage / config health, each reason-carrying, **shared with the dashboard** | `kweblens-core/.../health/` |
-| Remediation "has one action (`restart-pod`)" | 4, each gated on a precondition that says when it *cannot* work | `web/ai/RemediationService.java` |
-| "No relationship view … owner-ref child rows and nothing else" | Server-side detail endpoint with relation sections (endpoints / selected pods / mounted-by) | `web/api/DetailApiController.java`, `resource/RelationService.java` |
-| "Overview / home screens" thin | Cluster + **Workloads / Network / Storage / Config** overviews, click-through, namespace-scoped, truncation stated | `components/CategoryOverview.vue`, `overviewCategories.ts` |
-| Cluster management is config-file only | Add / edit / remove clusters at runtime, plus a Clusters page | `web/api/ClusterConfigApiController.java`, `components/ClustersPage.vue` |
-| Form editor | Schema-driven from the cluster's JSON Schema, over a curated path allowlist (9 kinds) | `kweblens-ui/src/schemaForm.ts` |
-| Table UX | Per-kind columns (**28 kinds**, 84 renderers), column-visibility toggle persisted per kind, natural sort | `columns.ts`, `ResourceListView.vue`, `prefs.ts` |
-| Nav coverage | 39 built-in kinds / 7 static categories, **plus** a Gateway API category promoted at runtime when the CRDs exist | `web/nav/NavCatalog.java`, `ClusterNavService.java` |
-| Metrics | metrics-server + Prometheus-compatible via apiserver proxy, **explicit config overriding discovery** | `metric/PrometheusMetricService.java`, `MetricsProperties.java` |
-| Helm | install / upgrade / rollback / uninstall / history / values library / repo refresh, each with a real `dryRun` | `web/helm/HelmService.java`, `web/api/HelmActionApiController.java` |
-| Logs | multi-source (container / pod / **workload**), colour-gutter legend, rAF-batched | `composables/useMultiLogs.ts` |
-| Dock | multi-tab, resizable, **pop-out to a floating window without dropping the socket** | `DockArea.vue`, `FloatingFrame.vue` |
+| **T1** write path cannot be previewed; audit is volatile | **DONE** | `ResourceService.dryRunApply` / `dryRunPatch` send `withDryRun(List.of("All"))`; `YamlApiController` `/apply/dry-run`; the Review Changes tab's second diff (#274). Audit goes to a dedicated `kweblens.audit` logger as well as the ring (#212). Remediation previews are server-validated where a patch exists and say `notChecked` where one does not (#209). |
+| **T2** nothing in the list path is bounded | **ANSWERED — do not build paging** | [`scale-measurements.md`](scale-measurements.md) §"Is server-side paging still worth building?". Wire: 16.78 MB / 637 ms for 3 000 pods after #279. Browser: main-thread block **flat** at 370 / 371 / 299 ms across a 15× range in object count, DOM rows pinned at 20 (#286). `/counts`: one `limit=1` request per kind + `metadata.remainingItemCount` (#283), 330→112 ms, 22.1 MB→111 KB. Fan-out: accept N + `SseKeepAlive` (#283, #288), argued in [`watch-fanout.md`](watch-fanout.md). **The unbounded axis is heap, not wire → GH#293.** |
+| **T3** finding a specific object is weak | **HALF SHIPPED** | Palette now indexes **objects**: `web/search/SearchService` over 13 kinds, ranked, reporting what it did not search; `commandPalette.ts` `objectCommands` / `mergeCommands` / `scopeNotes` (#263). Still true: `shell.ts:filterObjects` is three `.includes()` calls, and there is no regex, negation, label selector or field selector anywhere. |
+| **T4** error and empty states are inconsistent | **STILL TRUE, slightly worse** | `ErrorNotice` renders in 8 files (was 6), still Helm/Clusters-dominated. **11** bare `<div class="error">` with no retry, unchanged. **~20** ad-hoc empty-state sites under five different class names, and no `EmptyState` component exists. `ResourceTable.vue` has no `#empty` slot at all. And it is a defect class, not cosmetics — `HelmResourcesModal.vue` used `<ErrorNotice>` without importing it, so its error path rendered *nothing* (fixed in this PR). |
+| **T5** RBAC-awareness in its reduced form | **STILL TRUE** | Zero hits for `SelfSubjectAccessReview` / `SelfSubjectRulesReview` / `canI` in any `.java`, `.ts` or `.vue` file. All 24 hits are prose. |
+| **D1** relations breadth | **SHIPPED** | `RelationService` is now a dispatcher over five resolvers (`NetworkRelations`, `ReferenceRelations`, `WorkloadRelations`, `StorageRelations`, `AccessRelations`) resolving **12** relation keys, up from 3 (#220). [`detail-sections-audit.md`](detail-sections-audit.md) §"Group B status" is the current record. Not resolved, deliberately: Ingress → TLS secret **expiry** (`Relation` carries objects, so a *missing* reference can only be dropped or fabricated), requests-vs-usage (a metrics path, not a relation), and a general reverse index. |
+| **D2** agent-attach story | **NOT STARTED** | No attach page, no `mcpServers` snippet, no `claude mcp add` anywhere in `README.md` or `docs/`; `docs/deployment.md` has zero MCP mentions. The transport *is* documented correctly (`README.md` and `CLAUDE.md` both say SSE over WebMVC, `GET /sse`). |
+| **D3** analyzer breadth / cross-manifest rules | **NOT STARTED, now cheaper** | It was ranked below D1 because it depended on D1's joins. Those joins exist. |
+| **D4** guarded MCP write tools | **UNBLOCKED, unscoped** | 15 `@Tool` methods across three beans, none mutating. The T1 gate has lifted; what is left is Radar's scoping question (destructive-annotated, no delete, no shell), not a missing guardrail. |
+| **Chore I** docs currency | **DONE** | `README.md` and `CLAUDE.md` both say 15 read-only tools and SSE; the README frames identity per ADR-001 rather than as "the gap that matters". Only `competitor-analysis.md` still says 3, and it is a dated research snapshot. |
 
-**Still exactly as the review described:**
+**Three structural things the old cut got wrong, worth naming so they are not repeated:**
 
-- No server-side pagination anywhere. `ResourceService.list*` is
-  `inAnyNamespace().list().getItems()` — no `ListOptions`, no `limit`, no continue token.
-- No `SelfSubjectAccessReview` / `SelfSubjectRulesReview` anywhere (Java, TS or Vue).
-- No plugin API, no topology graph, no per-user identity.
+1. **T1's "Blocks: nothing" line was parking work that was already unblocked.** D4 sat behind a
+   gate that had lifted; the document said so in a paragraph and then re-listed D4 as item 8.
+2. **The sequencing rule "paging and filtering are one piece of work"** was correct and is now
+   moot — neither is being built. Everything that inherited a block from it (T3, GH#143, GH#148)
+   inherited a block from a contract that will not be written.
+3. **§8's issue table referenced GH#140, GH#141 and GH#142 as open.** All three closed
+   (2026-08-03, 2026-08-01, 2026-08-03). "Folds into GH#142" is not a plan.
 
-**Two things the docs get wrong about the code — worth correcting before anything is built
-on them:**
+## 4. The biggest gap is not on the old list
 
-1. ~~The MCP transport is streamable HTTP at `/mcp`, not SSE.~~ **Retracted — the docs are
-   right and this claim was wrong.** It was inferred from `application.yml` setting no
-   `spring.ai.mcp.server.protocol`; probing the running server settles it instead. `GET /sse`
-   holds a stream open and emits the classic SSE handshake:
+With T1 done, T2 answered and D1 shipped, the honest answer to "what would a user miss most" is
+not a feature. It is two things:
 
-   ```
-   event:endpoint
-   data:/mcp/message?sessionId=9eeda7e5-…
-   ```
+**(a) The product can be OOM-killed by listing Secrets — GH#293.** `ObjectApiController.objects`
+is `Serialization.asJson(ListProjection.forList(resources.listRaw(...)))`: the whole collection is
+deserialised, projected in place, then materialised as one `String`, so a request holds three
+copies at once. Measured on the live path, ~241 KB of transient heap **per Secret** — 10.6× the
+object's own JSON, and ~500× what #279 leaves on the wire. The shipped chart sets
+`resources.limits.memory: 1Gi` (`deploy/helm/kweblens/values.yaml`), and over-limit is an
+OOM-kill, not a slowdown. The trigger is **~2 000 Secrets**, and Helm stores one Secret per release
+*revision*, so a cluster with a couple of hundred releases is already there with a hundred pods.
+Every other axis — payload size, row count, block time — looks healthy the whole way, because
+#279, #283 and #286 fixed exactly those. This is the only known way to take the process down.
 
-   So the transport is SSE over WebMVC at `/sse`, messages POST to `/mcp/message`, and the
-   dependency is `spring-ai-starter-mcp-server-webmvc`. `POST /mcp` 404s. This also explains
-   why the CSRF exemption matters: `ignoringRequestMatchers("/api/**", "/mcp/**")` covers
-   `/mcp/message`, which is what makes MCP callable at all.
-2. **The remediation "dry-run preview" is a hand-written English sentence, not a dry-run.**
-   `RemediationService` builds strings like `"dry-run: pod 'x' would be deleted…"` and the
-   record's javadoc calls the field "a dry-run preview of the change". Nothing is sent to the
-   API server. The competitive review banks this as a verified advantage over Headlamp
-   ("propose → dry-run preview → explicit confirm → audited"); two of those four links are
-   weaker than advertised.
-3. **The audit log does not survive a restart.** `AuditService` is a bounded 500-entry
-   in-memory deque. "Always audited" is true only within one process lifetime.
+**(b) Nothing has ever been released.** No git tags. No GitHub releases. The version is
+`0.1.0-SNAPSHOT`. `repo1.maven.org/maven2/org/alexmond/kweblens-core/` returns **404**, while
+`README.md`'s module table claims "✅ Maven Central" for both `kweblens-core` and `kweblens-cli`
+(corrected in this PR). `.github/workflows/` contains `ci.yml` and `maven_release.yml` and nothing
+that builds or publishes an image, and `deploy/helm/kweblens/values.yaml` defaults to
+`repository: kweblens` with no registry — so the chart assumes an image you built yourself. The
+only install path for a would-be user is *clone the repo and run Maven*.
 
-## 4. The remaining gaps, ranked
+That is the real state of the product: a broad, well-tested, well-measured feature surface with no
+distribution. Ranking a filter syntax or an SSAR affordance above that would be planning for a
+user who cannot obtain the software.
 
-Ranked by *severity for a single operator*, which is not the same as the order to build them
-(§5). Split into table stakes we lack and differentiators we could win on.
+## 5. The plan, re-ranked
 
-### Table stakes we lack
+Ranked for the single trusted operator ADR-001 describes. Two items, then a tail of polish. If
+that reads short, it is because it is — see §4.
 
-**T1 — ~~The write path cannot be previewed against the cluster, and its audit is
-volatile.~~ MOSTLY LANDED — the remainder is the YAML editor.** Re-checked against the code
-2026-08-03. Two of the three parts shipped:
+### R1 — GH#293: stop materialising the list
 
-- **Remediation preview is real** (#209). `ResourceService.dryRunPatch` sends `dryRun=All`,
-  and `scale-up` / `rollout-restart` return the server's answer. `restart-pod` and `rollback`
-  *cannot* — a DELETE and a revision lookup are not patches — so they return `notChecked`
-  naming the reason rather than prose that reads like a server response. That is the right
-  answer, not a gap to close.
-- **The audit survives a restart** (#210 → #212). Every entry goes to a dedicated
-  `kweblens.audit` logger as well as the in-memory ring, with values escaped against
-  log injection and the category pinned to INFO.
-- **Still open: the YAML apply path.** `apply` is server-side apply with `forceConflicts()`
-  and sends no `dryRun`, so the Review Changes tab still diffs "my edit vs what I loaded",
-  never "live vs what the cluster would accept" — it cannot show defaulting, cannot show
-  another controller's fields, and cannot catch an admission-webhook rejection before the
-  write lands. `dryRun=All` on SSA returns exactly the merged object needed to close all
-  three, and fabric8 supports it; `dryRunPatch` is the pattern to follow.
+Measure **first**: one `jcmd GC.class_histogram` at peak during a large Secrets list, against a
+*live* cluster (the simulator's API server shares the JVM and is inside the reading). That single
+number decides the fix and has not been taken.
 
-**T2 — Nothing in the list path is bounded.** Every list is a full LIST into the JVM heap and
-then to the browser; `/counts` is `listRaw().size()`. This is k9s
-[#4109](https://github.com/derailed/k9s/issues/4109) waiting to happen, and its failure mode
-is a spinner that never resolves rather than an error. Compounding it: watches are opened
-**per SSE connection**, so N browser tabs × N open list views = N apiserver watches with no
-sharing. Ranked second rather than first only because its urgency is a function of cluster
-size, which we have not measured (§7).
+- If the spike is dominated by the output `String`, stream the projected list straight to the
+  response body. That removes it without touching the list contract, the filter semantics, or
+  three future clients — and paging stays unbuilt.
+- If it is dominated by the deserialised model graph, streaming the output halves it and
+  something that bounds what is *deserialised* is eventually needed. Re-open the paging question
+  then, with a number, and not before.
 
-> **Measured, 2026-08-05 — and the diagnosis above is half right in a way that matters.** The
-> browser half and the `/counts` half are fixed (#286, #283), and "full LIST to the browser" is
-> now 16.78 MB for 3 000 pods, which is fine. **"Full LIST into the JVM heap" is the half that
-> is still true and is the whole problem**: ~247 KB of transient heap per Secret on the live
-> path, against a 1 GiB container limit, so the failure mode is an OOM-killed pod rather than a
-> spinner. The fix that follows is streaming the response, not paging it. See §5 and
-> [`scale-measurements.md`](scale-measurements.md).
+`scripts/heap-probe.sh` is the probe. **Secret count per cluster is the thing to watch**, not pod
+count and not payload size.
 
-**T3 — Finding a specific object is weak.** Search is a plain substring over name / namespace
-/ kind (`shell.ts:filterObjects`); there is no label selector, no field filter, no regex, and
-the palette indexes clusters and nav leaves but **not objects**. For an operator the most
-frequent action in the product is "find the thing", and k9s sets the bar with `/regex`,
-`/!regex`, `/-l selector`.
+### R2 — Cut a release and publish an image
 
-**T4 — Error and empty states are inconsistent.** `ErrorNotice` (message + Retry) is used in
-6 files, all Helm/Clusters; 11 other sites render a bare `<div class="error">` with no retry,
-and there are 10 ad-hoc empty divs with no shared component. This is the difference between a
-product and a scaffold, and Octant's convention is the fix: make the empty-state string a
-required constructor argument so no list can ship without one.
+The gap in §4(b), closed. Concretely: a numeric `0.1.0` (never `-RC`/`-M`), the two library
+artifacts to Central through the existing `maven_release.yml`, a workflow that builds and pushes
+the `kweblens-web` image, and a chart default that points at it. Until this exists every other
+item on this list improves software nobody can install.
 
-**T5 — RBAC-awareness, in its reduced form.** Not "reflect the user's permissions" (there is
-no user) but "stop offering actions this deployment's service account cannot perform".
-Relevant precisely because the deployment guidance is a read-only role to start.
+### R3 — T4: one error state, one empty state
 
-### Differentiators we could win on
+11 bare error divs with no retry, ~20 ad-hoc empty states under five class names, no shared
+`EmptyState`, and the main resource table falling through to naive-ui's default "No Data". The
+`HelmResourcesModal` bug found while writing this — a component used without being imported, so
+the error path silently rendered nothing, past `vue-tsc` and `eslint` — is the argument that this
+is correctness and not decoration. Octant's convention is the fix: make the empty-state string a
+**required prop** so no list can ship without one.
 
-**D1 — Relations breadth, which is IDE depth *and* agent quality at once.** `RelationService`
-resolves three relations. The [detail-sections audit](detail-sections-audit.md) lists roughly
-eight more that the drawer wants and cannot express client-side: rollout history via owned
-ReplicaSets, HPA targeting a workload, Ingress → TLS secret and its expiry, workload → PVC,
-requests vs actual usage, reverse "who references this". Each one lands in the SPA drawer,
-`/diagnose` and `describeResource` from one implementation — this is what "one access layer,
-N front-ends" is supposed to buy, and it is the only item on this list where a day's work
-improves three surfaces.
+### R4 — Contract-test the detail endpoint
 
-**D2 — The agent-attach story.** The review's sharpest strategic observation is that the
-category moved from "chatbot in the sidebar" to "attach the coding agent the user already
-has" (Lens Ask AI, Freelens's Claude extension, K8Studio). kweblens is unusually well placed:
-its MCP server is free, in-process, always-on and reachable over HTTP, where Headlamp's is
-client-only/desktop-only/stdio-only and Lens's is $25/user/month and needs the desktop app
-running. What is missing is almost entirely presentation: a documented copy-paste attach
-flow, correct transport documentation, and a generated cluster-context surface. Cheapest
-differentiator on the list.
+`DetailApiController` returns a `{object, relations}` envelope carrying 12 relations and has
+**zero** HTTP-level coverage: no test file mentions `/detail`, `relations` or `RelationService`
+anywhere under `kweblens-web/src/test` (18 MockMvc classes, none on this path). Coverage is
+service-level only, in core (`RelationServiceTest`, `RelationBreadthTest`,
+`RelationStorageAccessTest` — 23 tests). The envelope, `Relation`'s null-omission, the 400 on a
+missing object and the unknown-`resourceId` path are all unverified — and this endpoint is what
+D3, GH#148 and GH#143 all build on.
 
-**D3 — Analyzer breadth over the shared health services.** The health checks span workloads,
-network, storage and config; k8sgpt also covers security/RBAC, and Kubevious's genuinely
-original idea — **cross-manifest** assertions (validate a Deployment against the Service,
-ConfigMap and ServiceAccount it references) — is exactly what `RelationService` now makes
-cheap. Ranked below D1 because it depends on D1's joins.
+### R5 — D2: the agent-attach page
 
-**D4 — Guarded MCP write tools.** Every 2026 entrant ships them; Radar's scoping
-(destructive-annotated, no delete tool, no shell) is the precedent. **The T1 gate has largely
-lifted** (2026-08-03): it existed because the dry-run was prose and the audit died with the
-pod, and neither is true now — remediation previews are server-validated (#209) and the audit
-trail survives a restart (#212). What remains before shipping write tools is a scoping
-decision, not a missing guardrail. See §5.
+Still the cheapest differentiator on the list and still unwritten: a copy-paste "attach Claude
+Code / Codex / Copilot CLI in three lines" page, a generated cluster-context surface, and an MCP
+section in `docs/deployment.md` (which currently has none). The transport documentation is already
+correct, so this is purely additive.
 
-## 5. The cut plan
+### Then, in no strong order
 
-Severity (§4) is not build order. Build order is leverage: do the cheap thing that unblocks
-an epic before the expensive thing that unblocks a module.
-
-### ~~First: T1 — write-path integrity~~  *(DONE — #209, #212, #274)*
-
-Originally one slice: `dryRun=All` on `apply` and `patch`; the same for the remediation
-actions; surface it as the Review Changes tab's second diff (**live → would-be**, alongside
-today's edited-vs-loaded); and make the audit log durable.
-
-**Shipped — T1 is DONE.** The remediation half (#209), the durable audit (#210 → #212), and
-now `dryRun=All` on the YAML apply path with the Review Changes second diff that consumes it
-(#274). The differentiator is no longer partly narrative.
-
-**Worth knowing about the last slice:** it also closed two gaps that only appeared once the
-dry run existed — the API server's refusal was flattened into a 500 (no
-`KubernetesClientException` mapping) and then discarded again client-side, so the webhook's
-message, which is the entire point, never reached the screen.
-
-**Consequence for the rest of this plan:** the D4 gate has largely lifted. The argument for
-blocking write-capable agent tools was "a guardrail whose dry-run is prose and whose audit
-dies with the pod", and neither is true any more — remediation previews are server-validated
-and the audit trail survives a restart. Anything gated on T1 for *those* reasons should be
-re-read as unblocked; only work that leans specifically on the **editor's** diff still waits.
-
-**Blocks:** nothing. T2 (bounded lists) is now the first open item in this plan.
-
-### Second: T2 — bounded lists, designed with filtering and with the watch topology
-
-`limit` + continue tokens in `ResourceService`, a cap-with-load-more fallback in the table, a
-genuinely cheap `/counts` via `limit=1` + `metadata.remainingItemCount`, and a decision on
-watch fan-out (share one watch per cluster+kind across subscribers, or accept N and document
-the ceiling).
-
-**Three of the four are done.** The list projection (#276), the cheap `/counts` and the
-fan-out decision have landed; measurements for all three are in
-[`scale-measurements.md`](scale-measurements.md).
-
-- **`/counts` is no longer a full LIST per kind.** `ResourceService.count` asks for one item
-  and reads `metadata.remainingItemCount`, with the absence of that best-effort field handled
-  explicitly rather than guessed. On the live cluster: 330 ms → 112 ms, and 22.1 MB → 111 KB
-  of API-server traffic per call, for the same 118 badge numbers (verified against the full
-  lists: 0 mismatches out of 118).
-- **Fan-out: accept N, do not share** — argued with the numbers in
-  [`watch-fanout.md`](watch-fanout.md). The measurement moved the question: the ratio was
-  already 1 watch per subscriber, but a watch on a *quiet* kind outlived its departed
-  subscriber by over five minutes, so one operator walking twenty kinds held 22 open watches.
-  A 15 s SSE keepalive (`SseKeepAlive`) makes the ceiling "one per list view on screen,
-  released within ~30 s"; at that ceiling a shared watch's lifecycle risk (refcounting, close
-  policy, slow-subscriber policy) buys nothing for a single-operator product.
-  **Part 2 of that note** ran the same audit across *every* long-lived surface: two more SSE
-  endpoints (both log streams) and a third nobody had listed (`resources/{id}/watch`) leaked
-  the same way and now attach the keepalive, with a structural test that fails the build if a
-  new SSE endpoint does not. Exec-over-WebSocket (~1.3 s to release, close frame *or* SIGKILL)
-  and port-forward (not client-scoped by design) were measured and need nothing.
-- **The fourth — `limit`/continue paging on the list path — is now measured, and the answer is
-  don't.** Full numbers and method in [`scale-measurements.md`](scale-measurements.md), "Is
-  server-side paging still worth building?". At 200 / 1 000 / 3 000 objects per kind on an idle
-  box: the wire is 16.78 MB in 637 ms for 3 000 pods and 1.2 s for the worst kind; the browser's
-  main-thread block is **flat** across all three sizes (170–420 ms, DOM rows pinned at 20); and
-  filtering 3 000 objects client-side costs ~0.3 s, so #263's refusal to truncate server-side
-  is not paying for itself in latency. Paging buys none of the three things it was scoped to
-  buy.
-- **What is unbounded is heap, not wire.** `ObjectApiController.objects` is
-  `Serialization.asJson(ListProjection.forList(listRaw(...)))` — the whole collection is
-  deserialised, then projected, then materialised as one `String`, so a request holds three
-  copies at once. Measured against the **live** cluster: ~94 KB of transient heap per pod,
-  **~247 KB per Secret**, 5–12× each object's own JSON and ~500× the bytes #279 leaves on the
-  wire. Retained heap returns to baseline, so it is a spike, not a leak — but the chart sets
-  `resources.limits.memory: 1Gi`, and a container over its limit is OOM-killed rather than
-  slowed. Secrets hit a 500 MB spike at roughly **2 000 objects**, which a cluster with a few
-  hundred Helm releases (one Secret per revision) already has.
-- **So the next move on the list path is streaming, not paging** — remove the output-`String`
-  copy without touching the list contract, the filter semantics or three future clients. First
-  measure how the spike splits between the model graph and that `String`
-  (`jcmd GC.class_histogram` at peak); if it is mostly the `String`, streaming is the whole fix.
-  `scripts/heap-probe.sh` is the probe, and Secret-count-per-cluster is the thing to watch.
-
-Why this is no longer second: the three parts that shipped were the valuable ones, and the
-fourth has now been measured out. The sequencing argument below still holds **if** paging is
-ever built — but it is no longer a blocker for GH#143 or GH#148, because neither of them
-changes the heap behaviour above and both can be written against today's list contract.
-
-**The sequencing constraint that matters most in this document:** paging and filtering are
-one piece of work, not two. A substring filter applied to a truncated page is a lie — it
-reports "no matches" for an object that exists. So server-side label/field selectors land
-with the continue token, or neither does. **Neither does** — measured 2026-08-05, and the
-client-side filter it would have replaced costs ~0.3 s over 3 000 objects.
-
-**Blocks:** nothing any more. GH#143 and GH#148 were blocked on a paging contract that is not
-being written; T3 is unblocked in its client-side form for the same reason.
-
-### Third: T3 — find anything
-
-Object search in the palette (⌘K finds a pod by name across kinds, not just a nav leaf), plus
-a real filter syntax on the list header — regex, negation, label selector — evaluated
-server-side.
-
-Why third: highest-frequency operator action, and it is the natural first consumer of T2's
-server-side filter. Building it before T2 means writing a client-side filter that T2 deletes.
-
-**Blocked by:** T2's filter contract.
-
-### Then, in rough order
-
-4. **D1 relations breadth** + the [missing server-side test on the detail endpoint](kind-catalog.md)
-   — the endpoint's HTTP contract is currently unverified, and it is the thing D1, D3 and the
-   TUI all build on.
-5. **D2 agent-attach**: correct the transport docs, verify against the 2026-07-28 MCP spec
-   final and Spring AI 2.0, ship an "attach Claude Code / Codex / Copilot CLI in three lines"
-   page and a generated cluster-context surface.
-6. **D3 analyzers**: security/RBAC checks and the first cross-manifest rule.
-7. **T4 error/empty states**, then **T5 SSAR affordances**.
-8. **D4 MCP write tools**, on Radar's scoping — only once (1) has landed.
+6. **T3 remainder** — a real filter syntax on the list header (regex, negation, label selector).
+   Unblocked and now unambiguously *client-side*, because there is no server-side truncation for
+   it to lie about.
+7. **D3** — security/RBAC checks and the first cross-manifest rule over the 12 relations.
+8. **T5** — SSAR affordances: grey out what this deployment's service account cannot do. Never an
+   authorization gate (ADR-001: it fails open).
+9. **D4** — guarded MCP write tools, on Radar's scoping. A scoping decision, not a blocked one.
 
 ## 6. What we are explicitly NOT doing, and why
 
-Each of these is a live suggestion in the research. Saying no once, in writing, is the point
-of this section.
-
 | Not doing | Why |
 |---|---|
-| **OIDC / per-user identity / token pass-through** | ADR-001, signed off. Not a gap — a position. Re-open only on the ADR's own triggers (a second person, exposure beyond a trusted network, or a need to attribute an action to a human). |
-| **SSAR as an authorization mechanism** | ADR-001 rejects it: it fails open. Only ever a UI affordance (T5). |
-| **A plugin framework (GH#146)** | The [research](../research/plugin-framework.md) settled the mechanism and recommended not yet. The expensive part is the published API surface, and it would have to include Naive UI. The trigger is one concrete extension someone actually wants; enumerating hooks is not that. Keep the GH#148 seam clean and publish nothing. |
-| **Radar-style simultaneous multi-cluster** | [cluster-selection.md](cluster-selection.md): every route, watch and registry entry addresses one cluster id. This is an access-layer rewrite wearing a sidebar's clothes. Worth its own decision, never smuggled in under "the rail does not scale". |
-| **A topology / resource-map graph** | The most-mourned feature in the category, and still the wrong next move: the relation *tables* already answer the diagnostic questions ("which pods back this Service", "what mounts this Secret") and a graph mostly answers them more beautifully. Revisit when a question arrives that the tables cannot answer. |
-| **Argo-grade 3-way diff with `ignoreDifferences` / jq paths** | Over-built for one operator hand-editing YAML. The *actual* diff gap is that we diff against what we loaded rather than against the server — which T1 fixes for a fraction of the cost. |
-| **kweblens-tui (GH#143) now** | Not before T2 and GH#148. A TUI written against today's TypeScript catalog would reimplement 84 renderers, which is the exact drift the module exists to prevent. |
-| **Pod file browser (GH#140) on by default** | ADR-001 is explicit: it reads mounted Secrets off disk under a shared credential. Build it if wanted; ship it off by default and say why. |
-| **External / off-cluster Prometheus auth models** | [metrics-sources.md](metrics-sources.md): four auth models against zero users. The apiserver proxy covers every in-cluster backend. Build when a deployment actually has an external one. |
-| **SSH / bastion tunnelling** | [proxy-competitive.md](proxy-competitive.md)'s explicit non-goal — it would mean storing users' SSH keys server-side. Document the sidecar / SOCKS5 pattern instead. |
-| **Competing on extensibility, auth breadth, or a published scale record** | Headlamp has 40+ hooks and 30k pods; OpenShift has 81 extension types. We will not win these and should never claim to. The honest pitch stays "the IDE surface Headlamp gates behind plugins or desktop mode, in one jar". |
-| **Positioning on MCP novelty or the apiserver-proxy metrics trick** | Both retracted by the review. Do not rebuild marketing on them. |
+| **OIDC / per-user identity / token pass-through** | ADR-001, signed off. A position, not a gap. Re-open only on the ADR's own triggers. |
+| **SSAR as an authorization mechanism** | ADR-001 rejects it: it fails open. Only ever a UI affordance (item 8). |
+| **Server-side `limit`/continue paging** | **Measured out, 2026-08-05** (#292). It buys none of the three things it was scoped to buy, and it would drag server-side selectors and a renegotiated search contract along with it — against a client-side filter measured at ~0.3 s over 3 000 objects. Re-open only if R1's histogram says the model graph, not the `String`, is the spike. |
+| **Sharing one watch per cluster+kind** | Decided against with numbers ([`watch-fanout.md`](watch-fanout.md)): with `SseKeepAlive` the ceiling is "one per list view on screen, released within ~30 s", and at that ceiling a shared watch's lifecycle risk buys nothing. |
+| **A plugin framework (GH#146)** | [Research](../research/plugin-framework.md) settled the mechanism and said not yet. The expensive part is the published API surface, which would have to include Naive UI. The trigger is one concrete extension someone actually wants. |
+| **Radar-style simultaneous multi-cluster** | [cluster-selection.md](cluster-selection.md): every route, watch and registry entry addresses one cluster id. An access-layer rewrite wearing a sidebar's clothes. |
+| **A topology / resource-map graph** | The relation *tables* — now twelve of them — already answer the diagnostic questions. Revisit when a question arrives that the tables cannot answer. |
+| **Argo-grade 3-way diff with `ignoreDifferences`** | Over-built for one operator hand-editing YAML, and the actual diff gap was closed by #274. |
+| **kweblens-tui (GH#143) now** | Blocked on GH#148 alone — see §7. The old "not before T2" half is void. |
+| **Pod file browser on by default** | ADR-001 is explicit: it reads mounted Secrets off disk under a shared credential. Shipped off by default (`kweblens.files.enabled`), and it says why. |
+| **External / off-cluster Prometheus auth models** | [metrics-sources.md](metrics-sources.md): four auth models against zero users. |
+| **SSH / bastion tunnelling** | [proxy-competitive.md](proxy-competitive.md)'s explicit non-goal — it would mean storing users' SSH keys server-side. |
+| **Competing on extensibility, auth breadth, or a published scale record** | Headlamp has 40+ hooks and 30k pods; OpenShift has 81 extension types. The honest pitch stays "the IDE surface Headlamp gates behind plugins or desktop mode, in one jar". |
+| **Positioning on MCP novelty or the apiserver-proxy metrics trick** | Both retracted by the review. |
 
-## 7. What is uncertain
+## 7. The parked epics, re-checked
 
-Stated rather than smoothed over.
+- **GH#148 (per-kind catalog in core) — correctly parked, but its recorded block has changed.**
+  It was "blocked by GH#136", which closed 2026-07-30. The live gate is the one in its own dated
+  re-audit ([`kind-catalog.md`](kind-catalog.md)): *build it when the TUI or the agent tool
+  surface actually starts consuming per-kind data*. Neither has — GH#143 has no module in the
+  reactor and the MCP tools carry zero per-kind branching. Drift keeps accruing (`columns.ts` is
+  84 `render:` functions across 28 kinds) and the re-audit's preferred first slice, the
+  relations catalog, was only *mitigated*: GH#203 shipped the loud-fallback minimum
+  (`genericRows`, `humanise(key)`), so `components/relations.ts` is still a client-side mirror of
+  a server-side registry. **Verdict: stay parked, at P3, with the block re-stated.**
+- **GH#146 (plugin framework) — correctly parked, nothing has changed.** Its stated trigger is
+  "one concrete extension someone actually wants", and none has appeared; its stated precondition
+  (GH#148 landing) has not either. The mechanism decisions are recorded so they need not be
+  re-litigated. **Verdict: stay parked.**
+- **GH#143 (kweblens-tui) — still parked, but its recorded reason is now wrong.** It carries
+  "blocked by GH#136" (closed) and this document used to add "not before T2". T2's paging is not
+  being built, so that half evaporates. The one real block is GH#148: a TUI written against
+  today's TypeScript catalog would reimplement 84 renderers plus a second per-kind catalog in
+  `relations.ts`, which is the exact drift the module exists to prevent. **Verdict: stay parked,
+  blocked on GH#148 alone.**
+- **GH#147 (this epic) — close it.** Its three deliverables were a thesis, a sequenced plan and a
+  cut into issues; all three exist, and this is the second pass over them against the code. What
+  is left is not synthesis work. **Verdict: close.**
 
-- **How urgent T2 actually is.** We have no external scale numbers and the simulator defaults
-  to ~1,000 objects; nobody has run kweblens against a 15k-pod cluster. The failure mode is
-  well evidenced *in other products*; our own threshold is unmeasured. Aptakube's KWOK rig
-  (4 clusters × 500 nodes × 5,000 pods for ~$15/month) is the cheap way to find out, and
-  doing that **before** committing to T2's size would be a reasonable first move.
-- **Whether `metadata.remainingItemCount` is reachable through fabric8** — flagged unverified
-  in [overview-pages.md](overview-pages.md), still unverified.
-- **Whether the SSE transport conforms to the MCP spec final of 2026-07-28.** The handshake
-  was observed against the running server, but a conformance run against the spec was not
-  done — an `initialize` exchange completing is not the same as full conformance.
-- **What `dryRun=All` returns through fabric8's server-side-apply path** — the plan assumes
-  the merged object comes back and is diffable. Unverified; it is the first thing to check
-  when starting T1.
-- **Whether sharing one watch per cluster+kind is safe** given that watches are currently
-  per-connection and per-identity concerns do not apply under ADR-001. Probably yes; not
-  designed.
-- Carried from the review: Radar's multi-cluster model (simultaneous vs switching) remains
-  unverified, and it is the one competitor worth re-checking monthly.
+## 8. What is uncertain
 
-## 8. Issues this implies
+Stated rather than smoothed over. Several entries from the previous cut have been **resolved by
+measurement** and are removed: T2's urgency (measured — #292), whether `metadata.remainingItemCount`
+is reachable through fabric8 (yes — `ResourceService.count`, #283), what `dryRun=All` returns
+through fabric8's server-side-apply path (the merged object; #274 diffs it), and whether sharing
+one watch per cluster+kind is safe (moot — accept-N was chosen with numbers).
 
-Existing issues are referenced, not duplicated. Open at time of writing: GH#140, GH#141,
-GH#142, GH#143, GH#146, GH#147, GH#148.
+What remains genuinely unknown:
 
-| # | Proposed issue | Maps to | Priority |
-|---|---|---|---|
-| A | Write-path integrity: `dryRun=All` on apply/patch/remediate, a live→would-be diff, and a durable audit log | T1 — **new**; blocks GH#142's write half | P1 |
-| B | Bounded lists: `limit`/continue + server-side label/field selectors + cheap `/counts` + a watch fan-out decision | T2 — **new epic**; blocks GH#143, GH#148 | P1 |
-| C | Find anything: object search in ⌘K + filter syntax on list headers | T3 — **new**; depends on B | P2 |
-| D | Detail endpoint: server-side contract tests, then widen `RelationService` (rollout history, HPA target, Ingress TLS + expiry, workload→PVC, reverse references) | D1 — **new**; the enabler GH#148 and GH#143 build on | P2 |
-| E | Agent-attach: correct the MCP transport in all docs, verify against the MCP spec final, ship a copy-paste attach page + generated cluster context | D2 — folds into GH#142 | P2 |
-| F | Analyzers: security/RBAC checks and the first cross-manifest rule over `RelationService` | D3 — folds into GH#142 | P2 |
-| G | Shared `EmptyState`, `ErrorNotice` everywhere, empty-state copy a required prop | T4 — **new** | P3 |
-| H | SSAR affordances: stop offering actions the deployment's service account cannot perform | T5 — **new** | P3 |
-| I | Docs currency: README/CLAUDE.md say identity is "the gap that matters" (ADR-001 says otherwise) and that MCP exposes three read-only tools (it is 15). The MCP *transport* wording is correct — see §retraction above. | — **new chore** | P3 |
+- **How GH#293's spike splits between the model graph and the output `String`.** This decides
+  R1's shape and it is one histogram away. Do not design before taking it.
+- **Anything past 3 000 objects/kind** is inference from demonstrated linearity, not measurement.
+  KWOK remains the answer, and the simulator explicitly cannot validate paging (the CRUD mock
+  ignores `limit`).
+- **Whether the SSE transport conforms to the MCP spec final of 2026-07-28.** The handshake was
+  observed against the running server; an `initialize` exchange completing is not conformance.
+- **Radar's multi-cluster model** (simultaneous vs switching) remains unverified, and it is the
+  one competitor worth re-checking monthly.
+- **Exec / port-forward through a SOCKS5 proxy** — flagged by the proxy research as the
+  highest-value untested case; fabric8 7.x uses WebSocket rather than SPDY, so kweblens may not
+  share the limitation client-go tools document.
 
-GH#141's remaining workstream (the cluster rail trim and the Clusters-page landing screen) is
-unaffected by this plan and can proceed on
-[cluster-selection.md](cluster-selection.md)'s recommendation. GH#146 and GH#148 stay parked
-on their own stated triggers; GH#143 waits on B.
+## 9. Issues
+
+Open at the time of this re-cut: **GH#143, GH#146, GH#147, GH#148, GH#293** — five, of which
+three are parked by decision and one is this epic.
+
+| Plan item | Issue | Priority |
+|---|---|---|
+| R1 — measure the heap split, then stream the list response | **GH#293** (open) | P1 |
+| R2 — cut `0.1.0`, publish the image, correct the README's Central claim | **new** | P1 |
+| R3 — shared `EmptyState` + `ErrorNotice` everywhere, empty copy a required prop | **new** (was T4/G) | P2 |
+| R4 — server-side contract tests for the detail endpoint | **new** (was part of D) | P2 |
+| R5 — agent-attach page + generated cluster context + MCP in deployment.md | **new** (was E/D2) | P2 |
+| 6 — list-header filter syntax: regex, negation, label selector | **new** (was C/T3, now client-side) | P3 |
+| 7 — security/RBAC checks and the first cross-manifest rule | **new** (was F/D3) | P3 |
+| 8 — SSAR affordances | **new** (was H/T5) | P3 |
+| 9 — guarded MCP write tools, Radar scoping | **new** (was D4) | P3 |
+
+Superseded from the previous cut and **not** to be re-filed: A (write-path integrity — done,
+#209/#212/#274), B (bounded lists — measured out, #292), I (docs currency — done).
