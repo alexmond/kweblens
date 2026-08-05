@@ -69,7 +69,15 @@ const columns = computed<DataTableColumns<PortForward>>(() => [
   { title: 'Name', key: 'name', sorter: 'default' },
   { title: 'Namespace', key: 'namespace', sorter: 'default' },
   { title: 'Kind', key: 'kind', sorter: 'default' },
-  { title: 'Pod Port', key: 'remotePort', sorter: (a, b) => a.remotePort - b.remotePort },
+  {
+    // A Service port is not what the container listens on, so show the translation
+    // (podinfo forwards 80 -> 9898). Same number on both sides means no translation.
+    title: 'Port',
+    key: 'remotePort',
+    sorter: (a, b) => a.remotePort - b.remotePort,
+    render: (f) => (f.podPort && f.podPort !== f.remotePort ? `${f.remotePort} → ${f.podPort}` : String(f.remotePort)),
+  },
+  { title: 'Pod', key: 'podName', sorter: 'default', render: (f) => f.podName || '—' },
   { title: 'Local Port', key: 'localPort', sorter: (a, b) => a.localPort - b.localPort },
   { title: 'Protocol', key: 'protocol', sorter: 'default' },
   {
@@ -100,7 +108,8 @@ const columns = computed<DataTableColumns<PortForward>>(() => [
     </div>
     <p class="modal-note">
       Forwards bind on the kweblens host. Reach a forward at <code>host:localPort</code> (loopback unless configured
-      otherwise). Start one from a Pod or Service detail.
+      otherwise). Start one from a Pod or Service detail. A Service port is translated to the pod's
+      <code>targetPort</code>; the Port column shows that translation (80 → 9898) when the two differ.
     </p>
     <div v-if="error" class="error">{{ error }}</div>
     <NDataTable

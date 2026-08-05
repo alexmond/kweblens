@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// Start-port-forward modal (Naive NModal): pick a remote (pod) port — an NSelect when known
+// Start-port-forward modal (Naive NModal): pick a remote port — an NSelect when known
 // ports are supplied, else a free number input — plus an optional local port (blank = auto).
+// For a Service the number is the SERVICE port; the server resolves it to the pod's
+// targetPort (named or numeric), so the label must not call it a pod port.
 // Emits: close (), started (), auth-expired ()
 import { NButton, NForm, NFormItem, NInputNumber, NModal, NSelect } from 'naive-ui';
 import { computed, ref } from 'vue';
@@ -22,11 +24,13 @@ const busy = ref(false);
 const error = ref<string | null>(null);
 
 const portOptions = computed(() => props.ports.map((p) => ({ label: String(p), value: p })));
+const isService = computed(() => props.kind.toLowerCase() === 'service');
+const portLabel = computed(() => (isService.value ? 'Service port' : 'Pod port'));
 
 const submit = () => {
   const remote = remotePort.value ?? 0;
   if (!Number.isFinite(remote) || remote <= 0) {
-    error.value = 'Enter a valid pod port.';
+    error.value = `Enter a valid ${portLabel.value.toLowerCase()}.`;
     return;
   }
   busy.value = true;
@@ -66,10 +70,13 @@ const onShow = (v: boolean) => {
   >
     <p class="modal-note">
       {{ namespace }}/{{ name }} — binds a local port on the kweblens host to a port on this {{ kind.toLowerCase() }}.
+      <template v-if="isService">
+        The service port is resolved to the pod's <code>targetPort</code>, so it may land on a different number.
+      </template>
     </p>
     <div v-if="error" class="error">{{ error }}</div>
     <NForm @submit.prevent="submit">
-      <NFormItem label="Pod port">
+      <NFormItem :label="portLabel">
         <NSelect v-if="ports.length > 0" v-model:value="remotePort" :options="portOptions" />
         <NInputNumber v-else v-model:value="remotePort" :min="1" style="width: 100%" />
       </NFormItem>
