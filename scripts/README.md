@@ -39,6 +39,17 @@ scripts/dev-run.sh --port 8085     # a second instance alongside the first
 scripts/dev-run.sh --stop          # stop whatever is on the port
 ```
 
+Starting an instance warns about kweblens instances on **other** ports, with their age and
+the command to stop each. A second instance is supported — that is what `--port` is for — so
+this warns rather than kills; but a forgotten one is not free. Since #283 and #288 we know
+each instance holds API-server watches and log streams open against a real cluster, and two
+were found here still running days after the agent that started them had gone, both
+predating the fixes for the very leaks they were demonstrating. Age is the tell: a few
+minutes is a colleague, a few days is litter.
+
+```bash
+```
+
 **Always start it this way rather than `java -jar`.** With no admin password set,
 `SecurityConfig` generates one per run and only writes it to the log — so `admin`/`admin`
 silently stops working and the reason is buried in the startup output. `dev-run.sh` always
