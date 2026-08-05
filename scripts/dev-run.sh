@@ -120,6 +120,29 @@ fi
 
 stop_port
 
+# Instances on OTHER ports, which are usually somebody's forgotten one.
+#
+# A second instance is a supported thing — that is what --port is for — so this warns
+# rather than kills. But an instance nobody remembers is not free: since #283 and #288 we
+# know each one holds API-server watches and log streams open against a real cluster, and
+# two were found here still running days after the agent that started them had gone, both
+# predating the fixes for the leaks they were demonstrating. Age is the tell, so it is
+# printed: a few minutes is a colleague, a few days is litter.
+warn_other_instances() {
+	local pid port started
+	# Match on the jar path, not on "kweblens": a looser pattern also matches this script's
+	# own argv and any editor or grep that happens to mention it.
+	for pid in $(pgrep -f "java -jar .*kweblens-web/target/kweblens.jar" 2>/dev/null); do
+		[[ "$pid" == "$$" ]] && continue
+		port=$(lsof -Pan -p "$pid" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {sub(/.*:/, "", $9); print $9}')
+		[[ -z "$port" || "$port" == "$PORT" ]] && continue
+		started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
+		echo "!!  another kweblens is on :${port} (pid ${pid}, since ${started})" >&2
+		echo "!!    it holds cluster watches and log streams; stop it with: $0 --port ${port} --stop" >&2
+	done
+}
+warn_other_instances
+
 ENV_VARS=(
 	KWEBLENS_SECURITY_ADMIN_USERNAME=admin
 	KWEBLENS_SECURITY_ADMIN_PASSWORD=admin
