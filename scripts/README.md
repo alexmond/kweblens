@@ -13,6 +13,7 @@ once — the reason is in the header comment of each script.
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
+| [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
 | [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
 | [`pr-watch.sh`](pr-watch.sh) | Wait for a PR's checks; optionally merge when they pass. |
 | [`deploy-k8s.sh`](deploy-k8s.sh) | Build/push the image and `helm upgrade --install`. |
@@ -136,6 +137,21 @@ records the last one.
 PORT=8131 CLUSTER=default node scripts/payload-bytes.mjs
 PORT=8132 CLUSTER=sim KINDS=pods,secrets SAMPLE=100 node scripts/payload-bytes.mjs
 JSON=1 node scripts/payload-bytes.mjs > after.json      # for diffing two runs
+```
+
+`heap-probe.sh` is the other half of that question: not how big an object is, but what **one
+list request costs the JVM**. It brackets the request with forced collections and samples with
+`jstat` from outside the process, so the answer does not depend on where in a GC cycle the
+reading landed — which is why the 2026-08-01 pass had to throw its heap numbers away. It exists
+because this turned out to be the axis that actually bounds the product: ~241 KB of transient
+heap per Secret on a live cluster, against a chart that limits the container to 1 GiB, where
+the wire cost of the same list is 498 bytes per row. **Run it against a live cluster when the
+number will be quoted** — the simulator's API server shares the JVM, so its serialisation is
+inside every reading. Rows marked `>=` had a young GC inside the window and are lower bounds.
+
+```bash
+PORT=8085 scripts/heap-probe.sh pods secrets configmaps
+CLUSTER=sim REPS=5 scripts/heap-probe.sh secrets
 ```
 
 `ui-shot.mjs` defaults to the **matrix**, not one image, because captures here were taken

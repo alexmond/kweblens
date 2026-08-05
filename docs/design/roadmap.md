@@ -146,6 +146,14 @@ is a spinner that never resolves rather than an error. Compounding it: watches a
 sharing. Ranked second rather than first only because its urgency is a function of cluster
 size, which we have not measured (§7).
 
+> **Measured, 2026-08-05 — and the diagnosis above is half right in a way that matters.** The
+> browser half and the `/counts` half are fixed (#286, #283), and "full LIST to the browser" is
+> now 16.78 MB for 3 000 pods, which is fine. **"Full LIST into the JVM heap" is the half that
+> is still true and is the whole problem**: ~247 KB of transient heap per Secret on the live
+> path, against a 1 GiB container limit, so the failure mode is an OOM-killed pod rather than a
+> spinner. The fix that follows is streaming the response, not paging it. See §5 and
+> [`scale-measurements.md`](scale-measurements.md).
+
 **T3 — Finding a specific object is weak.** Search is a plain substring over name / namespace
 / kind (`shell.ts:filterObjects`); there is no label selector, no field filter, no regex, and
 the palette indexes clusters and nav leaves but **not objects**. For an operator the most
@@ -251,22 +259,42 @@ fan-out decision have landed; measurements for all three are in
   the same way and now attach the keepalive, with a structural test that fails the build if a
   new SSE endpoint does not. Exec-over-WebSocket (~1.3 s to release, close frame *or* SIGKILL)
   and port-forward (not client-scoped by design) were measured and need nothing.
-- **Still open: `limit`/continue paging on the list path itself**, with the server-side
-  label/field selectors that must land with it (see the sequencing constraint below).
+- **The fourth — `limit`/continue paging on the list path — is now measured, and the answer is
+  don't.** Full numbers and method in [`scale-measurements.md`](scale-measurements.md), "Is
+  server-side paging still worth building?". At 200 / 1 000 / 3 000 objects per kind on an idle
+  box: the wire is 16.78 MB in 637 ms for 3 000 pods and 1.2 s for the worst kind; the browser's
+  main-thread block is **flat** across all three sizes (170–420 ms, DOM rows pinned at 20); and
+  filtering 3 000 objects client-side costs ~0.3 s, so #263's refusal to truncate server-side
+  is not paying for itself in latency. Paging buys none of the three things it was scoped to
+  buy.
+- **What is unbounded is heap, not wire.** `ObjectApiController.objects` is
+  `Serialization.asJson(ListProjection.forList(listRaw(...)))` — the whole collection is
+  deserialised, then projected, then materialised as one `String`, so a request holds three
+  copies at once. Measured against the **live** cluster: ~94 KB of transient heap per pod,
+  **~247 KB per Secret**, 5–12× each object's own JSON and ~500× the bytes #279 leaves on the
+  wire. Retained heap returns to baseline, so it is a spike, not a leak — but the chart sets
+  `resources.limits.memory: 1Gi`, and a container over its limit is OOM-killed rather than
+  slowed. Secrets hit a 500 MB spike at roughly **2 000 objects**, which a cluster with a few
+  hundred Helm releases (one Secret per revision) already has.
+- **So the next move on the list path is streaming, not paging** — remove the output-`String`
+  copy without touching the list contract, the filter semantics or three future clients. First
+  measure how the spike splits between the model graph and that `String`
+  (`jcmd GC.class_histogram` at peak); if it is mostly the `String`, streaming is the whole fix.
+  `scripts/heap-probe.sh` is the probe, and Secret-count-per-cluster is the thing to watch.
 
-Why second and not first: it is the largest item here and the only one that changes a
-contract three future consumers read. Why not later: **it must precede GH#143 (TUI) and
-GH#148 (server-side columns)**, because both are new clients of the list contract, and
-retrofitting paging into three clients costs three times what designing it into one does.
-GH#143 already states it should not start before the per-kind projection; the same argument
-applies with more force to paging.
+Why this is no longer second: the three parts that shipped were the valuable ones, and the
+fourth has now been measured out. The sequencing argument below still holds **if** paging is
+ever built — but it is no longer a blocker for GH#143 or GH#148, because neither of them
+changes the heap behaviour above and both can be written against today's list contract.
 
 **The sequencing constraint that matters most in this document:** paging and filtering are
 one piece of work, not two. A substring filter applied to a truncated page is a lie — it
 reports "no matches" for an object that exists. So server-side label/field selectors land
-with the continue token, or neither does.
+with the continue token, or neither does. **Neither does** — measured 2026-08-05, and the
+client-side filter it would have replaced costs ~0.3 s over 3 000 objects.
 
-**Blocks:** GH#143, GH#148, and T3.
+**Blocks:** nothing any more. GH#143 and GH#148 were blocked on a paging contract that is not
+being written; T3 is unblocked in its client-side form for the same reason.
 
 ### Third: T3 — find anything
 
