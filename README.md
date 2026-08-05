@@ -71,13 +71,17 @@ Closing the first three (real `dryRun=All`) and the last (durable audit) is the 
 
 ## Modules
 
-| Module | What it is | Published |
+| Module | What it is | Publishes to |
 |---|---|---|
-| `kweblens-core` | Cluster registry, kubeconfig loading, resource/log/exec/metrics/schema access | ✅ Maven Central |
-| `kweblens-cli`  | Dependency-light cluster inspector (picocli) | ✅ Maven Central |
-| `kweblens-ui`   | The Vue SPA (bundled into `kweblens-web`) | ❌ |
-| `kweblens-web`  | The runnable app (REST API + SPA + MCP) | ❌ container image |
-| `kweblens-it`   | On-demand operational/connectivity tasks (tag `it`) | ❌ |
+| `kweblens-core` | Cluster registry, kubeconfig loading, resource/log/exec/metrics/schema access | Maven Central |
+| `kweblens-cli`  | Dependency-light cluster inspector (picocli) | Maven Central |
+| `kweblens-ui`   | The Vue SPA (bundled into `kweblens-web`) | — |
+| `kweblens-web`  | The runnable app (REST API + SPA + MCP) | container image |
+| `kweblens-it`   | On-demand operational/connectivity tasks (tag `it`) | — |
+
+> **No release has been cut yet.** Nothing is on Maven Central and no image is published, so
+> today the only way to get kweblens is to build it — see [Build & run](#build--run) and
+> [Container image](#container-image). The column above is where each module *will* publish.
 
 ## Build & run
 

@@ -116,7 +116,8 @@ header, and log it.
   `ResourceSummary` rows; `RelationService` resolves the detail drawer's relation sections),
   `health/` (the deterministic workload/network/storage/config checks, shared by the dashboard,
   `/diagnose` and the MCP tools), `event/`, `log/`, `exec/`, `metric/`, `portforward/`,
-  `schema/`, `config/` (`KweblensProperties`). **Published** to Maven Central.
+  `schema/`, `config/` (`KweblensProperties`). Configured to publish to Maven Central — but see
+  the release note below: **no release has been cut**, so nothing is actually there yet.
 - **`kweblens-web`** — the runnable Spring Boot app. Slices: `web/api/` (JSON API +
   `ProblemDetail` error mapping), `web/ui/` (`SpaController` — serves the built Vue SPA),
   `web/security/` (`SecurityConfig` + `AuditService` — see the security gotcha), `web/mcp/`
@@ -146,7 +147,8 @@ header, and log it.
   auto-analysis.
   **Not published** — ships as a container image.
 - **`kweblens-cli`** — a dependency-light cluster inspector (picocli). Prints the cluster the
-  ambient kubeconfig points at. **Published**; runnable fat jar is the `exec` classifier.
+  ambient kubeconfig points at. Same publishing status as core; runnable fat jar is the `exec`
+  classifier.
 - **`kweblens-it`** — on-demand operational tasks (connectivity/health) tagged `it`, excluded
   from the default build. Not published.
 
@@ -292,6 +294,12 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
 
 ## Release (Maven Central)
 
+- **Nothing has ever been released.** No git tags, no GitHub releases, version still
+  `0.1.0-SNAPSHOT`, and `repo1.maven.org/maven2/org/alexmond/kweblens-core/` 404s. There is also
+  **no workflow that builds or publishes the container image** (`.github/workflows/` is `ci.yml`
+  + `maven_release.yml`), and `deploy/helm/kweblens/values.yaml` defaults to `repository:
+  kweblens` with no registry — so the chart assumes an image you built locally. Do not describe
+  any module as "published" until this changes; it is roadmap item **R2**.
 - **Only the libraries publish**: `kweblens-core`, `kweblens-cli` (+ parent pom). The app
   `kweblens-web` is **not** in the top-level `<modules>` — it lives in an `activeByDefault`
   `default` profile. So `-Prelease` deactivates `default` and drops web from the reactor (apps
@@ -360,10 +368,10 @@ now shipped and are kept only for the rule they carry.
   four actions — `restart-pod`, `rollout-restart`, `rollback`, `scale-up` — each gated on a
   precondition that says when it *cannot* work, and each applied only with `confirm=true` and
   audited. **The standing rule: remediation is suggest→approve→apply — never autonomous, always
-  audited, all writes behind auth.** Note the preview is currently prose, not a server dry-run
-  (see the security gotcha); roadmap T1 is the fix, and no new remediation action should be
-  added expecting a real dry-run until it lands. Helm fixes go through jhelm; manifest fixes
-  through the YAML apply path.
+  audited, all writes behind auth.** Roadmap T1 has **landed** (#209, #212, #274), so the preview
+  is a real `dryRun=All` wherever the action is a patch and an explicit `notChecked` where it is
+  not — a new remediation action must pick one of those two and never narrate a third. Helm fixes
+  go through jhelm; manifest fixes through the YAML apply path.
 - **Freelens-parity surfaces** — pod logs, YAML view/edit + apply, events, live metrics,
   exec-into-pod, port-forward, Helm, overviews, detail drawer with relation sections, command
   palette, runtime cluster add/edit/remove: **all shipped.** The rule that produced them stands —

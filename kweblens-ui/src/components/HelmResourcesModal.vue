@@ -6,6 +6,7 @@ import { computed, h } from 'vue';
 import { api } from '../api';
 import { useAsyncData } from '../composables/useAsyncData';
 import type { HelmResourceRef } from '../types';
+import ErrorNotice from './ErrorNotice.vue';
 
 // Objects a release manages (from its rendered manifest). Click a name to open it in the shell.
 //
