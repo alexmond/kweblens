@@ -348,14 +348,261 @@ cluster from the first commit** — see "Two things about the rig" above, which 
 **For sizes past ~3 000 objects/kind: no.** Seven minutes of seeding, superlinear, with no
 lever that helps. KWOK is the answer for anything larger.
 
-## Recommended change to the plan
+## Is server-side paging still worth building? (T2, 2026-08-05)
 
-1. **Virtualise the resource list.** Highest ratio of symptom removed to risk taken, needs no
-   server change, and is validatable on this rig today.
-2. **Then bound the lists server-side**, developed against KWOK or the live cluster from the
-   start because the simulator cannot prove it works. Paging and filtering stay one piece of
-   work, as the roadmap says: a substring filter over a truncated page reports "no matches"
-   for an object that exists.
+T2 was scoped as `limit` + continue tokens in `ResourceService` plus a cap-with-load-more in
+the table. Four things have landed since that scope was written, all of them aimed at the same
+problem from other directions: the list projection (#279, issue #276), the cheap `/counts`
+(#283), virtualisation from 50 rows (#286), and a simulator whose objects are within 1.31× of
+live ones (#287). This section re-asks the question against measurements rather than against
+the plan, and **it moves the answer**: the wire and the browser are now comfortable well past
+any plausible single-operator cluster, and the thing that is not bounded is the **JVM heap**.
+
+**Conditions.** Jar built from `main` at 4d50a08, `-Xmx2g -XX:+UseG1GC`, simulator at 200 /
+1 000 / 3 000 objects per kind across 3 namespaces. Box load recorded at every step and never
+above 5.4 (contrast the 2026-08-01 pass this document already disowns, taken at 19–23). Server
+timings are medians of 3 `curl` runs; heap is `jstat`/`jcmd` from **outside** the JVM; browser
+numbers are Playwright.
+
+### First, the instrument — because it had been setting the budgets
+
+`perf-sweep`'s LOAD column was never time-to-first-row. It waited for
+`.n-data-table-tbody tr, .count, .cluster-overview, .empty`, and `.count` is
+`ResourceListView`'s items badge, which has **no `v-if`**: it renders "0 items" the moment the
+list shell mounts. The positive control, taken at `size=3000` on one instance in one sitting:
+
+| instrument | Pods list, 3 000 objects, 16.78 MB |
+|---|---|
+| `perf-sweep` as merged | `0 rows` · **204 ms** · `ok` |
+| strict wait for a row | **1 879 ms** |
+
+The old tool called a page it never waited for a fast, passing page — 9× understated, and the
+understatement is worst exactly where the number matters, because the slower the server the
+earlier the badge wins. Across a full 44-leaf sweep, **30 of 44 pages** were reporting a "load"
+for a list that had produced no row. Fixed: a row is now the only thing that ends the
+measurement, an empty collection prints `—` rather than a duration, and the summary says how
+many pages had rows to time at all.
+
+**This does not touch #286.** Its threshold decision was argued entirely on BLOCK, which comes
+from a `PerformanceObserver` and never involved the selector. Re-measured here by rebuilding a
+`VIRTUAL_FROM=150` jar and running both arms against a 90-row simulator:
+
+| kind, 90 rows | BLOCK @150 | BLOCK @50 | #286 recorded |
+|---|---:|---:|---|
+| Pods | 1 519 ms | 406 ms | 1 519 → 391 |
+| Deployments | 1 218 ms | 299 ms | 1 729 → 295 |
+| Config Maps | 769 ms | 193 ms | 953 → 185 |
+| Secrets | 994 ms | 224 ms | — |
+
+DOM rows 90 → 20 and DOM nodes 3 767 → 1 257 across the same pair. The decision reproduces
+independently; nothing in #286 needs correcting.
+
+### The wire: comfortable, and not the constraint
+
+Projected list payload and total request time, median of 3:
+
+| kind | 200 | 1 000 | 3 000 |
+|---|---|---|---|
+| pods | 1.14 MB · 61 ms | 5.61 MB · 246 ms | 16.78 MB · 637 ms |
+| deployments | 776 KB · 45 ms | 3.85 MB · 208 ms | 11.37 MB · 488 ms |
+| replicasets | 740 KB · 49 ms | 3.70 MB · 186 ms | 11.11 MB · 580 ms |
+| services | 232 KB · 22 ms | 1.13 MB · 76 ms | 3.41 MB · 314 ms |
+| configmaps | 177 KB · 60 ms | 884 KB · 224 ms | 2.59 MB · 805 ms |
+| secrets | 172 KB · 101 ms | 862 KB · 428 ms | 2.53 MB · 1 224 ms |
+| ingresses | 251 KB · 24 ms | 1.23 MB · 93 ms | 3.70 MB · 203 ms |
+
+Linear in object count, and the slowest kind at 3 000 objects is 1.2 s for a list nobody opens
+by accident. This is the half #279 fixed: Secrets are 2.53 MB for 3 000 objects where the
+unprojected payload would be ~134 MB.
+
+**`/counts` on this rig is a rig artefact — do not quote it.** It reads 232 ms / 958 ms /
+3 647 ms at the three sizes, which looks like #283 regressing. It is not: the fabric8 CRUD mock
+**ignores `limit`**, so `ResourceService.count` gets a full, untruncated page with no continue
+token, takes the "the page IS the whole collection" branch, and returns the right number having
+done exactly the full LIST that #283 removed. Against a real API server the `limit=1` is
+honoured — re-measured here on the live cluster to be sure rather than cited: **110 ms warm**
+(1.39 s on the first call after start), matching #283's 112 ms. This is the same trap the top
+of this document is about, one layer down: **the mock cannot measure anything whose cost
+depends on `limit` being obeyed** — which is also, exactly, why it cannot validate paging.
+
+### The browser: flat, because virtualisation already fixed it
+
+Max main-thread block per list, fixed `perf-sweep`:
+
+| kind | 200 | 1 000 | 3 000 |
+|---|---:|---:|---:|
+| Pods | 370 ms | 371 ms | 299 ms |
+| Deployments | 288 ms | 286 ms | 344 ms |
+| Replica Sets | 255 ms | 250 ms | 371 ms |
+| Config Maps | 170 ms | 167 ms | 211 ms |
+| Secrets | 211 ms | 227 ms | 172 ms |
+| Events | 403 ms | 421 ms | 406 ms |
+
+**Flat from 200 to 3 000**, and DOM rows stay at 20 with ~1 000–1 300 nodes at every size. That
+is windowing doing exactly what #215 predicted and #286 tuned. Scrolling a 3 000-row list to the
+end costs 0–226 ms of block. Time-to-first-row is *not* quoted per size here: it varies with
+what the SPA already holds when the leaf is clicked (392 ms for a 3 000-row Deployments list
+that takes 488 ms to fetch, because rows arrive from the watch before the list settles), so it
+measures navigation order as much as scale. BLOCK is the number that behaved.
+
+**The client-side filter is cheap, which matters for the search argument.** Typing one
+character over a full collection, measured from the keystroke to the badge reporting the
+filtered total:
+
+| kind, 3 000 objects | filter | of which block |
+|---|---:|---:|
+| Pods | 353 ms | 294 ms |
+| Secrets | 263 ms | 219 ms |
+| Config Maps | 232 ms | 180 ms |
+
+#263 kept search client-side because **a substring filter over a server-truncated page reports
+"no matches" for an object that exists**. That correctness argument now has no performance
+argument pushing against it below 3 000 objects/kind: a third of a second, once, per search.
+
+### The heap: the one thing that is not bounded
+
+Nobody had measured this — the 2026-08-01 pass says so explicitly and omits its readings as GC
+noise. Taken properly here: force a full GC (`jcmd GC.run`), read heap used, sample at 50 ms
+through the request (`jstat`), force another GC, read again. **Transient** is peak minus
+baseline — the heap one list request needs on top of steady state.
+
+| kind | 200 | 1 000 | 3 000 | wire at 3 000 |
+|---|---:|---:|---:|---:|
+| pods | 44 MB | 194 MB | 557 MB | 16.78 MB |
+| configmaps | 55 MB | 239 MB | 702 MB | 2.59 MB |
+| secrets | 122 MB | 542 MB | **1 326 MB** | 2.53 MB |
+
+Retained heap returns to baseline after every request, at every size — there is no leak, only a
+spike. But the spike is linear in object count and enormous relative to the wire: **3 000
+Secrets are 2.53 MB on the wire and 1.33 GB of transient heap**, a ratio of 524×.
+
+The mechanism is not subtle, and it is visible in one line of `ObjectApiController`:
+
+```java
+return Serialization.asJson(ListProjection.forList(resources.listRaw(clusterId, descriptor, namespace)));
+```
+
+`listRaw` deserialises **the whole collection** into fabric8 model objects first;
+`ListProjection` then mutates those same instances (its javadoc says so), and `asJson`
+materialises the entire projected result as one `String` before a byte is written. So every
+list request holds, simultaneously, the API server's response, a full Java object graph of it,
+and the complete output JSON. **#279 moved bytes off the wire; it did not move them out of the
+heap** — which is exactly why Secrets show the largest gap between the two.
+
+#### How much of that is the rig?
+
+The simulator's API server is **in the same JVM**, so its own serialisation is inside every
+number above. That had to be bounded rather than assumed, so the identical probe was run
+against the live cluster, where the API server is out of process and the objects are real:
+
+| kind | objects | wire | transient heap | per object | object mean | heap ÷ object |
+|---|---:|---:|---:|---:|---:|---:|
+| pods | 88 | 435 KB | 6.9 MB | **81 KB** | 7.6 KB | 10.6× |
+| secrets | 151 | 73 KB | 35.5 MB | **241 KB** | 53.4 KB | 4.5× |
+| configmaps | 99 | 56 KB | 7.8 MB | **78 KB** | 16.9 KB | 4.6× |
+
+Against the simulator's per-object figures at the same measure — ~190 KB/pod, ~450 KB/secret,
+~240 KB/configmap — **the live path costs roughly a third to a half**, so the in-JVM mock is
+the larger part of the simulator's spike. It is not the whole story: the effect is real on both
+rigs, at the same shape, and the live numbers are the ones to quote. Retained heap returns to
+baseline on both, so this is a spike and not a leak.
+
+**Every figure in that table is a lower bound.** A young collection ran inside the measurement
+window on every rep, which resets the peak the sampler is watching, so the true spike is at
+least this and possibly more. `scripts/heap-probe.sh` marks such rows `>=` rather than
+reporting them as exact — the conclusion below only gets stronger if they are, so no attempt
+was made to tune GC to remove them.
+
+Two independent runs an hour apart agree to within 3% (pods 6.9 vs 7.0 MB, secrets 35.5 vs
+36.4 MB), which is the positive control for the method.
+
+The per-object cost is **flat in N on the simulator** (pods 225 → 199 → 190 KB across 200 →
+1 000 → 3 000), i.e. the spike is linear in object count. Live can only be measured at the
+sizes the cluster has (88–172 per kind), so the crossing numbers below take the live per-object
+cost and the simulator's demonstrated linearity together. **That combination is an inference,
+not a measurement** — it is the one place in this section where the two rigs are multiplied
+rather than compared, and it is why the trigger below is a thing to measure rather than a
+number to trust.
+
+### Verdict
+
+**Server-side `limit`/continue paging is not worth building now — and the thing that is
+genuinely unbounded is not what T2 was scoped to bound.**
+
+Three of the four reasons paging was proposed have been answered by other work, and the
+measurements say so rather than the changelog:
+
+- **Wire:** 3 000 pods is 16.78 MB in 637 ms; the worst kind is 1.2 s. #279 did this.
+- **Browser:** main-thread block is *flat* from 200 to 3 000 objects, 170–420 ms, DOM rows
+  pinned at 20. #286 did this.
+- **`/counts`:** #283 did this; the only number that looks bad here is the mock ignoring
+  `limit`.
+- **Search:** filtering 3 000 objects client-side costs ~0.3 s, so #263's refusal to truncate
+  server-side is not paying a performance price.
+
+What is left is heap, and it is worse than the wire ever was. On the live path, **a Secrets
+list costs ~241 KB of transient heap per object** — for a payload that #279 already reduced to
+498 bytes per row. Taking that with the simulator's demonstrated linearity, a spike budget of
+**500 MB** is exhausted at roughly:
+
+| kind | objects before a 500 MB spike | at 1 GB |
+|---|---:|---:|
+| Secrets | **~2 100** | ~4 200 |
+| Pods | ~6 300 | ~12 600 |
+| ConfigMaps | ~6 500 | ~13 100 |
+
+**Secrets are the kind that gets there first, and 2 000 Secrets is not a large cluster.** Helm
+stores one Secret per release *revision*, so 200 releases with ten revisions each is already
+there, on a cluster with a hundred pods. This is the number to watch, and it is roughly an
+order of magnitude below where a wire-based or DOM-based argument would have put the ceiling.
+
+Two things sharpen it into an operational limit rather than a curiosity:
+
+- The shipped chart sets `resources.limits.memory: 1Gi`
+  (`deploy/helm/kweblens/values.yaml`), and a container that exceeds its limit is OOM-killed,
+  not slowed down. The failure mode of listing Secrets on a big-enough cluster is therefore a
+  **restarting pod**, which is exactly the "spinner that never resolves" T2 was written to
+  prevent, reached by a different road.
+- At `size=3000` the Secrets list peaked at **2 021 MB against a 2 048 MB ceiling**. It
+  completed — but with 27 MB of headroom, and that was with `-Xmx2g`, four times what the chart
+  allows.
+
+**And paging is still the wrong first fix**, for the reason the roadmap already records: a
+substring filter over a truncated page reports "no matches" for an object that exists, so
+`limit` on the list path drags server-side label/field selectors and a renegotiated search
+contract along with it — measured above at 0.3 s of client-side cost it is not buying, and
+undevelopable on this rig because the CRUD mock ignores `limit`.
+
+The cheaper shape is to stop *materialising* the list rather than to stop *fetching* it. One
+list request currently holds three full copies at once (API response, model graph, output
+`String`); `Serialization.asJson(...)` returning one `String` is the copy that is pure waste,
+and streaming the projected list straight to the response body removes it without touching the
+list contract, the filter semantics, or three future clients.
+
+**What is not known, and decides between the two:** how the spike splits between the model
+graph and the output `String`. If most of it is the `String`, streaming is the whole fix and
+paging stays unbuilt. If most of it is the graph, streaming halves the problem and something
+that bounds what is deserialised — paging, or a projecting deserialiser — is eventually needed.
+That split is one afternoon's work to measure (a heap histogram at peak, `jcmd GC.class_histogram`
+against a live list) and should be measured **before** any of it is designed.
+
+**What to watch, so that crossing it is noticed.** Secret count per cluster, against the
+container's memory limit — not pod count, and not payload size, both of which look healthy the
+whole way. `scripts/payload-bytes.mjs` reports per-object size; `scripts/heap-probe.sh` is the
+other half and is the probe used above, shipped so the number can be re-taken rather than
+believed. Run it against a **live** cluster; the simulator's in-JVM API server is inside the
+reading.
+
+
+2. ~~**Then bound the lists server-side**~~ — **superseded 2026-08-05, by measurement.** See
+   "Is server-side paging still worth building?" above. The wire, the DOM and `/counts` are all
+   comfortable to 3 000 objects/kind now, so paging buys none of what it was scoped to buy; the
+   unbounded thing is **transient heap**, ~247 KB per Secret on the live path, which reaches the
+   chart's 1 GiB container limit at roughly **2 000 Secrets**. The next move is to stop
+   materialising the whole response (`Serialization.asJson` over the full list) rather than to
+   stop fetching it — and before either, to measure how the spike splits between the model graph
+   and the output `String`. Paging stays unbuilt, and the filter-correctness constraint below is
+   part of why.
 3. ~~**Either make the simulator's seeder bulk, or stop treating it as the scale rig**~~ —
    **done, partly.** The seeder now produces objects that resemble real ones (measured above),
    so it is a trustworthy rig for payload and rendering questions up to ~1 000 objects/kind and

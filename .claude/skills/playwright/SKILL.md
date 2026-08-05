@@ -142,6 +142,26 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-05 — **`perf-sweep`'s LOAD column was never time-to-first-row.** It waited for
+  `.n-data-table-tbody tr, .count, .cluster-overview, .empty`, and `.count` is
+  `ResourceListView`'s items badge, which has **no `v-if`**: it renders "0 items" the instant
+  the shell mounts. So a page whose data was slow resolved on an empty shell — a Pods list at
+  simulator `size=200` was recorded `0 rows 111ms` where a strict wait for a row measured
+  **917 ms** on the same instance, and at `size=3000` the gap is 132 ms against 12.3 s. The
+  understatement is worst exactly where the number matters: the slower the server, the earlier
+  the badge wins. 30 of 44 pages in a full sweep were reporting a "load" for a list they never
+  waited for. → A row is now the only thing that ends the LOAD measurement; an empty
+  collection (a zero badge still zero after `EMPTY_MS`) prints `—` and `(empty — load not
+  scored)` instead of a duration, and the summary line says how many pages actually had rows
+  to time. **A page with no rows has no load time; printing one is how "0 rows 111ms" got read
+  as a fast page.**
+  Two things this did *not* invalidate, both checked rather than assumed: **BLOCK** comes from
+  a `PerformanceObserver` and never depended on the selector, and **#286**'s threshold decision
+  was argued entirely on BLOCK — re-measured at both thresholds against a 90-row simulator, it
+  reproduces (Pods 1 519 ms at 150 vs 406 ms at 50, against the merged 1 519/391). **Check
+  which column a decision was made on before assuming a broken instrument broke the
+  decision.**
+
 - 2026-08-04 — **An optional `?click` on an already-open section CLOSES it**, and then the
   thing you came to measure is `not present` — which reads as "absent from the app". Measuring
   a Secret's Reveal button, `?click:.n-collapse-item__header:has-text("Data")` toggled shut a
