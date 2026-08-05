@@ -132,6 +132,8 @@ export interface PortForward {
   kind: string;
   name: string;
   remotePort: number;
+  podPort: number;
+  podName: string;
   localPort: number;
   address: string;
   protocol: string;

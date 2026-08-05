@@ -39,7 +39,7 @@ public class PortForwardApiController {
 		PortForwardInfo info = portForwards.start(clusterId, request.kind(), request.namespace(), request.name(),
 				request.remotePort(), request.localPort());
 		audit.record(clusterId, "port-forward", AuditService.ref(info.kind(), info.namespace(), info.name()) + " "
-				+ info.remotePort() + "->" + info.localPort());
+				+ info.remotePort() + "->" + info.localPort() + " via pod " + info.podName() + ":" + info.podPort());
 		return info;
 	}
 

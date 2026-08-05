@@ -29,8 +29,11 @@ import org.alexmond.kweblens.config.KweblensProperties;
  * everything is closed on shutdown.
  *
  * <p>
- * Both {@code Pod} and {@code Service} resources are {@link PortForwardable}, so the
- * fabric8 client resolves the target (including a service's endpoints) for us.
+ * A Service target is translated to a pod and a pod port first, by
+ * {@link PortForwardTargetResolver} — a Service's own port is not what the container
+ * listens on. fabric8's {@code services().portForward(…)} picks a matching pod but passes
+ * the port straight through, which reaches nothing whenever a Service remaps a port, so
+ * every forward is started against the resolved <em>pod</em>.
  */
 @Slf4j
 @Service
@@ -57,19 +60,39 @@ public class PortForwardService implements AutoCloseable {
 	public PortForwardInfo start(String clusterId, String kind, String namespace, String name, int remotePort,
 			Integer localPort) {
 		KubernetesClient client = clusters.require(clusterId);
-		PortForwardable target = resolve(client, kind, namespace, name);
+		PortForwardTarget target = target(clusterId, kind, namespace, name, remotePort);
+		PortForwardable pod = client.pods().inNamespace(target.namespace()).withName(target.podName());
 		int requested = (localPort != null) ? localPort : 0;
-		LocalPortForward forward = target.portForward(remotePort, bindAddress(), requested);
+		LocalPortForward forward = pod.portForward(target.podPort(), bindAddress(), requested);
 		if (forward.errorOccurred()) {
 			closeQuietly(forward);
-			throw new PortForwardException("Failed to start port-forward to " + kind + "/" + name);
+			throw new PortForwardException("Failed to start port-forward to " + normalise(kind) + "/" + name + " ("
+					+ target.podName() + ":" + target.podPort() + ")");
 		}
 		String id = clusterId + "-" + sequence.incrementAndGet();
 		PortForwardInfo info = new PortForwardInfo(id, clusterId, namespace, normalise(kind), name, remotePort,
-				forward.getLocalPort(), forward.getLocalAddress().getHostAddress(), "TCP", "Active");
+				target.podPort(), target.podName(), forward.getLocalPort(), forward.getLocalAddress().getHostAddress(),
+				"TCP", "Active");
 		forwards.put(id, new Active(forward, info));
-		log.info("Started port-forward {} {}/{} {}->{}", id, namespace, name, remotePort, forward.getLocalPort());
+		log.info("Started port-forward {} {}/{} {}->{} via pod {}:{}", id, namespace, name, remotePort,
+				forward.getLocalPort(), target.podName(), target.podPort());
 		return info;
+	}
+
+	/**
+	 * Where a forward to {@code kind}/{@code name} would land: the pod, and the port
+	 * inside it. For a Service this performs the {@code port} to {@code targetPort}
+	 * translation that {@code kubectl port-forward service/…} does, resolving a
+	 * <em>named</em> {@code targetPort} against the selected pod's container ports. A Pod
+	 * target is returned unchanged — there is nothing to translate.
+	 */
+	public PortForwardTarget target(String clusterId, String kind, String namespace, String name, int remotePort) {
+		KubernetesClient client = clusters.require(clusterId);
+		String resolved = normalise(kind).toLowerCase(Locale.ROOT);
+		if (!"pod".equals(resolved) && !"service".equals(resolved)) {
+			throw new PortForwardException("Port-forward supports Pod and Service, not '" + kind + "'");
+		}
+		return new PortForwardTargetResolver(client).resolve(resolved, namespace, name, remotePort);
 	}
 
 	/**
@@ -102,14 +125,6 @@ public class PortForwardService implements AutoCloseable {
 			status = active.forward.isAlive() ? "Active" : "Closed";
 		}
 		return active.info.withStatus(status);
-	}
-
-	private PortForwardable resolve(KubernetesClient client, String kind, String namespace, String name) {
-		return switch (normalise(kind).toLowerCase(Locale.ROOT)) {
-			case "service" -> client.services().inNamespace(namespace).withName(name);
-			case "pod" -> client.pods().inNamespace(namespace).withName(name);
-			default -> throw new PortForwardException("Port-forward supports Pod and Service, not '" + kind + "'");
-		};
 	}
 
 	private String normalise(String kind) {
