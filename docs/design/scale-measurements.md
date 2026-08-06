@@ -593,6 +593,106 @@ other half and is the probe used above, shipped so the number can be re-taken ra
 believed. Run it against a **live** cluster; the simulator's in-JVM API server is inside the
 reading.
 
+## Where the list spike actually is (#293, 2026-08-06)
+
+The section above ends by naming the one thing it could not settle: whether the spike is the
+output `String` (cheap to fix — stream it) or the deserialised model graph (expensive — stop
+materialising the collection). It proposed `jcmd GC.class_histogram` as the instrument. **That
+instrument cannot answer the question**, and the reason is worth writing down before the answer:
+
+```
+     MB      %      count Δ  class            (151 Secrets, live, GC.class_histogram -all diff)
+   24.8   66.0         4139  [B
+    9.5   25.2           99  [C
+    0.2    0.5         3210  java.util.LinkedHashMap
+    0.0    0.0          151  io.fabric8.kubernetes.api.model.GenericKubernetesResource
+```
+
+91% is `byte[]` and `char[]` — which is not an answer, because since JDK 9 compact strings
+**every `String` is a `byte[]`**. Those arrays are simultaneously the output `String`, Jackson's
+scratch buffers, the response body, and every field name and value in the model graph. A
+histogram has no call site, so it cannot separate the cheap case from the expensive one.
+
+**JFR allocation sampling can**, because each sample carries a stack:
+`jcmd <pid> JFR.start settings=profile jdk.ObjectAllocationSample#throttle=3000/s`, ten list
+requests, then attribute by call site and by thread. `scripts/alloc-probe.sh` is that probe.
+(Print the stacks with `--stack-depth 48`: `jfr print` truncates to **5 frames** by default,
+which lands inside Jackson and netty and attributes half the heap to "an event loop".)
+
+### The attribution
+
+Live cluster, per list request, mean of 10:
+
+| stage | Secrets (151 obj) | Pods (88 obj) | removed by |
+|---|---:|---:|---|
+| response bytes — TLS decrypt, netty buffers, `BufferUtil.toArray` | 32.0 MB · 56% | 2.6 MB · 20% | fetching less at once |
+| the model graph — Jackson decode into the maps/strings that *are* the objects | 21.1 MB · 37% | 4.8 MB · 36% | fetching less at once |
+| `ListProjection` | 0.07 MB · 0.1% | ~0 | — |
+| **`Serialization.asJson` — the output `String`** | **0.81 MB · 1.4%** | **2.0 MB · 15%** | **streaming the response** |
+| other (JFR's own recording, vert.x timers, Tomcat) | 3.5 MB · 6% | 3.9 MB · 29% | — |
+| total | 57.4 MB | 13.4 MB | |
+
+The same split, taken independently by **thread**, which needs no bucketing rules to believe:
+
+| thread | Secrets | Pods | what runs there |
+|---|---:|---:|---|
+| `vert.x-eventloop-*` | **52.8 MB** | 7.2 MB | the fabric8 client: read, decrypt, parse |
+| `tomcat-handler-*` | **1.4 MB** | 3.7 MB | the whole controller — `ListProjection` **and** `asJson` |
+
+**So it is the model graph, decisively, and the histogram's `[B` was mostly not the `String`.**
+For a Secrets list, 97.5% of the allocation has already happened before `ObjectApiController`
+runs its one line; the output `String` the previous section called "pure waste" is **1.4%** of
+it. Pods are the friendlier end of the range at 15%, because a pod's projected row is 5 068
+bytes against a Secret's 498.
+
+The dominant stacks, if the buckets are not trusted (Secrets, per request):
+
+| MB | allocation site |
+|---:|---|
+| 8.4 | `TextBuffer.carr` ← `UTF8StreamJsonParser._finishString2` — decoding a field value |
+| 7.6 | `GaloisCounterMode.implGCMCrypt` ← `SSLCipher…decrypt` — decrypting the response |
+| 6.2 | `BufferUtil.toArray` ← `ByteArrayBodyHandler.onBodyDone` — **the whole body as one `byte[]`** |
+| 5.7 | `BufferImpl.getBytes` ← `VertxHttpRequest.lambda$consumeBytes$0` — per-chunk copies |
+| 5.6 | `StringBuilder.<init>` ← `TextBuffer.contentsAsString` — building a model-graph `String` |
+| 4.3 | `UnpooledByteBufAllocator.newHeapBuffer` — netty read buffers |
+| 3.3 | `Arrays.copyOfRange` ← `String.<init>` ← `TextBuffer.contentsAsString` — the `String` itself |
+
+Every one of those is **the response**, not the reply. `ByteArrayBodyHandler` is the shape of
+the problem in one frame: fabric8 buffers the entire list response into a single `byte[]` before
+Jackson sees it, and Jackson then builds a complete `GenericKubernetesResource` graph from it,
+and only then is the controller called. Two whole-collection copies exist before the line that
+makes the third.
+
+### What that rules in and out
+
+- **Streaming the response is not the fix.** It removes 1.4% of a Secrets list and 15% of a Pods
+  list. Shipping it alone would be a change that measures well on a microbenchmark of the wrong
+  stage and leaves the OOM-kill exactly where it is.
+- **Paging is still not the fix**, for the unchanged reason: #263 refuses a server-side `limit`
+  so a substring filter cannot report "no matches" for an object that exists, and #292 measured
+  that refusal as costing ~0.3 s on 3 000 objects.
+- **What is left is the one thing both of those leave alone: fetch the collection in chunks and
+  let each chunk become garbage before the next arrives.** `limit` + `metadata.continue` is
+  server-side paging *of the fetch*, invisible to the client — the response is still every
+  object of the kind, so the list contract, the filter semantics and #263 are all untouched.
+  Peak heap stops being a function of collection size and becomes a function of chunk size.
+
+**Caveats.** JFR measures *allocation over a window*, not peak occupancy — it says which code
+allocated, which is the question; `heap-probe.sh` remains the instrument for how much is
+resident at once. Sample weights are extrapolations, so treat the percentages as ratios, not
+readings. The "other" bucket includes JFR's own recording (visible as the `Attach Listener`
+thread, ~2 MB/request), which is why the small totals are noisier.
+
+**How stable is it?** Two runs of the same probe an hour apart put the Secrets *total* at 57 MB
+and 95 MB — a single sample with an extrapolated weight of 38 MB landed in the second. The
+number the conclusion rests on did not move at all: `tomcat-handler-*` read **1.44 MB/request**
+in both. That is the useful positive control here, and the reason the thread table is quoted
+alongside the stage table rather than instead of it.
+
+## Does chunking the fetch actually bound the heap? (#293, 2026-08-06)
+
+Placeholder — filled in by the same PR once measured.
+
 
 2. ~~**Then bound the lists server-side**~~ — **superseded 2026-08-05, by measurement.** See
    "Is server-side paging still worth building?" above. The wire, the DOM and `/counts` are all

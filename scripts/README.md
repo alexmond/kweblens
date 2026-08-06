@@ -14,6 +14,7 @@ once — the reason is in the header comment of each script.
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
+| [`alloc-probe.sh`](alloc-probe.sh) | *Which code* spends that heap, by call site and thread. A class histogram cannot say. |
 | [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
 | [`pr-watch.sh`](pr-watch.sh) | Wait for a PR's checks; optionally merge when they pass. |
 | [`deploy-k8s.sh`](deploy-k8s.sh) | Build/push the image and `helm upgrade --install`. |
@@ -152,6 +153,22 @@ inside every reading. Rows marked `>=` had a young GC inside the window and are 
 ```bash
 PORT=8085 scripts/heap-probe.sh pods secrets configmaps
 CLUSTER=sim REPS=5 scripts/heap-probe.sh secrets
+```
+
+`alloc-probe.sh` answers the follow-up that decided #293: not **how much** heap a list request
+costs but **which code** spends it. It exists because the obvious instrument gives a confident
+wrong answer — a `GC.class_histogram` of a live Secrets list is 66% `byte[]` and 25% `char[]`,
+which separates nothing, because since JDK 9 compact strings every `String` is a `byte[]`, so
+that one bucket is the output `String`, Jackson's scratch, the response body and every field
+value in the model graph at once. JFR allocation samples carry a stack, so the same run splits
+them, and the split was 1.4% output `String` against 94% response-and-parse. Two traps are baked
+into the script because both produced a wrong answer first: `jfr print` truncates stacks to
+**five frames** unless told otherwise, and `settings=profile` samples too coarsely for a
+one-second request. Read the **thread** table first — it needs no bucketing rules to believe.
+
+```bash
+PORT=8142 CLUSTER=default scripts/alloc-probe.sh secrets pods
+REPS=20 scripts/alloc-probe.sh secrets
 ```
 
 `ui-shot.mjs` defaults to the **matrix**, not one image, because captures here were taken
