@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResourceList;
@@ -16,6 +17,7 @@ import io.fabric8.kubernetes.api.model.ListOptions;
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
@@ -43,6 +45,12 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 @RequiredArgsConstructor
 public class ResourceService {
 
+	/**
+	 * What an API server answers when a continue token's snapshot has been compacted
+	 * away.
+	 */
+	private static final int HTTP_GONE = 410;
+
 	private final ClusterRegistry clusters;
 
 	/**
@@ -67,6 +75,65 @@ public class ResourceService {
 			return op.inAnyNamespace().list().getItems();
 		}
 		return op.inNamespace(namespace).list().getItems();
+	}
+
+	/**
+	 * List a kind's resources the same way {@link #listRaw} does — <b>every</b> object,
+	 * same order, same objects — but fetched in server-side pages, handing each page to
+	 * {@code onChunk} and keeping no reference to it afterwards. A caller that also drops
+	 * each chunk holds one page at a time instead of the whole collection.
+	 *
+	 * <p>
+	 * <b>Why this exists.</b> Measured on a live cluster (#292/#293), one list request
+	 * costs ~241 KB of transient heap per Secret, against a chart that limits the
+	 * container to 1 GiB — an OOM-kill at roughly 2 000 Secrets, which one Secret per
+	 * Helm release revision reaches on an ordinary cluster. JFR allocation sampling
+	 * attributed 94% of that to the response body and the deserialised model graph and
+	 * only 1.4% to the output {@code String}, both of which exist in full before the
+	 * caller is handed anything. Fetching in pages is what bounds them; streaming the
+	 * reply is not.
+	 *
+	 * <p>
+	 * <b>This is not paging the API.</b> The caller still receives every object of the
+	 * kind — {@code limit}/{@code continue} is an implementation detail of the fetch, and
+	 * deliberately so: GH#263 refuses a client-visible {@code limit} because a substring
+	 * filter over a truncated page reports "no matches" for an object that exists.
+	 * Kubernetes serves a chunked list from a pinned revision, so the assembled result is
+	 * a consistent snapshot rather than a stitched-together one.
+	 *
+	 * <p>
+	 * Two behaviours of real API servers are handled rather than assumed:
+	 * <ul>
+	 * <li><b>{@code limit} ignored</b> — some kinds do this (ComponentStatus on the
+	 * reference cluster; the fabric8 CRUD mock does it for every kind). The first
+	 * response then carries the whole collection and no continue token, which terminates
+	 * the loop after one chunk: the behaviour degrades to exactly {@link #listRaw}.</li>
+	 * <li><b>an expired continue token</b> — the pinned revision can be compacted away
+	 * mid-scan, which the API server answers 410. That surfaces as
+	 * {@link ListChunkExpiredException} so the caller can restart the scan; it must not
+	 * be confused with the kind not existing.</li>
+	 * </ul>
+	 * @param chunkSize objects per request; not honoured by every API server, see above.
+	 * Zero or less asks for the whole collection in one request — one chunk, no
+	 * {@code limit} sent at all, which is the escape hatch if an API server mishandles
+	 * continue tokens.
+	 * @param onChunk called once per page, in order, with that page's objects
+	 */
+	public void listRawChunked(String clusterId, ResourceDescriptor descriptor, String namespace, int chunkSize,
+			Consumer<List<GenericKubernetesResource>> onChunk) {
+		if (chunkSize <= 0) {
+			onChunk.accept(listRaw(clusterId, descriptor, namespace));
+			return;
+		}
+		String token = null;
+		do {
+			ListOptions options = new ListOptionsBuilder().withLimit((long) chunkSize).withContinue(token).build();
+			GenericKubernetesResourceList page = listPage(clusterId, descriptor, namespace, options, token != null);
+			onChunk.accept((page.getItems() != null) ? page.getItems() : List.of());
+			ListMeta meta = page.getMetadata();
+			token = (meta != null) ? meta.getContinue() : null;
+		}
+		while (token != null && !token.isBlank());
 	}
 
 	/**
@@ -100,7 +167,8 @@ public class ResourceService {
 	 * {@code kubectl}.
 	 */
 	public int count(String clusterId, ResourceDescriptor descriptor, String namespace) {
-		GenericKubernetesResourceList page = listPage(clusterId, descriptor, namespace);
+		GenericKubernetesResourceList page = listPage(clusterId, descriptor, namespace,
+				new ListOptionsBuilder().withLimit(1L).build(), false);
 		int returned = (page.getItems() != null) ? page.getItems().size() : 0;
 		ListMeta meta = page.getMetadata();
 		Long remaining = (meta != null) ? meta.getRemainingItemCount() : null;
@@ -115,17 +183,31 @@ public class ResourceService {
 		return listRaw(clusterId, descriptor, namespace).size();
 	}
 
-	/** The single-item page {@link #count} reasons about. */
-	private GenericKubernetesResourceList listPage(String clusterId, ResourceDescriptor descriptor, String namespace) {
-		ListOptions options = new ListOptionsBuilder().withLimit(1L).build();
+	/**
+	 * One page of a kind — the single item {@link #count} reasons about, or one chunk of
+	 * {@link #listRawChunked}.
+	 * @param continuing whether {@code options} carries a continue token, which is the
+	 * only case in which a 410 means "the snapshot expired" rather than something being
+	 * wrong with the request
+	 */
+	private GenericKubernetesResourceList listPage(String clusterId, ResourceDescriptor descriptor, String namespace,
+			ListOptions options, boolean continuing) {
 		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
-		if (!descriptor.namespaced()) {
-			return op.list(options);
+		try {
+			if (!descriptor.namespaced()) {
+				return op.list(options);
+			}
+			if (namespace == null || namespace.isBlank()) {
+				return op.inAnyNamespace().list(options);
+			}
+			return op.inNamespace(namespace).list(options);
 		}
-		if (namespace == null || namespace.isBlank()) {
-			return op.inAnyNamespace().list(options);
+		catch (KubernetesClientException ex) {
+			if (continuing && ex.getCode() == HTTP_GONE) {
+				throw new ListChunkExpiredException(descriptor.id(), ex);
+			}
+			throw ex;
 		}
-		return op.inNamespace(namespace).list(options);
 	}
 
 	/**

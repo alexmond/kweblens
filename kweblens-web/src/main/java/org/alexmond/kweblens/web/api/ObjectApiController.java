@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import org.alexmond.kweblens.config.KweblensProperties;
 import org.alexmond.kweblens.resource.CrdService;
+import org.alexmond.kweblens.resource.ListChunkExpiredException;
 import org.alexmond.kweblens.resource.PrinterColumn;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
@@ -39,6 +41,8 @@ public class ObjectApiController {
 
 	private final CrdService crdService;
 
+	private final KweblensProperties properties;
+
 	/**
 	 * The CRD-declared printer columns for a kind (empty for built-in kinds). Lets the UI
 	 * render a custom resource's own columns instead of the generic projection.
@@ -51,24 +55,44 @@ public class ObjectApiController {
 
 	/**
 	 * The pods scheduled on a node, as a JSON array — backs the Pods tab of a node's
-	 * detail. Field-selected server-side, so only that node's pods are fetched.
+	 * detail. Field-selected server-side, so only that node's pods are fetched, and
+	 * bounded by what one node can run rather than by the cluster — hence no chunking.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/nodes/{node}/pods", produces = MediaType.APPLICATION_JSON_VALUE)
-	public String podsOnNode(@PathVariable String clusterId, @PathVariable String node) {
-		return Serialization.asJson(ListProjection.forList(resources.listPodsOnNode(clusterId, node)));
+	public byte[] podsOnNode(@PathVariable String clusterId, @PathVariable String node) {
+		return ListJson.of(resources.listPodsOnNode(clusterId, node));
 	}
 
 	/**
 	 * The objects of a kind as a JSON array (namespaced kinds honour the filter),
 	 * projected for a list by {@link ListProjection} — see there for what is dropped and
 	 * why the single-object endpoint below is not.
+	 *
+	 * <p>
+	 * The collection is fetched in server-side chunks and serialised a chunk at a time
+	 * ({@link ListJson}), because listing 3 000 Secrets as one collection cost 1.33 GB of
+	 * transient heap against a 1 GiB container limit (#292/#293). The <b>response is
+	 * unchanged</b>: every object of the kind, same bytes. GH#263's refusal of a
+	 * client-visible {@code limit} stands — a substring filter over a truncated page
+	 * would report "no matches" for an object that exists.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/objects",
 			produces = MediaType.APPLICATION_JSON_VALUE)
-	public String objects(@PathVariable String clusterId, @PathVariable String resourceId,
+	public byte[] objects(@PathVariable String clusterId, @PathVariable String resourceId,
 			@RequestParam(required = false) String namespace) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		return Serialization.asJson(ListProjection.forList(resources.listRaw(clusterId, descriptor, namespace)));
+		int chunkSize = properties.getList().getChunkSize();
+		try {
+			return ListJson.chunked(resources, clusterId, descriptor, namespace, chunkSize);
+		}
+		catch (ListChunkExpiredException ex) {
+			// The snapshot was compacted away mid-scan, so every chunk already assembled
+			// describes a revision that no longer exists. Start again on a fresh one
+			// rather than return a list stitched from two — once; a second expiry is a
+			// cluster problem and surfaces as one.
+			log.info("Chunked list of '{}' expired mid-scan; restarting", resourceId);
+			return ListJson.chunked(resources, clusterId, descriptor, namespace, chunkSize);
+		}
 	}
 
 	/**
