@@ -38,6 +38,9 @@ scripts/dev-run.sh --files=ro      # pod file browser ON, browse-and-download on
 scripts/dev-run.sh --files-roots /tmp   # ...and confined to those paths (implies --files)
 scripts/dev-run.sh --port 8085     # a second instance alongside the first
 scripts/dev-run.sh --stop          # stop whatever is on the port
+scripts/dev-run.sh --list          # every instance: pid, port, RSS, age, staleness
+scripts/dev-run.sh --stop-stale    # stop only those whose source tree has moved on
+scripts/dev-run.sh --stop-all      # stop all of them
 ```
 
 Starting an instance warns about kweblens instances on **other** ports, with their age and
@@ -50,6 +53,19 @@ minutes is a colleague, a few days is litter.
 
 ```bash
 ```
+
+Instances launch with **`setsid`**, so they outlive the shell — and the editor, agent or
+terminal that ran the script. `nohup` alone was not enough: it blocks SIGHUP but not a SIGTERM
+to the process *group*, which is how tooling normally tears down what it started, so instances
+died whenever the tool that launched them exited. An app you have open in a browser should not
+vanish because you restarted your editor.
+
+The trade is that Ctrl-C no longer stops one, which is why `--list`, `--stop`, `--stop-stale`
+and `--stop-all` exist. They derive everything from the process table rather than a state file:
+a registry that goes stale names a pid that has since been recycled, and killing the wrong
+process is worse than failing to kill the right one. The lookup is pinned to the `java`
+executable, not just an argv pattern — `pgrep -f` alone matches any shell whose command line
+merely mentions the pattern, which made an early `--stop-all` SIGTERM the shell invoking it.
 
 **Always start it this way rather than `java -jar`.** With no admin password set,
 `SecurityConfig` generates one per run and only writes it to the log — so `admin`/`admin`
