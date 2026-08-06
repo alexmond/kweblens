@@ -17,6 +17,9 @@
 #   scripts/dev-run.sh --files=ro      # pod file browser ON, browse-and-download only
 #   scripts/dev-run.sh --files-roots /tmp   # ...and confine it to those roots
 #   scripts/dev-run.sh --stop          # stop whatever is on the port
+#   scripts/dev-run.sh --list          # every kweblens on this box: port, pid, age, jar SHA
+#   scripts/dev-run.sh --stop-stale    # stop the ones built from a jar that is no longer HEAD
+#   scripts/dev-run.sh --stop-all      # stop every one of them
 #
 # Login is admin/admin. These are DEV credentials passed as environment at run
 # time — do not add them to application.yml, which would bake a default password
@@ -50,6 +53,9 @@ PORT=8080
 BUILD=false
 SIM=false
 STOP=false
+LIST=false
+STOP_ALL=false
+STOP_STALE=false
 AI=false
 FILES=off
 FILES_ROOTS=
@@ -65,6 +71,9 @@ while [[ $# -gt 0 ]]; do
 		--files-roots) FILES_ROOTS="$2"; shift 2 ;;
 		--files-roots=*) FILES_ROOTS="${1#*=}"; shift ;;
 		--stop) STOP=true; shift ;;
+		--list) LIST=true; shift ;;
+		--stop-all) STOP_ALL=true; shift ;;
+		--stop-stale) STOP_STALE=true; shift ;;
 		--port) PORT="$2"; shift 2 ;;
 		-h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -86,6 +95,95 @@ stop_port() {
 		sleep 2
 	fi
 }
+
+# ---- Instance management -------------------------------------------------------------
+#
+# Instances are deliberately DETACHED (setsid), so they survive the shell — and the agent,
+# and the editor — that started them. That is the behaviour you want: restarting your tools
+# should not kill the app you are looking at. The cost is that nobody is left who remembers
+# they exist, and two were once found here still holding cluster watches days after the run
+# that started them had finished.
+#
+# So: enumerate them, and be able to reap them. The PROCESS TABLE is the source of truth,
+# never a state file — a registry that goes stale points at a pid that has been recycled,
+# and killing the wrong process is far worse than failing to kill the right one. Everything
+# below is derived live from `pgrep` on the jar path.
+instances() {
+	# `-x java` as well as the pattern. `pgrep -f` alone matches ANY process whose argv
+	# contains the string — including the shell running a script that merely mentions it,
+	# which is how a --stop-all once SIGTERMed the very shell invoking it (exit 144). This
+	# is the same trap `stop_port` avoids by matching on the port instead of a name, and
+	# CLAUDE.md records it. Restricting to the java executable makes the pattern safe to
+	# say out loud.
+	pgrep -x java -f "java -jar .*kweblens-web/target/kweblens.jar" 2>/dev/null || true
+}
+
+port_of() {
+	lsof -Pan -p "$1" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {sub(/.*:/, "", $9); print $9}'
+}
+
+# The jar a running instance was started from, and whether it still matches the tree. An
+# instance whose jar predates HEAD is serving code nobody is looking at any more, which is
+# the same trap the staleness rebuild above exists to prevent — just discovered later.
+jar_age_of() {
+	local pid="$1" jar
+	jar=$(ls -l "/proc/$pid/cwd" 2>/dev/null >/dev/null && echo "$JAR")
+	[[ -f "$JAR" ]] || { echo "?"; return; }
+	if [[ "/proc/$pid/exe" -nt "$JAR" ]] 2>/dev/null; then echo "?"; else echo ""; fi
+}
+
+list_instances() {
+	local pid port started rss found=0
+	printf "%-8s %-7s %-9s %-22s %s\n" PID PORT RSS STARTED STATE
+	for pid in $(instances); do
+		found=1
+		port=$(port_of "$pid"); port=${port:-?}
+		started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
+		rss=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.0fM", $1/1024}')
+		local state="running"
+		# Started before the newest source file => serving code that no longer exists here.
+		if [[ -n "$(find pom.xml kweblens-*/pom.xml kweblens-*/src -newermt "$started" -print -quit 2>/dev/null)" ]]; then
+			state="STALE (source is newer)"
+		fi
+		printf "%-8s %-7s %-9s %-22s %s\n" "$pid" "$port" "$rss" "$started" "$state"
+	done
+	[[ "$found" == 0 ]] && echo "(none running)"
+	return 0
+}
+
+stop_pid() {
+	local pid="$1" port="$2"
+	echo "==> stopping :${port:-?} (pid $pid)"
+	kill "$pid" 2>/dev/null || true
+}
+
+if [[ "$LIST" == true ]]; then
+	list_instances
+	exit 0
+fi
+
+if [[ "$STOP_ALL" == true ]]; then
+	for pid in $(instances); do stop_pid "$pid" "$(port_of "$pid")"; done
+	sleep 2
+	list_instances
+	exit 0
+fi
+
+if [[ "$STOP_STALE" == true ]]; then
+	# Only the ones whose source tree has moved on under them. A deliberately-kept instance
+	# on current code survives, which is why this is not just --stop-all with extra steps.
+	stopped=0
+	for pid in $(instances); do
+		started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
+		if [[ -n "$(find pom.xml kweblens-*/pom.xml kweblens-*/src -newermt "$started" -print -quit 2>/dev/null)" ]]; then
+			stop_pid "$pid" "$(port_of "$pid")"; stopped=$((stopped + 1))
+		fi
+	done
+	echo "==> stopped $stopped stale instance(s)"
+	sleep 1
+	list_instances
+	exit 0
+fi
 
 if [[ "$STOP" == true ]]; then
 	stop_port
@@ -132,7 +230,7 @@ warn_other_instances() {
 	local pid port started
 	# Match on the jar path, not on "kweblens": a looser pattern also matches this script's
 	# own argv and any editor or grep that happens to mention it.
-	for pid in $(pgrep -f "java -jar .*kweblens-web/target/kweblens.jar" 2>/dev/null); do
+	for pid in $(instances); do
 		[[ "$pid" == "$$" ]] && continue
 		port=$(lsof -Pan -p "$pid" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {sub(/.*:/, "", $9); print $9}')
 		[[ -z "$port" || "$port" == "$PORT" ]] && continue
@@ -185,7 +283,18 @@ if [[ "$AI" == true ]]; then
 fi
 
 echo "==> starting on :${PORT}  (log: ${LOG})"
-nohup env "${ENV_VARS[@]}" java -jar "$JAR" > "$LOG" 2>&1 &
+# `setsid`, not just `nohup`. nohup only blocks SIGHUP — it does nothing about a SIGTERM
+# sent to the whole process GROUP, which is how an editor, an agent runner or a terminal
+# multiplexer usually tears down what it started. An instance launched with nohup alone
+# therefore dies when the tool that ran this script exits, which is exactly the behaviour
+# that is unwanted: the app you are looking at in a browser should not vanish because you
+# restarted your editor. setsid puts it in a new session and a new process group, so it has
+# no parent to be collected with. Verified: an instance started this way survives the shell
+# that launched it being killed.
+#
+# The trade is that it can no longer be stopped with Ctrl-C or by closing the terminal —
+# which is why `--stop`, `--stop-stale` and `--stop-all` exist, and why `--list` does.
+setsid nohup env "${ENV_VARS[@]}" java -jar "$JAR" > "$LOG" 2>&1 &
 
 for _ in $(seq 1 90); do
 	if curl -sf "localhost:${PORT}/actuator/health" >/dev/null 2>&1; then
