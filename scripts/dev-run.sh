@@ -20,6 +20,7 @@
 #   scripts/dev-run.sh --list          # every kweblens on this box: port, pid, age, jar SHA
 #   scripts/dev-run.sh --stop-stale    # stop the ones built from a jar that is no longer HEAD
 #   scripts/dev-run.sh --stop-all      # stop every one of them
+#   scripts/dev-run.sh --self-check    # prove the instance detection still works (see below)
 #
 # Login is admin/admin. These are DEV credentials passed as environment at run
 # time — do not add them to application.yml, which would bake a default password
@@ -54,6 +55,7 @@ BUILD=false
 SIM=false
 STOP=false
 LIST=false
+SELF_CHECK=false
 STOP_ALL=false
 STOP_STALE=false
 AI=false
@@ -72,10 +74,11 @@ while [[ $# -gt 0 ]]; do
 		--files-roots=*) FILES_ROOTS="${1#*=}"; shift ;;
 		--stop) STOP=true; shift ;;
 		--list) LIST=true; shift ;;
+		--self-check) SELF_CHECK=true; shift ;;
 		--stop-all) STOP_ALL=true; shift ;;
 		--stop-stale) STOP_STALE=true; shift ;;
 		--port) PORT="$2"; shift 2 ;;
-		-h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
@@ -109,13 +112,56 @@ stop_port() {
 # and killing the wrong process is far worse than failing to kill the right one. Everything
 # below is derived live from `pgrep` on the jar path.
 instances() {
-	# `-x java` as well as the pattern. `pgrep -f` alone matches ANY process whose argv
-	# contains the string — including the shell running a script that merely mentions it,
-	# which is how a --stop-all once SIGTERMed the very shell invoking it (exit 144). This
-	# is the same trap `stop_port` avoids by matching on the port instead of a name, and
-	# CLAUDE.md records it. Restricting to the java executable makes the pattern safe to
-	# say out loud.
-	pgrep -x java -f "java -jar .*kweblens-web/target/kweblens.jar" 2>/dev/null || true
+	# Two failure modes, opposite directions, and the obvious guard against the first
+	# silently causes the second:
+	#
+	#   `pgrep -f PATTERN` alone matches ANY process whose argv contains the string —
+	#   including the shell running a script that merely mentions it, which is how a
+	#   --stop-all once SIGTERMed the very shell invoking it (exit 144). Verified still
+	#   true: a bare `pgrep -f` here returns this script's own pid alongside the jar's.
+	#
+	#   `pgrep -x java -f PATTERN` was the fix for that, and it matched NOTHING — so
+	#   --list reported "(none running)" against a server that was answering on :8080,
+	#   and --stop-all/--stop-stale silently stopped nothing. With `-f`, pgrep matches
+	#   the joined command line, which ends in a trailing separator, so `-x` (whole
+	#   string, anchored both ends) cannot match however the pattern is written: the
+	#   exact literal `java -jar kweblens-web/target/kweblens.jar` fails too. `-x` was
+	#   not tightening the match, it was disabling it.
+	#
+	# So: match loosely on the jar path, then keep only processes whose EXECUTABLE is
+	# java. That is the "guard each PID on comm == java" rule from CLAUDE.md, and unlike
+	# `-x` it is testable — `--self-check` below asserts the jar is found and this very
+	# shell is not.
+	local pid
+	for pid in $(pgrep -f "kweblens-web/target/kweblens.jar" 2>/dev/null); do
+		[[ "$(ps -o comm= -p "$pid" 2>/dev/null)" == "java" ]] && echo "$pid"
+	done
+	return 0
+}
+
+# A positive control for the above, because both of its historical failures were INVISIBLE:
+# one killed the wrong thing, the other reported an empty list that looks exactly like a
+# clean machine. Run it whenever this detection is touched.
+self_check() {
+	local found_jar=0 found_self=0 pid
+	for pid in $(instances); do
+		[[ "$pid" == "$$" ]] && found_self=1
+		[[ -n "$(ps -o args= -p "$pid" 2>/dev/null | grep -F 'kweblens-web/target/kweblens.jar')" ]] && found_jar=1
+	done
+	if [[ $found_self -eq 1 ]]; then
+		echo "FAIL: instances() matched this shell (pid $$) — the exit-144 self-kill trap" >&2
+		return 1
+	fi
+	if [[ $(instances | wc -l) -eq 0 ]]; then
+		echo "self-check: no instance running — start one, then re-run to exercise the match" >&2
+		return 0
+	fi
+	if [[ $found_jar -eq 0 ]]; then
+		echo "FAIL: instances() returned a pid that is not the kweblens jar" >&2
+		return 1
+	fi
+	echo "self-check OK: jar found, this shell (pid $$) correctly excluded"
+	return 0
 }
 
 port_of() {
@@ -156,6 +202,11 @@ stop_pid() {
 	echo "==> stopping :${port:-?} (pid $pid)"
 	kill "$pid" 2>/dev/null || true
 }
+
+if [[ "$SELF_CHECK" == true ]]; then
+	self_check
+	exit $?
+fi
 
 if [[ "$LIST" == true ]]; then
 	list_instances

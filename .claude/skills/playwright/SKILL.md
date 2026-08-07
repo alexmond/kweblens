@@ -146,6 +146,20 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-07 — **`dev-run.sh --list` reported "(none running)" against a server answering on
+  :8080**, and `--stop-stale` / `--stop-all` therefore silently stopped nothing. The guard was
+  `pgrep -x java -f "<jar pattern>"`, added after a `--stop-all` SIGTERMed its own shell
+  (exit 144). Both readings are traps and they pull opposite ways: **bare `pgrep -f` matches
+  the shell** that merely mentions the pattern, while **`-x` with `-f` matches nothing at
+  all** — pgrep joins the command line with a trailing separator, so a whole-string anchored
+  match cannot succeed however the pattern is written (the exact literal fails too). `-x` was
+  not tightening the match, it was disabling it, and an empty instance list is indistinguishable
+  from a clean machine. → `instances()` now matches loosely on the jar path and keeps only pids
+  whose `comm` is `java`, and `scripts/dev-run.sh --self-check` is a positive control that
+  asserts the jar IS found and the calling shell is NOT. **A process-detection guard that can
+  only fail silently needs a control that fails loudly; run `--self-check` whenever it is
+  touched.**
+
 - 2026-08-07 — **Text painted into a `<canvas>` has no node, so `contrast-check` reports
   nothing at all for it — not a failure, not a pass.** The metrics chart handed
   `var(--muted)` / `var(--border)` to echarts' CanvasRenderer, which cannot resolve a CSS

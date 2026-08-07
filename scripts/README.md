@@ -42,6 +42,7 @@ scripts/dev-run.sh --stop          # stop whatever is on the port
 scripts/dev-run.sh --list          # every instance: pid, port, RSS, age, staleness
 scripts/dev-run.sh --stop-stale    # stop only those whose source tree has moved on
 scripts/dev-run.sh --stop-all      # stop all of them
+scripts/dev-run.sh --self-check    # prove the instance detection still works
 ```
 
 Starting an instance warns about kweblens instances on **other** ports, with their age and
@@ -51,9 +52,6 @@ each instance holds API-server watches and log streams open against a real clust
 were found here still running days after the agent that started them had gone, both
 predating the fixes for the very leaks they were demonstrating. Age is the tell: a few
 minutes is a colleague, a few days is litter.
-
-```bash
-```
 
 Instances launch with **`setsid`**, so they outlive the shell — and the editor, agent or
 terminal that ran the script. `nohup` alone was not enough: it blocks SIGHUP but not a SIGTERM
@@ -67,6 +65,15 @@ a registry that goes stale names a pid that has since been recycled, and killing
 process is worse than failing to kill the right one. The lookup is pinned to the `java`
 executable, not just an argv pattern — `pgrep -f` alone matches any shell whose command line
 merely mentions the pattern, which made an early `--stop-all` SIGTERM the shell invoking it.
+
+That pinning is done by filtering pids on `comm == java`, **not** by `pgrep -x java -f …`,
+which was the first attempt and which matched *nothing*: with `-f`, pgrep matches a joined
+command line ending in a trailing separator, so a whole-string anchored pattern can never
+match — the exact literal fails too. `--list` then reported "(none running)" against a live
+server and `--stop-all` stopped nothing, which looks exactly like a clean machine. Because
+both failure modes are silent, `scripts/dev-run.sh --self-check` exists as a positive
+control: it asserts the jar IS found and that the calling shell is NOT. Run it after
+touching the detection.
 
 **Always start it this way rather than `java -jar`.** With no admin password set,
 `SecurityConfig` generates one per run and only writes it to the log — so `admin`/`admin`
