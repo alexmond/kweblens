@@ -32,6 +32,9 @@ public class KweblensProperties {
 	/** Port-forwarding behaviour. */
 	private PortForward portForward = new PortForward();
 
+	/** How resource lists are fetched. */
+	private Lists list = new Lists();
+
 	@Data
 	public static class Cluster {
 
@@ -48,6 +51,28 @@ public class KweblensProperties {
 		 * kubeconfig context to select within that file; defaults to its current-context.
 		 */
 		private String context;
+
+	}
+
+	@Data
+	public static class Lists {
+
+		/**
+		 * Objects fetched per API-server request when listing a kind. This is <b>not</b>
+		 * a client-visible page size — the response is always the whole collection
+		 * (GH#263) — it is how much of it exists in the JVM at once, which is the axis
+		 * that OOM-kills the container: ~241 KB of transient heap per Secret, measured
+		 * live (#293).
+		 *
+		 * <p>
+		 * 500 is the Kubernetes convention and what {@code kubectl} uses. Lower it on a
+		 * memory-tight deployment with very large objects (Secrets, CRDs carrying OpenAPI
+		 * schemas); raise it to trade memory for round trips. Zero or less disables
+		 * chunking and fetches every object in one request, which is the pre-#293
+		 * behaviour and is the setting to use if an API server mishandles continue
+		 * tokens.
+		 */
+		private int chunkSize = 500;
 
 	}
 

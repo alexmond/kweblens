@@ -16,10 +16,25 @@
 #   base       heap used after `jcmd GC.run`, before the request
 #   peak       max heap used during the request (`jstat` every 50 ms)
 #   retained   heap used after `jcmd GC.run`, after the request
-#   transient  peak - base : what the request needed ON TOP of steady state. THE number.
+#   transient  peak - base : what the request needed ON TOP of steady state.
 #   ygc        young collections inside the window. If 0, transient is exact. If >0, peak was
 #              reset mid-flight and transient is a LOWER BOUND — the run says so rather than
 #              quietly under-reporting.
+#
+# WHAT `transient` IS NOT (#293, 2026-08-07): it is not the live set, and it must not be used
+# to decide whether a change BOUNDS the heap. It measures how much eden the request dirtied
+# before a lazy collector got round to it — allocation CHURN, not retention. Chunking the
+# list fetch scored WORSE on it (80-96 MB against 67-69 MB unchunked, 2 150 Secrets) while
+# being strictly better at the thing that actually matters, because five bounded pages
+# allocate more total garbage than one big graph even though far less of it is live at once.
+# Reading that table alone would have got #293 reverted.
+#
+# For "does this bound the heap", ask the question an OOM-kill asks: THE SMALLEST -Xmx IN
+# WHICH THE REQUEST STILL COMPLETES. That is immune to collector timing — a squeezed heap
+# collects whatever it can, so only genuinely-live bytes can push it over. Measured on
+# 8 150 live Secrets: unchunked OOMs at 224m and needs 256m; chunked completes at 224m and
+# below, with identical wall-clock (~2.6 s). Use both instruments; they answer different
+# questions, and this one answers the cheaper-but-wrong one.
 #
 # Do not use `jvm.gc.memory.allocated` for this on its own: it is incremented at GC boundaries,
 # so across a single fast request it reads as a multiple of the eden increment (17 MB, then
