@@ -94,7 +94,9 @@ const { collapsed: navCollapsed, toggle: toggleNav, toggleLabel, toggleTitle } =
     </button>
   </nav>
   <aside v-if="!navCollapsed" id="kw-nav" class="nav">
-    <div class="nav-title">{{ activeCluster?.name ?? cluster ?? '—' }}</div>
+    <!-- A bare em dash for "no cluster" is not a message: it was the only text in the whole
+         left column on a zero-cluster install (GH#298), where the tree below is empty too. -->
+    <div class="nav-title">{{ activeCluster?.name ?? cluster ?? 'No cluster' }}</div>
     <div class="nav-scroll">
       <NavTree
         v-if="cluster"

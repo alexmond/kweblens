@@ -924,6 +924,42 @@ body {
   padding: 20px 4px;
 }
 
+/* The shared empty state (GH#298). Deliberately a block with room in it rather than one grey
+   line: the state it was written for — a kweblens with no cluster registered — is the whole
+   content pane, and a single dim sentence floating at the top left of 1100px of nothing reads
+   as a rendering failure, which is exactly the impression this exists to remove.
+
+   Colours are the existing tokens only: the title takes --text because it is the sentence the
+   reader has to see, and only the explanation is --muted. An all-muted block was the previous
+   shape and is what made these states look like debris. */
+.empty-state {
+  max-width: 560px;
+  margin: 48px auto;
+  padding: 24px 26px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.empty-state-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty-state-body {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.empty-state-action {
+  margin-top: 18px;
+}
+
 /* Cluster overview landing */
 .ov-title {
   font-size: 20px;
@@ -3679,15 +3715,11 @@ body.dragging {
   color: var(--muted);
 }
 
-.cp-locked,
-.cp-empty {
+/* The page's own empty row is gone — both of its cases now render the shared `.empty-state`
+   (GH#298), which can carry an action; a table cell could only ever carry a sentence. */
+.cp-locked {
   font-size: 13px;
   color: var(--muted);
-}
-
-.cp-empty {
-  padding: 18px 10px;
-  text-align: center;
 }
 
 /* The rail's overflow button. Distinguished from a cluster tile so it does not read as one
