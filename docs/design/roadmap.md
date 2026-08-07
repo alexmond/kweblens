@@ -140,6 +140,16 @@ the error path silently rendered nothing, past `vue-tsc` and `eslint` — is the
 is correctness and not decoration. Octant's convention is the fix: make the empty-state string a
 **required prop** so no list can ship without one.
 
+**Partly started (#298).** The zero-cluster fix needed exactly this component, so it now exists:
+`components/EmptyState.vue` (title **required**, per the convention above) over `emptyState.ts`,
+which holds the branching — still-loading vs failed vs genuinely empty, and writer vs signed-out
+— because those are different sentences and the difference is testable without a DOM. Two of the
+~20 sites use it. **What a follow-up covers:** the other ~18, the five class names they use
+(`.empty`, `.cp-empty` — now gone — `.palette-empty`, `.diff-empty`, `.tone-empty`) collapsing
+into one, a `#empty` slot on `ResourceTable.vue`, and the 11 bare `<div class="error">` moving to
+`ErrorNotice`. The rule to carry into it: an empty pane is a claim, and "nothing here" and "this
+failed" have to be told apart.
+
 ### R4 — Contract-test the detail endpoint
 
 `DetailApiController` returns a `{object, relations}` envelope carrying 12 relations and has

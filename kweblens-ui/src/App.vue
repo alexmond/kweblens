@@ -14,6 +14,7 @@ import { useNavigation } from './composables/useNavigation';
 import { useResourceData } from './composables/useResourceData';
 import { defaultHiddenCols } from './columns';
 import { useDialog } from './dialog';
+import { clusterListEmpty } from './emptyState';
 import { objKey } from './kube';
 import { loadDark, loadHiddenCols, loadKeptCols, loadNamespace, saveCluster, saveDark, saveNamespace } from './prefs';
 import { HELM_VIEW_IDS, NAV, filterObjects, isSynthetic } from './shell';
@@ -109,7 +110,7 @@ const toggleTheme = () => {
 };
 document.documentElement.classList.toggle('kw-dark', dark.value);
 
-const { clusters, cluster, refresh: refreshClusters } = useClusters(setError);
+const { clusters, cluster, loaded: clustersLoaded, refresh: refreshClusters } = useClusters(setError);
 // Closed-mode: the session cookie outlives the in-memory creds. On load, restore an existing
 // session (so write controls appear + data loads after a reload) and re-fetch once authed.
 api
@@ -244,9 +245,36 @@ const openClusterFromPage = (id: string) => {
   showClusters.value = false;
 };
 
+/**
+ * The zero-cluster state (GH#298).
+ *
+ * Every other content surface needs a cluster, and used to sit — Clusters page included —
+ * behind one `v-if="cluster"`. With none registered the fetch SUCCEEDS, so `error` stays
+ * null and `cluster` stays null, and the whole pane rendered nothing at all: measured
+ * `childElementCount: 0`, with the rail's "All clusters" tile setting a flag whose page was
+ * inside the guard it could not escape. The server logs the explanation
+ * (`ClusterBootstrap`); the browser said none of it.
+ *
+ * This is a supported state — runtime cluster-add is a shipped feature, and removing your
+ * last cluster from the Clusters page lands here — so the Clusters page is now the landing
+ * page whenever there is nothing to land on. It is the one surface that must work without a
+ * cluster, because it is the only one that can create one.
+ */
+const clustersEmptyCopy = computed(() =>
+  clusterListEmpty({
+    loaded: clustersLoaded.value,
+    failed: error.value !== null,
+    count: clusters.value.length,
+    canWrite: authUser.value !== null,
+  }),
+);
+const showClustersPage = computed(() => showClusters.value || clustersEmptyCopy.value !== null);
+
 const runCommand = (command: Command) => {
   paletteOpen.value = false;
-  if (command.kind === 'cluster') {
+  if (command.kind === 'page') {
+    showClusters.value = true;
+  } else if (command.kind === 'cluster') {
     cluster.value = command.target;
   } else if (command.kind === 'object' && command.hit) {
     void openSearchHit(command.hit);
@@ -369,7 +397,7 @@ const onForwardStarted = () => {
               showClusters = false;
             }
           "
-          :clusters-page-open="showClusters"
+          :clusters-page-open="showClustersPage"
           @show-clusters="showClusters = true"
           @select="(i) => (selected = i)"
           @toggle-favorite="toggleFavorite"
@@ -378,17 +406,21 @@ const onForwardStarted = () => {
         <div class="content-col">
           <main class="content">
             <div v-if="error" class="error">{{ error }}</div>
-            <template v-if="cluster">
-              <ClustersPage
-                v-if="showClusters"
-                :clusters="clusters"
-                :current="cluster"
-                :can-write="!!authUser"
-                @select="openClusterFromPage"
-                @changed="refreshClusters"
-              />
+            <!-- OUTSIDE the cluster guard, deliberately (GH#298): this is the page that adds
+                 one, so gating it on a cluster existing made the empty install a dead end. -->
+            <ClustersPage
+              v-if="showClustersPage"
+              :clusters="clusters"
+              :current="cluster"
+              :can-write="!!authUser"
+              :empty-copy="clustersEmptyCopy"
+              @select="openClusterFromPage"
+              @changed="refreshClusters"
+              @require-auth="showLogin = true"
+            />
+            <template v-else-if="cluster">
               <ClusterOverview
-                v-else-if="showClusterOverview"
+                v-if="showClusterOverview"
                 :cluster="cluster"
                 :name="activeCluster?.name ?? cluster"
                 :master-url="activeCluster?.masterUrl"
@@ -424,8 +456,11 @@ const onForwardStarted = () => {
                 @require-auth="showLogin = true"
               />
             </template>
+            <!-- The list is a sibling of the block above rather than one of its branches, so
+                 it needs the same exclusion: the Clusters page spans every cluster, and
+                 rendering a per-cluster list underneath it puts two pages in one pane. -->
             <ResourceListView
-              v-if="showList && selected"
+              v-if="!showClustersPage && showList && selected"
               :selected="selected"
               :filtered="filtered"
               :objects="objects"

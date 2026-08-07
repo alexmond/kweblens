@@ -42,6 +42,21 @@ describe('buildCommands', () => {
     expect(targets).toEqual(['prod-us', 'default']);
   });
 
+  it('offers the Clusters page even with no cluster and no nav (#298)', () => {
+    // Every other row is derived from a cluster, so a zero-cluster install had an empty
+    // palette — and the page that fixes that was reachable only from an unlabelled tile.
+    const only = buildCommands([], [], null);
+    expect(only.map((c) => c.key)).toEqual(['page:clusters']);
+    expect(only[0].kind).toBe('page');
+  });
+
+  it('keeps the Clusters page below the cluster switches', () => {
+    // The palette opens on the switch, which is what it is mostly used for; a constant row
+    // must not take that top slot.
+    const keys = buildCommands(CLUSTERS, [], null).map((c) => c.key);
+    expect(keys.indexOf('page:clusters')).toBe(CLUSTERS.length);
+  });
+
   it('carries the nav item so the caller need not look it up', () => {
     const pods = buildCommands([], NAV, null).find((c) => c.target === 'pods');
     expect(pods?.item?.kind).toBe('Pods');

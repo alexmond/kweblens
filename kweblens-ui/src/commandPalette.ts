@@ -15,7 +15,7 @@ import type { ClusterInfo, NavCategory, NavItem, SearchHit, SearchResponse } fro
  */
 
 /** What kind of thing a row does when you pick it. */
-type CommandKind = 'cluster' | 'nav' | 'object';
+type CommandKind = 'cluster' | 'nav' | 'object' | 'page';
 
 export interface Command {
   /** Stable key for :key and for tests. */
@@ -34,7 +34,27 @@ export interface Command {
 }
 
 /**
- * Every command available right now: one per cluster, one per nav leaf.
+ * The Clusters page as a palette row (GH#298).
+ *
+ * <p>Everything else the palette offers is derived from a cluster: the switch rows need one
+ * to switch to, and the nav rows come from the tree of a cluster that is open. With none
+ * registered, both lists are empty and the palette had nothing at all to offer — while the
+ * one page that can fix that was reachable only by finding an unlabelled `···` tile. A
+ * constant row means the way in does not depend on there being somewhere to go.
+ *
+ * <p>It sits after the cluster rows, so on a normal install the top row stays the switch the
+ * palette is mostly opened for.
+ */
+const CLUSTERS_PAGE: Command = {
+  key: 'page:clusters',
+  kind: 'page',
+  label: 'Clusters',
+  hint: 'Add, edit or switch cluster',
+  target: 'clusters',
+};
+
+/**
+ * Every command available right now: one per cluster, the Clusters page, one per nav leaf.
  *
  * <p>This walks the categories itself rather than reusing `shell.allNavItems`, because a
  * row needs to name the category it came from and that helper returns bare items. The
@@ -76,7 +96,7 @@ export function buildCommands(
     }));
   });
 
-  return [...clusterCommands, ...navCommands];
+  return [...clusterCommands, CLUSTERS_PAGE, ...navCommands];
 }
 
 /**

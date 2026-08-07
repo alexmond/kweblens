@@ -139,7 +139,13 @@ watch(hits, () => (active.value = 0));
 
 const move = (delta: number) => (active.value = wrapIndex(active.value + delta, hits.value.length));
 
-const rowType = (kind: Command['kind']) => (kind === 'cluster' ? 'Cluster' : kind === 'nav' ? 'Kind' : 'Object');
+const ROW_TYPES: Record<Command['kind'], string> = {
+  cluster: 'Cluster',
+  nav: 'Kind',
+  object: 'Object',
+  page: 'Page',
+};
+const rowType = (kind: Command['kind']) => ROW_TYPES[kind];
 
 const choose = (command: Command | undefined) => {
   if (command) {
