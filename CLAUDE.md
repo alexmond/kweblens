@@ -197,6 +197,19 @@ Settings class: `KweblensProperties` (`kweblens.*`).
   for config.
 - **File size** — target source files **under ~500 lines**; split fat controllers into per-page
   `*PageService` helpers. Guideline, not a gate (Checkstyle hard-fails at 800).
+- **The front end has its own gate**: `npm run check` (prettier + `vue-tsc -b` + eslint + knip +
+  vitest), run from `kweblens-ui/pom.xml` so `dev-verify` and CI include it.
+  `tsconfig.app.json` sets **`vueCompilerOptions.strictTemplates`**, which is what makes vue-tsc
+  check the **component boundary** — an unresolved tag, an undeclared prop, an undeclared event,
+  an unknown directive. Without it those are silently `any`: a `<ErrorNotice>` used without its
+  import shipped and stayed shipped for 62 green CI runs, rendering nothing where an error
+  banner belonged. (Declared props' *types* and *requiredness* were always checked; only the
+  boundary was blind. vue-tsc 2.2 still does **not** check slot names — `#nosuchslot` passes
+  with strictTemplates on or off, measured.) The
+  price is that a plain HTML attribute on a component is now an error too, even though Vue's
+  fallthrough genuinely delivers it — so the global ones live in `kweblens-ui/vue-attrs.d.ts`
+  (`title` + every `aria-*`). Add to that file only attributes valid on **every** element; a
+  component-specific prop typo must stay an error.
 
 Recurring lint rules that bite: **SpringLambda** requires parentheses around a single lambda arg
 (`(e) -> …`, never `e -> …`) — `spring-javaformat:apply` does **not** add these, so it fails at

@@ -133,9 +133,17 @@ PREPARE='leaf:Network/Overview' node scripts/contrast-check.mjs '.ov-notes'
 
 With **no arguments and no `PREPARE`**, `contrast-check.mjs` walks a short list of *scenes*
 (defined at the top of the file) as well as the flat watchlist: the drawer's chips, the
-read-only YAML tab, a resource list, the diagnostics modal, a hovered button. Everything that
-matters is behind a click, so a watchlist alone could only ever report `not present` for it —
-and the summary's "N of M samples measured" line is the number to read, not the green verdict.
+read-only YAML tab, a resource list, the diagnostics modal, a hovered button, a hovered metrics
+chart. Everything that matters is behind a click, so a watchlist alone could only ever report
+`not present` for it — and the summary's "N of M samples measured" line is the number to read,
+not the green verdict.
+
+Two limits worth knowing before trusting a green run. The metrics-chart scene needs a
+Prometheus / VictoriaMetrics backend; without one the chart is a placeholder and its two rows
+are counted as unmeasured. And **text painted into a `<canvas>` can never be measured here** —
+there is no node to sample, which is exactly how a chart's axis labels came to render pure
+black at 1.34:1 on the dark theme with every review green. That class is guarded in the gate
+instead, by `kweblens-ui/src/metric-chart-option.test.ts`.
 Run it against `dev-run.sh --sim --files`; the simulator seeds the annotations, TLS Ingress and
 pod-file surface the scenes need — and, since the seeder was made realistic, the unhealthy
 pods, Warning events and NotReady node that `.ov-card.danger`, `.ov-card.warn` and the row
