@@ -119,6 +119,10 @@ api
   .then((r) => {
     authUser.value = r.user;
     void refreshClusters();
+    // Same reason as after an interactive sign-in, plus a race: the startup `about()` below
+    // is fired concurrently with this, so on a restored session it can be answered before
+    // the session is established and come back withholding `allowedRoots`.
+    loadAbout();
   })
   .catch(() => undefined);
 // Ask once, at startup, whether the pod file browser is on. Without this the Files tab can
@@ -126,10 +130,18 @@ api
 // shows a tab whose sole content is an explanation that it does not work. A public GET, so
 // it works signed out too; a server that omits the field leaves the state unknown and the
 // old learn-from-failure path still applies.
-api
-  .about()
-  .then((info) => filesFeature.noteAbout(info))
-  .catch(() => undefined);
+// Re-asked after a sign-in, not only at startup: the server withholds `allowedRoots` from an
+// unauthenticated caller on purpose (DiagnosticsService sends `List.of()`), and the whole
+// pod-file family is authenticated even in open-mode. Seeding once at startup therefore left a
+// confined deployment permanently looking unconfined, so the browser opened at `/` — the one
+// path such a deployment always refuses, which is exactly what allowedRoots exists to avoid.
+const loadAbout = (): void => {
+  api
+    .about()
+    .then((info) => filesFeature.noteAbout(info))
+    .catch(() => undefined);
+};
+loadAbout();
 const { nav, counts, helmCounts, namespaces, namespacesKnown, helmReleaseList, favorites, helmScope } = useClusterScope(
   cluster,
   namespace,
@@ -346,6 +358,7 @@ const loginSubmit = async (user: string, pass: string): Promise<boolean> => {
     authUser.value = user;
     showLogin.value = false;
     void refreshClusters();
+    loadAbout();
     return true;
   } catch {
     auth.clear();

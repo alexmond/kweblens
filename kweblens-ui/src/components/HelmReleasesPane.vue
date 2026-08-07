@@ -138,7 +138,12 @@ const columns = computed<DataTableColumns<HelmRelease>>(() => [
   { title: 'Revision', key: 'revision', sorter: (a, b) => a.revision - b.revision, render: (r) => r.revision },
   { title: 'Version', key: 'chartVersion', sorter: str('chartVersion'), render: renderVersion },
   { title: 'App Version', key: 'appVersion', sorter: str('appVersion'), render: (r) => r.appVersion },
-  { title: 'Status', key: 'status', sorter: str('status'), render: (r) => h(StatusBadge, { text: r.status }) },
+  {
+    title: 'Status',
+    key: 'status',
+    sorter: str('status'),
+    render: (r) => h(StatusBadge, { text: r.status ?? '—' }),
+  },
   {
     title: 'Updated',
     key: 'updated',
