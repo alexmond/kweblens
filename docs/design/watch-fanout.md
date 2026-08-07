@@ -339,11 +339,23 @@ to look for its successor rather than to drop the setting.)
   knows fabric8, not to two controllers that would each have to remember it. Both log
   surfaces now call it from their completion hooks *and* from the reader's `finally`.
 * **`SseEndpointKeepAliveTest`** — a structural guard, because this is an omission that
-  passes every test and every demo. It scans the controllers for handlers returning an
-  `SseEmitter` and requires the declaring class to reference `SseKeepAlive`, so a new
+  passes every test and every demo. It scans the controllers for handlers that stream a
+  response and requires the declaring class to **call `SseKeepAlive.attach`**, so a new
   streaming endpoint fails on the day it is written. It also asserts the scan still sees all
   four known controllers, so a scan that silently stops finding them fails rather than
   quietly shrinking.
+  **The guard used to check for the *name* `SseKeepAlive` in the class file's bytes, and
+  that was not the same question.** Every streaming controller here also calls
+  `SseKeepAlive.completeQuietly` from its failed-send path (added in this same PR, below),
+  which puts the class name in the constant pool — so the natural way to write the next
+  endpoint, copying a neighbour's `send(…)` helper, would have satisfied the guard while
+  shipping the original leak. It now reads the bytecode with spring-core's repackaged ASM
+  and looks for an `invokestatic` of `attach`, and carries `MultiLogStream` as a **positive
+  control**: a class known to name `SseKeepAlive` and known never to attach it, which the
+  old check passed and the new one must fail. Two blind spots remain and are stated in the
+  test: a handler whose return type names neither `SseEmitter` nor `ResponseBodyEmitter`
+  (`Object`), and — harmlessly — an SSE endpoint outside `web.api`, which cannot reference
+  the package-private `SseKeepAlive` at all and so fails to compile instead.
 * **`SseKeepAlive.completeQuietly`**, now used by every failed-send path. A bare
   `completeWithError` from a non-container thread races Tomcat's `AsyncListener.onError` and
   throws `IllegalStateException`; observed live, a disconnect from the chatty pod threw

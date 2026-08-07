@@ -184,6 +184,15 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
 - **The `ClusterRegistry` owns client lifecycles.** Never `new` a `KubernetesClient` in a
   controller/service — ask the registry (`require(id)` / `client(id)`). Re-registering an id
   closes the previous client. Everything is addressed by cluster **id**, never by a raw client.
+  Two consequences that have each been a bug: (1) a client built *before* it is handed over —
+  `ClusterConfigService` builds one, then persists, then registers — is owned by **nobody** until
+  `register()` returns, so every path between must close it or it is stranded with its private
+  Vert.x runtime (`adopt()` is that guard); (2) **closing the client does not release everything
+  the cluster held.** A port-forward's listening socket is bound by kweblens, not by the cluster,
+  and a cached OpenAPI document describes an API server the id may no longer point at — so
+  holders of cluster-scoped state register a `ClusterClientListener`
+  (`ClusterRegistry.addClientListener`) and release on removal *and* on re-point.
+  `PortForwardService` and `SchemaService` do; anything new that caches or binds per cluster must.
 - **Tests must not hit a real cluster.** Use `@EnableKubernetesMockClient(crud = true)` and set
   `kweblens.load-kubeconfig=false` so `ClusterBootstrap` skips ambient discovery; then register
   the mock `client` into the autowired `ClusterRegistry` in `@BeforeEach`.
@@ -253,8 +262,11 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
   `onCompletion` hook that closes the watch. **All four SSE endpoints now attach it**
   (`objects/watch`, `resources/{id}/watch`, `log/stream`, `logs/stream`) and
   `SseEndpointKeepAliveTest` fails the build if a new one does not — it scans the controllers
-  for handlers returning an `SseEmitter` and requires the class to reference `SseKeepAlive`,
-  because the omission is invisible in every test and every demo. The full audit — every
+  for handlers that stream a response and requires the class to **call `SseKeepAlive.attach`**
+  (checked in the bytecode, not by searching for the *name*: every streaming controller also
+  calls `completeQuietly`, so a name search passed a class that never attached anything). The
+  test carries `MultiLogStream` as its positive control. The omission is invisible in every
+  test and every demo, so the guard has to be exact. The full audit — every
   streaming surface, what it holds, and the release times — is
   `docs/design/watch-fanout.md`; the short version is that **exec-over-WebSocket and
   port-forward are fine and deliberately have no heartbeat** (a WebSocket close frame arrives

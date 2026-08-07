@@ -6,11 +6,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -55,6 +59,25 @@ import org.alexmond.kweblens.web.nav.NavCategory;
  * the worst matches rather than an arbitrary slice, and every match is still counted for
  * the honest total.
  *
+ * <h2>Superseded searches</h2>
+ *
+ * <p>
+ * A palette search is abandoned far more often than it is read: the client aborts the
+ * previous request on every keystroke past its debounce. Nothing tells the server that. A
+ * plain synchronous handler gets no disconnect signal — an {@code HttpServletResponse}
+ * learns its client is gone from a failed write, and a search that is still listing has
+ * not written yet — so the abandoned work used to run to completion, and, worse, its
+ * queued tasks sat in this pool's FIFO <b>ahead of</b> the query the operator was
+ * actually waiting for.
+ *
+ * <p>
+ * So supersession is derived from the only signal that is actually available: <b>a newer
+ * search for the same cluster</b>. Starting one cancels the previous attempt's tasks,
+ * which drains the not-yet-started ones out of the queue. The superseded caller still
+ * gets a well-formed answer — cancelled kinds are reported by name in
+ * {@link SearchResult#skippedKinds()}, never silently dropped, because a short list that
+ * looks complete is the one result this must not produce.
+ *
  * <p>
  * Listing goes through {@link ResourceService}'s projection rather than a second listing
  * path, so a search row is the same {@link ResourceSummary} the tables render.
@@ -84,6 +107,9 @@ public class SearchService {
 	 */
 	private static final int PER_KIND_CANDIDATES = 100;
 
+	/** What a kind cancelled by a newer search reports as its reason. */
+	static final String SUPERSEDED = "not searched — a newer query for this cluster replaced this one";
+
 	/**
 	 * Virtual threads would be ideal here, but the pool exists to cap concurrency, so a
 	 * small fixed pool of daemon threads does the job without a second knob.
@@ -93,6 +119,9 @@ public class SearchService {
 		thread.setDaemon(true);
 		return thread;
 	});
+
+	/** The in-flight attempt per cluster, so a newer search can cancel an older one. */
+	private final ConcurrentMap<String, Attempt> inFlight = new ConcurrentHashMap<>();
 
 	private final ClusterNavService clusterNav;
 
@@ -136,15 +165,26 @@ public class SearchService {
 
 	private List<KindResult> runAll(String clusterId, List<ResourceDescriptor> targets, String query,
 			String namespace) {
-		List<Future<KindResult>> pending = new ArrayList<>();
-		for (ResourceDescriptor descriptor : targets) {
-			pending.add(this.executor.submit(() -> searchKind(clusterId, descriptor, query, namespace)));
+		Attempt attempt = new Attempt();
+		Attempt previous = this.inFlight.put(clusterId, attempt);
+		if (previous != null) {
+			previous.supersede();
 		}
-		List<KindResult> results = new ArrayList<>();
-		for (Future<KindResult> future : pending) {
-			await(future).ifPresent(results::add);
+		try {
+			List<Future<KindResult>> pending = new ArrayList<>();
+			for (ResourceDescriptor descriptor : targets) {
+				pending.add(attempt.submit(this.executor, () -> searchKind(clusterId, descriptor, query, namespace)));
+			}
+			List<KindResult> results = new ArrayList<>();
+			for (int i = 0; i < pending.size(); i++) {
+				results.add(await(targets.get(i), pending.get(i)));
+			}
+			return results;
 		}
-		return results;
+		finally {
+			// Only if it is still ours: a newer attempt has already taken the slot.
+			this.inFlight.remove(clusterId, attempt);
+		}
 	}
 
 	/**
@@ -218,17 +258,28 @@ public class SearchService {
 		return (ex.getMessage() != null) ? ex.getMessage() : ex.getClass().getSimpleName();
 	}
 
-	private Optional<KindResult> await(Future<KindResult> future) {
+	/**
+	 * Wait for one kind. Every way this can fail produces a {@link KindResult} carrying
+	 * the reason rather than nothing at all — a kind that was not searched has to reach
+	 * {@link SearchResult#skippedKinds()}, or the caller reads a partial answer as a
+	 * complete one.
+	 */
+	private KindResult await(ResourceDescriptor descriptor, Future<KindResult> future) {
 		try {
-			return Optional.of(future.get());
+			return future.get();
+		}
+		catch (CancellationException ex) {
+			return new KindResult(descriptor, List.of(), 0, SUPERSEDED);
 		}
 		catch (InterruptedException ex) {
 			Thread.currentThread().interrupt();
-			return Optional.empty();
+			return new KindResult(descriptor, List.of(), 0, "not searched — the request was interrupted");
 		}
 		catch (ExecutionException ex) {
 			log.debug("Search task failed: {}", ex.getMessage());
-			return Optional.empty();
+			Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
+			String reason = (cause.getMessage() != null) ? cause.getMessage() : cause.getClass().getSimpleName();
+			return new KindResult(descriptor, List.of(), 0, reason);
 		}
 	}
 
@@ -237,6 +288,53 @@ public class SearchService {
 	 * than {@code hits} when the kind was capped), and the reason it could not be listed.
 	 */
 	private record KindResult(ResourceDescriptor descriptor, List<SearchHit> hits, int total, String error) {
+	}
+
+	/**
+	 * One search's tasks, so that a newer search for the same cluster can cancel them.
+	 *
+	 * <p>
+	 * Submission and cancellation share a lock because they race: the superseding thread
+	 * can arrive between two of the thirteen {@code submit} calls, and a task submitted
+	 * after the cancellation swept the list would otherwise survive it. Cancellation is
+	 * {@code cancel(false)} — the point is to drain the <em>queue</em>, and interrupting
+	 * a list already in flight buys a fraction of one round trip in exchange for a
+	 * half-consumed response.
+	 */
+	private static final class Attempt {
+
+		private final ReentrantLock lock = new ReentrantLock();
+
+		private final List<Future<?>> futures = new ArrayList<>();
+
+		private boolean superseded;
+
+		Future<KindResult> submit(ExecutorService executor, Callable<KindResult> task) {
+			Future<KindResult> future = executor.submit(task);
+			this.lock.lock();
+			try {
+				this.futures.add(future);
+				if (this.superseded) {
+					future.cancel(false);
+				}
+			}
+			finally {
+				this.lock.unlock();
+			}
+			return future;
+		}
+
+		void supersede() {
+			this.lock.lock();
+			try {
+				this.superseded = true;
+				this.futures.forEach((future) -> future.cancel(false));
+			}
+			finally {
+				this.lock.unlock();
+			}
+		}
+
 	}
 
 }

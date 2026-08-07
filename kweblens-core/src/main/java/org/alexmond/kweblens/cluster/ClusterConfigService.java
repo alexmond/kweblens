@@ -83,8 +83,7 @@ public class ClusterConfigService {
 				continue;
 			}
 			try {
-				this.registry.register(definition.id(), displayName(definition), clientFor(definition),
-						ClusterOrigin.RUNTIME);
+				adopt(definition, clientFor(definition), false);
 				restored++;
 			}
 			catch (RuntimeException ex) {
@@ -104,9 +103,7 @@ public class ClusterConfigService {
 			if (this.registry.info(normalized.id()).isPresent()) {
 				throw new ClusterConflictException("A cluster with id '" + normalized.id() + "' is already registered");
 			}
-			KubernetesClient client = clientFor(normalized);
-			this.store.save(normalized);
-			return this.registry.register(normalized.id(), displayName(normalized), client, ClusterOrigin.RUNTIME);
+			return adopt(normalized, clientFor(normalized), true);
 		}
 		finally {
 			this.lock.unlock();
@@ -128,10 +125,8 @@ public class ClusterConfigService {
 			String name = (patch != null && hasText(patch.name())) ? patch.name() : existing.name();
 			String context = (patch != null && hasText(patch.context())) ? patch.context() : existing.context();
 			ClusterDefinition merged = validate(new ClusterDefinition(id, name, context, kubeconfig));
-			KubernetesClient client = clientFor(merged);
-			this.store.save(merged);
 			// register() closes the previous client for this id.
-			return this.registry.register(id, displayName(merged), client, ClusterOrigin.RUNTIME);
+			return adopt(merged, clientFor(merged), true);
 		}
 		finally {
 			this.lock.unlock();
@@ -173,6 +168,57 @@ public class ClusterConfigService {
 			throw new InvalidClusterException("That kubeconfig contains no contexts");
 		}
 		return contexts;
+	}
+
+	/**
+	 * Hand a freshly built client to the registry, which from that moment owns it.
+	 *
+	 * <p>
+	 * <b>Nothing else holds a reference to that client.</b> So anything that fails on the
+	 * way to the registry — a store write refused by a missing RBAC grant on Secrets, an
+	 * unwritable data directory — has to close it here or it is stranded for the life of
+	 * the process, and a fabric8 client is not just an object: the vertx HTTP client
+	 * factory builds each one its own {@code Vertx} instance, whose event-loop and
+	 * blocked-thread-checker threads are released only by {@code close()}. A handful of
+	 * failed "Add cluster" attempts against a store that cannot be written would
+	 * otherwise leave a handful of live Vert.x runtimes behind, visible only as a rising
+	 * {@code jvm.threads.live} that names nothing.
+	 * @param definition the cluster being added, updated or restored
+	 * @param client the client built for it, closed here unless the registry takes it
+	 * @param persist whether to write the definition to the store first (restore is
+	 * reading it back, so it must not)
+	 * @return the registered cluster
+	 */
+	// Not try-with-resources, and it cannot be: the whole point is that the client is
+	// closed only when it is NOT handed over. A try-with-resources would close the one
+	// the
+	// registry has just taken ownership of.
+	@SuppressWarnings("PMD.UseTryWithResources")
+	private ClusterInfo adopt(ClusterDefinition definition, KubernetesClient client, boolean persist) {
+		boolean adopted = false;
+		try {
+			if (persist) {
+				this.store.save(definition);
+			}
+			ClusterInfo info = this.registry.register(definition.id(), displayName(definition), client,
+					ClusterOrigin.RUNTIME);
+			adopted = true;
+			return info;
+		}
+		finally {
+			if (!adopted) {
+				closeQuietly(client);
+			}
+		}
+	}
+
+	private void closeQuietly(KubernetesClient client) {
+		try {
+			client.close();
+		}
+		catch (RuntimeException ex) {
+			log.warn("Failed to close the client of a cluster that was never registered", ex);
+		}
 	}
 
 	private void requireEditable(String id) {
@@ -236,8 +282,13 @@ public class ClusterConfigService {
 	 * Build the client for a definition. Relative certificate paths inside a
 	 * runtime-supplied kubeconfig cannot be resolved (there is no file it came from), so
 	 * runtime kubeconfigs are expected to embed their credentials.
+	 *
+	 * <p>
+	 * Not private so that a test can substitute a client whose {@code close()} is
+	 * observable — "was the client closed when the store refused the write" cannot be
+	 * asserted about a real one without reaching the network.
 	 */
-	private KubernetesClient clientFor(ClusterDefinition definition) {
+	KubernetesClient clientFor(ClusterDefinition definition) {
 		try {
 			return KubeconfigLoader.clientFor(definition.kubeconfig(), null, definition.context());
 		}
