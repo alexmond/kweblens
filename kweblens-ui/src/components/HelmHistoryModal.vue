@@ -34,7 +34,7 @@ const columns: DataTableColumns<HelmRelease> = [
   { title: 'Chart', key: 'chart', render: (r) => r.chart },
   { title: 'Version', key: 'chartVersion', render: (r) => r.chartVersion },
   { title: 'App Version', key: 'appVersion', render: (r) => r.appVersion },
-  { title: 'Status', key: 'status', render: (r) => h(StatusBadge, { text: r.status }) },
+  { title: 'Status', key: 'status', render: (r) => h(StatusBadge, { text: r.status ?? '—' }) },
   { title: 'Updated', key: 'updated', render: (r) => (r.updated ? age(r.updated) : '—') },
 ];
 

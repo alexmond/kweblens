@@ -144,7 +144,17 @@ export interface HelmRelease {
   name: string;
   namespace: string;
   revision: number;
-  status: string;
+  /**
+   * Helm release status, or null when the release carries no info block.
+   *
+   * Nullable because the server means it: `HelmService.toSummary` writes null whenever
+   * `release.getInfo()` or its status is absent. Typing this `string` was not a harmless
+   * simplification — `statusTone` calls `.trim()` on it, so a null took out the whole
+   * releases table with a TypeError rather than degrading to one unknown cell. A lying
+   * type is invisible to `strictTemplates`, which checks the template against the type,
+   * not the type against the server.
+   */
+  status: string | null;
   chart: string;
   chartVersion: string;
   appVersion: string;
