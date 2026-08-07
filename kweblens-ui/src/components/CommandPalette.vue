@@ -20,6 +20,7 @@ import { NModal } from 'naive-ui';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import {
   buildCommands,
   type Command,
@@ -82,7 +83,7 @@ const runSearch = (cluster: string, q: string, mine: number) => {
     .catch((e: unknown) => {
       // An aborted request is this component superseding itself, not a failure to report.
       if (mine === seq && !(e instanceof DOMException && e.name === 'AbortError')) {
-        searchError.value = String(e);
+        searchError.value = failureNotice(e);
         result.value = null;
       }
     })

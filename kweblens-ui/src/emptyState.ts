@@ -85,3 +85,54 @@ export function noMatchEmpty(query: string, noun: string): EmptyStateCopy {
     action: null,
   };
 }
+
+/**
+ * The resource list's empty state — which of four situations it is in.
+ *
+ * <p>The table used to fall through to naive-ui's default "No Data" for all of them, which
+ * is the same phrase for "this cluster has no CronJobs", "your search matched nothing" and
+ * "the Helm release you scoped to owns none of these". Only the first is about the cluster;
+ * the other two are about a control the reader set and can unset.
+ *
+ * <p>Returns null while loading and when a fetch failed: the shell renders the error above
+ * the table (useResourceData sets it), and a confident second explanation underneath —
+ * "there are no Pods here" — would contradict it. An unanswered question has no answer.
+ */
+export function resourceListEmpty(state: {
+  loading: boolean;
+  failed: boolean;
+  /** Rows the server returned, before the search box and the Helm scope. */
+  total: number;
+  query: string;
+  /** The Helm release the view is scoped to, when there is one. */
+  scope: string | null;
+  /** The kind, in the nav's own words ("Pods", "ConfigMaps"). */
+  noun: string;
+  /** The namespace filter, when one is set — naming it is what makes a zero readable. */
+  namespace: string | null;
+}): EmptyStateCopy | null {
+  if (state.loading || state.failed) {
+    return null;
+  }
+  const noun = state.noun.toLowerCase();
+  if (state.query.trim()) {
+    return {
+      title: `No ${noun} match “${state.query.trim()}”`,
+      body:
+        state.scope !== null
+          ? `${state.total} loaded, filtered by your search and by the Helm release ${state.scope}.`
+          : `${state.total} loaded. Clear the search box to see them.`,
+      action: null,
+    };
+  }
+  if (state.scope !== null) {
+    return {
+      title: `The Helm release ${state.scope} manages no ${noun}`,
+      body: `${state.total} are loaded from the cluster; the Helm filter in the top bar is hiding them. Clear it to see the lot.`,
+      action: null,
+    };
+  }
+  return state.namespace
+    ? { title: `No ${noun} in ${state.namespace}`, body: 'The cluster returned none for this namespace.', action: null }
+    : { title: `No ${noun} in this cluster`, body: 'The cluster returned none.', action: null };
+}

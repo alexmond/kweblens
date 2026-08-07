@@ -12,6 +12,9 @@ import type { DataTableColumns } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
+import type { CheckState } from '../checkState';
+import { checkedData, checkedDanger, checkedValue, uncheckedNote } from '../checkState';
 import { eventObjectKind } from '../kube';
 import type { EventSummary, KubeObject } from '../types';
 import MetricChart from './MetricChart.vue';
@@ -22,7 +25,8 @@ const props = defineProps<{
   cluster: string;
   name: string;
   masterUrl?: string;
-  namespaceCount: number;
+  /** null when the namespace list could not be fetched — a count nobody answered is not 0. */
+  namespaceCount: number | null;
   namespace?: string | null;
   /** Whether the shell can navigate to a kind — a row with nowhere to go must not look clickable. */
   knowsKind?: (kind: string) => boolean;
@@ -35,8 +39,10 @@ const emit = defineEmits<{
   (e: 'require-auth'): void;
 }>();
 
-const nodes = shallowRef<KubeObject[] | null>(null);
-const warnings = shallowRef<EventSummary[] | null>(null);
+const nodes = shallowRef<CheckState<KubeObject[]>>({ status: 'checking' });
+// Three states, not two. The failure branch used to write `[]` here, and the page then said
+// "0 Warnings" and "No warnings." for a request that never came back — see checkState.ts.
+const warnings = shallowRef<CheckState<EventSummary[]>>({ status: 'checking' });
 const err = ref<string | null>(null);
 
 let reqId = 0;
@@ -44,17 +50,26 @@ watch(
   () => [props.cluster, props.namespace] as const,
   ([cluster, namespace]) => {
     const my = ++reqId;
-    nodes.value = null;
-    warnings.value = null;
+    nodes.value = { status: 'checking' };
+    warnings.value = { status: 'checking' };
     err.value = null;
     api
       .objects(cluster, 'nodes')
-      .then((n) => my === reqId && (nodes.value = n))
-      .catch((e) => my === reqId && (err.value = String(e)));
+      .then((n) => my === reqId && (nodes.value = { status: 'checked', data: n }))
+      .catch((e) => {
+        if (my === reqId) {
+          // Both, not just the banner: a card still showing "…" after the request has
+          // finished says "any moment now" about something that already failed.
+          nodes.value = { status: 'unchecked', message: failureNotice(e) };
+          err.value = failureNotice(e);
+        }
+      });
     api
       .events(cluster, namespace ?? undefined)
-      .then((ev) => my === reqId && (warnings.value = ev.filter((x) => x.type === 'Warning')))
-      .catch(() => my === reqId && (warnings.value = []));
+      .then(
+        (ev) => my === reqId && (warnings.value = { status: 'checked', data: ev.filter((x) => x.type === 'Warning') }),
+      )
+      .catch((e) => my === reqId && (warnings.value = { status: 'unchecked', message: failureNotice(e) }));
   },
   { immediate: true },
 );
@@ -79,15 +94,18 @@ const nodeReady = (o: KubeObject): boolean => {
   const r = conds.find((c) => c.type === 'Ready');
   return r ? r.status === 'True' : false;
 };
-const readyNodes = computed(() => (nodes.value ?? []).filter(nodeReady).length);
+const nodeData = computed(() => checkedData(nodes.value));
+const readyNodes = computed(() => (nodeData.value ?? []).filter(nodeReady).length);
 
 // Column widths and the reasoning behind them live in warningsTable.ts (#257).
 const columns = warnColumns() as DataTableColumns<EventSummary>;
 // Capped for rendering, but the cap is REPORTED. Previously the stat card showed the true
 // total while the table showed 30, so the page contradicted itself.
 const WARNING_LIMIT = 30;
-const warnRows = computed(() => (warnings.value ?? []).slice(0, WARNING_LIMIT));
-const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING_LIMIT);
+const warnData = computed(() => checkedData(warnings.value));
+const warnRows = computed(() => (warnData.value ?? []).slice(0, WARNING_LIMIT));
+const warningsTruncated = computed(() => (warnData.value?.length ?? 0) > WARNING_LIMIT);
+const warningsUnchecked = computed(() => uncheckedNote(warnings.value, 'warnings'));
 </script>
 
 <template>
@@ -102,17 +120,20 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
       <div class="ov-band-cards">
         <div class="ov-cards">
           <StatCard
-            :value="nodes ? nodes.length : '…'"
-            :label="`Nodes${nodes ? ` · ${readyNodes} ready` : ''}`"
+            :value="checkedValue(nodes)"
+            :label="`Nodes${nodeData ? ` · ${readyNodes} ready` : ''}`"
             clickable
             @select="emit('navigate', 'Node')"
           />
-          <StatCard :value="namespaceCount" label="Namespaces" clickable @select="emit('navigate', 'Namespace')" />
           <StatCard
-            :value="warnings ? warnings.length : '…'"
-            label="Warnings"
-            :danger="!!(warnings && warnings.length > 0)"
+            :value="namespaceCount ?? '—'"
+            label="Namespaces"
+            clickable
+            @select="emit('navigate', 'Namespace')"
           />
+          <!-- `—` when the events call failed, never 0: the number is a claim about the
+               cluster and we only make it when the cluster answered (checkState.ts). -->
+          <StatCard :value="checkedValue(warnings)" label="Warnings" :danger="checkedDanger(warnings)" />
         </div>
         <!-- Nodes and the charts beside them are cluster-scoped. Saying so is the honest
              alternative to either ignoring the filter silently or pretending these can be
@@ -142,9 +163,11 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
     <section class="ov-sec">
       <h3>Warnings</h3>
       <div v-if="warningsTruncated" class="ov-truncated">
-        Showing the {{ WARNING_LIMIT }} most recent of {{ warnings?.length }} warnings.
+        Showing the {{ WARNING_LIMIT }} most recent of {{ warnData?.length }} warnings.
       </div>
-      <div v-if="warnings && warnings.length === 0" class="empty">No warnings.</div>
+      <!-- The failure gets its own line and suppresses both the count and the all-clear. -->
+      <div v-if="warningsUnchecked" class="error">{{ warningsUnchecked }}</div>
+      <div v-else-if="warnData && warnData.length === 0" class="empty">No warnings.</div>
       <!-- `table-layout="fixed"` is what makes the declared widths binding and hands the
            remainder to Message; `scroll-x` is the floor below which it scrolls instead. -->
       <NDataTable
@@ -152,7 +175,7 @@ const warningsTruncated = computed(() => (warnings.value?.length ?? 0) > WARNING
         class="warn-table"
         :columns="columns"
         :data="warnRows"
-        :loading="warnings === null"
+        :loading="warnings.status === 'checking'"
         :row-key="(w) => `${w.object}/${w.reason}/${w.age}`"
         :row-props="rowProps"
         :scroll-x="WARN_TABLE_MIN_WIDTH"

@@ -2,7 +2,8 @@ import type { Ref } from 'vue';
 import { shallowRef, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { NAV, allNavItems, loadFavorites, withSyntheticNav } from '../shell';
+import { failureNotice } from '../apiFailure';
+import { NAV, allNavItems, helmScopeFailure, loadFavorites, withSyntheticNav } from '../shell';
 import type { HelmRelease, NavCategory } from '../types';
 
 /** Per-cluster nav tree, count badges, namespaces, Helm releases, and the active Helm scope. */
@@ -16,6 +17,10 @@ export function useClusterScope(
   const counts = shallowRef<Record<string, number>>({});
   const helmCounts = shallowRef<Record<string, number>>({});
   const namespaces = shallowRef<string[]>([]);
+  // Whether that list is an ANSWER. The picker can live with an empty list, but the cluster
+  // overview counts it on a stat card, and "0 Namespaces" for a request that failed is the
+  // same false all-clear as "0 Warnings" was (checkState.ts).
+  const namespacesKnown = ref(false);
   const helmReleaseList = shallowRef<HelmRelease[]>([]);
   const favorites = shallowRef<string[]>([]);
   const helmScope = ref<Set<string> | null>(null);
@@ -30,15 +35,19 @@ export function useClusterScope(
       counts.value = {};
       favorites.value = loadFavorites(c);
       namespaces.value = [];
+      namespacesKnown.value = false;
       helmReleaseList.value = [];
       setError(null);
       api
         .nav(c)
         .then((cats) => (nav.value = withSyntheticNav(cats)))
-        .catch((e) => setError(String(e)));
+        .catch((e) => setError(failureNotice(e)));
       api
         .namespaces(c)
-        .then((ns) => (namespaces.value = ns.map((r) => r.name).sort()))
+        .then((ns) => {
+          namespaces.value = ns.map((r) => r.name).sort();
+          namespacesKnown.value = true;
+        })
         .catch(() => (namespaces.value = []));
       api
         .helmReleases(c)
@@ -60,7 +69,15 @@ export function useClusterScope(
       api
         .helmReleaseResources(c, hr.namespace, hr.name)
         .then((refs) => !cancelled && (helmScope.value = new Set(refs.map((r) => `${r.kind}/${r.name}`))))
-        .catch(() => !cancelled && (helmScope.value = new Set()));
+        // Fails CLOSED, and says so — see helmScopeFailure. Swallowing this rendered the
+        // whole app as an empty shell that looked exactly like a release owning nothing.
+        .catch((e) => {
+          if (cancelled) {
+            return;
+          }
+          helmScope.value = new Set();
+          setError(helmScopeFailure(hr.namespace, hr.name, e));
+        });
     },
     { immediate: true },
   );
@@ -127,5 +144,5 @@ export function useClusterScope(
     { immediate: true },
   );
 
-  return { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, helmScope };
+  return { nav, counts, helmCounts, namespaces, namespacesKnown, helmReleaseList, favorites, helmScope };
 }

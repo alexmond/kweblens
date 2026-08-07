@@ -30,9 +30,22 @@ import type {
 export class ApiError extends Error {
   status: number;
 
-  constructor(status: number, message: string) {
+  /**
+   * The ProblemDetail `code` the server sent, or `''` when it sent none.
+   *
+   * <p>This is the difference between "kweblens does not know you" and "the cluster said no".
+   * `ApiExceptionHandler` tags every refusal it maps — `cluster-refused` for the API server's
+   * own verdict, `helm-failed`, `invalid-cluster`, … — while kweblens's own auth failures come
+   * from Spring Security's entry point with no body at all. Without the code a 403 is
+   * ambiguous, and the client used to read every one of them as an expired login (see
+   * `apiFailure.ts`).
+   */
+  code: string;
+
+  constructor(status: number, message: string, code = '') {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -47,18 +60,31 @@ export interface ActionResult {
  * <p>`ApiExceptionHandler` goes to the trouble of passing the API server's own sentence
  * through ("admission webhook … denied the request: no owner label"); the status line is the
  * part the operator already knew. A delete that is refused has to be able to say why (#297).
+ *
+ * <p>EVERY helper in this file goes through here, reads included. It used to be wired into
+ * two of seven, so an RBAC denial on a list read `403 Forbidden — /api/v1/…/objects` and a
+ * webhook rejection on apply read `422 Unprocessable Content`: the one sentence naming the
+ * service account, the verb and the namespace was fetched over the wire and dropped. If you
+ * add a helper, throw `await apiError(res)` from it — a bare status line is not an error
+ * message, it is the number the operator already saw in the network tab.
+ *
+ * <p>`context` (a URL) is kept only for the fallback: when there is no ProblemDetail there is
+ * nothing but the status, and "which request" is then the only thing left worth saying.
  */
-async function apiError(res: Response): Promise<ApiError> {
-  let detail = `${res.status} ${res.statusText}`;
+async function apiError(res: Response, context?: string): Promise<ApiError> {
+  const statusLine = `${res.status} ${res.statusText}`.trim();
+  let detail = context ? `${statusLine} — ${context}` : statusLine;
+  let code = '';
   try {
-    const problem = (await res.json()) as { detail?: string };
+    const problem = (await res.json()) as { detail?: string; code?: string };
+    code = problem?.code ?? '';
     if (problem?.detail) {
       detail = problem.detail;
     }
   } catch {
     // Not a ProblemDetail (a proxy error page, an empty body) — keep the status line.
   }
-  return new ApiError(res.status, detail);
+  return new ApiError(res.status, detail, code);
 }
 
 async function postJson<T>(url: string): Promise<T> {
@@ -79,7 +105,7 @@ async function postBody<T>(url: string, body: string, contentType: string): Prom
     body,
   });
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    throw await apiError(res);
   }
   return (await res.json()) as T;
 }
@@ -104,14 +130,14 @@ async function postNoContent(url: string, body?: string, contentType?: string): 
   }
   const res = await fetch(url, { method: 'POST', headers, body });
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    throw await apiError(res);
   }
 }
 
 async function deleteReq(url: string): Promise<void> {
   const res = await fetch(url, { method: 'DELETE', headers: { ...auth.header() } });
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    throw await apiError(res);
   }
 }
 
@@ -122,7 +148,7 @@ async function putJson<T>(url: string, body: string): Promise<T> {
     body,
   });
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    throw await apiError(res);
   }
   return (await res.json()) as T;
 }
@@ -134,7 +160,7 @@ async function putText(url: string, body: string): Promise<void> {
     body,
   });
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    throw await apiError(res);
   }
 }
 
@@ -162,7 +188,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms = 20000, sign
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, undefined, signal);
   if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText} — ${url}`);
+    throw await apiError(res, url);
   }
   return (await res.json()) as T;
 }
@@ -170,7 +196,7 @@ async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 async function getText(url: string): Promise<string> {
   const res = await fetchWithTimeout(url, { headers: { Accept: 'application/yaml, text/plain' } });
   if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText} — ${url}`);
+    throw await apiError(res, url);
   }
   return res.text();
 }

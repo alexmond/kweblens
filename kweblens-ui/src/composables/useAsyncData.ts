@@ -1,4 +1,5 @@
 import type { Ref } from 'vue';
+import { failureNotice } from '../apiFailure';
 import { ref, shallowRef, watch } from 'vue';
 
 /**
@@ -57,7 +58,7 @@ export function useAsyncData<T>(
         }
         // The data is deliberately left as it was rather than cleared: on a retry that
         // fails, showing the last good rows under an error beats blanking the pane.
-        error.value = String(e);
+        error.value = failureNotice(e);
         onError?.(e);
       })
       .finally(() => {

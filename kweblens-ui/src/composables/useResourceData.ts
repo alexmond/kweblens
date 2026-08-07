@@ -2,6 +2,7 @@ import type { Ref } from 'vue';
 import { shallowRef, ref, watch } from 'vue';
 
 import { api, clusterBase } from '../api';
+import { failureNotice } from '../apiFailure';
 import type { ColumnDef } from '../columns';
 import { columnsFor, printerColumnDefs } from '../columns';
 import { objKey } from '../kube';
@@ -17,6 +18,10 @@ export function useResourceData(
 ) {
   const objects = shallowRef<KubeObject[]>([]);
   const loading = ref(false);
+  // Reported separately from the error string, which the shell owns and any surface can
+  // write to. An empty table after a FAILED list must not claim the kind is empty, and
+  // "is there an error somewhere in the shell" is not the same question.
+  const failed = ref(false);
   const live = ref(false);
   const cols = shallowRef<ColumnDef[]>([]);
   const usage = shallowRef<Record<string, UsageSummary>>({});
@@ -32,18 +37,21 @@ export function useResourceData(
     ([c, sel], _prev, onCleanup) => {
       if (!c || !sel || isSynthetic(sel.id)) {
         objects.value = [];
+        failed.value = false;
         return;
       }
       let cancelled = false;
       onCleanup(() => (cancelled = true));
       loading.value = true;
+      failed.value = false;
       setError(null);
       api
         .objects(c, sel.id, scopedNs(sel))
         .then((r) => !cancelled && (objects.value = r))
         .catch((e) => {
           if (!cancelled) {
-            setError(String(e));
+            setError(failureNotice(e));
+            failed.value = true;
             objects.value = [];
           }
         })
@@ -174,5 +182,5 @@ export function useResourceData(
     { immediate: true },
   );
 
-  return { objects, setObjects, loading, live, cols, usage, nodeDisk };
+  return { objects, setObjects, loading, failed, live, cols, usage, nodeDisk };
 }

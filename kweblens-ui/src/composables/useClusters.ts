@@ -1,6 +1,7 @@
 import { shallowRef, ref } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { loadCluster } from '../prefs';
 import type { ClusterInfo } from '../types';
 
@@ -49,7 +50,7 @@ export function useClusters(setError: (e: string | null) => void) {
           cs.map((c) => c.id),
         );
       })
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(failureNotice(e)))
       .finally(() => (loaded.value = true));
   refresh();
   return { clusters, cluster, loaded, refresh };

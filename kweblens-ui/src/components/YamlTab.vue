@@ -8,6 +8,7 @@ import { NButton, NSwitch } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { stripManagedFields } from '../kube';
 import YamlEditorModal from './YamlEditorModal.vue';
 import YamlView from './YamlView.vue';
@@ -57,7 +58,7 @@ watch(
     api
       .yaml(props.cluster, props.resourceId, props.name, props.ns || undefined)
       .then((t) => !cancelled && (yaml.value = t))
-      .catch((e) => !cancelled && (yamlError.value = String(e)));
+      .catch((e) => !cancelled && (yamlError.value = failureNotice(e)));
   },
   { immediate: true },
 );

@@ -14,6 +14,7 @@ import { NButton, NForm, NFormItem, NInput, NModal, NSelect } from 'naive-ui';
 import { computed, ref } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { idProblem } from '../clustersPage';
 import type { ClusterDefinition } from '../types';
 
@@ -50,7 +51,7 @@ const readContexts = () => {
         context.value = list[0];
       }
     })
-    .catch((e: unknown) => (error.value = String(e)))
+    .catch((e: unknown) => (error.value = failureNotice(e)))
     .finally(() => (reading.value = false));
 };
 
@@ -74,7 +75,7 @@ const save = () => {
       kubeconfig.value = '';
       emit('saved');
     })
-    .catch((e: unknown) => (error.value = String(e)))
+    .catch((e: unknown) => (error.value = failureNotice(e)))
     .finally(() => (busy.value = false));
 };
 

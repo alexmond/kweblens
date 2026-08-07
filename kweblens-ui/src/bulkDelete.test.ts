@@ -106,11 +106,11 @@ describe('bulk delete reports what failed', () => {
 
     expect(del).toHaveBeenCalledTimes(3);
     expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a', 'default/cm-c'], authCleared: false });
-    expect(outcome?.failed).toEqual([{ ref: 'default/cm-b', error: 'Error: 409 Conflict' }]);
+    expect(outcome?.failed).toEqual([{ ref: 'default/cm-b', error: '409 Conflict' }]);
     expect(setError).toHaveBeenCalledTimes(1);
     const message = setError.mock.calls[0][0] as string;
     expect(message).toContain('Deleted 2 of 3 Config Maps; 1 failed');
-    expect(message).toContain('default/cm-b: Error: 409 Conflict');
+    expect(message).toContain('default/cm-b: 409 Conflict');
     expect(clearSelection).toHaveBeenCalled();
     del.mockImplementation(() => Promise.resolve());
   });
@@ -139,6 +139,8 @@ describe('bulk delete reports what failed', () => {
 });
 
 describe('bulk delete still stops on an auth failure', () => {
+  // 401, or a 403 with no ProblemDetail body — the two shapes kweblens's own security can
+  // produce. A CODED 403 is the cluster's verdict and is covered by the test below.
   it.each([401, 403])('clears auth and stops the run on %i', async (status) => {
     del.mockClear();
     del.mockImplementation((_c, _r, _ns, name) =>
@@ -157,6 +159,30 @@ describe('bulk delete still stops on an auth failure', () => {
     expect(del).toHaveBeenCalledTimes(2);
     expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a'], authCleared: true });
     expect(setError.mock.calls[0][0]).toContain('the rest were not tried');
+    del.mockImplementation(() => Promise.resolve());
+  });
+
+  it('does NOT clear auth on a cluster RBAC 403, and keeps deleting the rest', async () => {
+    // The service account may be allowed to delete the next object; the login is fine either
+    // way. Signing the operator out here ended a working session and hid the reason.
+    del.mockClear();
+    del.mockImplementation((_c, _r, _ns, name) =>
+      name === 'cm-b'
+        ? Promise.reject(new ApiError(403, 'configmaps "cm-b" is forbidden: User cannot delete', 'cluster-refused'))
+        : Promise.resolve(),
+    );
+    const objects = [namespaced('cm-a'), namespaced('cm-b'), namespaced('cm-c')];
+    const onAuthCleared = vi.fn();
+    const setError = vi.fn();
+
+    const outcome = await runBulkDelete(
+      deps({ objects, selection: new Set(objects.map(keyOf)), onAuthCleared, setError }),
+    );
+
+    expect(onAuthCleared).not.toHaveBeenCalled();
+    expect(del).toHaveBeenCalledTimes(3);
+    expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a', 'default/cm-c'], authCleared: false });
+    expect(setError.mock.calls[0][0]).toContain('is forbidden: User cannot delete');
     del.mockImplementation(() => Promise.resolve());
   });
 });

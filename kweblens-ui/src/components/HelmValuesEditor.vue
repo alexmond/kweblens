@@ -4,6 +4,7 @@ import type { SelectOption } from 'naive-ui';
 import { computed, ref } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import type { HelmAction } from './helm-types';
 
 // The values-YAML editor: load a saved set from the library / a release's current values,
@@ -28,7 +29,7 @@ const loadSaved = () => {
       valuesYaml.value = y;
       valuesMsg.value = `loaded "${pickValues.value}"`;
     })
-    .catch((e) => (valuesMsg.value = String(e)));
+    .catch((e) => (valuesMsg.value = failureNotice(e)));
 };
 
 const loadCurrent = () => {
@@ -42,7 +43,7 @@ const loadCurrent = () => {
       valuesYaml.value = y;
       valuesMsg.value = 'loaded current release values';
     })
-    .catch((e) => (valuesMsg.value = String(e)));
+    .catch((e) => (valuesMsg.value = failureNotice(e)));
 };
 
 const save = () => {
@@ -54,7 +55,7 @@ const save = () => {
       saveName.value = '';
       return api.helmValuesList().then((list) => (savedValues.value = list));
     })
-    .catch((e) => (valuesMsg.value = String(e)));
+    .catch((e) => (valuesMsg.value = failureNotice(e)));
 };
 </script>
 

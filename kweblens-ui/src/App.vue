@@ -3,6 +3,7 @@ import { NConfigProvider, darkTheme } from 'naive-ui';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { api } from './api';
+import { failureNotice } from './apiFailure';
 import type { Command } from './commandPalette';
 import { filesFeature } from './podFiles';
 import { auth } from './auth';
@@ -129,13 +130,13 @@ api
   .about()
   .then((info) => filesFeature.noteAbout(info))
   .catch(() => undefined);
-const { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, helmScope } = useClusterScope(
+const { nav, counts, helmCounts, namespaces, namespacesKnown, helmReleaseList, favorites, helmScope } = useClusterScope(
   cluster,
   namespace,
   helmRelease,
   setError,
 );
-const { objects, setObjects, loading, live, cols, usage, nodeDisk } = useResourceData(
+const { objects, setObjects, loading, failed, live, cols, usage, nodeDisk } = useResourceData(
   cluster,
   selected,
   namespace,
@@ -306,7 +307,7 @@ const openSearchHit = async (hit: { resourceId: string; kind: string; namespace:
     const obj = await api.object(clusterId, hit.resourceId, hit.name, hit.namespace);
     detail.value = { resourceId: hit.resourceId, obj };
   } catch (e) {
-    setError(`Could not open ${hit.kind} ${hit.name}: ${String(e)}`);
+    setError(`Could not open ${hit.kind} ${hit.name}: ${failureNotice(e)}`);
   }
 };
 
@@ -424,7 +425,7 @@ const onForwardStarted = () => {
                 :cluster="cluster"
                 :name="activeCluster?.name ?? cluster"
                 :master-url="activeCluster?.masterUrl"
-                :namespace-count="namespaces.length"
+                :namespace-count="namespacesKnown ? namespaces.length : null"
                 :namespace="namespace"
                 :knows-kind="knowsKind"
                 :authed="!!authUser"
@@ -474,6 +475,9 @@ const onForwardStarted = () => {
               :selection="selection"
               :selected-key="selectedKey"
               :loading="loading"
+              :failed="failed"
+              :scope="helmRelease ? helmRelease.name : null"
+              :namespace="selected.namespaced ? namespace : null"
               :fetch-children="fetchChildrenFn"
               @update:query="(v) => (query = v)"
               @toggle-col="toggleCol"

@@ -4,6 +4,7 @@ import type { DataTableColumns } from 'naive-ui';
 import { computed, h, ref } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { useAsyncData } from '../composables/useAsyncData';
 import { age } from '../columns';
 import { useDialog } from '../dialog';
@@ -65,7 +66,7 @@ const uninstall = (r: HelmRelease) => {
       api
         .helmUninstall(props.cluster, r.namespace, r.name)
         .then(() => (localKey.value += 1))
-        .catch((e) => (error.value = String(e)));
+        .catch((e) => (error.value = failureNotice(e)));
     });
 };
 

@@ -5,6 +5,7 @@ import { shallowRef, computed, h, onBeforeUnmount, onMounted, ref, watch } from 
 
 import { COL_WIDTH, autoHiddenCols, chromeWidth, tableWidth } from '../columnFit';
 import { age } from '../columns';
+import type { EmptyStateCopy } from '../emptyState';
 import { objKey, objName, objNs } from '../kube';
 import type { RowAction } from '../rowActions';
 import { parseRowActionKey, rowActionOptions } from '../rowActions';
@@ -12,6 +13,7 @@ import type { CellSpec, TableColumn } from '../table';
 import { toneFor } from '../table';
 import type { KubeObject } from '../types';
 import ContainerSquares from './ContainerSquares.vue';
+import EmptyState from './EmptyState.vue';
 import StatusBadge from './StatusBadge.vue';
 import UsageBar from './UsageBar.vue';
 
@@ -28,6 +30,13 @@ const props = defineProps<{
   fetchChildren?: (obj: KubeObject) => Promise<KubeObject[]>;
   /** Columns the Columns picker pinned: never taken away by width (#238). */
   keptCols?: Set<string>;
+  /**
+   * What an empty table means this time, or null when nothing should be claimed (still
+   * loading, or the fetch failed and the shell is already showing why). The table cannot
+   * work this out for itself — it is handed `filtered`, which has already been narrowed by
+   * a search box and a Helm scope it knows nothing about.
+   */
+  emptyCopy?: EmptyStateCopy | null;
 }>();
 const emit = defineEmits<{
   (e: 'update:selection', keys: string[]): void;
@@ -308,5 +317,11 @@ const rowProps = (row: KubeObject) => ({
     flex-height
     size="small"
     @update:checked-row-keys="(keys) => emit('update:selection', keys as string[])"
-  />
+  >
+    <!-- naive-ui's default here is "No Data" for every empty list, which reads as a fact
+         about the cluster even when the truth is "your filter matched nothing". -->
+    <template #empty>
+      <EmptyState v-if="emptyCopy" :title="emptyCopy.title" :body="emptyCopy.body" />
+    </template>
+  </NDataTable>
 </template>

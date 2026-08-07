@@ -7,6 +7,7 @@ import type { DataTableColumns } from 'naive-ui';
 import { shallowRef, computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import type { PortForward } from '../types';
 
 const props = defineProps<{ cluster: string; authed: boolean }>();
@@ -20,7 +21,7 @@ const refresh = () =>
   api
     .portForwards(props.cluster)
     .then((f) => (forwards.value = f))
-    .catch((e) => (error.value = String(e)));
+    .catch((e) => (error.value = failureNotice(e)));
 
 watch(
   () => props.cluster,
@@ -35,7 +36,7 @@ watch(
       api
         .portForwards(cluster)
         .then((f) => !cancelled && (forwards.value = f))
-        .catch((e) => !cancelled && (error.value = String(e)));
+        .catch((e) => !cancelled && (error.value = failureNotice(e)));
     };
     tick();
     const timer = window.setInterval(tick, 3000);
@@ -56,7 +57,7 @@ const stop = (id: string) => {
   api
     .stopPortForward(props.cluster, id)
     .then(() => refresh())
-    .catch((e) => (error.value = String(e)))
+    .catch((e) => (error.value = failureNotice(e)))
     .finally(() => (busy.value = null));
 };
 
