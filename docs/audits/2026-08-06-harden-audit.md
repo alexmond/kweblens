@@ -1,36 +1,145 @@
-# Correctness audit — 2026-08-06
+# Correctness audit — 2026-08-06, completed 2026-08-07
 
 A six-dimension fan-out in which **every finding was then attacked by an independent
 refuter**. Seeded by the `ErrorNotice` defect from #295 — a component used without an import
 that passed *both* `vue-tsc` and `eslint` — on the premise that the build gate has a blind
 spot and there would be more of that class.
 
-> **This run is incomplete and the record is imperfect. Read before acting on it.**
->
-> - A session limit killed **10 of 37 agents**, including the synthesis stage and the whole
->   `templates` dimension — the one the audit was designed around. There is no
->   cross-dimension pattern analysis, which was the most valuable intended output.
-> - The synthesis stage was also what joined each finding to its verdict. That join is lost,
->   so the pairing below is **reconstructed heuristically** by matching the file a verdict
->   discusses. Treat a CONFIRMED label as strong evidence, not proof, and re-read the
->   refutation text before relying on it.
-> - **Nothing here has been fixed**, and no issues have been filed.
+It was run twice. The first attempt (2026-08-06) was killed by a session limit part-way
+through; that partial record is kept below as an appendix because several of its findings did
+not resurface in the second run and are still open. **The complete run (2026-08-07, 6
+dimensions, 36 agents) is the authoritative result and is what this section reports.**
 
-**30 findings · 14 confirmed · 0 refuted · 16 unpaired**
+**28 confirmed · 1 refuted.**
 
-| dimension | findings |
+> **What "confirmed" means here, and what it does not.** A confirmed finding is one an
+> independent refuter tried to break against the source and could not. Most were argued from
+> the code; a minority were reproduced by running something (the `strictTemplates` probes were
+> executed against a copy of `kweblens-ui`; the shared PREPARE runner was driven with a stub
+> page). **None of this is "reproduced in production."** The refuters also narrowed or
+> corrected the consequence on a large fraction of findings, so read a severity as the
+> refuter's, not the finder's — and re-read the reasoning before acting.
+
+| dimension | confirmed |
 |---|---|
-| Code that cannot execute | 7 |
-| Documentation that the code contradicts | 6 |
-| Drift between the server's JSON and the client's types | 5 |
-| Error and empty states (roadmap T4) | 7 |
-| Resources acquired and not released | 5 |
+| Drift between the server's JSON and the client's types (`contract`) | 6 |
+| Code that cannot execute (`dead`) | 5 |
+| Error and empty states, roadmap T4 (`error-empty`) | 6 |
+| Documentation that the code contradicts (`docs-claims`) | 5 |
+| Resources acquired and not released (`resources`) | 5 |
+| Templates the type-checker cannot see (`templates`) | 1 |
 
-(`templates` is absent: its agent was killed.)
+The `templates` dimension — the one the audit was designed around, and the one whose agent
+died in the first run — produced a single finding, duplicated by the `dead` dimension from the
+other side: `vue-tsc` runs with `strictTemplates` off, so an unresolved component tag, a
+misspelled prop, an unknown event and a non-existent slot name all pass the gate. That is the
+seed defect's mechanism, still open.
+
+## The 28
+
+Ordered by severity, then dimension. No finding was rated **high**.
+
+| # | sev | dimension | where | finding |
+|---|---|---|---|---|
+| 1 | medium | contract | `kweblens-ui/src/api.ts:75` | Four of the client's six request helpers throw away the server's ProblemDetail `detail`, so every apply / create / Helm / add-cluster failure shows a bare status line instead of the cluster's reason |
+| 2 | medium | contract | `kweblens-ui/src/components/YamlEditorModal.vue:108` | An RBAC 403 from the *cluster*, which the server labels `code: "cluster-refused"`, is misread as an expired kweblens login and silently signs the operator out |
+| 3 | medium | contract | `kweblens-ui/src/podFiles.ts:277` | `allowedRoots` is seeded from an unauthenticated `/api/v1/about` — where the server deliberately sends `[]` — and never re-fetched after sign-in, so a confined file browser opens on `/` and refuses itself |
+| 4 | medium | dead code | `kweblens-ui/src/components/MetricChart.vue:79` | MetricChart hands `var(--muted)` / `var(--border)` to an echarts CanvasRenderer, which cannot resolve CSS custom properties — so all four axis colour declarations are silently discarded and the chart's labels and grid lines render pure black (1.34:1) on the default dark theme |
+| 5 | medium | dead code | `kweblens-ui/src/styles.css:1123` | The metrics-chart hover tooltip's `.chart-tip` wrapper rule selects a class echarts never emits, so the tooltip keeps echarts' default WHITE background while kweblens styles its text near-white — the hovered value renders at 1.28:1 |
+| 6 | medium | dead code | `kweblens-ui/tsconfig.app.json:1` | The front-end gate structurally cannot see an unresolved component tag — the exact defect class of the HelmResourcesModal seed is still shippable, proven by vue-tsc exiting 0 on a template with two undefined components |
+| 7 | medium | docs | `README.md:50` | README's entire "suggest → confirm → apply" section states that server-side `dryRun=All` does not exist and that the audit log is lost on restart — both shipped (#274/#209/#212) and both are documented as shipped in CLAUDE.md and roadmap.md, so the two user-facing docs now contradict each other |
+| 8 | medium | error/empty | `kweblens-ui/src/api.ts:165` | Every read-path failure discards the server's ProblemDetail, so RBAC denials and unreachable clusters render as a bare status line and URL |
+| 9 | medium | error/empty | `kweblens-ui/src/api.ts:82` | Write failures on apply, Helm and port-forward show only "422 Unprocessable Content" — the admission-webhook / Helm reason is parsed by the server and discarded by the client |
+| 10 | medium | error/empty | `kweblens-ui/src/components/ClusterOverview.vue:57` | When the events API fails, the cluster overview affirmatively claims "0 Warnings" and "No warnings." — a silent false all-clear on the primary health surface |
+| 11 | medium | error/empty | `kweblens-ui/src/composables/useClusterScope.ts:63` | A failed Helm-release-resources fetch silently empties every resource list in the app while the header keeps claiming N items |
+| 12 | medium | templates | `kweblens-ui/tsconfig.app.json:25` | vue-tsc runs with strictTemplates off, so component tags, props, events and slot names in every template are entirely unchecked — the exact hole the HelmResourcesModal `<ErrorNotice>` bug went through is still open |
+| 13 | low | contract | `kweblens-ui/src/podFiles.ts:72` | The pod-file error table claims to be exhaustive but is missing two codes the server can send, so both degrade to a generic message with a Retry that cannot succeed |
+| 14 | low | contract | `kweblens-ui/src/types.ts:147` | `HelmRelease.status` is typed as a required string but the server can send null, and the consumer calls `.trim()` on it — the whole releases table fails to render |
+| 15 | low | contract | `…/web/api/ObjectPatchApiController.java:33` | The JSON-Merge-Patch endpoint built for the structured form editor has no client caller — the form applies through full server-side apply with forceConflicts instead |
+| 16 | low | dead code | `docs/design/metrics-sources.md:95` | The doc tells operators to configure `kweblens.metrics.prometheus-url`; the shipped binding is `kweblens.metrics.prometheus-service` and it explicitly refuses a URL value, so the documented property binds to nothing and Spring ignores it silently |
+| 17 | low | dead code | `…/cluster/ProxyStatus.java:75` | `ProxyStatus.exclusions(String[])` is a public static method with zero callers anywhere in the reactor — main, test, CLI or IT |
+| 18 | low | docs | `README.md:97` | README and CLAUDE.md both say the ambient kubeconfig is seeded as cluster `default`; ClusterBootstrap actually registers one cluster per kubeconfig CONTEXT, named by context — `default` is only the no-kubeconfig fallback |
+| 19 | low | docs | `README.md:30` | README says the detail drawer has "three relation sections" and names the pre-#220 three; RelationService puts twelve keys in the response and the SPA renders all of them |
+| 20 | low | docs | `docs/design/overview-pages.md:82` | An undated present-tense gap list whose seven "fixes, as issues" have all shipped — it tells a reader only Cluster and Workloads overviews exist, the namespace filter is ignored, and the Job/CronJob health predicates are broken |
+| 21 | low | docs | `scripts/README.md:243` | Documents a `signin:<password>` PREPARE verb as "the only way to reach a surface gated on being signed in"; the shared runner that `ui-measure.mjs` and `ui-shot.mjs` use has no such verb and throws on it |
+| 22 | low | error/empty | `kweblens-ui/src/components/CategoryOverview.vue:57` | CategoryOverview swallows the events error and then hardcodes `:error="null"` on the pane built to display it, rendering "No events." for a failed fetch |
+| 23 | low | error/empty | `kweblens-ui/src/components/ResourceTable.vue:294` | ResourceTable has no `#empty` slot, so three unrelated situations all render naive-ui's default "No Data" |
+| 24 | low | resources | `…/cluster/ClusterConfigService.java:107` | Adding or editing a cluster builds a KubernetesClient before persisting it, so a failed `store.save()` drops the client — and with it a whole Vert.x instance — on the floor, never closed |
+| 25 | low | resources | `…/cluster/ClusterConfigService.java:146` | Removing or re-pointing a cluster never stops that cluster's port-forwards, leaving a bound local TCP listener with no UI path left to release it |
+| 26 | low | resources | `…/schema/SchemaService.java:60` | SchemaService caches whole OpenAPI group-version definition maps in a plain ConcurrentHashMap with no size cap, no TTL and no eviction on cluster removal |
+| 27 | low | resources | `…/web/search/SearchService.java:222` | Global search and the nav count endpoint keep executing every queued API-server list after the client has aborted, blocking a Tomcat request thread on an untimed `Future.get()` |
+| 28 | low | resources | `…/web/api/SseEndpointKeepAliveTest.java:98` | The structural guard against leaking SSE endpoints passes on any class that merely mentions `SseKeepAlive`, so an endpoint that only calls `completeQuietly()` ships the original leak with a green build |
+
+### Corrections the refuters made that the table cannot carry
+
+Several findings survived only in a narrower form. The ones where the difference changes what
+you would do:
+
+- **#26 `SchemaService`** — measured at 16.9–17.2 MB for a 38-group-version CRD-heavy cluster,
+  with the key space bounded by the nav catalog. **Not an OOM risk.** The real defect is
+  *staleness*: the cache is keyed by cluster id alone, so a CRD update or a re-pointed id
+  serves the old schema indefinitely.
+- **#27 `SearchService`** — the heap claim was refuted and the thread cost is nil under virtual
+  threads. The symptom is also inverted from the report: a 250 ms debounce means fast typing
+  produces *one* request, so this degrades when you type slowly.
+- **#28 `SseEndpointKeepAliveTest`** — not silent today. A sibling assertion pins the streaming
+  controller set to exactly four, so the build goes red the day a fifth is written. It is
+  fully silent only for a `ResponseEntity<SseEmitter>` return or a plain `@Controller`.
+- **#15 `ObjectPatchApiController`** — the endpoint has no SPA caller *by design*; #115 says so
+  verbatim. Only the javadoc claiming a caller is wrong.
+- **#14 `HelmRelease.status`** — the `status` path is near-unreachable and does **not** blank
+  the pane in a production build. The live half is `appVersion`, which renders as an empty cell
+  where the sibling charts pane correctly renders `—`.
+- **#23 `ResourceTable`** — the error case is *not* conflated with empty (it renders above the
+  list) and there is no loading flash. This is roadmap R3/P2, already tracked.
+- **#6 / #12 (`strictTemplates`)** — the recommended fix is
+  `"vueCompilerOptions": { "checkUnknownComponents": true }`, verified to catch the seed defect
+  with **zero** collateral errors. Blanket `strictTemplates: true` first needs ~5 naive-ui
+  attribute fall-throughs cleaned up.
+
+The one **refuted** finding was the heap claim attached to #27.
+
+The synthesis narrative ranks these as "26 findings" rather than 28 because it merges two
+duplicate pairs: the `strictTemplates` finding is reported once by the `templates` dimension
+and once by `dead` (#12/#6), and the two `api.ts` write-helper entries (#1/#9) describe the
+same helper family from the `contract` and `error-empty` sides.
+
+## What has been fixed since
+
+Both fixes came out of the **first, partial** run — neither defect recurs in the complete
+run's 28, which is consistent with them being gone but is not by itself proof:
+
+| Issue | Finding | Closed by |
+|---|---|---|
+| GH#297 | Bulk Delete sent nothing for cluster-scoped kinds and swallowed every non-auth failure (recorded below as **unpaired**, i.e. never verified by a refuter) | PR #300, merged 2026-08-07 |
+| GH#298 | A zero-cluster install rendered a blank pane and the only page that can add a cluster was unreachable (recorded below as **confirmed**) | PR #301, merged 2026-08-07 |
+
+The six `docs-claims` / doc-drift findings (#7, #16, #18, #19, #20, #21) were corrected in
+the docs directly rather than through issues. Everything else in the table above is open.
 
 ---
 
-## Confirmed
+## Appendix — the first, partial run (2026-08-06)
+
+**Superseded by the table above, and kept for two reasons:** several of its findings did not
+resurface in the complete run and are still open (the `/audit` URL in `docs/deployment.md`,
+`docs/references/freelens-vs-kweblens.md` as an undated gap list, `/actuator/info` being public
+under `open-mode=false`, the empty `Watcher.onClose`, `boundClaim` never requested for
+cluster-scoped objects, and global search being missing from both README and CLAUDE.md); and
+GH#297/#298 were filed from it.
+
+**Its own caveats still apply to everything in this appendix, and only to this appendix:**
+
+- A session limit killed **10 of 37 agents**, including the synthesis stage and the whole
+  `templates` dimension.
+- The synthesis stage was what joined each finding to its verdict, so the pairing below is
+  **reconstructed heuristically** by matching the file a verdict discusses. It is visibly wrong
+  in places — some "Correction from the refuter" blocks discuss a different finding than the
+  heading above them. Read the refutation text, not the pairing.
+- **30 findings · 14 confirmed · 0 refuted · 16 unpaired.** An "unpaired" finding was never
+  attacked by a refuter at all and carries no more weight than one agent's reading.
+
+## Appendix — confirmed (2026-08-06 run)
 
 ### [CONFIRMED · severity low] With zero registered clusters the entire content area renders blank and the Clusters page — the only place to add one — is unreachable
 
@@ -508,7 +617,7 @@ Could not refute it. The path is live: `showEvents` is true for category 'worklo
 
 ---
 
-## Unpaired (unverified)
+## Appendix — unpaired, i.e. unverified (2026-08-06 run)
 
 ### [UNPAIRED] Bulk Delete silently does nothing on every cluster-scoped kind, and swallows every non-auth failure, so a destructive action reports success it never attempted
 
@@ -977,5 +1086,8 @@ _No verdict could be paired with this finding — unverified._
 
 ---
 
-## Refuted
+## Appendix — refuted (2026-08-06 run)
+
+None. No finding in the partial run was refuted — but 10 of its 37 agents never ran, so that
+is a statement about coverage, not about the code.
 

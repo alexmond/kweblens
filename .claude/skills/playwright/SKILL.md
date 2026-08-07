@@ -78,11 +78,15 @@ ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
 ```
 
 `PREPARE` brings a surface on screen before it is sampled — `press:` `click:` `hover:<sel>`
-`fill:<sel>=<text>` `upload:<sel>=<path>` `wait:<ms>` `goto:<path>` `scroll:<sel>`
+`fill:<sel>=<text>` `upload:<sel>=<path>` `wait:<ms>` `scroll:<sel>`
 `drawer:<px>` (drag the open detail drawer inside its own 360..1400 resize range),
 `leaf:<nav label>` (or `leaf:<Category>/<label>` — `Overview` is a leaf in every category, and
-an ambiguous label THROWS rather than opening the first match), plus `close` in
-`contrast-check` only (shut an open drawer/modal), semicolon-separated.
+an ambiguous label THROWS rather than opening the first match), semicolon-separated.
+**Three verbs are runner-specific, and the wrong one throws `unknown PREPARE verb` rather
+than being skipped:** `goto:<path>` exists only in the shared runner (`ui-shot`,
+`ui-measure`); `close` (shut an open drawer/modal) and `signin:<password>` (the admin login,
+idempotent) exist only in `contrast-check`'s own copy. For a signed-in surface under
+`ui-shot`/`ui-measure`, spell the login out as `?click:` + `?fill:` steps.
 Prefix a step with `?` to skip it when its selector is absent; that matters because
 `PREPARE` runs once per theme and per viewport, and a step like signing in applies only
 the first time — without `?` the second pass waits for a modal that is already dealt with

@@ -240,11 +240,21 @@ of its own` (a wrapper whose text belongs to a child), `covered by another layer
 behind the open drawer) and `outside the viewport`. Treat a screenful of those as a failed
 run — use `PREPARE`, a wider `--view`, or close the drawer, and measure again.
 
-`PREPARE` steps include `signin:<password>` — one verb for the admin login, idempotent, and
-the only way to reach a surface gated on being signed in (the YAML editor's Form / Warnings /
-Review tabs are `v-if="!readonly"`, so a signed-out run never renders them at all). Plus
-`press:` / `click:` / `fill:<sel>=<text>` / `upload:<sel>=<path>` /
-`wait:<ms>`, and a step prefixed with `?` is skipped when its selector is not on screen.
+**`signin:<password>` is a `contrast-check.mjs` verb only, like `close`.** It is one
+idempotent step for the admin login, and it matters because a signed-out run never renders the
+surfaces gated on it at all — the YAML editor's Form / Warnings / Review tabs are
+`v-if="!readonly"`, so they are simply absent rather than visibly locked, and open-mode makes
+that easy to miss. `contrast-check.mjs` carries its own copy of the PREPARE runner (see
+above), and **the shared runner in `lib/kw-playwright.mjs` — the one `ui-shot.mjs` and
+`ui-measure.mjs` use — has neither `signin` nor `close`, and throws
+`unknown PREPARE verb: signin` rather than skipping it.** To reach a signed-in surface from
+those two, spell the login out with the `?click` / `?fill` steps shown in the example below;
+those work in both runners.
+
+Verbs both runners understand: `press:` / `click:` / `hover:<sel>` / `scroll:<sel>` /
+`fill:<sel>=<text>` / `upload:<sel>=<path>` / `wait:<ms>` / `leaf:<label>` / `drawer:<px>`.
+`goto:<path>` is shared-runner only; `signin:` and `close` are `contrast-check` only. A step
+prefixed with `?` is skipped when its selector is not on screen.
 The `?` matters for anything behind the login: `PREPARE` runs once per theme, so a sign-in
 that only applies to the first pass would otherwise stall the second one until it times
 out. `upload:` reaches UI that only exists once a file has been picked. Measuring the pod
