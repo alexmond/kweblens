@@ -15,7 +15,8 @@
 import { NButton, NModal, NTabPane, NTabs } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
-import { ApiError, api } from '../api';
+import { api } from '../api';
+import { failureNotice, isSessionExpiry } from '../apiFailure';
 import type { EditorDiagnostic } from '../types';
 import { stripManagedFields } from '../kube';
 import { requestServerPreview, serverPreviewCaption, type ServerPreviewState } from '../serverPreview';
@@ -105,12 +106,13 @@ const apply = async () => {
     window.setTimeout(() => emit('close'), 600);
   } catch (e) {
     err.value = true;
-    if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+    // A 403 here is nearly always the CLUSTER refusing, not an expired login — see
+    // apiFailure.ts. Signing out on one told the operator to fix a login that was fine and
+    // threw away the RBAC sentence that said what was actually wrong.
+    if (isSessionExpiry(e)) {
       emit('auth-expired');
-      msg.value = 'Authentication failed — sign in again.';
-    } else {
-      msg.value = String(e);
     }
+    msg.value = failureNotice(e);
   } finally {
     busy.value = false;
   }

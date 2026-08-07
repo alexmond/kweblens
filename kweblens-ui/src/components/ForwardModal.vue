@@ -7,7 +7,8 @@
 import { NButton, NForm, NFormItem, NInputNumber, NModal, NSelect } from 'naive-ui';
 import { computed, ref } from 'vue';
 
-import { ApiError, api } from '../api';
+import { api } from '../api';
+import { failureNotice, isSessionExpiry } from '../apiFailure';
 
 const props = defineProps<{
   cluster: string;
@@ -45,10 +46,10 @@ const submit = () => {
     })
     .then(() => emit('started'))
     .catch((err) => {
-      if (err instanceof ApiError && err.status === 401) {
+      if (isSessionExpiry(err)) {
         emit('auth-expired');
       }
-      error.value = String(err);
+      error.value = failureNotice(err);
       busy.value = false;
     });
 };

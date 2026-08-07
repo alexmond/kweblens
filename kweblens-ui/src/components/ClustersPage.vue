@@ -20,6 +20,7 @@ import { NButton, NInput, NPopconfirm } from 'naive-ui';
 import { computed, ref } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { filterRows, summarise, toRows } from '../clustersPage';
 import { noMatchEmpty, type EmptyStateCopy } from '../emptyState';
 import type { ClusterInfo, ClusterDefinition } from '../types';
@@ -76,7 +77,7 @@ const remove = (id: string) => {
   api
     .removeCluster(id)
     .then(() => emit('changed'))
-    .catch((e: unknown) => (error.value = String(e)))
+    .catch((e: unknown) => (error.value = failureNotice(e)))
     .finally(() => (busy.value = null));
 };
 

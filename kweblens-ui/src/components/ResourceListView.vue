@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NInput, NPopover } from 'naive-ui';
+import { computed } from 'vue';
 
+import { resourceListEmpty } from '../emptyState';
 import type { RowAction } from '../rowActions';
+import { listCountLabel } from '../shell';
 import type { TableColumn } from '../table';
 import type { KubeObject, NavItem } from '../types';
 import ResourceTable from './ResourceTable.vue';
@@ -9,12 +12,19 @@ import ResourceTable from './ResourceTable.vue';
 // The resource-list surface: header (search, create, columns), bulk bar, and the table.
 // Emits: update:query, toggle-col(key), clear-selection, bulk-delete, update:selection(keys),
 //        open(obj), namespace-click(ns), create, row-action(action,obj,container?)
-defineProps<{
+const props = defineProps<{
   selected: NavItem;
   filtered: KubeObject[];
   objects: KubeObject[];
   query: string;
   live: boolean;
+  /** The Helm release the view is scoped to, or null. It narrows `filtered`, so it has to
+   *  be visible to the count and the empty state or both describe a different list. */
+  scope: string | null;
+  /** The namespace filter, named in the empty state rather than left to be guessed. */
+  namespace: string | null;
+  /** Whether the list fetch failed: the shell renders that error, so the table stays quiet. */
+  failed: boolean;
   tableCols: TableColumn[];
   visibleCols: TableColumn[];
   hiddenCols: Set<string>;
@@ -39,13 +49,31 @@ const emit = defineEmits<{
   (e: 'create'): void;
   (e: 'row-action', action: RowAction, obj: KubeObject, container?: string): void;
 }>();
+
+const countLabel = computed(() =>
+  listCountLabel(props.filtered.length, props.objects.length, props.query, props.scope !== null),
+);
+
+// Why the table is empty, worked out here and rendered there — three unrelated situations
+// used to share naive-ui's default "No Data".
+const emptyCopy = computed(() =>
+  resourceListEmpty({
+    loading: props.loading,
+    failed: props.failed,
+    total: props.objects.length,
+    query: props.query,
+    scope: props.scope,
+    noun: props.selected.label,
+    namespace: props.namespace,
+  }),
+);
 </script>
 
 <template>
   <div class="list-view">
     <div class="content-head">
       <h1>{{ selected.label }}</h1>
-      <span class="count">{{ query ? `${filtered.length} of ${objects.length}` : `${objects.length} items` }}</span>
+      <span class="count">{{ countLabel }}</span>
       <span v-if="live" class="live" title="Live-updating (SSE watch)"><span class="dot" /> live</span>
       <NInput
         :value="query"
@@ -100,6 +128,7 @@ const emit = defineEmits<{
       :selection="selection"
       :fetch-children="fetchChildren"
       :kept-cols="keptCols"
+      :empty-copy="emptyCopy"
       @auto-hidden="(k) => emit('auto-hidden', k)"
       @update:selection="(k) => emit('update:selection', k)"
       @open="(o) => emit('open', o)"

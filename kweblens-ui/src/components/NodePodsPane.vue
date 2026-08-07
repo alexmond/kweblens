@@ -11,6 +11,7 @@ import type { DataTableColumns } from 'naive-ui';
 import { computed, h, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { gib, objKey, objName, objNs, parseCpuCores, parseMemBytes } from '../kube';
 import type { KubeObject, UsageSummary } from '../types';
 import StatusBadge from './StatusBadge.vue';
@@ -117,7 +118,7 @@ const load = (first: boolean) => {
     api
       .nodePods(props.cluster, props.node)
       .then((p) => (pods.value = p))
-      .catch((e) => (error.value = String(e)));
+      .catch((e) => (error.value = failureNotice(e)));
   }
   api
     .podMetrics(props.cluster)

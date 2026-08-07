@@ -1,4 +1,5 @@
-import { ApiError, api } from './api';
+import { api } from './api';
+import { failureNotice, isSessionExpiry } from './apiFailure';
 import type { DialogApi } from './dialog';
 import type { LogScope } from './dock';
 import { containerNames, objKey, objName, objNs } from './kube';
@@ -106,6 +107,37 @@ export function filterObjects(objects: KubeObject[], query: string, helmScope: S
   );
 }
 
+/**
+ * The list header's count.
+ *
+ * <p>It used to branch on the search query alone while {@link filterObjects} narrows by the
+ * search query AND the Helm scope, so a Helm-scoped list with an empty search box read
+ * "137 items" over a table with nothing in it. Both narrowings have to be counted here, or
+ * the header contradicts the body.
+ */
+export function listCountLabel(filtered: number, total: number, query: string, scoped: boolean): string {
+  return query.trim() || scoped ? `${filtered} of ${total}` : `${total} items`;
+}
+
+/**
+ * What to say when the Helm scope could not be resolved.
+ *
+ * <p>The scope fails CLOSED — an empty `Set` rather than `null` — because dropping the scope
+ * would show the whole cluster while the top bar still names a release. The cost is that an
+ * empty scope is byte-identical to a release that genuinely manages nothing: every list is
+ * empty, every non-Helm badge is gone. This sentence is the only thing that separates them,
+ * and it names the way out, because clearing a filter the operator set two clicks ago is not
+ * the first thing that occurs to someone looking at an app that appears to have lost its
+ * cluster.
+ */
+export function helmScopeFailure(namespace: string, name: string, e: unknown): string {
+  return (
+    `Could not list what the Helm release ${namespace}/${name} manages, so nothing is in scope: ` +
+    `this is an empty view, not an empty release. Clear the Helm filter to browse the whole cluster. ` +
+    failureNotice(e)
+  );
+}
+
 /** The pods a workload owns — matched by its spec.selector.matchLabels in its namespace. */
 export async function fetchWorkloadPods(cluster: string, obj: KubeObject): Promise<KubeObject[]> {
   const sel =
@@ -178,7 +210,7 @@ export function dispatchRowAction(
     return;
   }
   const confirmRun = (fn: () => Promise<unknown>, confirmMsg?: string) => {
-    const go = () => fn().catch((e) => deps.setError(String(e)));
+    const go = () => fn().catch((e) => deps.setError(failureNotice(e)));
     if (!confirmMsg) {
       go();
       return;
@@ -285,10 +317,14 @@ export async function runBulkDelete(deps: {
       await api.del(cluster, selected.id, objNs(o) ?? '', objName(o));
       outcome.deleted.push(refOf(o));
     } catch (e) {
-      outcome.failed.push({ ref: refOf(o), error: String(e) });
-      // A permission failure is about the session, not this object: trying the rest would
-      // produce the same 403 N times. Clear auth and stop, as this has always done.
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+      outcome.failed.push({ ref: refOf(o), error: failureNotice(e) });
+      // A session failure is about the login, not this object: trying the rest would produce
+      // the same 401 N times. Clear auth and stop.
+      //
+      // A CODED 403 is not that. It is the cluster refusing this object — the service account
+      // may well be allowed to delete the next one — so it counts as a failed row and the loop
+      // continues. Clearing the login on it signed the operator out of a session that worked.
+      if (isSessionExpiry(e)) {
         outcome.authCleared = true;
         onAuthCleared();
         break;

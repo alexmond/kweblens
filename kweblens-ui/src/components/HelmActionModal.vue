@@ -2,7 +2,8 @@
 import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal } from 'naive-ui';
 import { shallowRef, onMounted, ref } from 'vue';
 
-import { ApiError, api } from '../api';
+import { api } from '../api';
+import { failureNotice, isSessionExpiry } from '../apiFailure';
 import HelmValuesEditor from './HelmValuesEditor.vue';
 import HelmAdvancedOptions from './HelmAdvancedOptions.vue';
 import YamlView from './YamlView.vue';
@@ -125,10 +126,12 @@ const run = (dryRun: boolean) => {
       }
     })
     .catch((err) => {
-      if (err instanceof ApiError && err.status === 401) {
+      if (isSessionExpiry(err)) {
         emit('auth-expired');
       }
-      error.value = String(err);
+      // The dry run goes through this same path, so a chart or values file the cluster
+      // rejects has no other surface that would print the reason — it has to be here.
+      error.value = failureNotice(err);
     })
     .finally(() => (busy.value = false));
 };

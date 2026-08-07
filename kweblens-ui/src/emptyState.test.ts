@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clusterListEmpty, noMatchEmpty } from './emptyState';
+import { clusterListEmpty, noMatchEmpty, resourceListEmpty } from './emptyState';
 
 const base = { loaded: true, failed: false, count: 0, canWrite: true };
 
@@ -50,5 +50,41 @@ describe('noMatchEmpty', () => {
 
   it('offers no action — clearing the filter is the exit, and it is already on screen', () => {
     expect(noMatchEmpty('prod', 'cluster').action).toBeNull();
+  });
+});
+
+describe('resourceListEmpty', () => {
+  const base = { loading: false, failed: false, total: 0, query: '', scope: null, noun: 'Pods', namespace: null };
+
+  it('claims nothing while the list is still loading', () => {
+    expect(resourceListEmpty({ ...base, loading: true })).toBeNull();
+  });
+
+  it('claims nothing when the fetch failed — the shell is already showing why', () => {
+    // "There are no Pods here" underneath "403 … cannot list pods" would contradict it.
+    expect(resourceListEmpty({ ...base, failed: true })).toBeNull();
+  });
+
+  it('says the cluster has none, and names the namespace when one is filtering', () => {
+    expect(resourceListEmpty(base)?.title).toBe('No pods in this cluster');
+    expect(resourceListEmpty({ ...base, namespace: 'prod' })?.title).toBe('No pods in prod');
+  });
+
+  it('blames the search box when the search box is what hid them', () => {
+    const copy = resourceListEmpty({ ...base, total: 137, query: ' nginx ' });
+    expect(copy?.title).toBe('No pods match “nginx”');
+    expect(copy?.body).toContain('137 loaded');
+  });
+
+  it('blames the Helm scope when that is what hid them, and says how to undo it', () => {
+    const copy = resourceListEmpty({ ...base, total: 137, scope: 'billing' });
+    expect(copy?.title).toBe('The Helm release billing manages no pods');
+    expect(copy?.body).toContain('Clear it');
+  });
+
+  it('mentions both when both are narrowing', () => {
+    const copy = resourceListEmpty({ ...base, total: 137, query: 'nginx', scope: 'billing' });
+    expect(copy?.title).toContain('nginx');
+    expect(copy?.body).toContain('billing');
   });
 });

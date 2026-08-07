@@ -3,7 +3,8 @@ import { NButton, NDataTable, NInput } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { computed, h, ref } from 'vue';
 
-import { ApiError, api } from '../api';
+import { api } from '../api';
+import { failureNotice, isSessionExpiry } from '../apiFailure';
 import { useAsyncData } from '../composables/useAsyncData';
 import { useDialog } from '../dialog';
 import ErrorNotice from './ErrorNotice.vue';
@@ -11,11 +12,12 @@ import KebabMenu from './KebabMenu.vue';
 import type { KebabItem } from './helm-types';
 
 // Configured chart repositories: add / edit (remove+re-add) / refresh / remove. All writes
-// are auth-gated; a 401/403 surfaces via the auth-expired event.
+// are auth-gated; a failed login surfaces via the auth-expired event.
 //
 // Events emitted:
 //   (e: 'require-auth'): void    — an unauthenticated user attempted a write
-//   (e: 'auth-expired'): void    — a write returned 401/403
+//   (e: 'auth-expired'): void    — kweblens refused the login (401, or a bodyless 403); a
+//                                  coded 403 is the cluster's verdict and stays in the pane
 const props = defineProps<{ authed: boolean }>();
 const emit = defineEmits<{ (e: 'require-auth'): void; (e: 'auth-expired'): void }>();
 
@@ -37,10 +39,10 @@ const url = ref('');
 const busy = ref(false);
 
 const fail = (e: unknown) => {
-  if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+  if (isSessionExpiry(e)) {
     emit('auth-expired');
   }
-  error.value = String(e);
+  error.value = failureNotice(e);
 };
 
 const add = () => {

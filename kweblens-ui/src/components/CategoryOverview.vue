@@ -16,6 +16,9 @@
 import { shallowRef, computed, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
+import type { CheckState } from '../checkState';
+import { checkedData, uncheckedNote } from '../checkState';
 import type { EventSummary, KindHealth } from '../types';
 import EventsPane from './EventsPane.vue';
 import StatCard from './StatCard.vue';
@@ -28,7 +31,10 @@ const props = defineProps<{ cluster: string; category: string; namespace?: strin
 const emit = defineEmits<{ (e: 'navigate', kind: string, namespace?: string): void }>();
 
 const health = shallowRef<KindHealth[] | null>(null);
-const events = shallowRef<EventSummary[] | null>(null);
+// The events call gets the same three states the health check has always had. Its failure
+// used to be written as `[]` and then handed to EventsPane as `:error="null"` — the one
+// component built to tell those apart, told there was nothing to tell.
+const events = shallowRef<CheckState<EventSummary[]>>({ status: 'checking' });
 const error = shallowRef<string | null>(null);
 
 const copy = computed(() => OVERVIEW_CATEGORIES[props.category]);
@@ -43,18 +49,18 @@ watch(
   ([cluster, category, namespace]) => {
     const my = ++reqId;
     health.value = null;
-    events.value = null;
+    events.value = { status: 'checking' };
     error.value = null;
     const ns = namespace ?? undefined;
     api
       .overview(cluster, category, ns)
       .then((h) => my === reqId && (health.value = h))
-      .catch((e) => my === reqId && (error.value = String(e)));
+      .catch((e) => my === reqId && (error.value = failureNotice(e)));
     if (showEvents.value) {
       api
         .events(cluster, ns)
-        .then((e) => my === reqId && (events.value = e))
-        .catch(() => my === reqId && (events.value = []));
+        .then((e) => my === reqId && (events.value = { status: 'checked', data: e }))
+        .catch((e) => my === reqId && (events.value = { status: 'unchecked', message: failureNotice(e) }));
     }
   },
   { immediate: true },
@@ -89,8 +95,10 @@ const attentionTruncated = computed(() => (health.value ?? []).some((k) => k.tru
 const unavailable = computed(() => (health.value ?? []).filter((k) => k.error));
 
 const EVENT_LIMIT = 25;
-const recentEvents = computed(() => (events.value ? events.value.slice(0, EVENT_LIMIT) : null));
-const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT);
+const eventData = computed(() => checkedData(events.value));
+const recentEvents = computed(() => (eventData.value ? eventData.value.slice(0, EVENT_LIMIT) : null));
+const eventsTruncated = computed(() => (eventData.value?.length ?? 0) > EVENT_LIMIT);
+const eventsUnchecked = computed(() => uncheckedNote(events.value, 'events'));
 </script>
 
 <template>
@@ -166,9 +174,10 @@ const eventsTruncated = computed(() => (events.value?.length ?? 0) > EVENT_LIMIT
     <section v-if="showEvents" class="ov-sec">
       <h3>Recent Events</h3>
       <div v-if="eventsTruncated" class="ov-truncated">
-        Showing the {{ EVENT_LIMIT }} most recent of {{ events?.length }} events.
+        Showing the {{ EVENT_LIMIT }} most recent of {{ eventData?.length }} events.
       </div>
-      <EventsPane :events="recentEvents" :error="null" />
+      <!-- The pane distinguishes "loaded nothing" from "could not load"; give it the truth. -->
+      <EventsPane :events="recentEvents" :error="eventsUnchecked" />
     </section>
   </div>
 </template>

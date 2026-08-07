@@ -68,6 +68,11 @@ export type FileDirection = 'read' | 'write';
 /**
  * One entry per code the server can send. Anything not listed falls through to a generic
  * shape, which is why the table is exhaustive rather than "the interesting ones".
+ *
+ * <p>That claim is now CHECKED: `podFiles.test.ts` greps `web/files/` for every
+ * `PodFileException` code and fails if one has no entry here. It went stale silently once —
+ * `unreadable-listing` and `unreadable-stat` were raised by `PodFileParser` and explained by
+ * nothing — and a comment that says "exhaustive" is worse than no comment when it is not.
  */
 const NOTICES: Record<string, NoticeShape> = {
   'files-disabled': {
@@ -108,6 +113,22 @@ const NOTICES: Record<string, NoticeShape> = {
   'container-command-failed': {
     tone: 'error',
     title: 'The command failed in the container',
+    retryable: true,
+  },
+  // The listing/stat scripts always emit at least one NUL-terminated field and exit 0, so
+  // short output means the bytes were read before the container had finished writing them.
+  // That is transient, which is why both are retryable — unlike a missing `stat`, which is
+  // tolerated and renders as `—` rather than failing the directory.
+  'unreadable-listing': {
+    tone: 'error',
+    title: 'The container returned nothing to list',
+    hint: 'The directory command exited cleanly but produced no output at all, which normally means its output was read a moment too early. Retry; if it persists, try another container in the pod.',
+    retryable: true,
+  },
+  'unreadable-stat': {
+    tone: 'error',
+    title: 'The container returned unusable file metadata',
+    hint: 'The metadata came back shorter than the command can emit — usually output read a moment too early. Retry; if it persists, try another container in the pod.',
     retryable: true,
   },
   'path-outside-roots': {

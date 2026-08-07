@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { KubeObject } from './types';
 
-vi.mock('./api', () => ({
-  api: { del: vi.fn(() => Promise.resolve()) },
-}));
+// The real module is spread back in so `ApiError` stays the real class — the failure
+// classifier branches on `instanceof`, and a stubbed one would answer for the wrong reason.
+vi.mock('./api', async (orig) => ({ ...((await orig()) as object), api: { del: vi.fn(() => Promise.resolve()) } }));
 
-const { dispatchRowAction } = await import('./shell');
+const { ApiError } = await import('./api');
+const { dispatchRowAction, helmScopeFailure, listCountLabel } = await import('./shell');
 
 const obj = (name: string, ns = 'default'): KubeObject => ({
   kind: 'Pod',
@@ -78,5 +79,35 @@ describe('delete closes the drawer only when it is showing the deleted object', 
     // The updater drops the deleted object and keeps the rest.
     const updater = setObjects.mock.calls[0][0] as (p: KubeObject[]) => KubeObject[];
     expect(updater([obj('web-1'), obj('api-9')]).map((o) => o.metadata?.name)).toEqual(['api-9']);
+  });
+});
+
+describe('the list header counts what the list actually shows', () => {
+  // filterObjects narrows by the search query AND the Helm scope; the header used to branch
+  // on the query alone, so a Helm-scoped list with an empty search box said "137 items"
+  // above an empty table.
+
+  it('reports the plain total when nothing is narrowing the list', () => {
+    expect(listCountLabel(137, 137, '', false)).toBe('137 items');
+    expect(listCountLabel(137, 137, '   ', false)).toBe('137 items');
+  });
+
+  it('reports "n of m" while a search is active', () => {
+    expect(listCountLabel(3, 137, 'nginx', false)).toBe('3 of 137');
+  });
+
+  it('reports "n of m" while a Helm scope is active, search box or not', () => {
+    expect(listCountLabel(0, 137, '', true)).toBe('0 of 137');
+    expect(listCountLabel(2, 137, 'nginx', true)).toBe('2 of 137');
+  });
+});
+
+describe('a Helm scope that could not be resolved says so', () => {
+  it('names the release, says the view is empty rather than the release, and offers the way out', () => {
+    const msg = helmScopeFailure('prod', 'billing', new ApiError(502, 'Connection refused', 'cluster-refused'));
+    expect(msg).toContain('prod/billing');
+    expect(msg).toContain('empty view, not an empty release');
+    expect(msg).toContain('Clear the Helm filter');
+    expect(msg).toContain('Connection refused');
   });
 });

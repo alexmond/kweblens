@@ -21,6 +21,7 @@
 import { computed, ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { objName, objNs } from '../kube';
 import type { KubeObject, Relation } from '../types';
 import OverviewField from './OverviewField.vue';
@@ -69,7 +70,7 @@ watch(
     api
       .detail(cluster, resourceId, namespace, name)
       .then((d) => (relations.value = d.relations))
-      .catch((e) => (relationsError.value = String(e)))
+      .catch((e) => (relationsError.value = failureNotice(e)))
       .finally(() => (relationsLoading.value = false));
   },
   { immediate: true },

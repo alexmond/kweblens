@@ -14,6 +14,7 @@ import { NModal, NSpin } from 'naive-ui';
 import { ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import type { AboutInfo, ClusterDiagnostics } from '../types';
 
 const props = defineProps<{ cluster: string | null }>();
@@ -36,7 +37,7 @@ watch([show, () => props.cluster], ([open, cluster]) => {
     api
       .about()
       .then((a) => (about.value = a))
-      .catch((e) => (error.value = String(e))),
+      .catch((e) => (error.value = failureNotice(e))),
   ];
   if (cluster) {
     diag.value = null;
@@ -44,7 +45,7 @@ watch([show, () => props.cluster], ([open, cluster]) => {
       api
         .clusterDiagnostics(cluster)
         .then((d) => (diag.value = d))
-        .catch((e) => (error.value = String(e))),
+        .catch((e) => (error.value = failureNotice(e))),
     );
   }
   Promise.all(jobs).finally(() => (loading.value = false));

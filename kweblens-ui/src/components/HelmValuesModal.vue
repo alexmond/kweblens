@@ -3,6 +3,7 @@ import { NButton, NModal } from 'naive-ui';
 import { ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import YamlView from './YamlView.vue';
 
 // A release's stored configuration (helm get values), read-only.
@@ -23,7 +24,7 @@ watch(
     api
       .helmReleaseValues(props.cluster, props.namespace, props.name)
       .then((y) => !cancelled && (values.value = y))
-      .catch((e) => !cancelled && (error.value = String(e)));
+      .catch((e) => !cancelled && (error.value = failureNotice(e)));
   },
   { immediate: true },
 );

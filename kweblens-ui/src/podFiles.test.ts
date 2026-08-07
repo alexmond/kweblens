@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -352,5 +355,41 @@ describe('containerChoices', () => {
       { name: 'setup', init: true },
     ]);
     expect(containerChoices({})).toEqual([]);
+  });
+});
+
+describe('the notice table really is exhaustive', () => {
+  // The table's own doc comment claims one entry per code the server can send. It claimed
+  // that while `unreadable-listing` and `unreadable-stat` had no entry, and nothing noticed,
+  // because a missing entry does not fail — it degrades to a generic title. So the claim is
+  // checked against the server's source rather than against a second hand-written list,
+  // which would be the copy that goes stale next.
+  // Resolved from the vitest root (kweblens-ui), not from import.meta.url — Vite does not
+  // hand test modules a file: URL. If this path is ever wrong the positive control below
+  // fails rather than the check quietly passing on an empty directory.
+  const dir = resolve(process.cwd(), '../kweblens-web/src/main/java/org/alexmond/kweblens/web/files');
+
+  const serverCodes = (): string[] => {
+    const codes = new Set<string>();
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.java'))) {
+      const src = readFileSync(join(dir, f), 'utf8');
+      for (const m of src.matchAll(/PodFileException\([^,)]+,\s*"([a-z-]+)"/g)) {
+        codes.add(m[1]);
+      }
+    }
+    return [...codes].sort();
+  };
+
+  it('finds the server’s codes at all — a grep that matched nothing would pass vacuously', () => {
+    // The positive control. Without it the assertion below is "no codes found, no failures".
+    const codes = serverCodes();
+    expect(codes.length).toBeGreaterThan(15);
+    expect(codes).toContain('no-shell');
+  });
+
+  it('explains every code web/files can raise', () => {
+    const generic = noticeFor(new PodFileError(500, 'definitely-not-a-real-code', 'x')).title;
+    const unexplained = serverCodes().filter((c) => noticeFor(new PodFileError(502, c, 'x')).title === generic);
+    expect(unexplained).toEqual([]);
   });
 });

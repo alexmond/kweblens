@@ -14,6 +14,7 @@ import type { DropdownOption } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { useEscapeKey } from '../composables/useEscapeKey';
 import { needsFullObject, objName, objNs } from '../kube';
 import { filesFeature } from '../podFiles';
@@ -132,7 +133,7 @@ watch(
     api
       .objectEvents(props.cluster, kind.value, name.value, ns.value || undefined)
       .then((e) => !cancelled && (events.value = e))
-      .catch((e) => !cancelled && (eventsError.value = String(e)));
+      .catch((e) => !cancelled && (eventsError.value = failureNotice(e)));
   },
   { immediate: true },
 );

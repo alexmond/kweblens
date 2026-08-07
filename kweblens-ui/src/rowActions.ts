@@ -1,4 +1,5 @@
 import { api } from './api';
+import { failureNotice } from './apiFailure';
 import type { DialogApi } from './dialog';
 import type { LogScope } from './dock';
 import { containerNames, objectPorts } from './kube';
@@ -102,7 +103,7 @@ function confirmDelete(c: RowActionCtx, force: boolean) {
       }
       api.del(c.cluster, c.resourceId, c.ns, c.name, force).then(
         () => c.removeObject(c.obj),
-        (e) => c.setError(String(e)),
+        (e) => c.setError(failureNotice(e)),
       );
     });
 }

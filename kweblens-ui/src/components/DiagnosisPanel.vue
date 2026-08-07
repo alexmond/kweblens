@@ -16,6 +16,7 @@
 import { computed, ref } from 'vue';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import {
   analyseLabel,
   analysisNote,
@@ -62,7 +63,7 @@ const analyse = async () => {
   try {
     data.value = await api.analyseDiagnosis(props.cluster, props.namespace ?? undefined);
   } catch (e: unknown) {
-    analyseError.value = String(e);
+    analyseError.value = failureNotice(e);
   } finally {
     analysing.value = false;
   }
