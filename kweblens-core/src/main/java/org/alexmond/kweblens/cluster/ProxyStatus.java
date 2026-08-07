@@ -1,6 +1,5 @@
 package org.alexmond.kweblens.cluster;
 
-import java.util.Arrays;
 import java.util.Locale;
 
 /**
@@ -54,14 +53,6 @@ public record ProxyStatus(String effective, boolean bypassed, String detail) {
 		return new ProxyStatus(null, false, "no egress proxy configured — traffic goes direct" + exclusions);
 	}
 
-	/**
-	 * Convenience for the common call site, which has the four values on a fabric8
-	 * Config.
-	 */
-	public static ProxyStatus of(String masterUrl, String httpProxy, String httpsProxy) {
-		return of(masterUrl, httpProxy, httpsProxy, null);
-	}
-
 	private static boolean has(String value) {
 		return value != null && !value.isBlank();
 	}
@@ -69,11 +60,6 @@ public record ProxyStatus(String effective, boolean bypassed, String detail) {
 	/** True when a proxy is in force for this cluster's traffic. */
 	public boolean proxied() {
 		return has(this.effective);
-	}
-
-	/** The excluded hosts, for callers that want them separately. */
-	public static String[] exclusions(String[] noProxy) {
-		return (noProxy != null) ? Arrays.copyOf(noProxy, noProxy.length) : new String[0];
 	}
 
 }

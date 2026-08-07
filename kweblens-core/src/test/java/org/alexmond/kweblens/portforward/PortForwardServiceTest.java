@@ -6,15 +6,20 @@ import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.LocalPortForward;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.Test;
 
+import org.alexmond.kweblens.cluster.ClusterOrigin;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.cluster.UnknownClusterException;
 import org.alexmond.kweblens.config.KweblensProperties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @EnableKubernetesMockClient(crud = true)
 class PortForwardServiceTest {
@@ -218,6 +223,58 @@ class PortForwardServiceTest {
 		podinfoService("strnum", "podinfo", new IntOrString("9898"));
 		PortForwardService service = withMock();
 		assertThat(service.target("mock", "Service", "strnum", "podinfo", 80).podPort()).isEqualTo(9898);
+	}
+
+	@Test
+	void removingAClusterStopsItsForwards() throws Exception {
+		// The listening socket is bound by kweblens on the kweblens host, so closing the
+		// cluster's client kills the tunnel and leaves the port bound — and after a
+		// removal the port-forward table is gone from the UI with it, so nothing could
+		// ever stop it again.
+		ClusterRegistry registry = new ClusterRegistry();
+		// A stand-in client, not the shared mock-server one: unregistering closes it, and
+		// the rest of this class still needs the mock server.
+		registry.register("mock", "mock", mock(KubernetesClient.class), ClusterOrigin.RUNTIME);
+		PortForwardService service = service(registry);
+		LocalPortForward forward = mock(LocalPortForward.class);
+		LocalPortForward other = mock(LocalPortForward.class);
+		service.track(forward, forwardInfo("mock-1", "mock"));
+		service.track(other, forwardInfo("keep-1", "keep"));
+
+		registry.unregister("mock");
+
+		verify(forward).close();
+		assertThat(service.list("mock")).isEmpty();
+		// Another cluster's forwards are untouched.
+		verify(other, never()).close();
+		assertThat(service.list("keep")).extracting(PortForwardInfo::id).containsExactly("keep-1");
+	}
+
+	@Test
+	void rePointingAClusterStopsTheForwardsThatWentThroughTheOldClient() throws Exception {
+		ClusterRegistry registry = new ClusterRegistry();
+		registry.register("mock", "mock", mock(KubernetesClient.class), ClusterOrigin.RUNTIME);
+		PortForwardService service = service(registry);
+		LocalPortForward forward = mock(LocalPortForward.class);
+		service.track(forward, forwardInfo("mock-1", "mock"));
+
+		// Editing a cluster re-registers the id against a new client; the old one is
+		// closed, so the tunnel behind this forward is already dead. Leaving it listed as
+		// "Active" would be a socket that accepts connections and drops them.
+		registry.register("mock", "mock", mock(KubernetesClient.class), ClusterOrigin.RUNTIME);
+
+		verify(forward).close();
+		assertThat(service.list("mock")).isEmpty();
+	}
+
+	@Test
+	void stopAllIsAnHonestZeroForAClusterWithNoForwards() {
+		assertThat(service(new ClusterRegistry()).stopAll("mock")).isZero();
+	}
+
+	private PortForwardInfo forwardInfo(String id, String clusterId) {
+		return new PortForwardInfo(id, clusterId, "web", "Pod", "nginx", 80, 80, "nginx-1", 18080, "127.0.0.1", "TCP",
+				"Active");
 	}
 
 }

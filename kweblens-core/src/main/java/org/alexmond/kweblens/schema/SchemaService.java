@@ -1,5 +1,6 @@
 package org.alexmond.kweblens.schema;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
@@ -28,11 +30,36 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
  * {@code definitions} block holding every schema in the document, with the OpenAPI
  * {@code #/components/schemas/} refs rewritten to {@code #/definitions/} (draft-07's ref
  * location, which the editor's schema library resolves — {@code $defs} would not).
- * {@code definitions} maps are cached per (cluster, group-version).
+ *
+ * <h2>What the cache is, and what it is not</h2>
+ *
+ * <p>
+ * {@code definitions} maps are cached per (cluster, group-version). The key space is
+ * <b>bounded by the cluster's API surface</b> rather than by browsing: the requested kind
+ * is resolved through the nav catalog before it gets here, so it is always a built-in
+ * kind or one of that cluster's own CRDs — no request text reaches this map. Measured
+ * against a CRD-heavy real cluster, caching all 38 of its group-versions retains ~17 MB,
+ * which is why there is no size cap: an LRU here would evict entries that are about to be
+ * fetched again to save under 2% of the container's memory.
+ *
+ * <p>
+ * What it does need is <b>invalidation</b>, because a key alone does not say which
+ * cluster an id currently points at. Two things drop entries: the id being re-registered
+ * or removed (see {@link ClusterRegistry#addClientListener}), which is how "edit this
+ * cluster to point somewhere else" stops serving the previous cluster's schemas; and
+ * {@link #TTL}, which is how an API-server upgrade or an updated CRD stops being
+ * invisible for the life of the process. Neither is about memory.
  */
 @Slf4j
 @Service
 public class SchemaService {
+
+	/**
+	 * How long a fetched group-version stays usable. A schema changes when the API server
+	 * is upgraded or a CRD is updated in place — rare, but nothing else in the process
+	 * would ever notice, so an entry is re-fetched eventually rather than never.
+	 */
+	static final Duration TTL = Duration.ofMinutes(10);
 
 	private final ClusterRegistry clusters;
 
@@ -41,10 +68,34 @@ public class SchemaService {
 	/**
 	 * Rewritten {@code definitions} maps, keyed by {@code clusterId|group-version-path}.
 	 */
-	private final Map<String, Map<String, Object>> cache = new ConcurrentHashMap<>();
+	private final Map<String, Entry> cache = new ConcurrentHashMap<>();
 
+	private final Duration ttl;
+
+	// Explicit, because the TTL-taking overload below means there is more than one
+	// constructor and Spring will not choose for us.
+	@Autowired
 	public SchemaService(ClusterRegistry clusters) {
+		this(clusters, TTL);
+	}
+
+	/** As {@link #SchemaService(ClusterRegistry)}, with the entry lifetime given. */
+	SchemaService(ClusterRegistry clusters, Duration ttl) {
 		this.clusters = clusters;
+		this.ttl = ttl;
+		// From the constructor rather than @PostConstruct so the hook is in place for
+		// every construction, including tests that build this directly.
+		clusters.addClientListener(this::invalidate);
+	}
+
+	/**
+	 * Forget everything cached for a cluster. Called when its client is closed, because a
+	 * cluster id that has been removed or re-pointed no longer describes the API server
+	 * whose schemas are held under it.
+	 * @param clusterId the cluster to forget
+	 */
+	public void invalidate(String clusterId) {
+		this.cache.keySet().removeIf((key) -> key.startsWith(clusterId + '|'));
 	}
 
 	/**
@@ -53,11 +104,24 @@ public class SchemaService {
 	 */
 	public Map<String, Object> jsonSchema(String clusterId, String group, String version, String kind) {
 		String gvPath = group.isEmpty() ? ("api/" + version) : ("apis/" + group + "/" + version);
-		Map<String, Object> defs = cache.get(clusterId + '|' + gvPath);
-		if (defs == null) {
-			defs = fetchDefs(clusterId, gvPath);
-			if (!defs.isEmpty()) {
-				cache.put(clusterId + '|' + gvPath, defs);
+		String key = clusterId + '|' + gvPath;
+		Entry cached = cache.get(key);
+		Map<String, Object> defs;
+		if (cached != null && !cached.expired(System.nanoTime())) {
+			defs = cached.defs();
+		}
+		else {
+			Map<String, Object> fetched = fetchDefs(clusterId, gvPath);
+			if (fetched.isEmpty()) {
+				// A refresh that failed must not turn into "this kind has no schema" when
+				// a good answer is already in hand; the deadline stays passed, so the
+				// next
+				// call tries again.
+				defs = (cached != null) ? cached.defs() : fetched;
+			}
+			else {
+				cache.put(key, new Entry(fetched, System.nanoTime() + this.ttl.toNanos()));
+				defs = fetched;
 			}
 		}
 		String name = findSchemaName(defs, group, version, kind);
@@ -130,6 +194,18 @@ public class SchemaService {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * One cached group-version and the {@link System#nanoTime()} reading past which it is
+	 * refetched. A monotonic clock rather than the wall clock: a cache that a clock
+	 * adjustment can make immortal is not a cache with a TTL.
+	 */
+	private record Entry(Map<String, Object> defs, long deadlineNanos) {
+
+		boolean expired(long nowNanos) {
+			return nowNanos - this.deadlineNanos >= 0;
+		}
 	}
 
 }

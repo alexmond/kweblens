@@ -7,6 +7,7 @@ import java.net.UnknownHostException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -50,6 +51,9 @@ public class PortForwardService implements AutoCloseable {
 	public PortForwardService(ClusterRegistry clusters, KweblensProperties properties) {
 		this.clusters = clusters;
 		this.properties = properties;
+		// Registered from the constructor rather than @PostConstruct so the hook is in
+		// place for every construction, including the tests that build this directly.
+		clusters.addClientListener(this::stopAll);
 	}
 
 	/**
@@ -73,10 +77,21 @@ public class PortForwardService implements AutoCloseable {
 		PortForwardInfo info = new PortForwardInfo(id, clusterId, namespace, normalise(kind), name, remotePort,
 				target.podPort(), target.podName(), forward.getLocalPort(), forward.getLocalAddress().getHostAddress(),
 				"TCP", "Active");
-		forwards.put(id, new Active(forward, info));
+		track(forward, info);
 		log.info("Started port-forward {} {}/{} {}->{} via pod {}:{}", id, namespace, name, remotePort,
 				forward.getLocalPort(), target.podName(), target.podPort());
 		return info;
+	}
+
+	/**
+	 * Take ownership of an already-started forward. {@link #start} is the only production
+	 * caller; it is a separate step so that the lifecycle around a forward can be
+	 * exercised without binding a real socket to a real cluster.
+	 * @param forward the open forward, closed by {@link #stop} or {@link #close}
+	 * @param info its description, whose {@code id} becomes the handle
+	 */
+	void track(LocalPortForward forward, PortForwardInfo info) {
+		forwards.put(info.id(), new Active(forward, info));
 	}
 
 	/**
@@ -114,6 +129,34 @@ public class PortForwardService implements AutoCloseable {
 			closeQuietly(active.forward);
 			log.info("Stopped port-forward {}", id);
 		}
+	}
+
+	/**
+	 * Stop every forward belonging to a cluster, because that cluster's client has been
+	 * closed.
+	 *
+	 * <p>
+	 * <b>Closing the client is not enough.</b> The listening socket a forward binds is
+	 * bound by kweblens on the kweblens host, not by the cluster: closing the client
+	 * kills the tunnel behind it and leaves the port bound with its accept thread alive,
+	 * still accepting connections that then go nowhere. Worse, after a <em>removal</em>
+	 * the cluster is gone from the rail, and the port-forward table is cluster-scoped —
+	 * so there is no longer any screen on which that forward can be listed, let alone
+	 * stopped. It would hold the port until the process restarted.
+	 * @param clusterId the cluster whose forwards are now dead
+	 * @return how many forwards were stopped
+	 */
+	public int stopAll(String clusterId) {
+		List<String> stale = forwards.entrySet()
+			.stream()
+			.filter((entry) -> entry.getValue().info.clusterId().equals(clusterId))
+			.map(Map.Entry::getKey)
+			.toList();
+		stale.forEach(this::stop);
+		if (!stale.isEmpty()) {
+			log.info("Stopped {} port-forward(s) belonging to cluster '{}'", stale.size(), clusterId);
+		}
+		return stale.size();
 	}
 
 	private PortForwardInfo currentStatus(Active active) {

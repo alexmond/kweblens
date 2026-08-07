@@ -1,5 +1,7 @@
 package org.alexmond.kweblens.cluster;
 
+import java.util.Optional;
+
 import io.fabric8.kubernetes.client.ConfigBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
@@ -8,8 +10,11 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -256,11 +261,72 @@ class ClusterConfigServiceTest {
 	}
 
 	@Test
+	void aStoreThatRefusesTheWriteDoesNotStrandTheClient() {
+		// The in-cluster shape of this is a missing RBAC grant on Secrets, or a read-only
+		// data directory for the file store. Nothing but add() holds the client at that
+		// point — the registry never took it — so if it is not closed here it is stranded
+		// for the life of the process, and a fabric8 client is not merely an object: the
+		// vertx factory gives each one its own Vertx instance and its event-loop threads.
+		ClusterStore failing = mock(ClusterStore.class);
+		willThrow(new IllegalStateException("secrets is forbidden")).given(failing).save(any());
+		KubernetesClient client = mock(KubernetesClient.class);
+		ClusterConfigService service = new StubbedClientService(this.registry, failing, client);
+
+		assertThatThrownBy(() -> service.add(definition("staging", "staging")))
+			.isInstanceOf(IllegalStateException.class);
+
+		verify(client).close();
+		assertThat(this.registry.list()).isEmpty();
+	}
+
+	@Test
+	void aFailedEditStrandsNothingAndLeavesTheClusterUsable() {
+		KubernetesClient existing = mock(KubernetesClient.class);
+		this.registry.register("staging", "Staging", existing, ClusterOrigin.RUNTIME);
+		ClusterStore failing = mock(ClusterStore.class);
+		given(failing.find("staging"))
+			.willReturn(Optional.of(new ClusterDefinition("staging", "Staging", "staging", KUBECONFIG)));
+		willThrow(new IllegalStateException("secrets is forbidden")).given(failing).save(any());
+		KubernetesClient replacement = mock(KubernetesClient.class);
+		ClusterConfigService service = new StubbedClientService(this.registry, failing, replacement);
+
+		assertThatThrownBy(() -> service.update("staging", new ClusterDefinition(null, "Renamed", null, null)))
+			.isInstanceOf(IllegalStateException.class);
+
+		// The client built for the edit is closed, and the one the operator is browsing
+		// with is neither closed nor replaced.
+		verify(replacement).close();
+		verify(existing, never()).close();
+		assertThat(this.registry.client("staging")).contains(existing);
+	}
+
+	@Test
 	void theDefinitionNeverPrintsItsCredential() {
 		ClusterDefinition withCredential = definition("staging", "staging");
 
 		assertThat(withCredential.toString()).doesNotContain("s3cr3t").contains("<redacted>");
 		assertThat(withCredential.withKubeconfig(null).toString()).contains("<none>");
+	}
+
+	/**
+	 * Substitutes the client the service would build. "Was it closed?" is not a question
+	 * a real fabric8 client answers without reaching the network, and the leak this
+	 * covers is precisely a client nobody holds a reference to.
+	 */
+	private static final class StubbedClientService extends ClusterConfigService {
+
+		private final KubernetesClient client;
+
+		StubbedClientService(ClusterRegistry registry, ClusterStore store, KubernetesClient client) {
+			super(registry, store);
+			this.client = client;
+		}
+
+		@Override
+		KubernetesClient clientFor(ClusterDefinition definition) {
+			return this.client;
+		}
+
 	}
 
 }
