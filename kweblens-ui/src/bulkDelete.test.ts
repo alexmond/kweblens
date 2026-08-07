@@ -1,0 +1,162 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import type { KubeObject, NavItem } from './types';
+
+// Only `api.del` is stubbed: ApiError stays the real class, because runBulkDelete branches on
+// `instanceof ApiError` and a stubbed one would make the 401/403 case pass for the wrong reason.
+const { del } = vi.hoisted(() => ({
+  del: vi.fn<(cluster: string, resourceId: string, ns: string, name: string) => Promise<unknown>>(() =>
+    Promise.resolve(),
+  ),
+}));
+vi.mock('./api', async (orig) => ({ ...((await orig()) as object), api: { del } }));
+
+const { ApiError } = await import('./api');
+const { runBulkDelete } = await import('./shell');
+
+const pvs: NavItem = {
+  id: 'persistentvolumes',
+  label: 'Persistent Volumes',
+  kind: 'PersistentVolume',
+  namespaced: false,
+};
+const cms: NavItem = { id: 'configmaps', label: 'Config Maps', kind: 'ConfigMap', namespaced: true };
+
+const clusterScoped = (name: string): KubeObject => ({ kind: 'PersistentVolume', metadata: { name } });
+const namespaced = (name: string, ns = 'default'): KubeObject => ({
+  kind: 'ConfigMap',
+  metadata: { name, namespace: ns },
+});
+
+/** objKey() — what the selection set holds. */
+const keyOf = (o: KubeObject): string => (o.metadata?.namespace ?? '') + '/' + (o.metadata?.name ?? '');
+
+function deps(over: Record<string, unknown> = {}) {
+  return {
+    cluster: 'c1',
+    selected: cms,
+    selection: new Set<string>(),
+    objects: [] as KubeObject[],
+    dialog: { confirm: () => Promise.resolve(true), prompt: () => Promise.resolve(null) },
+    setError: vi.fn(),
+    onAuthCleared: vi.fn(),
+    clearSelection: vi.fn(),
+    ...over,
+  } as unknown as Parameters<typeof runBulkDelete>[0];
+}
+
+describe('bulk delete sends cluster-scoped objects', () => {
+  // #297: the old filter was `selection.has(objKey(o)) && objNs(o)`, which dropped every
+  // Node / PersistentVolume / ClusterRole / cluster-scoped CRD — the button was offered on
+  // those lists and then nothing was sent at all.
+
+  it('sends a request per cluster-scoped object, with an empty namespace', async () => {
+    del.mockClear();
+    const objects = [clusterScoped('pv-a'), clusterScoped('pv-b')];
+    const outcome = await runBulkDelete(deps({ selected: pvs, objects, selection: new Set(objects.map(keyOf)) }));
+
+    expect(del.mock.calls).toEqual([
+      ['c1', 'persistentvolumes', '', 'pv-a'],
+      ['c1', 'persistentvolumes', '', 'pv-b'],
+    ]);
+    expect(outcome).toMatchObject({ attempted: 2, deleted: ['pv-a', 'pv-b'], failed: [] });
+  });
+
+  it('still passes the namespace for a namespaced kind', async () => {
+    del.mockClear();
+    const objects = [namespaced('cm-a', 'scratch')];
+    await runBulkDelete(deps({ objects, selection: new Set(objects.map(keyOf)) }));
+
+    expect(del.mock.calls).toEqual([['c1', 'configmaps', 'scratch', 'cm-a']]);
+  });
+
+  it('sends nothing when the confirm is declined', async () => {
+    del.mockClear();
+    const objects = [clusterScoped('pv-a')];
+    const outcome = await runBulkDelete(
+      deps({
+        selected: pvs,
+        objects,
+        selection: new Set(objects.map(keyOf)),
+        dialog: { confirm: () => Promise.resolve(false) },
+      }),
+    );
+
+    expect(del).not.toHaveBeenCalled();
+    expect(outcome).toBeNull();
+  });
+});
+
+describe('bulk delete reports what failed', () => {
+  // The old catch swallowed everything that was not 401/403: a webhook denial, a 409 from a
+  // finalizer, a 500. Seven of ten blocked looked exactly like ten deleted.
+
+  it('surfaces a partial failure with the counts and the reasons', async () => {
+    del.mockClear();
+    del.mockImplementation((_c, _r, _ns, name) =>
+      name === 'cm-b' ? Promise.reject(new ApiError(409, '409 Conflict')) : Promise.resolve(),
+    );
+    const objects = [namespaced('cm-a'), namespaced('cm-b'), namespaced('cm-c')];
+    const setError = vi.fn();
+    const clearSelection = vi.fn();
+
+    const outcome = await runBulkDelete(
+      deps({ objects, selection: new Set(objects.map(keyOf)), setError, clearSelection }),
+    );
+
+    expect(del).toHaveBeenCalledTimes(3);
+    expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a', 'default/cm-c'], authCleared: false });
+    expect(outcome?.failed).toEqual([{ ref: 'default/cm-b', error: 'Error: 409 Conflict' }]);
+    expect(setError).toHaveBeenCalledTimes(1);
+    const message = setError.mock.calls[0][0] as string;
+    expect(message).toContain('Deleted 2 of 3 Config Maps; 1 failed');
+    expect(message).toContain('default/cm-b: Error: 409 Conflict');
+    expect(clearSelection).toHaveBeenCalled();
+    del.mockImplementation(() => Promise.resolve());
+  });
+
+  it('says nothing when every delete succeeded', async () => {
+    del.mockClear();
+    const objects = [namespaced('cm-a'), namespaced('cm-b')];
+    const setError = vi.fn();
+    await runBulkDelete(deps({ objects, selection: new Set(objects.map(keyOf)), setError }));
+
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it('truncates a long list of failures but keeps the counts', async () => {
+    del.mockClear();
+    del.mockImplementation(() => Promise.reject(new Error('boom')));
+    const objects = ['a', 'b', 'c', 'd', 'e'].map((n) => namespaced(n));
+    const setError = vi.fn();
+    await runBulkDelete(deps({ objects, selection: new Set(objects.map(keyOf)), setError }));
+
+    const message = setError.mock.calls[0][0] as string;
+    expect(message).toContain('Deleted 0 of 5 Config Maps; 5 failed');
+    expect(message).toContain('and 2 more');
+    del.mockImplementation(() => Promise.resolve());
+  });
+});
+
+describe('bulk delete still stops on an auth failure', () => {
+  it.each([401, 403])('clears auth and stops the run on %i', async (status) => {
+    del.mockClear();
+    del.mockImplementation((_c, _r, _ns, name) =>
+      name === 'cm-b' ? Promise.reject(new ApiError(status, `${status} nope`)) : Promise.resolve(),
+    );
+    const objects = [namespaced('cm-a'), namespaced('cm-b'), namespaced('cm-c')];
+    const onAuthCleared = vi.fn();
+    const setError = vi.fn();
+
+    const outcome = await runBulkDelete(
+      deps({ objects, selection: new Set(objects.map(keyOf)), onAuthCleared, setError }),
+    );
+
+    expect(onAuthCleared).toHaveBeenCalledTimes(1);
+    // cm-c was never tried: the loop breaks rather than firing two more rejected requests.
+    expect(del).toHaveBeenCalledTimes(2);
+    expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a'], authCleared: true });
+    expect(setError.mock.calls[0][0]).toContain('the rest were not tried');
+    del.mockImplementation(() => Promise.resolve());
+  });
+});

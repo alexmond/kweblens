@@ -215,17 +215,60 @@ export function dispatchRowAction(
   });
 }
 
-/** Delete every selected object, prompting once; clears auth on 401/403. */
+/** What a bulk delete actually did — one entry per object it got an answer for. */
+interface BulkDeleteOutcome {
+  /** Objects the delete was attempted on. */
+  attempted: number;
+  /** Refs (`ns/name`, or just `name` when cluster-scoped) the server accepted. */
+  deleted: string[];
+  /** Refs the server refused, with the error as rendered to the operator. */
+  failed: { ref: string; error: string }[];
+  /** True when a 401/403 stopped the run before every target was tried. */
+  authCleared: boolean;
+}
+
+/** `ns/name`, or `name` alone for a cluster-scoped object. */
+const refOf = (o: KubeObject): string => (objNs(o) ? `${objNs(o)}/${objName(o)}` : objName(o));
+
+/**
+ * One line naming what happened, only ever produced when something failed.
+ *
+ * <p>A partial failure has to be distinguishable from success (#297): "7 of 10 blocked by an
+ * admission webhook" used to look exactly like "all 10 deleted", because neither said anything
+ * at all. The counts come first so the shape of the outcome survives truncation of the reasons.
+ */
+function bulkDeleteMessage(outcome: BulkDeleteOutcome, label: string): string {
+  const { attempted, deleted, failed, authCleared } = outcome;
+  const reasons = failed.slice(0, 3).map((f) => `${f.ref}: ${f.error}`);
+  const rest = failed.length - reasons.length;
+  const stopped = authCleared ? ' Stopped after a permission error; the rest were not tried.' : '';
+  return (
+    `Deleted ${deleted.length} of ${attempted} ${label}; ${failed.length} failed. ` +
+    reasons.join('; ') +
+    (rest > 0 ? `; and ${rest} more` : '') +
+    stopped
+  );
+}
+
+/**
+ * Delete every selected object, prompting once; clears auth on 401/403.
+ *
+ * <p>Cluster-scoped objects are sent with no namespace rather than filtered out (`api.del`
+ * turns that into the URL's "no namespace" segment, and the server addresses the object by
+ * the kind's own scope). Skipping them, as this used to, meant Delete was offered on 13
+ * built-in kinds plus every cluster-scoped CRD and then quietly did nothing (#297).
+ */
 export async function runBulkDelete(deps: {
   cluster: string;
   selected: NavItem;
   selection: Set<string>;
   objects: KubeObject[];
   dialog: DialogApi;
+  setError: (e: string) => void;
   onAuthCleared: () => void;
   clearSelection: () => void;
-}) {
-  const { cluster, selected, selection, objects, dialog, onAuthCleared, clearSelection } = deps;
+}): Promise<BulkDeleteOutcome | null> {
+  const { cluster, selected, selection, objects, dialog, setError, onAuthCleared, clearSelection } = deps;
   const ok = await dialog.confirm({
     title: 'Delete',
     message: `Delete ${selection.size} ${selected.label}? This cannot be undone.`,
@@ -233,18 +276,28 @@ export async function runBulkDelete(deps: {
     danger: true,
   });
   if (!ok) {
-    return;
+    return null;
   }
-  const targets = objects.filter((o) => selection.has(objKey(o)) && objNs(o));
+  const targets = objects.filter((o) => selection.has(objKey(o)));
+  const outcome: BulkDeleteOutcome = { attempted: targets.length, deleted: [], failed: [], authCleared: false };
   for (const o of targets) {
     try {
-      await api.del(cluster, selected.id, objNs(o) as string, objName(o));
+      await api.del(cluster, selected.id, objNs(o) ?? '', objName(o));
+      outcome.deleted.push(refOf(o));
     } catch (e) {
+      outcome.failed.push({ ref: refOf(o), error: String(e) });
+      // A permission failure is about the session, not this object: trying the rest would
+      // produce the same 403 N times. Clear auth and stop, as this has always done.
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        outcome.authCleared = true;
         onAuthCleared();
         break;
       }
     }
   }
   clearSelection();
+  if (outcome.failed.length > 0) {
+    setError(bulkDeleteMessage(outcome, selected.label));
+  }
+  return outcome;
 }

@@ -41,13 +41,33 @@ export interface ActionResult {
   result: string;
 }
 
+/**
+ * The error for a failed response — the server's ProblemDetail `detail` when it sent one.
+ *
+ * <p>`ApiExceptionHandler` goes to the trouble of passing the API server's own sentence
+ * through ("admission webhook … denied the request: no owner label"); the status line is the
+ * part the operator already knew. A delete that is refused has to be able to say why (#297).
+ */
+async function apiError(res: Response): Promise<ApiError> {
+  let detail = `${res.status} ${res.statusText}`;
+  try {
+    const problem = (await res.json()) as { detail?: string };
+    if (problem?.detail) {
+      detail = problem.detail;
+    }
+  } catch {
+    // Not a ProblemDetail (a proxy error page, an empty body) — keep the status line.
+  }
+  return new ApiError(res.status, detail);
+}
+
 async function postJson<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { ...auth.header(), Accept: 'application/json' },
   });
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    throw await apiError(res);
   }
   return (await res.json()) as T;
 }
@@ -64,15 +84,7 @@ async function postBody<T>(url: string, body: string, contentType: string): Prom
   return (await res.json()) as T;
 }
 
-/**
- * POST a body and read the response as TEXT, keeping the server's explanation on failure.
- *
- * `postBody` throws `${status} ${statusText}` and discards the response, which is fine when
- * the status is the whole story. It is not fine for the apply dry run: the entire point of
- * that call is the API server's sentence — "admission webhook … denied the request: no owner
- * label" — and "422 Unprocessable Entity" is exactly the part the operator already knew.
- * So this reads the ProblemDetail `detail` when there is one.
- */
+/** POST a body and read the response as TEXT, keeping the server's explanation on failure. */
 async function postText(url: string, body: string, contentType: string, accept: string): Promise<string> {
   const res = await fetch(url, {
     method: 'POST',
@@ -80,16 +92,7 @@ async function postText(url: string, body: string, contentType: string, accept: 
     body,
   });
   if (!res.ok) {
-    let detail = `${res.status} ${res.statusText}`;
-    try {
-      const problem = (await res.json()) as { detail?: string };
-      if (problem?.detail) {
-        detail = problem.detail;
-      }
-    } catch {
-      // Not a ProblemDetail (a proxy error page, an empty body) — keep the status line.
-    }
-    throw new ApiError(res.status, detail);
+    throw await apiError(res);
   }
   return await res.text();
 }
@@ -502,9 +505,19 @@ export const api = {
     postJson<ActionResult>(`${clusterBase(cluster)}/nodes/${encodeURIComponent(name)}/uncordon`),
 };
 
+/**
+ * Namespace path segment standing for "this kind is cluster-scoped".
+ *
+ * <p>A Node / PersistentVolume / ClusterRole has no namespace, and an empty segment does not
+ * match the server's mapping — `…/resources/nodes//node-1/delete` 404s. A namespace is a
+ * DNS-1123 label, so it can never be `_`; `ResourceActionApiController.NO_NAMESPACE` maps it
+ * back to none (#297).
+ */
+const NO_NAMESPACE = '_';
+
 function actionUrl(cluster: string, resourceId: string, namespace: string, name: string, action: string): string {
   return (
     `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}` +
-    `/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/${action}`
+    `/${encodeURIComponent(namespace || NO_NAMESPACE)}/${encodeURIComponent(name)}/${action}`
   );
 }

@@ -1,6 +1,7 @@
 package org.alexmond.kweblens.web;
 
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
+import io.fabric8.kubernetes.api.model.PersistentVolumeBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +50,40 @@ class ResourceActionEndpointsTest {
 				.endMetadata()
 				.build())
 			.create();
+	}
+
+	@Test
+	void deleteRemovesAClusterScopedResourceAddressedWithTheNoNamespaceSegment() throws Exception {
+		// A Node / PersistentVolume / ClusterRole has no namespace to put in the path, so
+		// the UI sends `_` (#297). An EMPTY segment cannot be used — see the test below.
+		client.persistentVolumes()
+			.resource(new PersistentVolumeBuilder().withNewMetadata().withName("doomed-pv").endMetadata().build())
+			.create();
+
+		mvc.perform(post("/api/v1/clusters/test/resources/persistentvolumes/_/doomed-pv/delete"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.result").value(org.hamcrest.Matchers.containsString("deleted")));
+
+		mvc.perform(get("/api/v1/clusters/test/yaml").param("resource", "persistentvolumes").param("name", "doomed-pv"))
+			.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void anEmptyNamespaceSegmentDoesNotMatchTheMapping() throws Exception {
+		// Why the placeholder exists at all: `…/persistentvolumes//pv/delete` is not a
+		// missing namespace to Spring, it is a URL with no handler. Sending one is a
+		// silent
+		// no-op dressed as a request, which is what #297 was.
+		client.persistentVolumes()
+			.resource(new PersistentVolumeBuilder().withNewMetadata().withName("survivor-pv").endMetadata().build())
+			.create();
+
+		mvc.perform(post("/api/v1/clusters/test/resources/persistentvolumes//survivor-pv/delete"))
+			.andExpect(status().isNotFound());
+
+		mvc.perform(
+				get("/api/v1/clusters/test/yaml").param("resource", "persistentvolumes").param("name", "survivor-pv"))
+			.andExpect(status().isOk());
 	}
 
 	@Test

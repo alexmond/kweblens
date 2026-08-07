@@ -110,6 +110,7 @@ export function useAppActions(a: {
       selection: a.selection.value,
       objects: a.objects.value,
       dialog: a.dialog,
+      setError: a.setError,
       onAuthCleared: () => {
         signOut();
         a.setShowLogin(true);
