@@ -92,6 +92,10 @@ stays on GET.
 
 ## Recommendation
 
+> **Recommendations 1 and 2 shipped in #182, under a different name — see "What shipped"
+> below before copying a property out of this section.** The rest of this section is still
+> the proposal as written on 2026-07-30.
+
 **1. Explicit configuration, overriding discovery.** `kweblens.metrics.prometheus-url`, per
 cluster. This is table stakes for any non-standard install and is the only fix for the
 two-valid-backends case. Discovery stays as the zero-config default.
@@ -130,3 +134,27 @@ anticipate it.
 2. PVC capacity with the requested-size sanity check — a real feature, unblocked, honest.
 3. Direct access with auth — defer until a deployment actually has an external backend.
    Building four auth models against no user is speculative.
+
+## What shipped (added 2026-08-07)
+
+Items 1 and 2 of the suggested order landed together in **#182**. **The property is not
+called `prometheus-url`** — that name appears only in this document, binds to nothing, and
+Spring drops it silently at startup because unknown properties are not an error.
+
+- **The real key is `kweblens.metrics.prometheus-service`** (`MetricsProperties`,
+  `@ConfigurationProperties(prefix = "kweblens.metrics")` — that one field is the whole class).
+- **Its value is a Service reference, `namespace/service:port`** — e.g.
+  `monitoring/prometheus-k8s:9090` — **not a URL.** The queries go through the kube-apiserver
+  service proxy, so cluster RBAC is the only credential. An `http(s)://` value is refused
+  rather than ignored: `MetricsProperties.isExternalUrl()` detects it and
+  `PrometheusMetricService.resolve()` returns `UNSUPPORTED_URL`, which the diagnostics panel
+  renders as its own row. That is recommendation 3 (direct access) still being unbuilt, said
+  out loud instead of failing quietly.
+- **It is process-wide, not per cluster.** The `CONFIGURED` branch of
+  `PrometheusMetricService.resolve(clusterId)` ignores `clusterId`. If a per-cluster override
+  is ever needed, that is new work, not a spelling change.
+- **Recommendation 2 shipped with it.** `resolve()` reports `AMBIGUOUS` whenever discovery
+  matched more than one candidate, and `DiagnosticsService.prometheusBackend` turns that into
+  "picked X from N matching services … — set `kweblens.metrics.prometheus-service` to choose",
+  with its own wording for the no-candidate and unsupported-URL cases. The running product is
+  therefore the reliable source for this key's name; this document was not.

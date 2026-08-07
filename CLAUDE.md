@@ -160,8 +160,12 @@ header, and log it.
   then lands anyway once the connection drops, i.e. reports failure for a write that happened), `web/diag/` (the diagnostics panel's capability report), `web/ai/`
   (`DiagnoseService` — LLM enrichment inert unless `kweblens.ai.enabled` and a key are set —
   plus `RemediationService`, which is **not** AI-gated), `web/sim/` (the in-JVM cluster
-  simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig as cluster
-  `default` on startup; `ClusterConfigApiController` in `web/api/` adds/edits/removes clusters
+  simulator), `web/config/` (`ClusterBootstrap` seeds the ambient kubeconfig on startup —
+  **one cluster per kubeconfig context, id = context name**, not a single cluster called
+  `default`; `default` is only the fallback id used when there is no readable kubeconfig
+  (in-cluster ServiceAccount), no contexts in it, or it fails to parse. Never assume `default`
+  exists — resolve ids from `GET /api/v1/clusters` in code, tests and examples;
+  `ClusterConfigApiController` in `web/api/` adds/edits/removes clusters
   at runtime). `/actuator/{health,info,metrics,prometheus}` exposed.
   **A `GET` never calls a model (#251).** `DiagnoseService.diagnose()` returns the deterministic
   findings plus only what `DiagnosisSummaryCache` already holds *for exactly those findings* —
@@ -204,7 +208,7 @@ prefer `!=`); **InnerTypeLast** (nested types after methods — see `ClusterRegi
 
 - **Building a fabric8 client does not connect.** `new KubernetesClientBuilder().build()` only
   resolves config; the first API call is what reaches the cluster. This is why `ClusterBootstrap`
-  can seed `default` at startup and why tests need no live cluster — but it also means a bad
+  can register every kubeconfig context at startup and why tests need no live cluster — but it also means a bad
   kubeconfig fails *lazily* on first use, not at boot.
 - **The `ClusterRegistry` owns client lifecycles.** Never `new` a `KubernetesClient` in a
   controller/service — ask the registry (`require(id)` / `client(id)`). Re-registering an id

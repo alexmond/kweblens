@@ -1,7 +1,15 @@
 # Overview pages — audit and redesign (GH#139)
 
-What the Cluster and Workloads overviews should answer, why the current ones fall short, and
-the specific fixes. Each fix below has its own issue.
+> **Status: HISTORY. Written 2026-07-30, superseded 2026-08-07 — everything below is the
+> state of the overviews *before* the redesign, not now.** GH#139 closed on 2026-07-30 and all
+> seven "fixes, as issues" have shipped. Read the present tense below as past tense: the
+> defects it names are the ones that were removed. Do not open work from this file, and do not
+> "restore" a behaviour it describes — section 4 in particular argues for predicates the code
+> deliberately replaced. What actually ships is in the [What shipped](#what-shipped-added-20260807)
+> section at the end, checked against the code on 2026-08-07.
+
+What the Cluster and Workloads overviews should answer, why the current ones fell short, and
+the specific fixes. Each fix below had its own issue.
 
 ## What exists today
 
@@ -114,3 +122,19 @@ Only Cluster and Workloads exist. The categories where an overview would earn it
 
 Sequencing: 4 and 5 are small and independent. 3 unblocks 7 (which should not repeat the
 list-everything mistake). 1 and 2 together are the redesign proper.
+
+## What shipped (added 2026-08-07)
+
+All seven landed. Verified against the code on 2026-08-07, not against a changelog. Where the
+implementation differs from the proposal, the difference is stated — the proposal is not the
+record of what exists.
+
+| # | Fix | Where it lives now |
+|---|---|---|
+| 1 | Name the unhealthy objects | `OverviewApiController` returns "per-kind tallies plus the **named** objects needing attention"; `CategoryOverview.vue` renders them as rows |
+| 2 | Cards click through | `StatCard.vue` renders a real `<button>` and emits `select` when a destination exists, and stays a plain `<div>` when there is nowhere to go |
+| 3 | Stop listing everything client-side | **Not** by calling `/counts` from the browser, as proposed. The whole overview moved server-side: `CategoryOverview` makes one `GET …/overview/{category}` call instead of seven `objects` calls. Separately, `/counts` itself became a real count — `ResourceService.count` uses `withLimit(1)` plus `metadata.remainingItemCount`, with an explicit fallback when the field is absent, so this file's "unverified against fabric8, and worth checking" is now verified and implemented |
+| 4 | Job / CronJob predicates | `WorkloadHealth.job()` keys on the **Failed** condition and its javadoc names `succeeded > 0` as the predicate it replaced. `WorkloadHealth.cronJob()` is a deliberate three-state suspended/OK with a documented rationale for *not* guessing at failed runs — a failed run surfaces as a failed Job. **Section 4 above is the argument for the behaviour that was removed; do not re-derive it from there** |
+| 5 | Report truncation | `CategoryOverview.vue` renders "Some kinds have more affected objects than shown", a separate note for kinds it could not check, and one for truncated events |
+| 6 | Honour the namespace filter | `namespace` is a prop, is in the re-fetch watch, is passed to the API, and the page states its own scope on screen ("Namespace: x" / "All namespaces") |
+| 7 | Network / Storage / Config overviews | `OverviewApiController` switches on `workloads`, `network`, `storage`, `config`; an unknown category 404s rather than rendering as a healthy empty dashboard. **Access Control** was deferred, as this file recommended, and is still not built |

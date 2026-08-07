@@ -27,7 +27,7 @@ Because it runs as a server rather than on your laptop, the browser needs no kub
 | **Live updates** | Kubernetes watches streamed to the browser over SSE, batched per animation frame so a large-list event burst can't freeze the tab |
 | **Overviews** | A cluster overview plus Workloads / Network / Storage / Config category overviews — stat cards, the objects needing attention named rather than only counted, click-through to the filtered list, namespace-scoped |
 | **YAML editing** | CodeMirror 6 with completion and validation driven by **the cluster's own OpenAPI v3 schema**, plus Form (generated from the schema), Warnings and Review-Changes (diff) tabs, then apply or JSON-merge patch |
-| **Detail drawer** | Per-kind detail from a server-side endpoint, including three relation sections: a Service's endpoints, the pods a Service selects, and which pods mount a ConfigMap or Secret |
+| **Detail drawer** | Per-kind detail from a server-side endpoint, plus **twelve relation joins** resolved server-side and shown as sections where they apply: what owns an object and what it owns (`ownedBy`, a Deployment's ReplicaSets), a Service's endpoints, the pods a Service selects and the Ingresses that route to it, which pods mount a ConfigMap or Secret, a PVC↔PV binding both ways, a pod's ServiceAccount and the RoleBindings that grant it, and the HPAs and PodDisruptionBudgets covering a workload. Three of them (endpoints, selected pods, mounted-by) get kind-specific columns; the rest render as name/kind/namespace tables |
 | **Logs** | Multi-source streaming over SSE: every container of a pod, or every pod behind a workload, in one stream — new pods created by a rollout join a stream already in flight |
 | **Terminal** | Exec into a container over WebSocket, in a multi-tab dockable pane that can be popped out to a floating window |
 | **Port-forward** | Started and managed from the browser |
@@ -47,18 +47,25 @@ confirmation, then an audit entry. Nothing mutates the cluster silently. Be prec
 
 - **Helm** install/upgrade/rollback take a genuine `dryRun` — jhelm renders the release without
   persisting it.
-- **YAML apply/patch** shows a Review-Changes diff of *your edit against what was loaded*, not
-  against what the server would produce. `apply` is server-side apply with `forceConflicts()`,
-  and nothing is sent to the API server with `dryRun=All`, so the diff cannot show defaulting,
-  another controller's fields, or an admission-webhook rejection.
-- **Remediation** previews are a written description of the intended change ("pod 'x' would be
-  deleted and recreated by its owner"), not a server round-trip.
-- **The audit log is an in-memory ring of the last 500 entries.** It is queryable while the
-  process lives and is **lost on restart**, and it records the action, not a person — there is
-  no per-user identity to record.
+- **YAML apply** shows *two* diffs in its Review-Changes tab: your edit against what was loaded,
+  and — from a real `POST …/apply/dry-run`, which the server issues as
+  `dryRun().forceConflicts().serverSideApply()` — the live object against what the cluster says
+  it would actually store. So defaulting, another manager's fields and an admission-webhook
+  refusal all surface *before* the write. A refusal is rendered as a result, not an error.
+- **Remediation** previews are a real server round-trip for the two patch-shaped actions:
+  `scale-up` and `rollout-restart` go through `dryRun=All`. `restart-pod` and `rollback`
+  **cannot** — a DELETE and a revision lookup are not patches — so they return an explicit
+  "not checked" naming that reason rather than prose that reads like a server answer.
+- **Audit is durable, and the API view is not.** Every entry is written to a dedicated
+  `kweblens.audit` logger (route it to a file or shipper like any other log category) *as well
+  as* an in-memory ring of the newest 500, which is only the live view behind
+  `/api/v1/audit` and is what resets on restart. Entries record the action, not a person —
+  there is no per-user identity to record.
 
-Closing the first three (real `dryRun=All`) and the last (durable audit) is the top item on
-[the roadmap](docs/design/roadmap.md).
+What none of that covers: the `apply` that actually writes is still
+`forceConflicts().serverSideApply()` with no `dryRun`, because that *is* the write. The preview
+is a separate request an operator can choose to run; nothing forces them to look at it first.
+See [the roadmap](docs/design/roadmap.md) for what is next.
 
 ## Stack
 
@@ -94,8 +101,14 @@ Start it with `dev-run.sh` rather than `java -jar` — with no admin password co
 random one is generated per run and only written to the log. See
 [`scripts/README.md`](scripts/README.md) for the rest.
 
-kweblens seeds your **ambient kubeconfig** (`KUBECONFIG` / `~/.kube/config`) as cluster
-`default` on startup. Set `KWEBLENS_LOAD_KUBECONFIG=false` to start with none, or configure
+kweblens seeds your **ambient kubeconfig** (`KUBECONFIG` / `~/.kube/config`) on startup, and
+**every context in it becomes its own cluster, with the context name as the cluster id** — so a
+laptop kubeconfig with six contexts registers six clusters. The id `default` is the *fallback*:
+it is used when there is no readable kubeconfig at all (an in-cluster ServiceAccount, most
+obviously), when the file declares no contexts, or when it cannot be parsed. Building a fabric8
+client does not connect, so extra contexts cost a map entry and a row in the cluster rail, not
+a connection. `GET /api/v1/clusters` is the authority on which ids exist.
+Set `KWEBLENS_LOAD_KUBECONFIG=false` to start with none, or configure
 clusters explicitly under `kweblens.clusters[*]`. Clusters can also be added, edited and
 removed **at runtime** (`POST/PUT/DELETE /api/v1/clusters`, admin login required); the
 kubeconfig is kept in a Kubernetes Secret in-cluster and in a data directory otherwise —
@@ -133,7 +146,7 @@ but not yet versioned beyond `v1`.
 | `/api/v1/clusters/{id}/diagnose` | diagnostics findings, plus any cached LLM summary — never calls a model |
 | `/api/v1/clusters/{id}/diagnose/summary` (POST) | runs the LLM analysis on demand and caches it (in-memory, per-process) |
 | `/api/v1/clusters/{id}/remediations` · `/apply` | proposed fixes, and applying an approved one |
-| `/api/v1/audit` | audit log of mutating actions (in-memory, last 500) |
+| `/api/v1/audit` | live view of the audit trail (in-memory, newest 500); the durable copy is the `kweblens.audit` log category |
 
 Helm, metrics, multi-source logs, port-forward, node and pod-file endpoints live under the same
 `/api/v1` prefix. `/actuator/{health,info,metrics,prometheus}` is exposed.
@@ -235,8 +248,9 @@ Being a decided position does not make the consequences go away, so state them:
   yours, and does not run `SelfSubjectAccessReview` — so it will happily offer an action that
   the underlying credentials are allowed to perform even if *you* personally should not, and
   offer actions those credentials cannot perform, which then fail with 403.
-- **Audit entries name an action, not a person**, and do not survive a restart (in-memory, last
-  500).
+- **Audit entries name an action, not a person.** The record itself is durable — it is written
+  to the `kweblens.audit` log category — but it can never be attributed to a human. The
+  `/api/v1/audit` view is the newest 500 held in memory and resets with the process.
 - **No server-side pagination**, so very large clusters will be slow to list.
 
 The ADR's own revisit triggers: a second person needing their own view of a cluster, exposure
