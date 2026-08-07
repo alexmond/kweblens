@@ -104,9 +104,34 @@ header, and log it.
   the simulator still **cannot validate paging** (the CRUD mock ignores `limit`) and costs 7
   minutes to seed 3 000/kind, so KWOK remains the answer for paging and for anything larger.
   Measurements and the verdict: `docs/design/scale-measurements.md`.
+- **Heap is the axis that bounds this product, and it has its own instruments — none of which
+  is `peak - base`.** "Does this bound the heap" is answered ONLY by the **smallest `-Xmx` in
+  which the request still completes**, because a squeezed heap collects everything it can and
+  so only genuinely-live bytes can push it over. `heap-probe.sh`'s `transient` measures
+  allocation *churn* and disagrees: chunking the list fetch scored **worse** on it (80–96 MB
+  vs 67–69 MB) while cutting the minimum heap for 8 150 Secrets from **256m to 176m** — the
+  app's own boot floor — at identical wall-clock. Reading `transient` alone would have got
+  #293 reverted. Also: **seed a heap rig with `kubectl create`, never `apply`** — `apply`
+  stores a copy of each manifest in `last-applied-configuration`, which `ListProjection` does
+  not strip, and the rig then measures its own seeding (13.3 MB where the truth was 502 KB).
+  `scripts/heap-probe.sh` says *how much* heap one list request costs (forced GCs either side,
+  `jstat` from outside the JVM); `scripts/alloc-probe.sh` says *which code* spends it (JFR
+  allocation samples, by call site and thread). Reach for the second whenever the first
+  surprises you: a `jcmd GC.class_histogram` **cannot** answer "is this the output `String` or
+  the model graph", because since JDK 9 compact strings every `String` is a `byte[]` and both
+  land in the same row — that trap cost #293 a design. Run both against a **live** cluster;
+  the simulator's API server is in the same JVM and inside every reading. The sister tool
+  **jvmlens** (`java -jar ~/IdeaProjects/jvmlens/jvmlens-cli/target/jvmlens.jar analyze <jfr>
+  -a org.alexmond.kweblens`, skill: `jvmlens-perf`) reads the same recordings and ranks
+  source-attributed allocation sites — but **also pass `-a io.fabric8 -a com.fasterxml.jackson
+  -a io.vertx`** here, because this app's list cost is incurred inside the client library, on
+  threads with no kweblens frame on the stack, and an app-only scope reports it as ~1%.
 - Tests are **hermetic**: no live cluster. The fabric8 `kubernetes-server-mock`
   (`@EnableKubernetesMockClient(crud = true)`) serves an in-JVM API server; web tests set
   `kweblens.load-kubeconfig=false` so the registry starts empty and the test seeds its own client.
+  **The CRUD mock ignores `limit`**, so neither it nor the simulator can exercise anything that
+  depends on chunking or paging — `ResourceChunkedListTest` and `ResourceCountTest` stub the mock
+  per **exact query string** instead, which is the only way to assert a flag was actually sent.
 
 ## Architecture (modules)
 

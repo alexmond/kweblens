@@ -619,6 +619,12 @@ requests, then attribute by call site and by thread. `scripts/alloc-probe.sh` is
 (Print the stacks with `--stack-depth 48`: `jfr print` truncates to **5 frames** by default,
 which lands inside Jackson and netty and attributes half the heap to "an event loop".)
 
+**The sister tool [jvmlens](https://github.com/alexmond/jvmlens) reads the same recording** and
+ranks allocation by source-attributed call site, which is exactly this question. Its answer,
+pointed at the same live-Secrets recording, agrees line for line with the hand-rolled
+attribution below — with one caveat about scope that is worth knowing before running it, in
+"Did jvmlens answer it?" at the end of this section.
+
 ### The attribution
 
 Live cluster, per list request, mean of 10:
@@ -689,9 +695,125 @@ number the conclusion rests on did not move at all: `tomcat-handler-*` read **1.
 in both. That is the useful positive control here, and the reason the thread table is quoted
 alongside the stage table rather than instead of it.
 
-## Does chunking the fetch actually bound the heap? (#293, 2026-08-06)
+### Did jvmlens answer it? Yes — but not on the scope you would reach for first
 
-Placeholder — filled in by the same PR once measured.
+The same recording through the sister tool, `analyze <jfr> -a org.alexmond.kweblens`:
+
+```
+## Top allocation sites (application code, by est. bytes) [sampled]
+- ResourceService.listRaw            — 1% (7.8 MB)  (:67 · byte[] 2.2 MB · int[] 1.1 MB)
+- ObjectApiController.objects        — 1% (3.3 MB)  (:71 · byte[] 1.4 MB · char[] 1.4 MB)
+- ListProjection.forList             — 0% (343.8 KB)
+## Top allocated types (by est. bytes) [sampled]
+- [B — 64% (359.4 MB)      - [C — 15% (83.7 MB)
+```
+
+It ranks the fetch above the serialise, which is the right direction and is the decision — but
+both lines read **1%**, and 98% of the bytes sit in a `[B` row that is precisely the
+undifferentiated bucket the class histogram already gave. The reason is structural: kweblens's
+list cost is incurred **inside a client library**, on fabric8's vert.x event-loop threads, where
+there is no application frame anywhere on the stack for an app-scoped attribution to anchor to.
+
+Widening the scope to the libraries that actually spend the memory closes it completely, and
+the ranking is the hand-rolled analysis above, in one command:
+
+```
+$ jvmlens analyze secrets-alloc.jfr -a org.alexmond.kweblens -a io.fabric8 \
+                                    -a com.fasterxml.jackson -a io.vertx
+## Top allocation sites (application code, by est. bytes) [sampled]
+- com.fasterxml.jackson.core.util.TextBuffer.contentsAsString — 18% (102.9 MB)  (:492 · byte[] 102.8 MB)
+- com.fasterxml.jackson.core.util.TextBuffer.carr             — 15% (83.5 MB)   (:1235 · char[] 83.5 MB)
+- io.fabric8.kubernetes.client.http.BufferUtil.toArray        — 11% (63.0 MB)
+- io.vertx.core.buffer.impl.BufferImpl.getBytes               — 10% (55.7 MB)
+- io.vertx.core.impl.VertxImpl$InternalTimerHandler.handle    —  9% (53.1 MB)  ⚠ Long may be
+      scalar-replaced (escape analysis) — confirm the actual win with -prof gc
+```
+
+Model-graph strings (`contentsAsString`), Jackson's decode scratch (`carr`), and the response
+body held whole (`BufferUtil.toArray`, `BufferImpl.getBytes`) — against
+`ObjectApiController.objects:71`, the `Serialization.asJson` line, at **0.6%** in the same run.
+The tool also caught something the hand-rolled buckets got wrong: the 53 MB of boxed `Long` is
+vert.x's timer handler, i.e. rig noise, and it is flagged as possibly scalar-replaced rather
+than offered as a lever.
+
+**The dogfood finding, since it is a result in its own right:** on an application whose cost is
+inside a client library, `-a <your package>` alone reports ~1% for the two lines that matter and
+leaves the rest in `[B`. The tool is right — those *are* the only app frames — but the default
+gesture under-serves this shape of problem. Worth `-a`-ing the library you are calling through
+whenever the profile's `[B` row dwarfs every attributed site. (`--source` was also pointed at
+already-edited files here and echoed shifted lines; that is the operator's error, not the
+tool's — echo sources at the revision the recording was taken from.)
+
+## Does chunking the fetch actually bound the heap? (#293, 2026-08-07)
+
+Yes — and the instrument built to answer it said the opposite, which is the more useful half of
+this entry.
+
+### The rig
+
+8 000 generated Secrets in one namespace plus the cluster's own 150, on the live k3s cluster:
+**8 150 objects, 54.89 MB stored** on the API server, **2.08 MB on the wire** after
+`ListProjection` (#279) nulls the values. Each generated object is ~6.4 KB, at the live median
+of 9.2 KB rather than at the long tail, so the rig under-states a real cluster if anything.
+
+**Seed it with `kubectl create`, never `kubectl apply`.** The first attempt used `apply`, which
+stores a full copy of every manifest in the `last-applied-configuration` annotation — an
+annotation `ListProjection` does not strip, because on a real object it is small. Every rig
+object therefore carried a duplicate of its own 6.2 KB payload and the response read **13.3 MB
+instead of 502 KB**: a rig measuring its own seeding method, in the same family as the
+739-byte simulator pod above.
+
+### The measurement that pointed the wrong way
+
+`heap-probe.sh`'s `transient` (peak − base) says chunking makes things **worse**:
+
+| 2 150 Secrets | transient |
+|---|---|
+| chunking off (`chunk-size: 0`) | 67–69 MB |
+| chunking on (500) | 80–96 MB |
+
+That reading is real and it is not the answer. `peak − base` measures how much eden the request
+dirtied before a lazy collector got round to it — allocation **churn**. Five bounded pages
+allocate more total garbage than one whole-collection graph, while far less of it is live at any
+instant. Taken alone this table is an argument for reverting the fix.
+
+### The measurement that answers the question
+
+The question an OOM-kill asks is not "how much did it allocate" but **"how small a heap can it
+finish in"** — only genuinely-live bytes can push a squeezed heap over, so collector timing
+drops out. Smallest `-Xmx` in which one full Secrets list completes, 8 150 objects:
+
+| `-Xmx` | chunking off | chunking on (500) |
+|---|---|---|
+| 256m | ok 2.84 s | ok 2.60 s |
+| 224m | **OOM** | ok 2.63 s |
+| 208m | **OOM** | ok 2.85 s |
+| 192m | **OOM** | ok 2.78 s |
+| 176m | **OOM** | ok 3.29 s |
+
+Unchunked needs **256m**; chunked completes at **176m**, which is the floor of the app itself —
+below ~176m the process cannot finish booting Spring at all, list or no list. So chunking does
+not merely reduce the list's heap cost, it removes the cluster's size from the floor: what
+bounds the chunked path is kweblens's own footprint.
+
+Wall-clock is unchanged (~2.6 s either way), so the bound costs nothing.
+
+### Why this is the number that matters
+
+`deploy/helm/kweblens/values.yaml` sets `limits.memory: 1Gi`, and the JVM's default max heap is
+a quarter of the container limit — **~256 MB**. Unchunked, 8 150 Secrets sits exactly on that
+line. This was never a slowdown; it was an OOM-kill with a cluster-sized trigger.
+
+### Standing consequence
+
+Two instruments, two questions, and they disagree by design:
+
+- **`heap-probe.sh`** — how much a request allocates. Good for comparing kinds to each other.
+  **Not** admissible for "does this bound the heap"; its header now says so.
+- **the minimum-heap bisect** — whether the live set is bounded. This is the one that decides.
+
+Neither can run on the simulator: its API server is in the same JVM, so its serialisation is
+inside every reading.
 
 
 2. ~~**Then bound the lists server-side**~~ — **superseded 2026-08-05, by measurement.** See
