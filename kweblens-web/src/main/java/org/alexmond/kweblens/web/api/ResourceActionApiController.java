@@ -18,11 +18,22 @@ import org.alexmond.kweblens.web.security.AuditService;
 /**
  * Mutating resource actions — delete, scale, and rolling restart. All are POSTs, so they
  * are auth-gated by SecurityConfig, and each is recorded by {@link AuditService}.
+ *
+ * <p>
+ * A cluster-scoped object (Node, PersistentVolume, ClusterRole, a cluster-scoped CRD) has
+ * no namespace to put in the path, and an empty segment does not match the mapping —
+ * Spring 404s on {@code …/resources/nodes//node-1/delete}. The URL contract is therefore
+ * that the namespace segment is {@value #NO_NAMESPACE} when there is none; a real
+ * namespace can never be that, since namespaces are DNS-1123 labels. See
+ * {@code actionUrl} in the SPA's {@code api.ts} (#297).
  */
 @RestController
 @RequestMapping("/api/v1/clusters/{clusterId}/resources/{resourceId}/{namespace}/{name}")
 @RequiredArgsConstructor
 public class ResourceActionApiController {
+
+	/** Namespace path segment standing for "this kind is cluster-scoped". */
+	public static final String NO_NAMESPACE = "_";
 
 	private final ResourceService resources;
 
@@ -35,9 +46,9 @@ public class ResourceActionApiController {
 			@PathVariable String namespace, @PathVariable String name,
 			@RequestParam(defaultValue = "false") boolean force) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		resources.delete(clusterId, descriptor, namespace, name, force);
-		audit.record(clusterId, force ? "force-delete" : "delete",
-				AuditService.ref(descriptor.kind(), namespace, name));
+		String ns = namespaceOf(namespace);
+		resources.delete(clusterId, descriptor, ns, name, force);
+		audit.record(clusterId, force ? "force-delete" : "delete", AuditService.ref(descriptor.kind(), ns, name));
 		return Map.of("result", (force ? "force-deleted " : "deleted ") + descriptor.kind() + " " + name);
 	}
 
@@ -45,8 +56,9 @@ public class ResourceActionApiController {
 	public Map<String, String> scale(@PathVariable String clusterId, @PathVariable String resourceId,
 			@PathVariable String namespace, @PathVariable String name, @RequestParam int replicas) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		resources.scale(clusterId, descriptor, namespace, name, replicas);
-		audit.record(clusterId, "scale=" + replicas, AuditService.ref(descriptor.kind(), namespace, name));
+		String ns = namespaceOf(namespace);
+		resources.scale(clusterId, descriptor, ns, name, replicas);
+		audit.record(clusterId, "scale=" + replicas, AuditService.ref(descriptor.kind(), ns, name));
 		return Map.of("result", "scaled " + name + " to " + replicas);
 	}
 
@@ -54,8 +66,9 @@ public class ResourceActionApiController {
 	public Map<String, String> restart(@PathVariable String clusterId, @PathVariable String resourceId,
 			@PathVariable String namespace, @PathVariable String name) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		resources.rolloutRestart(clusterId, descriptor, namespace, name);
-		audit.record(clusterId, "restart", AuditService.ref(descriptor.kind(), namespace, name));
+		String ns = namespaceOf(namespace);
+		resources.rolloutRestart(clusterId, descriptor, ns, name);
+		audit.record(clusterId, "restart", AuditService.ref(descriptor.kind(), ns, name));
 		return Map.of("result", "restarted " + name);
 	}
 
@@ -64,16 +77,18 @@ public class ResourceActionApiController {
 			@PathVariable String namespace, @PathVariable String name,
 			@RequestParam(defaultValue = "true") boolean suspend) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		resources.setSuspended(clusterId, descriptor, namespace, name, suspend);
-		audit.record(clusterId, suspend ? "suspend" : "resume", AuditService.ref(descriptor.kind(), namespace, name));
+		String ns = namespaceOf(namespace);
+		resources.setSuspended(clusterId, descriptor, ns, name, suspend);
+		audit.record(clusterId, suspend ? "suspend" : "resume", AuditService.ref(descriptor.kind(), ns, name));
 		return Map.of("result", (suspend ? "suspended " : "resumed ") + name);
 	}
 
 	@PostMapping("/trigger")
 	public Map<String, String> trigger(@PathVariable String clusterId, @PathVariable String resourceId,
 			@PathVariable String namespace, @PathVariable String name) {
-		resources.triggerCronJob(clusterId, namespace, name);
-		audit.record(clusterId, "trigger", AuditService.ref("CronJob", namespace, name));
+		String ns = namespaceOf(namespace);
+		resources.triggerCronJob(clusterId, ns, name);
+		audit.record(clusterId, "trigger", AuditService.ref("CronJob", ns, name));
 		return Map.of("result", "triggered " + name);
 	}
 
@@ -81,13 +96,21 @@ public class ResourceActionApiController {
 	public Map<String, String> rollback(@PathVariable String clusterId, @PathVariable String resourceId,
 			@PathVariable String namespace, @PathVariable String name) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
-		resources.rollback(clusterId, descriptor, namespace, name);
-		audit.record(clusterId, "rollback", AuditService.ref(descriptor.kind(), namespace, name));
+		String ns = namespaceOf(namespace);
+		resources.rollback(clusterId, descriptor, ns, name);
+		audit.record(clusterId, "rollback", AuditService.ref(descriptor.kind(), ns, name));
 		return Map.of("result", "rolled back " + name + " to the previous revision");
 	}
 
 	private ResourceDescriptor descriptor(String clusterId, String resourceId) {
 		return clusterNav.find(clusterId, resourceId).orElseThrow(() -> new UnknownResourceException(resourceId));
+	}
+
+	/**
+	 * The placeholder segment back to "no namespace"; anything else is passed through.
+	 */
+	private static String namespaceOf(String namespace) {
+		return NO_NAMESPACE.equals(namespace) ? "" : namespace;
 	}
 
 }
