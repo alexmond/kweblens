@@ -1111,25 +1111,14 @@ body {
   margin-bottom: 6px;
 }
 
-/* Recharts surface: clicking a point selects it, so hint it's interactive. */
-.chart .recharts-wrapper {
-  cursor: pointer;
-}
-.chart .recharts-cartesian-axis-line,
-.chart .recharts-cartesian-axis-tick-line {
-  stroke: var(--border);
-}
-
-/* Hover tooltip (custom-rendered) — timestamp over value. */
-.chart-tip {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  font-size: 11px;
-  line-height: 1.35;
-}
+/* Hover tooltip — timestamp over value. Only these two INNER divs are ours: the formatter in
+   metric-chart-option.ts returns them, but the box around them is echarts' own container, which
+   echarts inline-styles. A `.chart-tip` wrapper rule used to sit here and matched nothing —
+   echarts never emits that class — so the box kept echarts' default WHITE while these rules
+   made the text near-white: 1.28:1 on the default dark theme. The container's colours are set
+   through the echarts option instead, which is the only thing that reaches it. (The dead
+   `.recharts-*` rules that shared this block went the same way; the cursor hint they carried
+   moved into MetricChart.vue.) */
 .chart-tip-t {
   color: var(--muted);
 }

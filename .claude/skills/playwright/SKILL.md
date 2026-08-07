@@ -142,6 +142,35 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-07 — **Text painted into a `<canvas>` has no node, so `contrast-check` reports
+  nothing at all for it — not a failure, not a pass.** The metrics chart handed
+  `var(--muted)` / `var(--border)` to echarts' CanvasRenderer, which cannot resolve a CSS
+  custom property: the assignment is rejected outright (`ctx.fillStyle='#ff0000'` then
+  `ctx.fillStyle='var(--muted)'` leaves it `#ff0000`), so echarts kept its default black. Both
+  axes' labels and the grid lines rendered **pure black on `--panel` #1f242a, 1.34:1**,
+  measured as 533 px in the y-gutter and 1 622 px in the x-strip with zero pixels of either
+  token. Light mode reads black at 21:1, which is why it survived every review. → No script
+  can fix this class — there is nothing to sample — so the guard went into the **gate**
+  instead: `kweblens-ui/src/metric-chart-option.test.ts` fails if any `var(--…)` reaches the
+  chart option. **When the defect lives in pixels a DOM tool cannot reach, put the invariant
+  in the unit test, not in a new Playwright script.**
+- 2026-08-07 — Same chart, the half that *was* DOM: the hover tooltip's box is echarts' own
+  container, inline-styled by echarts, so the `.chart-tip` wrapper rule in `styles.css`
+  matched nothing and the default WHITE box carried near-white `.chart-tip-v` at **1.28:1**
+  (timestamp 2.51:1) — worse than #169 and #200. No scene had ever hovered a chart point, so
+  the tooltip DOM did not exist during a run. → A `metrics chart tooltip` scene now does
+  (`hover:.metric-echart`), and reproduces 1.28:1 / 2.51:1 on the pre-fix code before passing
+  at 12.20:1 / 6.24:1 on the fix. **A watchlist is only a watchlist for what the run can see —
+  and a surface that only exists under the pointer needs a scene, not a selector.**
+- 2026-08-07 — That scene's first run reported `covered by another layer` for both tooltip
+  selectors, in both themes. It was not covered: echarts sets `pointer-events: none` on the
+  container, and such an element is **painted but can never be returned by
+  `elementFromPoint`** — so the occlusion hit test was answering a question it had not been
+  asked, and a visibly-failing surface read as unmeasurable. Same shape as #250: the
+  instrument, not the code. → `unmeasurable()` now forces `pointer-events: auto` on the
+  element and any ancestor that has it off, hit-tests, and restores. A `--self-test` control
+  (`.ghost .layer`) pins that a painted `pointer-events: none` layer IS measured, while the
+  genuinely-covered control still fires.
 - 2026-08-05 — **`perf-sweep`'s LOAD column was never time-to-first-row.** It waited for
   `.n-data-table-tbody tr, .count, .cluster-overview, .empty`, and `.count` is
   `ResourceListView`'s items badge, which has **no `v-if`**: it renders "0 items" the instant

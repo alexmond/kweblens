@@ -22,5 +22,13 @@
     // returns '' for a `?raw` CSS import (it does not process CSS), so fs is the way in.
     "types": ["vitest/globals", "node"]
   },
-  "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue"]
+  // strictTemplates is what makes vue-tsc check the COMPONENT BOUNDARY: an unresolved tag, an
+  // undeclared prop, an undeclared event, an unknown directive. Without it all four are silently
+  // `any` — a `<ErrorNotice>` used without its import shipped and stayed shipped for 62 green CI
+  // runs, rendering nothing where an error banner belonged. (Declared props' types and
+  // requiredness were always checked; it is only the boundary that was blind. Measured caveat:
+  // vue-tsc 2.2 has no unknown-SLOT check, so `#nosuchslot` still passes either way.) Native
+  // attributes that legitimately fall through to a component are declared in vue-attrs.d.ts.
+  "vueCompilerOptions": { "strictTemplates": true },
+  "include": ["env.d.ts", "vue-attrs.d.ts", "src/**/*.ts", "src/**/*.vue"]
 }

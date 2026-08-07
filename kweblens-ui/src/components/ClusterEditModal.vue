@@ -104,7 +104,7 @@ const contextOptions = computed(() => contexts.value.map((c) => ({ label: c, val
           type="textarea"
           :rows="8"
           placeholder="Paste the kubeconfig YAML"
-          spellcheck="false"
+          :input-props="{ spellcheck: false }"
         />
       </NFormItem>
 

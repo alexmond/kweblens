@@ -226,6 +226,26 @@ const SCENES = [
       '?click:.n-tabs-tab:has-text("Files");wait:1200;?hover:.btn',
     selectors: ['.btn'],
   },
+  {
+    // The metrics chart's hover tooltip. Nothing here had ever hovered a chart point, so the
+    // tooltip DOM did not exist during a run and these two selectors were unmeasurable: the
+    // value rendered at 1.28:1 and the timestamp at 2.51:1 on the default dark theme, worse
+    // than every failure this file's header records. The box is echarts' OWN container and
+    // echarts inline-styles it, so a `.chart-tip` wrapper rule (which is what used to sit in
+    // styles.css) can never reach it — its colours come from the chart option.
+    //
+    // What this scene CANNOT see is the chart itself: the axis labels and grid lines are
+    // painted into a `<canvas>`, so there is no node to sample and no amount of scene-walking
+    // will produce one. That half is guarded in the gate instead, by
+    // `src/metric-chart-option.test.ts`, which fails if a `var(--…)` ever reaches the option.
+    //
+    // Needs a Prometheus / VictoriaMetrics backend. Without one MetricChart renders its
+    // "Graphs need a …" placeholder, there is no canvas to hover, and these rows are counted
+    // as unmeasured rather than passed.
+    name: 'metrics chart tooltip',
+    prepare: 'close;leaf:Cluster/Overview;wait:2000;?hover:.metric-echart;wait:800',
+    selectors: ['.chart-tip-t', '.chart-tip-v'],
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -373,11 +393,26 @@ async function sampleSelector(page, sel) {
         // Hit-test several points, not one: a single probe can land in the gap between two
         // glyphs of an inline child. "Related" means the element itself, an ancestor (what a
         // `pointer-events: none` badge resolves to) or a descendant.
+        //
+        // `pointer-events: none` first, though: such an element is PAINTED but can never be
+        // returned by elementFromPoint, so the hit test answers a question it was not asked
+        // and every one of them reads as "covered by another layer". That is how the metrics
+        // chart's hover tooltip — echarts sets `pointer-events: none` on its container —
+        // reported unmeasurable while sitting in plain sight at 1.28:1. Force the property
+        // back on for the duration of the probe, so the answer is about occlusion again.
+        const forced = [];
+        for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+          if (getComputedStyle(n).pointerEvents === 'none') {
+            forced.push([n, n.style.pointerEvents]);
+            n.style.pointerEvents = 'auto';
+          }
+        }
         const pts = [0.5, 0.15, 0.85].map((f) => [r.x + r.w * f, r.y + r.h / 2]);
         const seen = pts.some(([x, y]) => {
           const hit = document.elementFromPoint(x, y);
           return hit && (hit === el || el.contains(hit) || hit.contains(el));
         });
+        forced.forEach(([n, prev]) => (n.style.pointerEvents = prev));
         return seen ? null : 'covered by another layer';
       };
       const of = (el, what) => {
@@ -713,6 +748,10 @@ const FIXTURE = `
     .cover .under { position: absolute; inset: 0; background: rgb(255,255,255); color: rgb(0,0,0); }
     .cover .over { position: absolute; inset: 0; background: rgb(27,42,51); }
     #offscreen { position: absolute; left: 3000px; top: 0; color: rgb(0,0,0); }
+    /* Painted, in plain sight, but invisible to elementFromPoint — echarts' tooltip. */
+    .ghost { position: relative; width: 200px; height: 24px; background: rgb(27,42,51); }
+    .ghost .layer { position: absolute; inset: 0; background: rgb(255,255,255); color: rgb(0,0,0);
+                    pointer-events: none; }
   </style>
   <div class="bar">
     <div id="opaque">Opaque</div>
@@ -722,6 +761,7 @@ const FIXTURE = `
     <div id="glyphs">MMMMMMMM</div>
     <div class="cover"><div class="under">hidden under</div><div class="over"></div></div>
     <div id="offscreen">parked off-screen</div>
+    <div class="ghost"><div class="layer">pointer-events none</div></div>
   </div>
 `;
 
@@ -740,6 +780,11 @@ const CONTROLS = [
   // than report the colour they happen to find there.
   { sel: '.cover .under', wantNote: 'covered by another layer', why: 'covered — must not measure the layer on top' },
   { sel: '#offscreen', wantNote: 'outside the viewport', why: 'off-viewport — must not measure' },
+  // ...and the control that must NOT fire: an element that is painted on top but has
+  // `pointer-events: none`, so elementFromPoint can never return it. Every metrics-chart
+  // tooltip sample reported "covered by another layer" until the hit test forced the property
+  // back on — a whole surface reading as unmeasurable while visibly failing at 1.28:1.
+  { sel: '.ghost .layer', want: WHITE, why: 'pointer-events:none but painted — must be measured' },
 ];
 
 async function selfTest(page) {

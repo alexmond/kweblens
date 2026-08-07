@@ -8,12 +8,16 @@ import { computed, ref, watch } from 'vue';
 import VChart from 'vue-echarts';
 
 import { api } from '../api';
+import { useThemeTokens } from '../composables/useThemeTokens';
 import { fmtStamp, fmtValue } from '../format';
+import { buildMetricOption, CHART_TOKENS } from '../metric-chart-option';
 import type { MetricPoint, MetricSeries } from '../types';
 
 use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
-const ACCENT = '#0a7ac2';
+// The chart is a CANVAS: `var(--muted)` handed to it is discarded and echarts falls back to
+// black. Resolve the tokens to real colours, and re-resolve them when the theme flips.
+const tokens = useThemeTokens(CHART_TOKENS);
 
 const props = defineProps<{
   cluster: string;
@@ -59,46 +63,7 @@ const meta = computed(() => {
   return `now ${fmtValue(s.unit, vals[vals.length - 1])} · peak ${fmtValue(s.unit, Math.max(...vals))}`;
 });
 
-const option = computed<EChartsOption>(() => {
-  const s = series.value;
-  const unit = s?.unit ?? '';
-  const data = (s?.points ?? []).map((p) => [p.t * 1000, p.v]);
-  return {
-    grid: { left: 52, right: 12, top: 10, bottom: 22 },
-    tooltip: {
-      trigger: 'axis',
-      formatter: (params: unknown) => {
-        const p = (params as { data: [number, number] }[])[0];
-        return `<div class="chart-tip-t">${fmtStamp(p.data[0] / 1000)}</div><div class="chart-tip-v">${fmtValue(unit, p.data[1])}</div>`;
-      },
-    },
-    xAxis: {
-      type: 'time',
-      axisLabel: {
-        fontSize: 10,
-        color: 'var(--muted)',
-        formatter: (v: number) => new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      },
-      axisLine: { lineStyle: { color: 'var(--border)' } },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { fontSize: 10, color: 'var(--muted)', formatter: (v: number) => fmtValue(unit, v) },
-      splitLine: { lineStyle: { color: 'var(--border)', type: 'dashed' } },
-    },
-    series: [
-      {
-        type: 'line',
-        smooth: true,
-        showSymbol: false,
-        data,
-        lineStyle: { color: ACCENT, width: 1.5 },
-        itemStyle: { color: ACCENT },
-        areaStyle: { color: ACCENT, opacity: 0.14 },
-      },
-    ],
-  };
-});
+const option = computed<EChartsOption>(() => buildMetricOption(series.value, tokens.value));
 
 const onPointClick = (params: unknown) => {
   const p = params as { data?: [number, number] };
@@ -131,5 +96,9 @@ const onPointClick = (params: unknown) => {
 .metric-echart {
   width: 100%;
   height: 150px;
+  /* Clicking a point selects it, so hint that the surface is interactive. The rule used to be
+     `.chart .recharts-wrapper` in styles.css and stopped matching anything at the echarts
+     migration; it lives with the component now so it cannot be orphaned again. */
+  cursor: pointer;
 }
 </style>
