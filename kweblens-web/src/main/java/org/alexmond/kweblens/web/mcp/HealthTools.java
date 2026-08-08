@@ -75,8 +75,9 @@ public class HealthTools {
 	}
 
 	@Tool(description = "Check PersistentVolumeClaims that are not bound, naming the StorageClass. "
-			+ "An unbound claim is a pod that will never start. Does NOT check capacity — that needs a "
-			+ "metrics source, not the Kubernetes API.")
+			+ "An unbound claim is a pod that will never start. Also flags a BOUND claim that is at or "
+			+ "above 90% full, but only when a metrics source is configured and reports a figure "
+			+ "plausible for the claim's requested size; without one, capacity is simply not reported.")
 	public List<KindHealth> checkStorageHealth(@ToolParam(description = "kweblens cluster id") String clusterId,
 			@ToolParam(required = false, description = "namespace, or omit for the whole cluster") String namespace) {
 		return this.storage.summarise(clusterId, namespace);

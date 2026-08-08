@@ -1,0 +1,403 @@
+include::_header.adoc[]
+= Configuration
+
+Every kweblens setting lives under the `kweblens.*` prefix and is a standard Spring Boot
+`@ConfigurationProperties`, so it can be set in `application.yml`, on the command line
+(`--kweblens.security.open-mode=false`), or — most usefully in a container — as an
+environment variable.
+
+This page lists every `kweblens.*` property that exists. Anything not here is not a
+kweblens setting.
+
+== Environment variables and relaxed binding
+
+Spring Boot maps a property name to an environment variable by uppercasing it, replacing
+dots with underscores, and *removing* dashes:
+
+....
+kweblens.list.chunk-size        →  KWEBLENS_LIST_CHUNKSIZE
+kweblens.security.open-mode     →  KWEBLENS_SECURITY_OPENMODE
+kweblens.files.max-read-bytes   →  KWEBLENS_FILES_MAXREADBYTES
+....
+
+The binder also accepts a second form in which each dash becomes an underscore
+(`KWEBLENS_SECURITY_OPEN_MODE`, `KWEBLENS_FILES_MAX_READ_BYTES`). Both work; the tables
+below give the dash-removed form as canonical and note the other where kweblens's own
+`application.yml` or Helm chart uses it, so you can match what you see in a manifest.
+
+List properties bind by index (`KWEBLENS_CLUSTERS_0_ID`), and a `List<String>` also binds
+from a comma-separated value.
+
+== Cluster discovery
+
+`org.alexmond.kweblens.config.KweblensProperties`.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.load-kubeconfig`
+| `KWEBLENS_LOAD_KUBECONFIG`
+| `true`
+| Load clusters from the ambient kubeconfig (`KUBECONFIG`, else `~/.kube/config`). Every
+context in it becomes its own cluster. Set `false` to start with only the clusters you
+declare.
+
+| `kweblens.clusters[n].id`
+| `KWEBLENS_CLUSTERS_n_ID`
+| —
+| Stable identifier used in URLs and the API. An entry with no id is skipped with a warning.
+
+| `kweblens.clusters[n].name`
+| `KWEBLENS_CLUSTERS_n_NAME`
+| the id
+| Display name.
+
+| `kweblens.clusters[n].kubeconfig`
+| `KWEBLENS_CLUSTERS_n_KUBECONFIG`
+| —
+| Path to a kubeconfig *file* to load this cluster from. Left unset, the entry is built from
+whatever ambient configuration the fabric8 client resolves (in-cluster ServiceAccount, or
+the ambient kubeconfig).
+
+| `kweblens.clusters[n].context`
+| `KWEBLENS_CLUSTERS_n_CONTEXT`
+| the file's `current-context`
+| Which context to select within that file.
+|===
+
+== Resource lists
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.list.chunk-size`
+| `KWEBLENS_LIST_CHUNKSIZE`
+| `500`
+| Objects fetched per API-server request when listing a kind. This is *not* a client-visible
+page size — the response is always the whole collection — it is how much of it exists in the
+JVM at once, which is the axis that OOM-kills the container. 500 is the Kubernetes
+convention and what `kubectl` uses. Lower it on a memory-tight deployment with very large
+objects (Secrets, CRDs carrying OpenAPI schemas); raise it to trade memory for round trips.
+Zero or less disables chunking and fetches everything in one request, which is the setting
+to use if an API server mishandles continue tokens.
+|===
+
+== Port forwarding
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.port-forward.bind-address`
+| `KWEBLENS_PORTFORWARD_BINDADDRESS`
+| `""` (blank)
+| Address the forwarded local ports bind to on the kweblens host. Blank binds loopback only,
+so forwards are not exposed on the network. Set `0.0.0.0` only behind auth on a trusted
+host.
+|===
+
+== Runtime cluster store
+
+Where clusters added through the API — and the kubeconfigs that authenticate them — are
+kept. `org.alexmond.kweblens.config.ClusterStoreProperties`.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.cluster-store.mode`
+| `KWEBLENS_CLUSTERSTORE_MODE`
+| `auto`
+| One of `auto`, `file`, `secret`, `memory`. `auto` resolves to `secret` when
+`KUBERNETES_SERVICE_HOST` is set (kweblens is running in a cluster) and to `file`
+otherwise. `memory` refuses to persist credentials at all — runtime clusters do not survive
+a restart. If `secret` cannot build a client for kweblens's own cluster, or the namespace
+cannot be determined, it falls back to `file` with a warning rather than failing startup.
+
+| `kweblens.cluster-store.path`
+| `KWEBLENS_CLUSTERSTORE_PATH`
+| `<user.home>/.kweblens/clusters`
+| Data directory for `file` mode. In a container point this at a mounted volume.
+
+| `kweblens.cluster-store.namespace`
+| `KWEBLENS_CLUSTERSTORE_NAMESPACE`
+| kweblens's own namespace
+| Namespace for `secret` mode.
+
+| `kweblens.cluster-store.secret-prefix`
+| `KWEBLENS_CLUSTERSTORE_SECRETPREFIX`
+| `kweblens-cluster-`
+| Name prefix for the per-cluster Secrets in `secret` mode.
+|===
+
+[NOTE]
+====
+kweblens's own `application.yml` wires these two through the underscore-for-dash form —
+`KWEBLENS_CLUSTER_STORE_MODE`, and `path` as `${KWEBLENS_DATA_DIR:${user.home}/.kweblens}/clusters`.
+So `KWEBLENS_DATA_DIR` moves the whole data directory, and both spellings of the mode
+variable are honoured.
+====
+
+== Security
+
+`org.alexmond.kweblens.web.security.SecurityProperties`.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.security.open-mode`
+| `KWEBLENS_SECURITY_OPENMODE`
+| `true`
+| When true, `GET` endpoints are public and every non-`GET` requires the admin login. When
+false, everything except health, `/actuator/info`, the login page and the SPA's own assets
+requires authentication. A few path families are authenticated in *both* modes: pod exec
+(`/ws/**`), the pod file browser, and Helm values — what they return is itself a secret.
+
+| `kweblens.security.admin-username`
+| `KWEBLENS_SECURITY_ADMINUSERNAME`
+| `admin`
+| The single built-in admin username. There is one in-memory account; kweblens has no
+per-user identity by design (ADR-001).
+
+| `kweblens.security.admin-password`
+| `KWEBLENS_SECURITY_ADMINPASSWORD`
+| _(none)_
+| When blank, a random UUID is generated at startup, logged at `WARN`, and used for that
+process only. No password is baked into the source and none should be.
+|===
+
+The Helm chart renders `auth.openMode` as `KWEBLENS_SECURITY_OPEN_MODE` and expects
+`auth.existingSecret` to supply `KWEBLENS_SECURITY_ADMIN_USERNAME` /
+`KWEBLENS_SECURITY_ADMIN_PASSWORD`. See xref:security.adoc[Security and identity].
+
+== Metrics
+
+`org.alexmond.kweblens.metric.MetricsProperties`.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.metrics.prometheus-service`
+| `KWEBLENS_METRICS_PROMETHEUSSERVICE`
+| _(none — discovered by service name)_
+| The Prometheus-compatible backend to query, as `namespace/service:port` (for example
+`monitoring/prometheus-k8s:9090`). Overrides name-based discovery, which is right almost
+always but is a guess and cannot choose between two valid backends of different scope.
+A Service reference, *not* a URL: the query goes through the kube-apiserver's service proxy,
+so cluster RBAC is the only credential needed. An `http(s)://` value is reported as
+unsupported rather than quietly ignored.
+|===
+
+== Pod file browser
+
+Off by default, deliberately: it can read a projected Secret volume or a service-account
+token straight off a container's disk. `org.alexmond.kweblens.web.files.FilesProperties`.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.files.enabled`
+| `KWEBLENS_FILES_ENABLED`
+| `false`
+| Enable the pod file browser API and the drawer's Files tab. Every endpoint in the family
+requires the admin login, reads included, even in open mode.
+
+| `kweblens.files.writable`
+| `KWEBLENS_FILES_WRITABLE`
+| `true`
+| Allow modifying, uploading and deleting files inside containers. Set `false` for
+browse-and-download only. The feature is still off entirely unless `enabled` is set.
+
+| `kweblens.files.max-read-bytes`
+| `KWEBLENS_FILES_MAXREADBYTES`
+| `1048576`
+| Largest file that may be viewed or downloaded. Larger files are refused, not truncated.
+
+| `kweblens.files.max-write-bytes`
+| `KWEBLENS_FILES_MAXWRITEBYTES`
+| `1048576`
+| Largest payload that may be written into a container.
+
+| `kweblens.files.max-entries`
+| `KWEBLENS_FILES_MAXENTRIES`
+| `1000`
+| Largest number of directory entries returned in one listing.
+
+| `kweblens.files.command-timeout`
+| `KWEBLENS_FILES_COMMANDTIMEOUT`
+| `20s`
+| How long a single in-container command may take before it is abandoned. A `Duration`, so
+`30s` or `PT30S` both parse.
+
+| `kweblens.files.allowed-roots`
+| `KWEBLENS_FILES_ALLOWEDROOTS`
+| _(empty — the whole container filesystem)_
+| Absolute path prefixes the browser is confined to, e.g. `/data,/tmp`. The check runs
+twice: on the requested path, and again on the path the container itself resolves
+(`readlink -f`), so a symlink inside a root that points outside it is refused. A path that
+cannot be resolved is refused rather than allowed.
+|===
+
+`application.yml` wires the byte and entry limits through the underscore-for-dash form
+(`KWEBLENS_FILES_MAX_READ_BYTES` and friends); both spellings bind.
+
+== Helm
+
+`org.alexmond.kweblens.web.helm.HelmProperties`. Releases are read from the cluster; these
+settings are about *chart* repositories and the saved-values library.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.helm.repositories[n].name`
+| `KWEBLENS_HELM_REPOSITORIES_n_NAME`
+| —
+| Short repo name shown in the charts browser.
+
+| `kweblens.helm.repositories[n].url`
+| `KWEBLENS_HELM_REPOSITORIES_n_URL`
+| —
+| Base URL of a classic HTTP chart repository (the directory holding `index.yaml`). These
+are seeded into the shared jhelm `RepoManager` at startup, idempotently; after boot repos
+are managed at runtime under `/api/v1/helm/repos`.
+
+| `kweblens.helm.index-cache-seconds`
+| `KWEBLENS_HELM_INDEXCACHESECONDS`
+| `300`
+| How long a fetched repo index is cached before it is refetched.
+
+| `kweblens.helm.values-path`
+| `KWEBLENS_HELM_VALUESPATH`
+| `<java.io.tmpdir>/kweblens-helm/values`
+| Directory for the reusable values-file library (named `*.yaml` files saved and reused
+across installs and upgrades).
+|===
+
+`application.yml` ships two default repositories — `prometheus-community` and
+`ingress-nginx` — and sets `values-path` to
+`${KWEBLENS_HELM_HOME:${user.home}/.kweblens/helm}/values`. So `KWEBLENS_HELM_HOME` moves
+the whole Helm home, which is what the chart's `persistence` block does (`/data/helm`), and
+it is also where jhelm's own `repositories.yaml` and index cache are kept. Without a durable
+Helm home, runtime-added repositories and saved values do not survive a restart.
+
+== AI diagnosis
+
+`org.alexmond.kweblens.web.ai.KweblensAiProperties`.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.ai.enabled`
+| `KWEBLENS_AI_ENABLED`
+| `false`
+| Enable LLM enrichment of the diagnosis summary. The deterministic health checks always
+run and do not depend on this. Enrichment additionally needs an Anthropic API key
+(`ANTHROPIC_API_KEY`); `application.yml` supplies the placeholder `not-set` so the chat
+client bean constructs without one. No `GET` ever calls a model.
+|===
+
+== Cluster simulator
+
+A generated in-JVM cluster for development, CI and performance work.
+`org.alexmond.kweblens.web.sim.SimulatorProperties`.
+
+[cols="2,2,1,3"]
+|===
+| Property | Environment | Default | What it does
+
+| `kweblens.simulator.enabled`
+| `KWEBLENS_SIMULATOR_ENABLED`
+| `false`
+| Turn the simulator on. Typically paired with `kweblens.load-kubeconfig=false` so it is the
+only cluster.
+
+| `kweblens.simulator.cluster-id`
+| `KWEBLENS_SIMULATOR_CLUSTERID`
+| `sim`
+| Cluster id the simulator registers under. Its display name is `Simulator`.
+
+| `kweblens.simulator.size`
+| `KWEBLENS_SIMULATOR_SIZE`
+| `200`
+| Objects generated *per kind* (ConfigMap, Secret, Pod, ReplicaSet, Deployment, Service,
+Endpoints, Ingress).
+
+| `kweblens.simulator.namespaces`
+| `KWEBLENS_SIMULATOR_NAMESPACES`
+| `3`
+| How many namespaces to spread the generated objects across.
+
+| `kweblens.simulator.payload-scale`
+| `KWEBLENS_SIMULATOR_PAYLOADSCALE`
+| `1.0`
+| Multiplier on generated ConfigMap/Secret data sizes. Objects are sized to match a real
+cluster's, which costs memory — at `size=3000` the Secrets alone are ~150 MB held in the
+mock API server. Turn it down (`0.1`, or `0` for keys with no bodies) for a sweep that needs
+many rows rather than realistic ones, and say so when quoting any payload number from that
+run.
+|===
+
+== Environment variables that are not `kweblens.*`
+
+These appear in `application.yml` and the chart and are worth knowing about.
+
+[cols="2,3"]
+|===
+| Variable | What it does
+
+| `PORT`
+| HTTP listen port (`server.port`). Default `8080`.
+
+| `KUBECONFIG`
+| Read directly when discovering the ambient kubeconfig. May be a path list; the first entry
+is treated as the primary.
+
+| `KWEBLENS_DATA_DIR`
+| Parent of the runtime cluster store directory. Default `<user.home>/.kweblens`.
+
+| `KWEBLENS_HELM_HOME`
+| Helm home: jhelm's `repositories.yaml`, its index cache, and the values library. Default
+`<user.home>/.kweblens/helm`.
+
+| `ANTHROPIC_API_KEY`
+| Key for the Spring AI Anthropic chat client. Never called unless `kweblens.ai.enabled` is
+true.
+
+| `SPRING_PROFILES_ACTIVE`
+| Standard Spring profile activation; the chart sets it from `springProfiles`.
+
+| `SPRING_CONFIG_IMPORT`
+| Optional central config server, e.g. `optional:configserver:<url>`. The config client is
+inert without it — `spring.cloud.config.import-check.enabled` is `false`.
+
+| `KUBERNETES_SERVICE_HOST`
+| Not set by you — its presence is how kweblens decides `cluster-store.mode: auto` means
+Secrets.
+|===
+
+== Related settings that are not kweblens's own
+
+* `logging.level.kweblens.audit` is pinned to `INFO` in `application.yml`. Every recorded
+  write is emitted on that logger as one structured line, so the audit trail survives a
+  restart via whatever already ships your logs. Raising the root level must not switch it
+  off; route it to a rolling file appender in a `logback-spring.xml` if you want a local
+  copy. The logger name is the contract.
+* `management.endpoints.web.exposure.include` exposes `health`, `info`, `metrics` and
+  `prometheus`.
+* `spring.cache.caffeine.spec` is `maximumSize=2000,expireAfterWrite=10s` — a bounded,
+  short-TTL cache over hot list and get reads.
+* `spring.ai.mcp.server.keep-alive-interval` is `30s`, because an MCP SSE session learns of a
+  disconnect only from a failed write. See xref:mcp.adoc[MCP server].
+
+== Next
+
+* xref:clusters.adoc[Connecting clusters] — what the cluster settings actually do
+* xref:security.adoc[Security and identity]
+* xref:deployment.adoc[Deploying to Kubernetes]

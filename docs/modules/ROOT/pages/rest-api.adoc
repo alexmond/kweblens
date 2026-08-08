@@ -1,0 +1,452 @@
+include::_header.adoc[]
+= REST API
+
+Everything the SPA does, it does over this API. There is no private back channel, so anything on
+this page is equally available to `curl`, a script or another service.
+
+The base is `/api/v1`. Almost everything is addressed by *cluster id*.
+
+[IMPORTANT]
+====
+*Never assume a cluster called `default` exists.* `ClusterBootstrap` registers *one cluster per
+kubeconfig context, with the context name as the id*. `default` is only the fallback used when
+there is no readable kubeconfig (an in-cluster ServiceAccount), no contexts in it, or it fails to
+parse.
+
+Resolve ids from `GET /api/v1/clusters` — in code, in tests and in examples.
+====
+
+== Authentication
+
+Two modes, set by `kweblens.security.open-mode` (default `true`). See
+xref:security.adoc[Security and identity].
+
+[cols="1,3"]
+|===
+| Mode | Rule
+
+| `open-mode: true` (default)
+| Every `GET` is public, so the dashboard and CI work out of the box. Every *non-`GET`* — apply,
+patch, delete, scale, exec, port-forward, Helm, remediation — requires the admin login.
+
+| `open-mode: false`
+| Everything except `/actuator/health/**`, `/actuator/info`, the login page and the SPA shell
+requires authentication.
+|===
+
+Three path families are authenticated *even in open-mode*, because what they return is itself a
+secret:
+
+* `/ws/**` — pod exec over WebSocket.
+* `/api/v1/clusters/*/pods/*/*/files` and `/…/files/**` — the whole pod file browser, *reads
+  included*. Letting those GETs ride the public read path would make secret exfiltration an
+  unauthenticated operation.
+* `GET /api/v1/helm/values`, `/api/v1/helm/values/**` and
+  `/api/v1/clusters/*/helm/releases/*/*/values` — a release's stored config and the saved values
+  library commonly carry plaintext secrets and are returned raw.
+
+Authenticate with HTTP Basic per request, or `POST /api/v1/auth/session` once to establish a
+`JSESSIONID` (the SPA does this because a browser cannot attach Basic auth to a WebSocket
+handshake). `/api/**` and `/mcp/**` are exempt from CSRF; a failed Basic auth answers a bare `401`
+with no `WWW-Authenticate` header.
+
+== Errors
+
+Failures come back as RFC 9457 `ProblemDetail` JSON with a `code` property, mapped by
+`ApiExceptionHandler`:
+
+[cols="1,1,1,2"]
+|===
+| Condition | Status | `code` | Notes
+
+| Unknown cluster id | 404 | `unknown-cluster` |
+| Unusable cluster definition | 400 | `invalid-cluster` | Rejected before anything is registered or persisted.
+| Duplicate id, or editing a statically declared cluster | 409 | `cluster-conflict` |
+| Port-forward failure | 400 | `port-forward-failed` |
+| Analysis requested with no LLM configured | 409 | `ai-unavailable` | Nothing broke and nothing was spent.
+| Helm action failure | 400 | `helm-failed` |
+| The API server refused the request | *its own status* | `cluster-refused` | A 403 from RBAC stays a 403, a 422 from a validating webhook stays a 422. fabric8 reports `0` when the request never reached the server (DNS, TLS, connection refused), which maps to *502*.
+| Bad input | 400 | `invalid-request` |
+|===
+
+The `cluster-refused` mapping is load-bearing for the dry-run paths: their whole purpose is to
+surface an admission-webhook rejection before the write lands, and without it the operator got
+"500 kweblens broke" with the webhook's message discarded. The detail carries the server's own
+human-readable reason, not fabric8's framing.
+
+The pod file browser has its own handler for its own failure modes.
+
+== Clusters
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET /api/v1/clusters`
+| Every connected cluster: `id`, `name`, `masterUrl`, `origin` (`STATIC` or runtime-managed).
+
+| `POST /api/v1/clusters`
+| Add a cluster at runtime. Body is a `ClusterDefinition` — `id`, `name`, `context`, `kubeconfig`.
+
+| `PUT /api/v1/clusters/{clusterId}`
+| Edit a runtime-managed cluster. Editing a statically declared one is a 409.
+
+| `DELETE /api/v1/clusters/{clusterId}`
+| Remove a runtime-managed cluster.
+
+| `GET /api/v1/clusters/{clusterId}/config`
+| Everything the editor needs — id, name, origin, master URL, selected context, available
+contexts, where runtime clusters are stored, whether that storage is persistent, and
+`kubeconfigStored`. *There is deliberately no kubeconfig field:* the credential goes in and never
+comes back out. A read-only GET returning the YAML would turn any open-mode deployment into a
+credential-exfiltration endpoint.
+
+| `POST /api/v1/clusters/contexts`
+| Given a kubeconfig in the body, list the contexts in it — so the UI can offer them before the
+cluster is added.
+|===
+
+The kubeconfig is a credential throughout: never returned, never logged, and `ClusterDefinition`
+overrides `toString()` to redact it so an interpolated exception message cannot dump a working
+credential into the log stream.
+
+== Navigation and counts
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET /api/v1/clusters/{clusterId}/nav`
+| The left-nav registry for this cluster: categories → kinds → resource ids, including CRDs
+discovered from the cluster and a Gateway category promoted when the Gateway API CRDs exist.
+
+| `GET /api/v1/clusters/{clusterId}/counts[?namespace=…]`
+| One badge number per kind.
+
+| `GET /api/v1/clusters/{clusterId}/resources/{resourceId}/columns`
+| The CRD-declared printer columns for a kind; empty for built-in kinds.
+
+| `GET /api/v1/clusters/{clusterId}/search?q=…[&namespace=…][&limit=…]`
+| Ranked hits, plus `total` counted over *every* match (so "showing 20 of 137" is true), which
+kinds were searched, which were *not*, and which failed with a reason — so a reader can tell "it
+is not there" from "I did not look".
+
+| `GET /api/v1/clusters/{clusterId}/diagnostics`
+| The per-cluster capability report — see xref:health-and-diagnostics.adoc[Health and
+diagnostics].
+|===
+
+`counts` computes its numbers with one `limit=1` request per kind plus `metadata.remainingItemCount`,
+not by listing everything. Listing was 22.1 MB of API-server traffic per call on a real cluster,
+re-fetched on every namespace switch.
+
+== Resources and objects
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET /api/v1/clusters/{clusterId}/resources/{resourceId}[?namespace=…]`
+| Kind-agnostic summary rows: kind, namespace, name, status, age.
+
+| `GET /api/v1/clusters/{clusterId}/namespaces`
+| Namespaces, as summary rows.
+
+| `GET /api/v1/clusters/{clusterId}/pods[?namespace=…]`
+| Pods, as summary rows.
+
+| `GET /api/v1/clusters/{clusterId}/resources/{resourceId}/objects[?namespace=…]`
+| *The raw objects* as a JSON array, matching the cluster's own representation.
+
+| `GET /api/v1/clusters/{clusterId}/resources/{resourceId}/object?name=…[&namespace=…]`
+| One raw object, in full.
+
+| `GET /api/v1/clusters/{clusterId}/nodes/{node}/pods`
+| The pods scheduled on a node, field-selected server-side.
+
+| `GET /api/v1/clusters/{clusterId}/detail/{resourceId}/{namespace}/{name}`
+| Per-kind detail for the drawer, including the resolved relation sections.
+
+| `GET /api/v1/clusters/{clusterId}/overview/{category}[?namespace=…]`
+| Health summaries for `workloads`, `network`, `storage` or `config`.
+
+| `GET /api/v1/clusters/{clusterId}/events[?namespace=…][&kind=…&name=…]`
+| Events, newest first, optionally scoped to one object.
+
+| `GET /api/v1/clusters/{clusterId}/schema?resource=…`
+| The cluster's own OpenAPI v3 schema for a kind, which drives editor completion and validation.
+|===
+
+[NOTE]
+====
+*A list row is not the whole object.* Both `objects` and its watch stream go through
+`ListProjection`, which strips `managedFields` and ships ConfigMap/Secret `data`, `stringData` and
+`binaryData` as *keys with `null` values*. That was 9.85 MB → 1.28 MB across six kinds on a real
+cluster.
+
+A `null` value means "we did not send it", which is a different claim from "it is empty" — the UI
+renders it as `—`, never as an empty string, and refetches the whole object from the `object`
+endpoint when it needs the values. The single-object endpoint is deliberately *not* projected:
+that is exactly what the drawer calls it for.
+
+This is not redaction. Per ADR-001 the drawer still shows every value. Redaction is the
+xref:mcp.adoc[MCP] boundary's rule, not this one.
+====
+
+The `objects` collection is fetched in server-side chunks and serialised a chunk at a time — the
+*response is unchanged*, but listing 3,000 Secrets as one collection cost 1.33 GB of transient
+heap. There is no client-visible `limit`: a substring filter over a truncated page would report
+"no matches" for an object that exists.
+
+== YAML, apply and patch
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET /api/v1/clusters/{clusterId}/yaml?resource=…&name=…[&namespace=…]`
+| The object as `application/yaml`.
+
+| `POST /api/v1/clusters/{clusterId}/apply`
+| Apply a manifest (`application/yaml` body). This is the write: `forceConflicts().serverSideApply()`,
+with no dry run. Returns the resulting summary row. *Auth required*, and audited.
+
+| `POST /api/v1/clusters/{clusterId}/apply/dry-run`
+| The same request with `dryRun=All`, returning what the cluster says it would store — so
+defaulting, another manager's fields and admission all surface first. A refusal comes back as a
+`cluster-refused` problem carrying the webhook's message. *Auth required*, and deliberately *not*
+audited — the audit trail records what was changed, and nothing was.
+
+| `PATCH /api/v1/clusters/{clusterId}/patch?resource=…&name=…[&namespace=…]`
+| A JSON merge patch (`application/merge-patch+json`). Returns the patched summary row. *Auth
+required*, and audited.
+|===
+
+The dry run and the apply share the same normalisation, because a preview made of different bytes
+describes a different request. Note that nothing *forces* a caller to run the dry run first — it
+is a separate request the operator chooses to make.
+
+== Actions
+
+All of these are `POST`, all require auth, all are audited.
+
+[cols="2,3"]
+|===
+| Endpoint | Effect
+
+| `…/resources/{resourceId}/{namespace}/{name}/delete[?force=true]` | Delete the object.
+| `…/resources/{resourceId}/{namespace}/{name}/scale?replicas=N` | Scale a workload.
+| `…/resources/{resourceId}/{namespace}/{name}/restart` | Rollout restart.
+| `…/resources/{resourceId}/{namespace}/{name}/suspend[?suspend=false]` | Suspend or resume (CronJob).
+| `…/resources/{resourceId}/{namespace}/{name}/trigger` | Trigger a Job from a CronJob.
+| `…/resources/{resourceId}/{namespace}/{name}/rollback` | Roll back to the previous revision.
+| `/api/v1/clusters/{clusterId}/nodes/{name}/cordon` | Mark the node unschedulable.
+| `/api/v1/clusters/{clusterId}/nodes/{name}/uncordon` | Reverse it.
+| `/api/v1/clusters/{clusterId}/nodes/{name}/drain` | Evict the node's pods.
+|===
+
+(Prefix the first six with `/api/v1/clusters/{clusterId}`.)
+
+== Logs
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET …/pods/{namespace}/{pod}/log[?container=…][&tailLines=200]`
+| A plain-text tail.
+
+| `GET …/pods/{namespace}/{pod}/log/previous[?container=…][&tailLines=500]`
+| The *previous* run's log — the crashloop diagnostic, since after a restart the current log
+begins at the new process.
+
+| `GET …/pods/{namespace}/{pod}/log/stream[?container=…]`
+| *SSE.* One container, followed live.
+
+| `GET …/logs/stream?namespace=…[&tailLines=200][&initContainers=false]`
+| *SSE.* Multi-source, interleaved. Pass `pod` for every container of one pod, or
+`resourceId` + `name` for every pod of a workload.
+
+| `GET …/logs/sources?namespace=…[&initContainers=false]`
+| What the multi-source stream would follow, given the same `pod` or `resourceId` + `name`, so the
+UI can label the streams before opening one.
+|===
+
+All paths are under `/api/v1/clusters/{clusterId}`.
+
+== Exec and port-forward
+
+Exec is *WebSocket*, not HTTP:
+
+[source]
+----
+/ws/exec?cluster=…&namespace=…&pod=…&container=…[&mode=attach]
+----
+
+Text frames are written to the container's stdin; output comes back as frames. `mode=attach`
+attaches to the container's existing process instead of starting a shell. *Authenticated in both
+security modes*, and audited on connect. A WebSocket close frame arrives in under a second, so
+there is deliberately no heartbeat here.
+
+Port-forwards are HTTP-managed and are *meant to outlive the tab that started one*:
+
+[cols="2,3"]
+|===
+| Endpoint | Effect
+
+| `GET /api/v1/clusters/{clusterId}/port-forwards` | List active forwards.
+| `POST /api/v1/clusters/{clusterId}/port-forwards` | Start one. Body: `kind`, `namespace`, `name`, `remotePort`, optional `localPort`. *Auth required.*
+| `POST /api/v1/clusters/{clusterId}/port-forwards/{id}/stop` | Stop it. *Auth required.*
+|===
+
+The listening socket is bound by kweblens, not by the cluster, so forwards are released when their
+cluster is removed or re-pointed — not merely when its client closes.
+
+== Helm
+
+kweblens's own release surface, per cluster, built on jhelm — never the `helm` binary. Each
+mutating call takes a real `dryRun`.
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET …/helm/releases[?namespace=…]` | Releases with status and chart version.
+| `GET …/helm/releases/{namespace}/{name}` | One release.
+| `GET …/helm/releases/{namespace}/{name}/history` | Its revisions.
+| `GET …/helm/releases/{namespace}/{name}/resources` | The objects it owns.
+| `GET …/helm/releases/{namespace}/{name}/values` | Its stored values as YAML. *Auth required even in open-mode.*
+| `GET …/helm/charts[?query=…]` | The chart catalogue from the configured repositories.
+| `POST …/helm/releases` | Install. *Auth required.*
+| `POST …/helm/releases/{namespace}/{name}/upgrade` | Upgrade. *Auth required.*
+| `POST …/helm/releases/{namespace}/{name}/rollback` | Roll back to a revision. *Auth required.*
+| `POST …/helm/releases/{namespace}/{name}/uninstall` | Uninstall. *Auth required.*
+|===
+
+All under `/api/v1/clusters/{clusterId}`. Install, upgrade and rollback bodies all carry a
+`dryRun` flag.
+
+Cluster-agnostic Helm endpoints live under `/api/v1/helm` and are served by the jhelm-rest
+library: `/api/v1/helm/repos` (repositories), `/api/v1/helm/charts` (chart show/values/readme/CRDs),
+`/api/v1/helm/hub` (Artifact Hub search). kweblens adds two of its own there:
+
+* `POST /api/v1/helm/repos/{name}/refresh` — re-index one repository and evict its cached charts.
+* `GET|PUT|DELETE /api/v1/helm/values[/{name}]` — the reusable values-file library. *Every method
+  requires auth*, including the GETs.
+
+== Health, diagnosis and remediation
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET …/diagnose[?namespace=…]`
+| Deterministic findings, plus a cached LLM summary *only* if one was already bought for exactly
+these findings. *Never calls a model.*
+
+| `POST …/diagnose/summary[?namespace=…]`
+| Runs the analysis and caches it. The only caller of the LLM. *Auth required in both modes*, and
+audited. 409 `ai-unavailable` when no LLM is configured.
+
+| `GET …/remediations[?namespace=…]`
+| Proposed fixes. Read-only.
+
+| `POST …/remediations/preview?namespace=…&action=…&target=…`
+| What the cluster says the action would do. A `POST` because it reaches the API server with
+`dryRun=All` and runs admission, even though it changes nothing. *Auth required.*
+
+| `POST …/remediations/apply?namespace=…&action=…&target=…&confirm=true`
+| Carry it out. Without `confirm=true` it refuses. *Auth required*, and audited.
+|===
+
+All under `/api/v1/clusters/{clusterId}`. Full behaviour, and which previews are real, in
+xref:health-and-diagnostics.adoc[Health and diagnostics].
+
+== Metrics
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET …/metrics/nodes` | Per-node CPU/memory from metrics-server.
+| `GET …/metrics/pods[?namespace=…]` | Per-pod CPU/memory.
+| `GET …/metrics/nodes/disk` | Per-node disk usage from node-exporter.
+| `GET …/metrics/prometheus` | Whether a backend was found, and which.
+| `GET …/metrics/graph?target=…[&namespace=…][&name=…][&minutes=60]` | A time series for a fixed target.
+|===
+
+All under `/api/v1/clusters/{clusterId}`. See xref:metrics.adoc[Metrics] — in particular, the
+absence of a source is an empty result, never an error.
+
+== Pod files
+
+`/api/v1/clusters/{clusterId}/pods/{namespace}/{pod}/files`
+
+`GET` lists a directory (`?path=/`), `GET /content` reads a file, `GET /download` fetches bytes,
+`PUT /content` writes, `DELETE` removes. All take an optional `container`.
+
+Two gates apply: the feature is *off* unless `kweblens.files.enabled=true`, and writes need
+`kweblens.files.writable=true`. *Every method here requires the admin login, GETs included* — the
+browser can read a projected Secret volume or the service-account token straight off a container's
+disk. The caps and the allowed roots are reported by `/api/v1/about` so a client can refuse an
+oversized upload without a round trip.
+
+== Instance endpoints
+
+[cols="2,3"]
+|===
+| Endpoint | Returns
+
+| `GET /api/v1/about`
+| Version, build time, cluster count, cluster-store backend and persistence, security mode, AI
+enabled, pod-file gates, simulator state. Never a secret — only *whether* one is set. In open-mode
+the operationally sensitive fields (admin username, store path, allowed roots) are withheld until
+you sign in.
+
+| `GET /api/v1/audit`
+| The audit trail of mutating actions, newest first. This is the in-memory 500-entry ring; every
+entry is *also* written to the `kweblens.audit` logger, so the durable record survives a restart
+and eviction no longer loses it.
+
+| `POST /api/v1/auth/session`
+| Authenticate once with Basic and get a `JSESSIONID` back, for the exec WebSocket.
+|===
+
+== Streaming endpoints
+
+Four endpoints return `text/event-stream`:
+
+* `…/resources/{resourceId}/objects/watch[?namespace=…]` — raw objects, each event named
+  `ADDED` / `MODIFIED` / `DELETED`, projected exactly as the initial list is.
+* `…/resources/{resourceId}/watch[?namespace=…]` — the same as summary rows.
+* `…/pods/{namespace}/{pod}/log/stream`
+* `…/logs/stream`
+
+[NOTE]
+====
+*Every one of them writes a `:keepalive` comment every 15 seconds*, and this is not cosmetic. An
+`SseEmitter` learns its client is gone only from a *failed write* — nothing polls the socket — so
+a data-driven stream on a quiet cluster holds its cluster-side watch open on a departed subscriber
+indefinitely. Measured at over 5 minutes on `pods`, and 22 open watches for one operator who
+walked twenty kinds in one tab. The keepalive write fails, which completes the emitter, which runs
+the hook that closes the watch.
+
+Treat a stream that goes silent for more than ~15 seconds as a dead connection.
+====
+
+Consume them with any SSE client; each event's `data` is JSON.
+
+== Actuator
+
+`/actuator/health`, `/actuator/info`, `/actuator/metrics` and `/actuator/prometheus` are exposed.
+
+`/actuator/health/**` and `/actuator/info` are public in *both* security modes — that is what
+makes them usable as Kubernetes probes. `metrics` and `prometheus` are ordinary GETs: public in
+open-mode, authenticated when `open-mode: false`. Liveness and readiness probe groups are enabled.
+
+== Related
+
+* xref:clusters.adoc[Connecting clusters] — the cluster endpoints in workflow order
+* xref:editing-and-applying.adoc[Editing and applying] — the YAML and dry-run path
+* xref:mcp.adoc[MCP server] — the same cluster view for AI assistants
+* xref:security.adoc[Security and identity] — what open-mode actually permits

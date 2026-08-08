@@ -12,9 +12,9 @@
 
     <artifactId>kweblens-ui</artifactId>
     <name>kweblens :: ui (Vue SPA)</name>
-    <description>Vite/Vue/TypeScript single-page UI, a parity port of kweblens-ui. Built with
-        base "/ui/" and packaged as classpath static resources under static/ui; consumed by
-        kweblens-web and served at /ui. Not published — it ships inside the kweblens-web image.</description>
+    <description>Vite/Vue/TypeScript single-page UI for kweblens. Built with base "/ui/" and
+        packaged as classpath static resources under static/ui; consumed by kweblens-web, which
+        serves it at / as well as /ui. Not published — it ships inside the kweblens-web image.</description>
 
     <properties>
         <node.version>v22.14.0</node.version>

@@ -1,0 +1,288 @@
+include::_header.adoc[]
+= Performance and scale
+
+Everything on this page was measured, not estimated. The measurements, their conditions and
+the times they turned out to be wrong are in `docs/design/scale-measurements.md`; this is the
+operator-facing summary.
+
+Four changes bound what kweblens costs, each aimed at a different resource:
+
+[cols="1,2,2"]
+|===
+| What | Bounds | Result
+
+| List projection
+| bytes on the wire
+| 9.85 MB → 1.28 MB across six kinds
+
+| Cheap `/counts`
+| API-server traffic
+| 22.1 MB → 111 KB per call
+
+| Per-frame watch batching + row virtualisation
+| main-thread work in the browser
+| flat from 200 to 3 000 objects
+
+| Chunked list fetch
+| *JVM heap*
+| minimum heap 256 MB → 176 MB over 8 150 Secrets
+|===
+
+The last one is the one that decides whether the pod stays up.
+
+== A list row is not the whole object
+
+`web/api/ListProjection` sits at the web boundary and trims every list payload: it strips
+`managedFields` from every object, and ships ConfigMap/Secret `data`, `stringData` and
+`binaryData` as *keys with `null` values*. Measured on a live cluster, HTTP body bytes:
+
+[cols="1,>1,>1,>1,>1"]
+|===
+| Kind | Objects | Before | After | Saving
+
+| pods | 87 | 678.8 KB | 430.9 KB | 36.5%
+| replicasets | 168 | 980.6 KB | 508.0 KB | 48.2%
+| deployments | 59 | 351.5 KB | 187.1 KB | 46.8%
+| services | 62 | 97.9 KB | 57.5 KB | 41.3%
+| configmaps | 97 | 1.55 MB | 54.3 KB | 96.6%
+| secrets | 150 | 6.24 MB | 72.9 KB | *98.8%*
+| *total* | | *9.85 MB* | *1.28 MB* | *87.0%*
+|===
+
+Almost all of it is Secrets, and almost none of it was ever on screen. Both the `objects`
+endpoint and the `objects/watch` SSE stream go through the same projection — separate code
+paths, one rule.
+
+The cost is moved, not removed: opening a ConfigMap or Secret drawer now refetches the full
+object (16–26 ms and ~1.3 KB for a typical one; 60 ms and 948 KB for the largest Secret on
+the measured cluster). Every other kind's drawer fetches nothing extra.
+
+*This is not redaction* — the drawer shows every value, per
+xref:security.adoc[ADR-001's single-operator model]. A `null` value renders as `—`, never as
+an empty string: "we did not send it" and "it is empty" are different claims.
+
+== Counting without listing
+
+The sidebar's 118 badge numbers used to be computed as `listRaw(...).size()` — a full LIST of
+every kind to produce an integer, re-fetched on *every namespace switch*. On the measured
+cluster (118 kinds, 1 561 objects) that was *22.1 MB* of API-server traffic per call, half of
+it CRD OpenAPI schemas and 6.5 MB of Secret data, all decoded into heap and thrown away.
+
+`ResourceService.count` instead asks each kind for *one* item and reads
+`metadata.remainingItemCount`:
+
+[cols="2,>1,>1"]
+|===
+| | Before | After
+
+| `GET /counts`, warm | 330 ms | *112 ms*
+| first call after start | 1.66 s | 1.44 s
+| bytes pulled from the API server | *22.1 MB* | *111 KB*
+| kinds returned | 118 | 118
+|===
+
+`remainingItemCount` is *best-effort*, so its absence is branched on rather than guessed: no
+continue token means the page is the whole collection and the count is exact (which also
+covers a server that ignores `limit` outright), and a page that is truncated *without* the
+field falls back to a full list. A sweep comparing all 118 badges against the full object list
+for the same kind found zero mismatches.
+
+The latency was never the scandal. The traffic was — and it scales with the cluster's total
+content while the numbers do not.
+
+== The browser
+
+*Watch events are batched per animation frame.* On connect, a watch replays the whole
+collection as an `ADDED` burst; applied one at a time that is one full table re-render per
+object, and it froze the tab before first paint. `useResourceData` buffers events and applies
+them in a single `objects` update per `requestAnimationFrame`.
+
+This is a *gated invariant*, not a convention: `useResourceData.test.ts` asserts that a burst
+of N events coalesces into at most one update per frame, and it runs in `npm run check` and
+therefore in CI. *When you add a live-updated list, add its watch to the same buffer-and-flush
+pattern.*
+
+*Rows are virtualised from 50 objects up.* Before that, one DOM row per object with real
+components in each — status pills, container squares, usage bars — put ~14 000 nodes and a
+12 000 px table on the page at 300 objects, extrapolating to ~715 000 nodes at 15 000. Above
+the threshold the table windows to the visible rows.
+
+Measured max main-thread block per list, at 200 / 1 000 / 3 000 objects per kind:
+
+[cols="1,>1,>1,>1"]
+|===
+| Kind | 200 | 1 000 | 3 000
+
+| Pods | 370 ms | 371 ms | 299 ms
+| Deployments | 288 ms | 286 ms | 344 ms
+| Replica Sets | 255 ms | 250 ms | 371 ms
+| Config Maps | 170 ms | 167 ms | 211 ms
+| Secrets | 211 ms | 227 ms | 172 ms
+| Events | 403 ms | 421 ms | 406 ms
+|===
+
+*Flat*, with DOM rows pinned at 20 and ~1 000–1 300 nodes at every size. Scrolling a 3 000-row
+list end to end costs 0–226 ms of block. Filtering is client-side and stays cheap — one
+keystroke over 3 000 objects is 232–353 ms, once — which is why search is not truncated
+server-side: a substring filter over a server-truncated page would report "no matches" for an
+object that exists.
+
+== The wire
+
+Projected list payload and total request time, medians of three, at three simulator sizes:
+
+[cols="1,1,1,1"]
+|===
+| Kind | 200 | 1 000 | 3 000
+
+| pods | 1.14 MB · 61 ms | 5.61 MB · 246 ms | 16.78 MB · 637 ms
+| deployments | 776 KB · 45 ms | 3.85 MB · 208 ms | 11.37 MB · 488 ms
+| replicasets | 740 KB · 49 ms | 3.70 MB · 186 ms | 11.11 MB · 580 ms
+| services | 232 KB · 22 ms | 1.13 MB · 76 ms | 3.41 MB · 314 ms
+| configmaps | 177 KB · 60 ms | 884 KB · 224 ms | 2.59 MB · 805 ms
+| secrets | 172 KB · 101 ms | 862 KB · 428 ms | 2.53 MB · 1 224 ms
+| ingresses | 251 KB · 24 ms | 1.23 MB · 93 ms | 3.70 MB · 203 ms
+|===
+
+Linear in object count, and the slowest kind at 3 000 objects is 1.2 s. The wire is not the
+constraint.
+
+== Heap: the axis that actually bounds kweblens
+
+Once the wire and the browser were comfortable, the unbounded thing was the JVM heap, and it
+was worse than either had ever been. Allocation sampling with stacks (JFR) attributed a live
+Secrets list request:
+
+[cols="3,>1,>1"]
+|===
+| Stage | Secrets (151 obj) | Pods (88 obj)
+
+| response bytes — TLS decrypt, buffers, whole body as one `byte[]` | 56% | 20%
+| the deserialised model graph — Jackson decode into the objects | 37% | 36%
+| `ListProjection` | 0.1% | ~0
+| `Serialization.asJson` — the output `String` | *1.4%* | 15%
+| other (profiler overhead, timers, Tomcat) | 6% | 29%
+|===
+
+So the expensive copies are the ones that exist *before* the controller runs: fabric8 buffers
+the entire list response into one `byte[]`, Jackson builds a complete object graph from it,
+and only then is a line of kweblens code called. Streaming the reply — the fix that looked
+obvious — would have removed 1.4% of a Secrets list.
+
+*What works is fetching the collection in chunks* and letting each chunk become garbage before
+the next arrives. `ResourceService.listRawChunked` sends `limit` + `metadata.continue`;
+`web/api/ListJson` projects and writes each page as it arrives. This is server-side paging *of
+the fetch*, invisible to the client — the response is still every object of the kind, so the
+list contract, the filter semantics and client-side search are all untouched. Peak heap
+follows the chunk size instead of the collection size.
+
+Default `kweblens.list.chunk-size` is *500* (the Kubernetes convention, and what `kubectl`
+uses). Lower it on a memory-tight deployment with very large objects; `0` disables chunking
+and restores the single-request behaviour, which is the setting to reach for if an API server
+mishandles continue tokens.
+
+=== The result that matters
+
+Rig: 8 150 live Secrets in one namespace on a real cluster — 54.89 MB stored on the API
+server, 2.08 MB on the wire after projection. Smallest `-Xmx` in which one full Secrets list
+request completes:
+
+[cols="1,2,2"]
+|===
+| `-Xmx` | chunking off | chunking on (500)
+
+| 256m | ok 2.84 s | ok 2.60 s
+| 224m | *OOM* | ok 2.63 s
+| 208m | *OOM* | ok 2.85 s
+| 192m | *OOM* | ok 2.78 s
+| 176m | *OOM* | ok 3.29 s
+|===
+
+Unchunked needs *256 MB*. Chunked completes at *176 MB*, which is kweblens's own boot floor —
+below roughly 176m the process cannot finish starting Spring at all, list or no list. So
+chunking does not merely reduce the list's heap cost; it removes the cluster's size from the
+floor. Wall-clock is unchanged at ~2.6 s either way, so the bound costs nothing.
+
+[IMPORTANT]
+====
+*Why 256 MB is exactly the wrong number.* The chart sets `resources.limits.memory: 1Gi` and
+sets no JVM options, so the JVM's default maximum heap is a quarter of the container limit —
+about *256 MB*. Unchunked, 8 150 Secrets sits precisely on that line. This was never a slow
+page; it was an OOM-killed container with a cluster-sized trigger.
+====
+
+=== The measurement rule
+
+`peak − base` — heap used at the peak of a request minus heap used after a forced GC — is
+*allocation churn*, not the live set, and it answers a different question.
+
+On this exact change it pointed the wrong way. Over 2 150 Secrets, chunking scored *worse*:
+80–96 MB transient with chunking on against 67–69 MB with it off. Five bounded pages allocate
+more total garbage than one whole-collection graph, while far less of it is live at any
+instant. Read alone, that table is an argument for reverting a fix that cut the minimum heap
+by 80 MB.
+
+*The only answer to "does this bound the heap" is the smallest `-Xmx` in which the request
+still completes.* A squeezed heap collects everything it can, so only genuinely-live bytes can
+push it over and collector timing drops out.
+
+Two instruments, two questions, disagreeing by design:
+
+* `scripts/heap-probe.sh` — how much a request *allocates*. Good for comparing kinds to each
+  other. Not admissible for "does this bound the heap".
+* `scripts/alloc-probe.sh` (JFR allocation samples, by call site and thread) — *which code*
+  spends it. Reach for it whenever the first surprises you. A class histogram cannot answer
+  this: since JDK 9's compact strings every `String` is a `byte[]`, so the output string and
+  the model graph land in the same row.
+* The minimum-heap bisect — whether the live set is bounded. This is the one that decides.
+
+== What to watch
+
+*Secret count per cluster, against the container's memory limit.* Not pod count, not payload
+size — both look healthy the whole way. Helm stores one Secret per release *revision*, so a
+cluster with a hundred pods and a couple of hundred releases can hold thousands of Secrets.
+
+`scripts/payload-bytes.mjs` reports per-object and per-row bytes against a running instance;
+`scripts/heap-probe.sh` and `scripts/alloc-probe.sh` are the heap side. Run all of them
+against a *live* cluster.
+
+== Watches and streams
+
+The ratio is one API-server watch per SSE subscriber — but the number that mattered was how
+long a watch outlives a departed subscriber. An `SseEmitter` learns its client is gone only
+from a *failed write*, so a stream whose writes are data-driven held its cluster-side watch
+open for over five minutes on a quiet kind, and one operator walking twenty kinds in one tab
+held *22 open watches*.
+
+`SseKeepAlive` writes a `:keepalive` comment every 15 s; the write fails, the emitter
+completes and the `onCompletion` hook closes the watch. All four SSE endpoints attach it, and
+a test fails the build if a new streaming endpoint does not. The ceiling is now "one watch per
+list view currently on screen, released within ~30 s".
+
+Exec-over-WebSocket and port-forward deliberately have no heartbeat: a WebSocket close frame
+arrives in under a second, and a port-forward is a named server-side resource that is *meant*
+to outlive the tab that started it.
+
+== Reading these numbers honestly
+
+* *The rig's objects must resemble real ones.* The built-in simulator once generated a 739-byte
+  pod against a real cluster's 7.8 KB, which is how a scale pass concluded "~88 bytes/row" and
+  was wrong by 50–500×. It now generates objects sized, shaped and distributed like measured
+  live ones (`managedFields` at 24–43%, a real long tail, a realistic minority of unhealthy
+  objects), within 1.31× of the live cluster on every kind. Check any new kind with
+  `scripts/payload-bytes.mjs` before quoting a number from it.
+* *The simulator cannot validate paging.* Its CRUD dispatcher ignores `limit` outright, so
+  anything whose cost depends on `limit` being honoured — including `/counts` — measures the
+  rig. KWOK or a live cluster is the answer.
+* *The simulator cannot measure heap.* Its API server runs in the same JVM, so its own
+  serialisation is inside every reading.
+* *Suspect the instrument before the code.* The sweep tool's "time to first row" was for a
+  while waiting on a badge that renders before any row exists — 204 ms reported for a page
+  that actually took 1 879 ms, and 30 of 44 pages reporting a load for a list with no rows.
+  Build a positive control before believing a surprising result.
+
+== Related
+
+* xref:deployment.adoc[Deploying to Kubernetes] — the memory limit these numbers are about
+* xref:browsing-resources.adoc[Browsing resources] — what a list row contains
+* xref:development.adoc[Development] — running the simulator and the measurement scripts

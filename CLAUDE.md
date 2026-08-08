@@ -16,7 +16,7 @@ exposes the same read-only cluster view to AI assistants over **MCP**.
 **Spring Boot 4.0.6 / Java 21**, multi-module Maven (`org.alexmond:kweblens-parent`,
 `0.1.0-SNAPSHOT`). Cluster access is the **fabric8 Kubernetes client**; the UI is a **Vue 3 +
 Vite + TypeScript SPA** (Naive UI, dark theme) in `kweblens-ui`, built into the jar and served at
-`/`. The Thymeleaf/htmx "classic" UI was **deleted** (#124) — a reference to it is stale.
+`/`. The Thymeleaf/htmx "classic" UI was **deleted** (#125) — a reference to it is stale.
 
 **Read before planning work:**
 - [`docs/design/adr-001-identity-model.md`](docs/design/adr-001-identity-model.md) — **ACCEPTED**:
@@ -104,12 +104,21 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   `ProblemDetail`), `ui/` (`SpaController`), `security/` (`SecurityConfig`, `AuditService`),
   `mcp/`, `nav/` (`NavCatalog`: 39 built-in kinds / 7 static categories + discovered CRDs;
   `ClusterNavService` promotes a Gateway category when those CRDs exist), `helm/`, `exec/`,
-  `files/`, `diag/`, `ai/`, `sim/`, `config/`. `/actuator/{health,info,metrics,prometheus}`.
+  `files/`, `search/` (global search), `diag/`, `ai/`, `sim/`, `config/`.
+  `/actuator/{health,info,metrics,prometheus}` — note `metrics` and `prometheus` are **not** in
+  `SecurityConfig`'s permit list, so they are public in open-mode and authenticated in closed.
 - **`kweblens-cli`** — dependency-light inspector (picocli); runnable fat jar is the `exec`
-  classifier. **`kweblens-it`** — on-demand ops tasks tagged `it`, excluded from the default build.
+  classifier. **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
+  build; what is excluded are its `it`-**tagged tests**, via surefire `excludedGroups`.
 
 Config is env-var driven (`kweblens-web/src/main/resources/application.yml`): `PORT`,
 `KWEBLENS_LOAD_KUBECONFIG`, `kweblens.clusters[*]`. Settings class: `KweblensProperties`.
+
+**Both env-var spellings of a dashed property bind**, measured against Boot 4.0.6's
+`SystemEnvironmentPropertyMapper`: `kweblens.security.open-mode` accepts
+`KWEBLENS_SECURITY_OPENMODE` *and* `KWEBLENS_SECURITY_OPEN_MODE`. This matters — the Helm chart
+uses the second form, so "dashes are removed" as a lone rule reads as though the chart is
+broken. It is not; do not "fix" it.
 
 - **`ClusterBootstrap` registers one cluster per kubeconfig context, id = the context name.**
   `default` is only the fallback when there is no readable kubeconfig (in-cluster SA), no
@@ -179,7 +188,11 @@ Config is env-var driven (`kweblens-web/src/main/resources/application.yml`): `P
   it plainly in user-facing text. SSAR is sanctioned only as a UI affordance, never as an
   authorization gate: it fails open.
 - **"Suggest → preview → confirm → apply" — know which link is real, per surface.**
-  - **Helm** — a genuine jhelm `dryRun`. Always was.
+  - **Helm** — a genuine jhelm `dryRun` on **install / upgrade / rollback**, and the Apply
+    button stays disabled until it returns. **`uninstall` has none** — `HelmService.uninstall`
+    takes no `dryRun` and returns `void`, so the UI goes from confirm straight to the delete.
+    History, values library and repo refresh have no dry-run concept at all. "Each with a real
+    dryRun" was wrong wherever it was written.
   - **Remediation** — `scale-up` / `rollout-restart` take a real server-side `dryRun=All`;
     `restart-pod` and `rollback` **cannot** (a DELETE and a revision lookup are not patches), so
     `preview` returns `notChecked` naming the reason. **A new action must pick one of those two
@@ -273,8 +286,9 @@ new tool returning raw objects must go through it.**
 
 "What next" lives in [`docs/design/roadmap.md`](docs/design/roadmap.md). These outlive any plan:
 
-- **Helm goes through jhelm, never the `helm` binary.** `org.alexmond:jhelm-core` (1.5.0),
-  Spring-Boot-autoconfigured; kweblens is a **dogfood** of it. Shipped as `web/helm/HelmService`.
+- **Helm goes through jhelm, never the `helm` binary.** The declared artifacts are
+  `org.alexmond:jhelm-kube` and `jhelm-rest-starter` (1.5.0) — `jhelm-core` is only transitive,
+  so pin and bump those two. kweblens is a **dogfood** of jhelm. Shipped as `web/helm/HelmService`.
   Do **not** add a `helm` CLI dependency. **Keep `jhelm.version` a RELEASED version — never a
   `-SNAPSHOT`**: jhelm publishes no snapshots, so a snapshot pin resolves only from the local
   `~/.m2` and CI goes red everywhere else. Central's *search* index does not return

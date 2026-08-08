@@ -1,0 +1,7 @@
+:toc: left
+:sectnums:
+:description: A self-hosted, web-based Kubernetes IDE — browse and edit cluster resources, stream logs, exec into pods, manage Helm releases, and expose the same read-only view to AI assistants over MCP.
+:keywords: Kubernetes, Kubernetes IDE, Kubernetes dashboard, Spring Boot, fabric8, Helm, MCP, Vue
+:author: Alexander Mondshain
+:email: alex.mondshain@gmail.com
+:imagesdir: ../images

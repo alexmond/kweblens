@@ -1,0 +1,217 @@
+include::_header.adoc[]
+= Changelog
+
+[IMPORTANT]
+====
+**No release has been cut.** There are no git tags, no GitHub releases, and nothing on Maven
+Central. The version is `0.1.0-SNAPSHOT` and the only way to get kweblens today is to build it —
+see xref:installation.adoc[Installation].
+
+The section below is therefore not release history. It is a summary of what exists in `main`
+today, derived from the commit log, so that the first release has something to be measured
+against.
+====
+
+== Unreleased — `0.1.0-SNAPSHOT`
+
+The whole project to date: 238 commits between **2026-07-23** and **2026-08-07**, starting from an
+empty multi-module scaffold. Entries carry the pull-request number where one identifies the work.
+
+=== Features
+
+Cluster connection and navigation::
+* Multi-cluster from the start: every kubeconfig context is registered as its own cluster, plus
+  any explicitly configured under `kweblens.clusters[*]` (#7). Clusters can be added, edited and
+  removed at runtime (#198) from a dedicated Clusters page (#204).
+* A Freelens-style shell over a declarative nav registry and one reusable resource list (#12),
+  with a cluster rail, CRDs discovered and grouped by API group (#48), a Cluster submenu (#50), a
+  Helm group (#79), a Gateway API category promoted when those CRDs exist (#151), a collapsible
+  nav tree (#241) and full-label tooltips on truncated leaves (#285).
+* Favourites / pinning in the navigator (#34).
+* A `Ctrl`/`⌘`-`K` command palette for switching cluster or jumping to a kind (#200), and global
+  search for an object by name across kinds and namespaces (#263).
+* Global namespace and Helm-release filters in the top bar, which also drive the badge counts
+  (#64).
+
+Resource browsing and detail::
+* Cluster events, sortable (#47) and coloured by severity (#173).
+* Overviews for the cluster and for Workloads, Network, Storage and Config (#166) — collapsible
+  sections (#67), stat cards (#179), proportion bars with the states named (#192), click-through
+  to the filtered list honouring the namespace filter (#165), and server-side health that **names**
+  the offending objects rather than only counting them (#163).
+* Expandable workload rows rendering child pods as an aligned, clickable tree (#65, #105).
+* A detail drawer fed by per-kind server-side endpoints doing the relational joins (#150),
+  rendered as relation sections (#152), projected by registry rather than guesswork (#205) and
+  later broadened by ten more joins (#220). Pod environment variables and container last-state
+  (#126), resolved pod templates (#131), Pods and Metrics tabs on Node detail, and a metadata
+  sidebar whose header uses the width it has (#262).
+* Per-row kebab menus (#63), kind-aware with container submenus (#78), driven by one declarative
+  `ROW_ACTIONS` registry (#82).
+
+Editing and writing::
+* YAML view, edit and apply (#3), rebuilt on CodeMirror 6 (#109) in a pop-out window (#110) with
+  schema-driven autocompletion (#112), a structured Form tab generated from the cluster's own JSON
+  Schema (#114, #178), and Editor / Form / Warnings / Review-Changes tabs (#115). Review Changes
+  now also asks the cluster what it would actually store (#274).
+* Write actions: delete, scale, rollout-restart, node cordon / uncordon / drain, CronJob trigger,
+  suspend and resume (#66); Deployment and StatefulSet rollback (#68); bulk delete (#32).
+* An audit trail at `/audit`, with every entry also written to a dedicated log category so it
+  survives a restart (#212).
+
+Logs, terminal, port-forward, files::
+* Pod logs as a tail snapshot plus a live SSE stream (#2), grown into multi-source streaming that
+  follows every container of a pod or every pod behind a workload (#130), with pods created by a
+  rollout joining a stream already in flight (#168).
+* Exec into a container over WebSocket (#6) in a dockable xterm terminal (#31, #42), per container
+  (#59), with several terminal and log sessions in one resizable tabbed dock (#75) that can pop
+  out to a floating window (#76) or split the content pane (#77).
+* Managed port-forwards for pods and services (#30, #43).
+* A pod file browser over one-shot container exec (#140, #206) with a Files tab on the pod drawer
+  (#216), working writes and upload (#224), enforced allowed-roots and drag-and-drop (#227). Off
+  by default.
+
+Helm::
+* Releases through the sibling jhelm library — never the `helm` binary (#1) — plus a charts
+  browser (#29, #44), install / upgrade / rollback with dry-run guards (#45), uninstall, values and
+  history (#80), advanced install options (#81), a repositories admin panel backed by a persistent
+  Helm-home volume (#72), stored release values (#73), release→resource linking (#49), and flags
+  for kweblens-installed releases with a chart update available (#71).
+
+Metrics::
+* Node and pod usage from metrics-server (#5), CPU and memory columns in lists (#28), time-series
+  graphs backed by Prometheus or VictoriaMetrics (#28), used-vs-allocatable bars on Nodes (#54),
+  node disk usage aggregated across filesystems (#55, #56), and interactive charts with axes and
+  point selection (#95).
+
+Health, diagnosis and remediation::
+* Deterministic evidence-driven checks (#181) surfaced as a findings panel on the overview (#222),
+  grouped by title (#226), with targeted diagnosis for cases like a Service with no endpoints
+  (#229) and bounded prose (#239).
+* LLM enrichment is manual-trigger-and-cache rather than automatic, so a `GET` never calls a model
+  (#258).
+* Four guarded remediation actions (#199), each offered only when a precondition says it can work,
+  each applied only on explicit confirmation, and previewed with a real server-side dry run where
+  the action is a patch (#213).
+
+Security and integration::
+* Authentication with an open-mode toggle — reads open, writes authenticated (#8) — and Helm
+  values endpoints authenticated even in open mode, because what they return is itself a secret
+  (#74).
+* An in-jar MCP server exposing 15 read-only tools over a reachable endpoint (#171).
+
+The user interface::
+* The SPA was originally React; it was **replaced by a Vue 3 + Naive UI SPA at full parity**, with
+  a dark theme (#96, #98, #99), and the older Thymeleaf/htmx "classic" UI was deleted.
+* Visual identity: the kweblens lens-and-k logo and favicon (#103), one semantic colour palette
+  designed for both themes (#172), and a responsive primitive built on container breakpoints and
+  section ranks (#249).
+
+Deployment::
+* Helm chart, deploy script, Docker Compose and install documentation (#69). A zero-cluster
+  install now explains what happened and offers a way out (#301).
+
+=== Performance
+
+* Log streams stopped replaying their whole history on open (#108).
+* Large-list responsiveness: a tab freeze on big resource lists fixed (#117), a sticky table header
+  (#120), and Vue 3.5 `shallowRef` guidance applied (#116).
+* Watch-flood guards — a regression test in the gate plus a site-wide sweep (#118), backed by a
+  configurable in-JVM simulator for cluster-free performance work (#119), later regenerated to
+  produce realistically sized and shaped objects (#287).
+* Scale measured rather than assumed: where kweblens degrades, with the fix list re-ordered
+  accordingly (#214), and a correction to an earlier extrapolation that had measured the test rig
+  instead of the application (#277).
+* List virtualisation above 150 rows (#215, #221), lowered to 50 after 88 pods produced a 1.5 s
+  freeze (#286).
+* List payload projection: `managedFields` stripped and ConfigMap/Secret values shipped as keys
+  with null values, cutting roughly 9 MB of bytes nothing on screen consumes (#276, #279).
+* A cheap `/counts` endpoint using `limit=1` plus `remainingItemCount` instead of full lists, and a
+  decided watch fan-out model (#283); category badges count objects, never menu entries (#195).
+* Watch-stream leaks: the fan-out work surfaced one, and an audit of every streaming surface found
+  three more — exec and port-forward were already clean (#288).
+* Paging was measured and deliberately **not** built: the unbounded resource turned out to be heap,
+  not wire (#292). The fix was a server-side chunked list fetch, so heap follows the chunk size
+  rather than the cluster size (#293, #302).
+* Cluster teardown now releases everything a cluster held, not only its client (#304).
+
+=== Fixes
+
+* Helm client security: TLS verification is no longer disabled, client-certificate and token auth
+  are propagated, and the API client is built through the official kubeconfig loader (#1).
+* Sign-in: the browser's native Basic prompt no longer hijacks the SPA's login (#53), and sessions
+  are restored on load (#102).
+* Drawer and menus: the row kebab opens the menu rather than the detail drawer, and the drawer no
+  longer blocks the table (#100); an opened row is addressed by its own kind, not the list's (#188).
+* Dark theme: cluster rail and nav honour it (#101), YAML editor colours are readable (#111),
+  autofilled fields are fixed (#117), stat cards are no longer black-on-black (#219), and
+  single-theme colour literals were swept out of `styles.css` (#272).
+* Layout: the footer is pinned to the viewport bottom rather than the end of content (#107); a
+  stray always-on scrollbar in the schema hover (#120); long names no longer hide the drawer's
+  controls (#219); table columns floor at their longest word instead of one glyph (#282); the top
+  band and the resource table lay out for the width they actually have (#270, #267).
+* Contrast: muted greys and the selected nav leaf corrected (#201, #207). The contrast checker
+  itself was fixed twice — first to composite every translucent layer (#225), then to read the
+  backdrop from actual rendered pixels (#256).
+* Events: repeat-count alignment and badge colouring (#173); the warning-row highlight now actually
+  applies (#190).
+* Colour system: Naive UI's primary points at the application accent instead of its default green
+  (#189); one status-badge convention and aligned nav counts (#240, #242, #246).
+* Container squares: init and ephemeral containers shown (#133), outlined rather than shrunk
+  (#164), and rendered one per **declared** container rather than per reported status (#271).
+* Overviews: corrected health predicates and report truncation (#156, #157, #161); a deliberately
+  scaled-down workload is a warning, not a critical (#261).
+* Error handling: a failed request stops the spinner, says what went wrong and offers a retry
+  (#194); responses report what the server actually said, and an unanswered check is never
+  reported as clear (#306).
+* Metrics: the backend can be configured explicitly, and discovery reports when it had to guess
+  (#182); the metrics chart no longer paints itself black (#305).
+* Proxy: the `http-proxy` trap that silently bypassed the proxy is now detected and reported
+  (#186).
+* Cluster rail: no two tiles may render the same label (#252, #255).
+* Bulk delete: cluster-scoped objects are addressed correctly and failures are reported (#297,
+  #300).
+* Type and capability correctness: a nullable field that was typed non-null, and a capability
+  requested while signed out (#307).
+* CI unblocked by depending on a released jhelm 1.5.0 rather than an unpublished snapshot (#127);
+  a `.linkbtn` class renamed to `.bar-btn` because the old name kept inviting the same bug (#280,
+  #284).
+
+=== Documentation and tooling
+
+* Design references and research: a Freelens IA reference and roadmap, a captioned reference deck
+  (#9), per-page Freelens→kweblens gap analysis, a competitive review of the Kubernetes IDE
+  landscape (#25, #128), a proxy-support survey with tests pinning the existing behaviour (#22,
+  #134), a metrics-source recommendation measured against a live cluster (#174), a plugin-framework
+  study recommending "not yet" while settling the mechanism (#146, #197), and a design review of
+  cluster selection at scale (#141, #196).
+* **ADR-001, the identity model** — enforce at the API server rather than inside kweblens.
+  Proposed (#149), accepted with impersonation sanctioned as the mechanism if identity ever
+  arrives (#167).
+* README and roadmap kept honest against the code: a README that describes what kweblens actually
+  is (#36, #129), roadmap re-cuts with a re-ranked gap list (#147, #208, #295), and documentation
+  currency corrections (#211, #273, #275, #303).
+* Front-end quality gates: Prettier (#90), ESLint with SonarJS, knip and Vitest coverage wired into
+  the Maven build (#91), complexity rules promoted to build errors with the app component
+  decomposed so the gate could be unconditional (#92, #93), matching gates on the Vue application
+  (#97), and a gate that finally sees the component boundary (#305).
+* Data-driven extension points — registries for nav, columns and row actions (#82, #84, #85, #86)
+  with a README documenting them (#83) — plus two passes deduplicating hard-coded strings across
+  the SPA and the Java code (#88, #89).
+* Measurement instruments, each built because a judgement made by eye had been wrong: the
+  simulator (#119, #287), the scale measurements (#214, #277), the watch-flood regression test
+  (#118), and the contrast checker (#225, #256).
+* Development scripts in `scripts/` for the operations that kept being redone by hand (#202): an
+  `--ai` flag (#217), rebuild-when-the-jar-is-stale (#243), a warning about kweblens instances on
+  other ports (#290), runs that survive the tool that started them and can be reaped (#296), and a
+  `--list` that finds a server that is actually answering (#308).
+* A Playwright skill covering every script in `scripts/` (#253, #254), and a correctness audit from
+  the hardening phase — saved incomplete and marked as such (#299), then completed (#303).
+* Dogfooding the sibling jhelm library: its REST surface for cluster-agnostic Helm (#70) and its
+  fabric8 backend for releases (#106).
+
+== What a release will need
+
+Tracked as roadmap item **R2**: there are no tags, no GitHub releases, and **no workflow that
+builds or publishes the container image** — `.github/workflows/` holds `ci.yml` and
+`maven_release.yml` only. The Helm chart's default image repository assumes an image you built
+locally. Until that changes, no module should be described as published.

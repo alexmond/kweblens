@@ -1,0 +1,320 @@
+include::_header.adoc[]
+= Health and diagnostics
+
+kweblens answers three different questions about a cluster, and keeps them apart on purpose:
+
+* *Is anything wrong, and which objects?* — the deterministic health checks, rendered as the
+  category overviews.
+* *Why is this screen empty?* — the per-cluster capability report.
+* *What should I do first?* — the diagnosis, plus four guarded remediation actions.
+
+None of the first two involves a language model. The third involves one only when you press a
+button.
+
+== The deterministic checks
+
+The checks live in `kweblens-core` under `health/`, so the dashboard, the diagnosis endpoint and
+the xref:mcp.adoc[MCP tools] all read the *same* verdicts. A diagnosis and the Network page cannot
+disagree about whether a Service is broken, because there is one implementation.
+
+Each check produces a per-kind summary: total, a per-state breakdown in the kind's own vocabulary,
+and the *named* objects needing attention with a reason each. Counts alone would force the browser
+to fetch the whole collection anyway to say which objects are unhealthy — which is the transfer
+the summary exists to avoid.
+
+`GET /api/v1/clusters/{clusterId}/overview/{category}` serves them, where `category` is one of
+`workloads`, `network`, `storage`, `config`. An unknown category is a 404, not an empty list: an
+empty list would render as a healthy, empty dashboard.
+
+=== Workloads
+
+`WorkloadHealth` judges seven kinds — Pod, Deployment, StatefulSet, ReplicaSet, DaemonSet, Job,
+CronJob. Anything else is reported OK rather than guessed at, and the Workloads overview filters
+the nav category down to kinds a rule actually understands, because a kind with no rule would
+otherwise be reported as uniformly healthy — a claim rather than a measurement.
+
+[cols="1,3"]
+|===
+| Kind | Verdict
+
+| Pod
+| `Running` is OK; `Succeeded` is *idle*, not healthy-and-running. Otherwise the first waiting
+reason across init then app containers becomes the state name — `CrashLoopBackOff`,
+`ImagePullBackOff` — because that is what names the fix. `PodInitializing` and `ContainerCreating`
+are ignored as normal transient states. A `Pending` pod with no failing container is amber, not
+red: it is being scheduled, not broken.
+
+| Deployment, StatefulSet, ReplicaSet
+| `readyReplicas == spec.replicas` is healthy; otherwise `n/m ready`. *Scaled to zero is idle, not
+a fault* — flagging it would light up every deliberately idle workload.
+
+| DaemonSet
+| `numberReady` against `desiredNumberScheduled`, same rule.
+
+| Job
+| Attention only when the `Failed` condition is true. `Complete` is idle; anything else is
+`Active`. The predicate this replaced was "succeeded > 0", which reported every in-flight Job as
+unhealthy.
+
+| CronJob
+| Suspended or scheduled. There is deliberately *no* "last run failed" heuristic — a failed run
+surfaces as a failed Job, from the object that actually knows it.
+|===
+
+Four states rather than a boolean: `OK`, `ATTENTION`, `SUSPENDED` and `IDLE`. A suspended CronJob
+is an operator's choice, and colouring it red beside genuine failures is how a health signal earns
+its way into being ignored.
+
+=== Network
+
+One check: *Services with nothing answering behind them*. The Service exists, DNS resolves,
+`kubectl` shows it as normal, and every request to it fails.
+
+It distinguishes the two causes, which have different fixes:
+
+* `no endpoints` — the selector is wrong or the workload is gone.
+* `n pods matched, none ready` — the workload is deployed and failing its readiness probe.
+
+Both come out of one Endpoints list (`notReadyAddresses` is exactly that signal), so the whole
+check costs two list calls, not one per Service. `ExternalName` Services are always fine: they are
+a DNS CNAME with no endpoints by design.
+
+=== Storage
+
+PersistentVolumeClaims that are not bound. An unbound PVC is a pod that will never start, and the
+pod's own status points at the claim rather than the cause — so a `Pending` claim's reason names
+its StorageClass, which is nearly always the question.
+
+Bound claims are also checked for fullness at 90%, but *only where the reading is about the
+claim*. See xref:metrics.adoc[Metrics] for why: kubelet reports the filesystem backing the volume,
+so on a provisioner with no per-volume quota every claim on a class reports the same size. A
+reading that fails the plausibility check is not used, and the claim is reported as bound rather
+than flagged on a number that describes a shared disk.
+
+Capacity checks are simply absent when there is no metrics backend. The binding checks stand on
+their own.
+
+=== Config
+
+ConfigMaps and Secrets that nothing in the namespace refers to. This is the one question the
+Kubernetes API cannot answer directly, and no other kweblens screen answers at all: nothing
+garbage-collects config objects and nothing warns about them.
+
+It is framed as *"not referenced"*, never as *"safe to delete"*, and the wording matters. The scan
+covers pods, ServiceAccounts and Ingresses in one namespace, so an object referenced from a
+controller template whose pods do not exist yet, from another namespace, or from a CRD's own spec
+will appear here while being very much in use. Findings are amber, because they are advisory.
+
+Two Secret types are excluded outright rather than listed: service-account tokens (the cluster
+owns them) and Helm release records (`helm.sh/release.v1`), which look unused because nothing
+mounts them and are the exact opposite of disposable. Secrets are listed for their *names* only —
+the values are never read.
+
+=== "Could not check" is not "nothing is wrong"
+
+Every check reports an `error` for a kind it could not list, instead of a zero. On a health screen
+those two must never look the same. The config check goes further: if the reference scan itself
+fails, both ConfigMaps and Secrets are reported as failed, because "0 unused" would read as a
+clean result.
+
+== The capability report
+
+`GET /api/v1/clusters/{clusterId}/diagnostics` answers "why is this screen empty?". Graceful
+degradation is silent by design, which makes it indistinguishable from a broken query, so this
+endpoint says which it is. It returns the cluster's Kubernetes version plus one row per capability
+with an explanation:
+
+* *metrics-server* — probed by API group (`metrics.k8s.io`), never by calling the usage endpoint,
+  because an empty usage result means both "not installed" and "installed with no samples yet".
+* *Prometheus-compatible metrics* — the concrete backend, and *how it was chosen*. See
+  xref:metrics.adoc[Metrics].
+* *Egress proxy* — the proxy actually in force, and whether a configured one is being bypassed. A
+  bypass is reported as *not* available, because it is the case where the configuration says one
+  thing and the connection does another.
+* *Gateway API* (`gateway.networking.k8s.io`) and *Custom resources* (`apiextensions.k8s.io`).
+
+Every probe is guarded individually: an unreachable cluster, or a service account that cannot list
+Services, must still produce useful answers for the other rows. A probe failure is unwrapped to
+its root cause, because fabric8 often surfaces a connection failure as the literal string "An
+error has occurred.", which tells the reader nothing.
+
+`GET /api/v1/about` is the companion for the instance rather than the cluster: version, build
+time, cluster count, security mode, whether the AI is enabled, the pod-file-browser gates. It
+never contains a secret — only whether one is set. In open-mode it is a public GET, so the
+operationally sensitive fields (admin username, the cluster store's host path, the file browser's
+allowed roots) are withheld until the caller signs in.
+
+== Diagnosis
+
+`DiagnoseService` runs deterministic validators over the current state and returns findings sorted
+most-severe-first. Each finding carries a severity (`critical` / `warning` / `info`), a title, the
+object as `Kind/name`, the observed evidence, a suggested next step, and a source.
+
+The validators are:
+
+* *Per pod* — container-level failures.
+* *Relational* — the Network and Storage checks above, reused rather than reimplemented. A Service
+  with no ready endpoints and an unbound claim are both invisible on any one object.
+* *Warning events* — deduplicated to one row per object+reason (the same probe failing 1,600 times
+  is one problem), skipped entirely for objects the checks above already explained, and capped at
+  15 so one noisy namespace cannot bury everything else.
+
+A Service with nothing behind it is told what to do about the cause it actually has. When exactly
+one workload carries the selector and sits at zero replicas, the finding is a *warning* titled
+"Service points at a scaled-down workload" and the advice is to scale up — the selector is the one
+thing that is right. When no workload carries the selector, it stays critical.
+
+=== A GET never calls a model
+
+This is the rule, and it is not a performance tweak:
+
+[IMPORTANT]
+====
+`GET /api/v1/clusters/{clusterId}/diagnose` returns the deterministic findings plus *only* what
+`DiagnosisSummaryCache` already holds for exactly those findings. It never starts an inference
+call, however tempting a cache miss makes it.
+
+`POST /api/v1/clusters/{clusterId}/diagnose/summary` is the only caller of the LLM anywhere in
+kweblens.
+====
+
+The cache key is *the findings, not the scope*. A SHA-256 fingerprint is computed over every field
+of every finding, in order, with unambiguous separators. The deterministic findings are the
+model's entire input, so a hit means the model would be shown exactly what it was shown before —
+and *a cluster that has changed is a miss rather than a stale verdict*. Cluster and namespace
+alone would serve yesterday's opinion about a cluster that has since been rolled.
+
+The summary endpoint is a `POST` because it is write-shaped, not because it writes: it spends
+money and ships cluster state to a third-party inference provider. That puts it behind the admin
+login in *both* security modes, and it is audited. Panel mounts and namespace switches used to buy
+an analysis each; now they cost nothing.
+
+The read tells you what it is showing rather than letting an old reading pass as current:
+
+[cols="1,3"]
+|===
+| Field | Meaning
+
+| `summary` | The prose, or `null` — which is the normal state, not a failure.
+| `aiEnriched` | Whether a summary is being shown.
+| `analysedAt` | When this scope was last analysed, whether or not the summary survived.
+| `summaryOutdated` | This scope *has* been analysed, but the findings changed, so the old summary is deliberately withheld.
+| `aiAvailable` | Whether triggering an analysis could do anything here. False means do not offer the button.
+|===
+
+The cache is in-memory and per-process, capped at 64 scopes with least-recently-*read* eviction. A
+restart empties it and a second replica has its own. That costs one more inference call, never a
+wrong answer. There is deliberately no endpoint to clear it: a summary is already discarded the
+moment the findings change, which is the only invalidation that means anything.
+
+=== AI enrichment is inert by default
+
+The LLM path requires `kweblens.ai.enabled=true` *and* a configured Anthropic API key. Without
+both, `analyse()` returns a 409 (`ai-unavailable`) — nothing broke and nothing was spent, and the
+caller could already tell in advance from `aiAvailable` on the read.
+
+When it does run, the model is given the findings *grouped by distinct problem*, not one line per
+object, with exact per-group counts, up to 15 named objects per group and up to 4 distinct
+evidence messages. It is capped at 25 distinct problem groups, and when the cap bites the
+truncation is stated in the answer rather than happening silently. The model is asked for
+judgement only — one next action and at most three bullets, 90 words — because the reader can
+already see a table of every finding directly below it.
+
+The model never invents state. It reasons over observed evidence, and if the call fails the
+deterministic findings are returned alone.
+
+== Remediation
+
+`RemediationService` turns findings into *proposed* fixes. The safety model is not negotiable:
+
+[IMPORTANT]
+====
+*Suggest → approve → apply. Never autonomous, always audited, all writes behind auth.*
+
+Proposing is read-only. Applying requires an explicit `confirm=true`, goes through the auth-gated
+write path, and is recorded by `AuditService`.
+====
+
+`GET /api/v1/clusters/{clusterId}/remediations` proposes; `POST …/remediations/preview` asks the
+cluster what would happen; `POST …/remediations/apply` carries it out. Both POSTs require the
+admin login, even in open-mode.
+
+The four actions:
+
+[cols="1,2,2"]
+|===
+| Action | What it does | Offered when
+
+| `restart-pod`
+| Deletes the pod so its controller recreates it.
+| The finding is `CrashLoopBackOff` or `Pod not running`. Deliberately narrow — a restart does
+nothing for a bad image name, a missing ConfigMap, an unschedulable pod or an OOM kill.
+
+| `rollout-restart`
+| Stamps the workload's pod template so its controller replaces every pod under its update
+strategy, honouring `maxUnavailable`.
+| Same finding titles, plus a resolvable owning workload. Offered *alongside* `restart-pod` on
+purpose: deleting one pod is surgical, rolling the workload is one audited action across every
+replica, and which is right depends on how many replicas are affected.
+
+| `rollback`
+| Reverts the workload to the revision before the current one.
+| The finding is a *template* failure — a bad image, a missing config reference, an OOM kill, a
+crash on start — and the workload has rollout history. Scheduling failures are excluded: the
+previous template usually does not change the scheduler's verdict either.
+
+| `scale-up`
+| Sets `spec.replicas` to 1.
+| A Service has `no endpoints`, and exactly one workload carries its selector and sits at zero.
+Not offered when pods matched but are unready (scaling produces more pods failing the same probe),
+when nothing matches the selector, or when the match is ambiguous.
+|===
+
+Every action is gated on a precondition that says when it *cannot* work. A proposal that cannot
+work costs an operator a confirmation, a change to a running system, and the time to discover the
+symptom is unchanged — strictly worse than proposing nothing.
+
+Workload-level actions need a namespace to resolve the owning object in, and a finding carries
+only `Kind/name`. So a cluster-wide diagnosis proposes only the pod-level action rather than
+guessing across namespaces.
+
+=== Know which preview is real
+
+The preview is where "suggest → preview → confirm" is easy to overstate, so kweblens returns one
+of three distinct outcomes rather than flattening them into a string:
+
+[cols="1,3"]
+|===
+| Outcome | Meaning
+
+| `SERVER_VALIDATED`
+| The patch went to the API server with `dryRun=All`. Admission webhooks, validation and quota all
+ran, and the detail is the object the server says would result.
+
+| `REJECTED`
+| Same request, and the server refused it. The rejection *is* the useful answer — exactly what the
+operator needed before approving — so it is rendered as a result, not an error.
+
+| `NOT_CHECKED`
+| The cluster was not asked, and the detail says why.
+|===
+
+Which action gets which:
+
+* `scale-up` and `rollout-restart` are patches, so they get a real server-side `dryRun=All`.
+* `restart-pod` and `rollback` *cannot*. A DELETE is not a patch, and a rollback is resolved from
+  the workload's revision history rather than sent as one. Both return `NOT_CHECKED` naming that
+  reason.
+
+Saying "we did not check" is the design, not an omission. A hand-written sentence prefixed
+`dry-run:` describes what kweblens intends, which is a different claim from what the cluster would
+allow — and the difference is precisely what the operator is being asked to approve.
+
+A new remediation action must pick one of those two shapes. Never narrate a third.
+
+== Related
+
+* xref:metrics.adoc[Metrics] — the backend behind the capacity checks and the charts
+* xref:editing-and-applying.adoc[Editing and applying] — the YAML editor's own dry-run diff
+* xref:security.adoc[Security and identity] — what "behind auth" and "audited" mean here
+* xref:rest-api.adoc[REST API] — every endpoint named above

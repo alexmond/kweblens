@@ -1,0 +1,221 @@
+include::_header.adoc[]
+= MCP server
+
+kweblens runs a Model Context Protocol server *inside the same jar as the web app*. There is no
+separate process to start, no second copy of your kubeconfig, and no extra credential: an
+assistant connected to it sees the cluster through exactly the connections the dashboard already
+holds.
+
+The surface is *15 read-only tools*. No tool mutates anything. Changing the cluster stays on the
+guarded suggest → preview → approve → apply path, which is deliberately not reachable from here —
+see xref:health-and-diagnostics.adoc[Health and diagnostics].
+
+== The tools
+
+Three beans, split by what an assistant is doing at that moment, registered together by
+`McpConfig` through a single `MethodToolCallbackProvider`. They are registered together on
+purpose: a partial surface is worse than none, because an assistant that can list pods but not
+read their *previous* logs will confidently diagnose a crashloop it has no evidence for.
+
+=== Orientation — `ClusterTools` (4)
+
+[cols="1,3"]
+|===
+| Tool | Returns
+
+| `listClusters`
+| The clusters kweblens is connected to. Start here — every other tool takes a `clusterId`.
+
+| `listNamespaces`
+| The namespaces in a cluster.
+
+| `listPods`
+| Pods, optionally scoped to one namespace.
+
+| `listResourceKinds`
+| The kinds this cluster serves, grouped by category, with the `resourceId` every other tool
+takes. It exists because those ids are *per cluster* — they include the CRDs this particular
+cluster serves — and an assistant that had to guess them would guess wrong on exactly the custom
+resources it was asked about.
+|===
+
+=== Evidence — `DiagnosticTools` (4)
+
+[cols="1,3"]
+|===
+| Tool | Returns
+
+| `describeResource`
+| One object in full, as raw YAML-equivalent JSON. Summaries are not enough for the questions that
+matter: a crashlooping container's exit code lives in
+`status.containerStatuses[].lastState.terminated`, and an unschedulable pod's reason in
+`status.conditions[type=PodScheduled].message`. *This is the tool that goes through
+`ToolRedaction`.*
+
+| `listResources`
+| Objects of one kind as list rows (kind, namespace, name, status, age) — how you navigate from a
+workload to its pods, replica sets or claims.
+
+| `getEvents`
+| Events, newest first, optionally scoped to one object by kind and name. For some failures events
+are the *only* evidence: a PVC stuck `Pending` carries no reason on the object, but its events
+name the missing StorageClass. Quota rejections, admission-webhook refusals and probe failures
+also appear only here.
+
+| `getPodLogs`
+| A container's log. Takes `previous=true` for the terminated instance's log, which is *the*
+crashloop diagnostic — after a restart the current log begins at the new process, so the output
+explaining the crash exists only in the previous run.
+|===
+
+`getPodLogs` defaults to 200 lines and is capped at 500. The cap is *stated in the result*
+(`requestedLines`, `maxLines`) rather than applied silently, because a model told "here is the
+log" will reason as though it is complete. An empty result is reported as
+`{"available": false, "reason": …}` rather than as an empty log, for the same reason: a model
+handed `{"log": ""}` reads it as "the container ran and printed nothing".
+
+=== Verdicts — `HealthTools` (7)
+
+These are the same server-side checks the dashboard's overviews render, exposed rather than left
+for the assistant to reconstruct. They already do joins a model would otherwise perform by hand
+across several tool calls — a Service against its Endpoints, a workload against its replica counts
+— and each returns a *reason*, not just a count. Sharing the implementation also means the
+assistant and the dashboard cannot disagree about whether something is broken.
+
+[cols="1,3"]
+|===
+| Tool | Returns
+
+| `checkWorkloadHealth`
+| Per-kind tallies plus the *named* objects needing attention, each with a reason like `2/3 ready`,
+`CrashLoopBackOff` or `ImagePullBackOff`. The usual starting point.
+
+| `checkNetworkHealth`
+| Services with nothing behind them, distinguishing `no endpoints` from `N pods matched, none
+ready` — different causes, different fixes.
+
+| `checkStorageHealth`
+| PersistentVolumeClaims that are not bound, naming the StorageClass, plus a fullness check on
+bound claims where the metrics reading is genuinely about the claim.
+
+| `checkConfigUsage`
+| ConfigMaps and Secrets nothing in the namespace references. *Advisory only* — the tool
+description says so at length, because this is not evidence an object is unused and an assistant
+must never recommend deleting on the strength of it.
+
+| `getPodUsage`
+| Current CPU and memory per pod, from metrics-server.
+
+| `getNodeUsage`
+| Current CPU and memory per node.
+
+| `listHelmReleases`
+| Helm releases with status and chart version.
+|===
+
+Adding a tool means one `@Tool`-annotated method on a bean wired into `McpConfig`'s provider — and
+updating the count of 15 wherever it is stated, because that is the number people check.
+
+== Transport
+
+*SSE over WebMVC*, from `spring-ai-starter-mcp-server-webmvc`.
+
+[source]
+----
+GET /sse                       <1>
+POST /mcp/message?sessionId=…  <2>
+----
+<1> Holds the stream open and immediately emits `event:endpoint` with
+`data:/mcp/message?sessionId=…`.
+<2> Where the client posts its JSON-RPC messages, using the session id it was just handed.
+
+[IMPORTANT]
+====
+*There is no `POST /mcp`.* It 404s. This is the SSE transport, not Streamable HTTP.
+
+`application.yml` sets no `spring.ai.mcp.server.protocol`, and the SSE autoconfiguration is the
+one that matches when the property is absent. Point your client at `GET /sse` and let it follow
+the endpoint event.
+====
+
+Client configuration is the URL plus nothing else:
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "kweblens": {
+      "url": "https://kweblens.example.com/sse"
+    }
+  }
+}
+----
+
+The MCP session keep-alive is on (`spring.ai.mcp.server.keep-alive-interval: 30s`). The SDK ships
+it off, and measured on a live server three disconnected MCP clients still had their
+`McpServerSession` instances in the heap 240 seconds later with sockets parked in `CLOSE_WAIT` —
+nothing had noticed. Unlike a Kubernetes watch this holds no cluster-side resource, so a leaked
+session is bounded process memory; that is why it is a setting rather than a code change.
+
+=== Why the CSRF exemption matters
+
+`SecurityConfig` exempts `/api/**` *and* `/mcp/**` from CSRF:
+
+[source,java]
+----
+.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**", "/mcp/**"))
+----
+
+CSRF protection guards cookie-authenticated *browser form posts*. An MCP client is neither: it
+cannot obtain a CSRF token, and it has no session cookie to be ridden. Without `/mcp/**` in that
+list every tool call is rejected with a 403 — the server accepts the SSE handshake and then
+refuses every JSON-RPC message posted back to it, so the tool surface *exists but is unreachable*.
+This is the failure mode where everything looks configured and nothing works.
+
+In the default `open-mode` the tool endpoints are reachable without signing in, like every other
+read. See xref:security.adoc[Security and identity] for what that means and how to close it.
+
+== Redaction at the boundary
+
+`describeResource` returns raw objects, so its output passes through `ToolRedaction` first:
+
+* *Secret `data` and `stringData`* — keys kept, every value replaced with
+  `<redacted by kweblens>`.
+* *The `kubectl.kubernetes.io/last-applied-configuration` annotation* — replaced. It is a verbatim
+  copy of the object as applied, including, for a Secret, its data. Redacting the live fields
+  while leaving a full copy in an annotation would be a leak that *looks* like it was handled.
+* *`managedFields`* — dropped entirely. It is server-side bookkeeping no diagnosis needs, and on a
+  real object it is routinely a third of the payload.
+
+Keys are kept deliberately. "There is a Secret named `db-credentials` with a key `password`" is
+genuinely useful — a container failing with `CreateContainerConfigError` because a key is missing
+is a real failure mode — and it can be said without disclosing anything.
+
+[IMPORTANT]
+====
+*This is stricter than the dashboard, on purpose.*
+
+The dashboard shows an operator the Secret values they are entitled to read; per ADR-001 that is
+the product working. Tool output is different: it leaves the machine, crosses a network, lands in
+somebody's inference logs, and may end up in training data.
+
+So the asymmetry is intentional and belongs exactly at this boundary. Pushing redaction down into
+the access layer would break the SPA; leaving it to each tool would mean one forgotten method
+hands over every credential in the cluster. *Any new tool that returns raw objects must go through
+`ToolRedaction`.*
+====
+
+The list-shaped tools return kind-agnostic summary rows — kind, namespace, name, status, age — so
+they carry no object payload to redact. `ToolRedaction` is the rule for anything that returns a
+whole object.
+
+Note that redaction is not a permission boundary. kweblens acts with one shared credential and is
+not RBAC-aware, so an assistant with access to this server can read whatever kweblens can read,
+minus what is redacted above. Do not expose `/sse` to an audience you would not give the
+kubeconfig to.
+
+== Related
+
+* xref:health-and-diagnostics.adoc[Health and diagnostics] — the checks behind `HealthTools`
+* xref:security.adoc[Security and identity] — open-mode, and the one shared identity
+* xref:rest-api.adoc[REST API] — the same data over plain HTTP

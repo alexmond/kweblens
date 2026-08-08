@@ -1,0 +1,302 @@
+include::_header.adoc[]
+= Development
+
+Everything below runs from a checkout of the repository. You need **JDK 21**; Node is downloaded
+by the build, so you do not have to install it yourself.
+
+== The three scripts you will use every day
+
+[source,bash]
+----
+scripts/dev-verify.sh                 # format + whole-reactor verify — green here = green PR
+scripts/dev-test.sh <selector>        # targeted -Dtest run
+scripts/dev-run.sh                    # run locally on :8080, login admin/admin
+----
+
+Every script in `scripts/` carries its reasoning in its own header comment, and
+`scripts/README.md` is the index. They exist because doing the same thing by hand went wrong at
+least once.
+
+=== `dev-verify.sh` — the gate
+
+It runs `./mvnw spring-javaformat:apply` and then `./mvnw -B verify` over the whole reactor:
+compile, Checkstyle, PMD, the Java tests, JaCoCo, and — through `kweblens-ui/pom.xml` — the
+front-end gate. CI (`.github/workflows/ci.yml`) runs `./mvnw -B verify` on JDK 21, so **green
+here means green on the PR**. Extra arguments are forwarded to the `verify` invocation:
+
+[source,bash]
+----
+scripts/dev-verify.sh
+scripts/dev-verify.sh -pl kweblens-web -am
+----
+
+=== `dev-test.sh` — one test, fast
+
+The **last** argument is the `-Dtest` selector; anything before it is passed to Maven. With no
+Maven arguments it defaults to `-pl kweblens-web -am`.
+
+[source,bash]
+----
+scripts/dev-test.sh ClusterRegistryTest
+scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
+scripts/dev-test.sh -pl kweblens-core MyTest
+----
+
+=== `dev-run.sh` — and why never `java -jar`
+
+[WARNING]
+====
+**Start the app with `scripts/dev-run.sh`, never `java -jar`.** With no admin password
+configured, `SecurityConfig` **generates one per run and only writes it to the log** — so
+`admin`/`admin` silently stops working and the reason is buried in the startup output.
+`dev-run.sh` always passes the dev credentials as environment at run time, and fails loudly if a
+password gets generated anyway.
+
+Do **not** move those credentials into `application.yml`. That would bake a default password
+into the repository.
+====
+
+[source,bash]
+----
+scripts/dev-run.sh                 # build if needed, run on :8080
+scripts/dev-run.sh --build         # force a rebuild first
+scripts/dev-run.sh --sim           # no cluster needed — the built-in simulator
+scripts/dev-run.sh --files         # pod file browser ON, read-write
+scripts/dev-run.sh --files=ro      # pod file browser ON, browse-and-download only
+scripts/dev-run.sh --files-roots /tmp   # ...and confined to those roots (implies --files)
+scripts/dev-run.sh --ai            # LLM enrichment of /diagnose (needs an Anthropic key)
+scripts/dev-run.sh --port 8085     # a second instance alongside the first
+scripts/dev-run.sh --stop          # stop whatever is on the port
+scripts/dev-run.sh --list          # every instance on this box: port, pid, age, jar SHA
+scripts/dev-run.sh --stop-stale    # stop those built from a jar that is no longer HEAD
+scripts/dev-run.sh --stop-all      # stop all of them
+scripts/dev-run.sh --self-check    # prove the instance detection still works
+----
+
+Instances launch with `setsid`, so they outlive the shell, the editor or the tool that started
+them — which is why `--list` / `--stop` / `--stop-all` exist and why `--self-check` is worth
+running after touching the detection. A forgotten instance is not free: each one holds
+API-server watches and log streams open against a real cluster.
+
+`scripts/pr-watch.sh <pr> [--merge]` waits for a PR's checks and exits 1 on any failure, so it
+can gate a follow-up step.
+
+== The front-end gate
+
+`npm run check` — run from `kweblens-ui/pom.xml` during `generate-resources`, so `dev-verify` and
+CI both include it — is:
+
+[source,text]
+----
+prettier --check   →   vue-tsc -b   →   eslint src   →   knip   →   vitest run --coverage
+----
+
+Then `npm run build` produces `dist/`, which is copied to `target/classes/static/ui`.
+
+=== What `strictTemplates` does, and what it does not
+
+`tsconfig.app.json` sets `vueCompilerOptions.strictTemplates`. That is what makes `vue-tsc` check
+the **component boundary**:
+
+* an unresolved tag,
+* an undeclared prop,
+* an undeclared event,
+* an unknown directive.
+
+Without it all four are silently `any`. An `<ErrorNotice>` used without its import shipped and
+*stayed* shipped across 62 green CI runs, rendering nothing where an error banner belonged.
+
+What it does **not** catch:
+
+* **Slot names.** Measured: `vue-tsc` 2.2 accepts `#nosuchslot` with `strictTemplates` on or off.
+* **A type that is itself wrong.** A field declared non-null that the server actually sends as
+  `null` type-checks perfectly and throws at runtime. The boundary check verifies that the
+  contract is *stated*, not that it is *true*.
+
+The price of `strictTemplates` is that a plain HTML attribute on a component is an error too,
+even though Vue's fallthrough genuinely delivers it. Globally valid ones live in
+`kweblens-ui/vue-attrs.d.ts` (`title` plus every `aria-*`). **Add only attributes valid on every
+element** — a component-specific prop typo must stay an error.
+
+=== Keep logic out of `.vue`
+
+Behaviour goes in `.ts`, rendering in `.vue`, so behaviour is testable without a DOM. That is
+what lets the Vitest suite run inside the Maven gate with no browser.
+
+== The Java gates
+
+All of these run at `validate` or `verify` and **fail the build**.
+
+[cols="1,3"]
+|===
+| Gate | What it enforces
+
+| spring-javaformat 0.0.47
+| Tabs, Spring conventions. Run `./mvnw spring-javaformat:apply` before committing —
+`dev-verify.sh` does it for you.
+
+| Checkstyle 3.6.0
+| `checkstyle.xml` delegates to `SpringChecks` and adds two hard limits: **`FileLength` 800** and
+**`MethodLength` 80**. Suppressions live in `checkstyle-suppressions.xml`. Test sources are
+included.
+
+| PMD 3.28.0
+| `pmd-ruleset.xml` — best practices, code style, design, error-prone, multithreading and
+performance categories, tuned. `failOnViolation` is on; test sources are excluded.
+
+| JaCoCo 0.8.15
+| Line-coverage minimums per module: `kweblens-core` **0.70**, `kweblens-web` **0.50**,
+`kweblens-cli` **0.60**. The application entry point is excluded from the web module's check.
+|===
+
+Browser-driven capture tests are tagged `ui` and excluded from the default build
+(`<excludedGroups>ui</excludedGroups>`); run them on demand with `-DexcludedGroups=`.
+
+=== Lint rules that bite
+
+These are the ones that keep failing builds, and `spring-javaformat:apply` fixes none of them —
+so they surface at `validate` on the *next* build:
+
+* **SpringLambda** — parenthesise a single lambda parameter: `(e) -> …`, never `e -> …`.
+* **SpringTernary** — parenthesised and preferring `!=`: `(a != b) ? x : y`.
+* **InnerTypeLast** — nested types go after methods.
+* **UseUnderscoresInNumericLiterals** — `86_400`, not `86400`.
+* **AppendCharacterWithChar** — `sb.append('m')`, not `sb.append("m")`.
+
+Also standing: Lombok `@RequiredArgsConstructor` for constructor injection,
+`@ConfigurationProperties` for config, and a target of **under ~500 lines** per source file (a
+guideline; Checkstyle hard-fails at 800).
+
+== Tests are hermetic
+
+**No test touches a real cluster.** The fabric8 `kubernetes-server-mock`
+(`@EnableKubernetesMockClient(crud = true)`) serves an in-JVM API server; web tests set
+`kweblens.load-kubeconfig=false` so `ClusterBootstrap` skips ambient discovery and the registry
+starts empty, then the test registers the mock client into the autowired `ClusterRegistry` in
+`@BeforeEach`.
+
+[IMPORTANT]
+====
+**The CRUD mock ignores `limit` and `dryRun`.** It returns the whole collection regardless of the
+page size asked for, and it applies a patch whether or not the request said "dry run".
+
+So a test that seeds objects and then asserts on the result **passes whether or not the flag was
+ever sent**. Assert on the **exact outgoing request** instead — stub the mock per query string
+and let the stubbed path *be* the assertion. `ResourceChunkedListTest`, `ResourceCountTest`,
+`ListJsonTest`, `SearchEndpointsTest`, `YamlEndpointsTest` and `RemediationActionsTest` all do
+this, and each says so in its own header.
+
+The same limitation applies to the built-in simulator, which is the same CRUD mock: **it cannot
+validate paging.**
+====
+
+One more guard worth knowing: `SseEndpointKeepAliveTest` scans the controllers for handlers that
+stream a response and fails the build unless the class contains an `invokestatic` of
+`SseKeepAlive.attach` — checked in the **bytecode**, because every streaming controller also
+calls `completeQuietly`, so a search for the *name* passed a class that never attached anything.
+
+== The simulator — a cluster-free rig
+
+Set three environment variables and kweblens registers a generated in-JVM cluster called `sim`:
+
+[source,bash]
+----
+scripts/dev-run.sh --sim   # or, by hand:
+KWEBLENS_SIMULATOR_ENABLED=true \
+KWEBLENS_LOAD_KUBECONFIG=false \
+KWEBLENS_SIMULATOR_SIZE=200 \
+  ./mvnw -pl kweblens-web -am spring-boot:run
+----
+
+`KWEBLENS_SIMULATOR_NAMESPACES` (default 3) spreads the objects. The generator (`web/sim/`)
+produces objects **sized, shaped and distributed like measured live ones** — `managedFields`,
+real `data` with a long tail, statuses and conditions — and seeds a deterministic minority of
+*unhealthy* ones: crash-looping, unschedulable and evicted pods, Services with no Endpoints, a
+NotReady node, Warning events. Determinism is by object index, so runs are comparable and every
+state appears within the first hundred rows.
+
+[CAUTION]
+====
+**A rig whose objects are unrepresentative measures the rig.** The simulator's pod was once 739
+bytes against a real cluster's 7.8 KB, which is how a scale pass concluded "the API is
+comfortable, ~88 bytes per row" and was wrong by 50–500×. Check any **new kind you seed** with
+`scripts/payload-bytes.mjs` against a live cluster before quoting a number from it.
+====
+
+== Measuring the running app
+
+These drive a **running instance** — start one with `dev-run.sh` first — and they use the
+account-wide Playwright install rather than a local `node_modules`:
+
+[source,bash]
+----
+export NODE_PATH=$HOME/.local/lib/playwright/node_modules
+----
+
+[cols="1,3"]
+|===
+| Script | What it settles
+
+| `scripts/ui-shot.mjs`
+| Screenshots as a **matrix** — three widths (narrow 1024 / normal 1400 / wide 1900) × both
+themes, not one image. Output goes to `.playwright/`, which is **gitignored and must stay that
+way**: the images carry a live cluster's API-server hostname, node names and namespaces.
+
+| `scripts/ui-measure.mjs`
+| Geometry: box, overflow against the nearest clipping ancestor, characters per line, words too
+wide for their own box, and how much of a container's width its children actually reach. Exits 1
+over budget. Has a `--self-test`.
+
+| `scripts/contrast-check.mjs`
+| WCAG contrast of rendered UI in **both** themes; exits 1 on failure. The backdrop is decoded
+from the rendered image rather than derived from the DOM, so paint order cannot fool it. Has a
+`--self-test`.
+
+| `scripts/perf-sweep.mjs`
+| Walks every nav leaf and fails if any page's time-to-first-**row** or longest main-thread block
+exceeds `LOAD_MS` / `BLOCK_MS`. On-demand, not a per-commit gate.
+
+| `scripts/payload-bytes.mjs`
+| Bytes per object per kind — projected list bytes per row *and* full object bytes, with
+p50/p90/max and the `managedFields` share. This is the check that a rig is representative.
+
+| `scripts/heap-probe.sh`
+| What **one list request costs the JVM heap**: forced collections either side, `jstat` sampled
+from outside the JVM.
+
+| `scripts/alloc-probe.sh`
+| **Which code** spends that heap — JFR allocation samples attributed by call site and thread.
+|===
+
+Three rules that came out of getting these wrong:
+
+* **A selector reported as `not present` or `absent` is a failed measurement, not a pass.** Bring
+  the surface on screen with `--leaf`, `--path` or `PREPARE` and measure again; a screenful of
+  `not present` is a failed run.
+* **Suspect the instrument before the code.** Every wrong UI conclusion in this project came from
+  a broken measuring tool, not from broken reasoning. Build a positive control — a case whose
+  answer you already know — before believing a surprising result.
+* **`peak - base` does not answer "does this bound the heap".** `heap-probe.sh`'s `transient`
+  measures allocation *churn* and can rank a correct fix as worse. The question an OOM-kill asks
+  is **the smallest `-Xmx` in which the request still completes**. Run both probes against a
+  **live** cluster: the simulator's API server shares the JVM and is inside every reading.
+
+There is also a **regression guard in the gate**, needing no browser and no cluster:
+`kweblens-ui/src/composables/useResourceData.test.ts` asserts the resource-list watch coalesces a
+burst of N events into at most one `objects` update per animation frame. **When you add a
+live-updated list, add its watch to that batching pattern** (buffer, flush per rAF) so it cannot
+flood.
+
+== Building the container image
+
+Cloud Native Buildpacks, via the `docker` profile. Only `kweblens-web` declares the Spring Boot
+plugin, so only it produces an image:
+
+[source,bash]
+----
+./mvnw -Pdocker -pl kweblens-web -am package \
+  -Ddocker.image.name=… -Ddocker.publish=true
+----
+
+Requires a running Docker daemon. See xref:deployment.adoc[Deploying to Kubernetes] for what to
+do with the result, and xref:contributing.adoc[Contributing] for the pre-push checklist.
