@@ -1,0 +1,30 @@
+* xref:index.adoc[Home]
+
+* Getting started
+** xref:installation.adoc[Installation]
+** xref:getting-started.adoc[First run]
+** xref:configuration.adoc[Configuration]
+** xref:clusters.adoc[Connecting clusters]
+
+* Using kweblens
+** xref:browsing-resources.adoc[Browsing resources]
+** xref:editing-and-applying.adoc[Editing and applying]
+** xref:logs-exec-and-files.adoc[Logs, exec and pod files]
+** xref:helm.adoc[Helm releases]
+** xref:health-and-diagnostics.adoc[Health and diagnostics]
+** xref:metrics.adoc[Metrics]
+
+* Integrating
+** xref:mcp.adoc[MCP server]
+** xref:rest-api.adoc[REST API]
+
+* Operating
+** xref:security.adoc[Security and identity]
+** xref:deployment.adoc[Deploying to Kubernetes]
+** xref:performance.adoc[Performance and scale]
+
+* Project
+** xref:architecture.adoc[Architecture]
+** xref:development.adoc[Development]
+** xref:contributing.adoc[Contributing]
+** xref:CHANGELOG.adoc[Changelog]

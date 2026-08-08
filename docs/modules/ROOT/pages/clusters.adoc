@@ -1,0 +1,248 @@
+include::_header.adoc[]
+= Connecting clusters
+
+kweblens can talk to several clusters at once. Every one of them is addressed by a stable
+**id**, and everything in the API and the UI — routes, the cluster rail, the audit trail —
+uses that id rather than a raw client.
+
+Clusters reach the registry from three places, in this order at startup:
+
+. Statically-configured clusters, from `kweblens.clusters[*]`.
+. The ambient kubeconfig, when `kweblens.load-kubeconfig` is on — **one cluster per
+  context**.
+. Clusters added at runtime through the API and persisted by the cluster store, restored
+  last and never overwriting an id the first two already claimed.
+
+That last rule is deliberate: the deployment manifest is the authority on the clusters it
+names, and a persisted entry silently shadowing one would make the running state disagree
+with the manifest with nothing in the UI to explain why.
+
+If nothing registers, kweblens logs
+`No clusters registered — set kweblens.clusters[*] or provide a kubeconfig.` and starts
+anyway. The Clusters page still renders, because it is the page that adds one.
+
+== One cluster per kubeconfig context
+
+This is the part most people get wrong, so it is worth stating flatly.
+
+kweblens reads the ambient kubeconfig — `KUBECONFIG` if set (a path list; the first entry is
+treated as the primary), otherwise `~/.kube/config` — and **registers every context in it as
+its own cluster, with the context name as the cluster id and as the display name**. A
+kubeconfig with six contexts gives you six clusters. A context that is already registered
+(from `kweblens.clusters[*]`) is left alone.
+
+[WARNING]
+====
+*Never assume a cluster called `default` exists.* `default` is only the **fallback** id, used
+in exactly three cases:
+
+* there is no readable kubeconfig at the resolved path — most commonly because kweblens is
+  running in-cluster on a ServiceAccount;
+* the kubeconfig parses but declares no contexts;
+* the kubeconfig cannot be read or parsed at all.
+
+In those cases one cluster is registered with id `default` and the display name
+`Current kubeconfig`, built from whatever ambient configuration the fabric8 client resolves.
+Otherwise `default` does not exist.
+
+Resolve ids from `GET /api/v1/clusters` — in code, in tests, and in examples.
+====
+
+Extra contexts are cheap. Building a fabric8 client only resolves configuration; it opens no
+connection. So a context you never click costs a map entry and a tile in the rail, not a
+socket.
+
+== Statically-configured clusters
+
+Use `kweblens.clusters[*]` when the deployment, not the operator, should decide what exists.
+Each entry needs an `id`; an entry without one is skipped with a warning.
+
+[source,yaml]
+----
+kweblens:
+  load-kubeconfig: false
+  clusters:
+    - id: prod-eu
+      name: Production EU
+      kubeconfig: /kubeconfigs/kubeconfig
+      context: prod-eu
+    - id: staging
+      name: Staging
+      kubeconfig: /kubeconfigs/kubeconfig
+      context: staging
+----
+
+`kubeconfig` is a **path to a file**. Relative certificate paths inside it resolve against
+that path, so an on-disk kubeconfig may reference certificate files beside it. Omit
+`kubeconfig` and the entry is built from ambient configuration instead — which is how you
+register the hosting cluster from an in-cluster ServiceAccount. Omit `context` and the file's
+`current-context` is used.
+
+If an entry cannot be turned into a client, kweblens logs
+`Could not register configured cluster '<id>': …` and carries on. It does not fail startup.
+
+The Helm chart renders `clusterScope.external` into exactly these properties, mounting the
+kubeconfig Secret read-only at `/kubeconfigs/kubeconfig` — see
+xref:installation.adoc[Installation].
+
+== Adding clusters at runtime
+
+`ClusterConfigApiController` (`/api/v1/clusters`) adds, edits and removes clusters without a
+restart. The UI for it is the Clusters page, reached from the bottom of the cluster rail.
+
+[cols="2,3"]
+|===
+| Route | What it does
+
+| `GET /api/v1/clusters`
+| Every registered cluster: `id`, `name`, `masterUrl`, `origin`. The authority on which ids
+exist.
+
+| `POST /api/v1/clusters`
+| Register and persist a new cluster. `201`.
+
+| `PUT /api/v1/clusters/{id}`
+| Edit one. Omit `kubeconfig` to keep the stored credential — renaming or switching context
+does not require re-supplying it.
+
+| `DELETE /api/v1/clusters/{id}`
+| Close the client and delete the stored credential. `204`.
+
+| `GET /api/v1/clusters/{id}/config`
+| How a cluster is configured: origin, master URL, selected context, the contexts available
+in the stored kubeconfig, whether a credential is held, where runtime clusters are persisted
+and whether that store is durable.
+
+| `POST /api/v1/clusters/contexts`
+| List the contexts in a kubeconfig the caller is *about* to submit, so the editor can offer
+them. Only the `kubeconfig` field of the body is read; nothing is stored.
+|===
+
+Every mutating route here is a non-`GET`, so it is behind the admin login in both security
+modes, and every one is audited — adding a cluster hands kweblens a credential, and removing
+one revokes access for every user of the instance.
+
+=== The kubeconfig only travels one way
+
+It is accepted on `POST` and `PUT` and is **never returned by any route**. `GET
+…/{id}/config` reports only *whether* a credential is held, not what it is; a read-only `GET`
+that returned the YAML would turn any open-mode deployment into a credential-exfiltration
+endpoint. It is also excluded from logs — the persisted record redacts it in `toString()`, so
+an exception message that happens to interpolate a definition cannot dump a working cluster
+credential into the log stream.
+
+=== What is validated, and what is not
+
+Validation is **structural, not a connection test**:
+
+* the id must match `[a-z0-9][a-z0-9._-]{0,62}` — it becomes a URL path segment, a filename
+  and a Secret name suffix, so it is constrained to the intersection of what all three
+  accept. It is lowercased and trimmed;
+* the id must not already be registered;
+* a kubeconfig is required on add;
+* the kubeconfig must parse as YAML and contain at least one context;
+* if a context is named, it must be in that kubeconfig; if none is named, the kubeconfig must
+  have a `current-context`.
+
+Reachability is *not* checked. The cluster may legitimately be down when it is added, and
+conflating "is this configuration usable" with "is this cluster up" would make adding a
+cluster impossible during an outage.
+
+Failure messages quote only the first line of the underlying error, truncated — parser and
+decoder errors can echo the document they choked on, and that document is a credential.
+
+=== Order of operations
+
+Validate → build the client → persist → register. A rejected kubeconfig therefore leaves both
+the store and the registry byte-for-byte as they were. Anything that fails on the way to the
+registry closes the client it built: a fabric8 client is not just an object, it carries its
+own Vert.x runtime with event-loop threads, and a handful of failed "Add cluster" attempts
+against an unwritable store would otherwise leave a handful of live runtimes behind.
+
+=== A runtime kubeconfig must embed its credentials
+
+A pasted kubeconfig has no file it came from, so relative certificate paths inside it cannot
+be resolved. Use embedded `client-certificate-data` / `client-key-data` / `token`, not
+`client-certificate: ./client.crt`.
+
+== Which clusters can be edited
+
+Each cluster carries an **origin**:
+
+`STATIC`:: Declared in `kweblens.clusters[*]` or discovered in the ambient kubeconfig.
+Read-only at runtime. The Clusters page disables edit and remove and says why: the cluster is
+re-created on every boot, so "deleting" it from the browser would appear to work and then
+silently undo itself on the next restart. Change the configuration or the kubeconfig instead.
+
+`RUNTIME`:: Added through the API and persisted by the cluster store. Editable and removable.
+
+An `origin` the API does not report is treated as `STATIC` — an older server that does not
+send it predates runtime cluster management, so nothing it returns is editable. Defaulting
+the other way would offer controls that then fail.
+
+== Where runtime clusters are stored
+
+A kubeconfig is a credential, so the store differs by deployment. `kweblens.cluster-store.mode`
+picks it; `auto`, the default, resolves to Secrets when `KUBERNETES_SERVICE_HOST` is set and
+to a data directory otherwise.
+
+[cols="1,3"]
+|===
+| Mode | Where
+
+| `secret`
+| One Kubernetes Secret per cluster in kweblens's own namespace, named
+`kweblens-cluster-<id>`. Encryption at rest, RBAC, and it survives a reschedule with no PVC.
+The chart's `rbac.clusterStore` grants the namespaced Role this needs.
+
+| `file`
+| A directory on the kweblens host — `<user.home>/.kweblens/clusters` by default, or
+`KWEBLENS_DATA_DIR`. The only durable option off-cluster; in a container point it at a
+mounted volume.
+
+| `memory`
+| Not persisted at all. Runtime clusters vanish on restart. This is the setting for "refuse
+to hold credentials".
+|===
+
+If `secret` mode cannot build a client for kweblens's own cluster, or cannot determine its
+namespace, it falls back to `file` with a warning rather than failing startup. Likewise, an
+unreadable store at boot logs a warning and restores nothing — the operator needs kweblens
+*up* in order to fix it.
+
+`GET …/{id}/config` reports which store is in use and whether it is durable, so the UI can
+say "these will not survive a restart" rather than leaving you to find out.
+
+== A client is built lazily and connects lazily
+
+`new KubernetesClientBuilder().build()` resolves configuration and returns. **The first API
+call is what reaches the cluster.** Two consequences worth planning around:
+
+* A bad kubeconfig — wrong CA, expired token, unreachable API server — is accepted at startup
+  and at add time, and fails on first *use*: a red list, not a red boot. Startup is never
+  blocked by a cluster being down.
+* Registration is cheap enough that registering every kubeconfig context by default is not
+  extravagant.
+
+== Lifecycle: the registry owns the clients
+
+`ClusterRegistry` is the single owner. Never construct a `KubernetesClient` in a controller
+or a service — ask the registry.
+
+* Registering an id that already exists **closes the previous client**, unless the very same
+  instance is being re-registered.
+* Unregistering closes the client. Closing is the point: a removed cluster must stop holding
+  sockets and threads, not merely disappear from the list.
+* **Closing the client does not release everything the cluster held.** A port-forward's
+  listening socket is bound by kweblens, not by the cluster, and a cached OpenAPI document
+  describes an API server the id may no longer point at. So holders of cluster-scoped state
+  register a `ClusterClientListener` and release both on removal *and* on a re-point — an id
+  aimed at a different cluster is a close as much as a deletion is.
+
+== Related
+
+* xref:configuration.adoc[Configuration] — `kweblens.load-kubeconfig`, `kweblens.clusters[*]`,
+  `kweblens.cluster-store.*`
+* xref:installation.adoc[Installation] — the chart's `clusterScope` block
+* xref:deployment.adoc[Deploying to Kubernetes] — in-cluster credentials and RBAC
+* xref:security.adoc[Security and identity] — one shared identity, and what follows from it

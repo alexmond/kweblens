@@ -1,0 +1,181 @@
+include::_header.adoc[]
+= Architecture
+
+kweblens is one runnable Spring Boot application built out of a small reactor of Maven modules.
+The split is not decorative: it is a **dependency direction**. Cluster access lives in a module
+that knows nothing about HTTP, the web module turns that access into surfaces, and the SPA is a
+separate build that lands on the web module's classpath as static resources.
+
+== The module map
+
+[cols="1,2,1"]
+|===
+| Module | What it is | License
+
+| `kweblens-core`
+| The cluster access layer — the fabric8 client registry, resource projection, health checks,
+logs, exec, metrics, port-forward, schema. No web concerns.
+| Apache-2.0
+
+| `kweblens-ui`
+| The Vue 3 + Vite + TypeScript SPA. Built with `base: '/ui/'` and copied into
+`target/classes/static/ui`, so it ships inside the web module's jar.
+| —
+
+| `kweblens-web`
+| The runnable app: JSON API, the SPA, the MCP server, security and audit. One `web/<area>/`
+slice per surface.
+| AGPL-3.0
+
+| `kweblens-cli`
+| A dependency-light cluster inspector (picocli) over `kweblens-core`. The runnable fat jar is
+attached under the `exec` classifier, so the plain artifact stays a normal library jar.
+| Apache-2.0
+
+| `kweblens-it`
+| On-demand operational and connectivity tasks. Its tests are tagged `it` and excluded by
+default, so a normal `verify` only compiles the module and needs no live cluster.
+| AGPL-3.0
+|===
+
+[NOTE]
+====
+**Nothing has been released.** `kweblens-core` and `kweblens-cli` are *configured* to publish to
+Maven Central — the `release` profile wires signing, sources, Javadoc and the central publishing
+plugin — but no tag has been cut and no artifact is on Central. The version is still
+`0.1.0-SNAPSHOT`.
+====
+
+=== Reactor shape and the profile trick
+
+The top-level `<modules>` list contains only the two publishable libraries. The application is
+added by an `activeByDefault` profile:
+
+* **`default`** (active in every ordinary build, including CI) adds `kweblens-ui`,
+  `kweblens-web` and `kweblens-it`.
+* **`release`** is requested explicitly, which deactivates `default` and therefore drops the
+  application from the reactor — an app does not belong on Maven Central.
+* **`docker`** is also explicit, so it has to *re-add* `kweblens-ui` and `kweblens-web` in order
+  to build the image at all.
+
+The consequence to remember: **any new `-P` profile that needs the application must list
+`<module>kweblens-web</module>` itself**, or the app silently vanishes from the build.
+
+== `kweblens-core` — cluster access, no web concerns
+
+[cols="1,3"]
+|===
+| Package | What lives there
+
+| `cluster/`
+| `ClusterRegistry` — one fabric8 `KubernetesClient` per cluster id, and the `ClusterInfo` view
+of it. Also `ClusterClientListener` (see below).
+
+| `resource/`
+| `ResourceService`, which projects arbitrary Kubernetes objects into kind-agnostic
+`ResourceSummary` rows, lists, counts and chunked reads; `RelationService`, which resolves the
+detail drawer's relation sections.
+
+| `health/`
+| The deterministic workload / network / storage / config checks. One implementation, shared by
+the dashboard, the diagnose pass and the MCP tools — so a verdict cannot differ depending on who
+asked.
+
+| `event/`, `log/`, `exec/`, `metric/`, `portforward/`, `schema/`
+| One access service per capability: cluster events, log follows, exec sessions, metrics,
+port-forwards, and the cluster's own OpenAPI v3 schema.
+
+| `config/`
+| `KweblensProperties` — the `kweblens.*` settings class.
+|===
+
+Nothing here imports Spring MVC. That is what makes the access layer testable against an in-JVM
+mock API server, and what lets `kweblens-cli` and `kweblens-it` reuse it without dragging a web
+server along.
+
+== `kweblens-web` — one slice per surface
+
+Each user-facing surface is a directory under `org.alexmond.kweblens.web`:
+
+`api/`:: The JSON API and its `ProblemDetail` error mapping — one controller per surface, plus
+`ListProjection` (what a list row is allowed to contain), `ListJson`, and `SseKeepAlive`.
+`ui/`:: `SpaController`, which forwards `/`, `/ui` and `/ui/` to the built SPA's `index.html`.
+`security/`:: `SecurityConfig` and `AuditService`.
+`nav/`:: `NavCatalog`, the declarative category → kind → list-route registry (39 built-in kinds
+across 7 static categories), and `ClusterNavService`, which discovers CRDs and promotes a
+Gateway category at runtime when the Gateway API CRDs are present.
+`mcp/`:: The `@Tool` beans and `McpConfig`, plus `ToolRedaction` — the boundary that strips
+Secret values before anything leaves for an inference log.
+`helm/`:: The jhelm-backed release surface.
+`exec/`:: Exec over WebSocket.
+`files/`:: The pod file browser, off by default.
+`search/`:: Global search — `SearchService`, `SearchKinds`, `SearchRanking`.
+`diag/`:: The diagnostics panel's capability report.
+`ai/`:: `DiagnoseService` (LLM enrichment, inert without a key) and `RemediationService` (not
+AI-gated).
+`sim/`:: The in-JVM cluster simulator used for development, CI and performance work.
+`config/`:: `ClusterBootstrap`, which seeds the ambient kubeconfig at startup.
+
+`/actuator/{health,info,metrics,prometheus}` is exposed alongside them.
+
+== The rules that produced this shape
+
+These are standing constraints, not history. Each one has already been a bug when it was broken.
+
+=== Every surface is a slice over a core access service
+
+A `web/<area>/` slice composes, projects and serves. It never reimplements cluster access. That
+is why adding logs, exec, port-forward, Helm, metrics and the detail drawer did not each grow
+their own way of talking to a cluster — and why a fix in `health/` is a fix everywhere the
+verdict is shown.
+
+=== The `ClusterRegistry` owns every client lifecycle
+
+Never construct a `KubernetesClient` in a controller or a service. Ask the registry:
+`require(id)` or `client(id)`. Everything is addressed by cluster **id** — never by passing a
+raw client around — and re-registering an id closes the previous client.
+
+Two consequences that have each cost a bug:
+
+. **A client built before it is handed over is owned by nobody.** Between `new
+  KubernetesClientBuilder().build()` and the registry's `register()` returning, no one will close
+  it, so every failure path in between has to. The registry's `adopt()` guard exists for exactly
+  that window; a stranded client keeps its own Vert.x runtime alive.
+. **Closing the client does not release everything the cluster held.** A port-forward's
+  listening socket is bound by kweblens on the kweblens host, not by the cluster, so closing the
+  client kills the tunnel and leaves the port bound. A cached OpenAPI document describes an API
+  server that the id may no longer point at.
+
+=== Cluster-scoped state registers a `ClusterClientListener`
+
+The hook is `ClusterRegistry.addClientListener`, and it fires on **removal *and* on re-point** —
+both are "anything derived from the old client is dead now". `PortForwardService` and
+`SchemaService` both use it. Anything new that caches or binds per cluster must do the same.
+
+The dependency deliberately runs one way: holders register themselves with the registry, and the
+registry knows nothing about them.
+
+=== Building a client does not connect
+
+`new KubernetesClientBuilder().build()` only resolves configuration; the first API call is what
+reaches the cluster. This is why `ClusterBootstrap` can register every kubeconfig context at
+startup for the cost of a map entry, and why the test suite needs no live cluster — and also why
+a bad kubeconfig fails *lazily*, on first use rather than at boot.
+
+=== Clusters are ids, and `default` is only a fallback
+
+`ClusterBootstrap` registers **one cluster per kubeconfig context, with the context name as the
+id**. A six-context kubeconfig registers six clusters. `default` is used only when there is no
+readable kubeconfig at all (an in-cluster ServiceAccount), when the file declares no contexts, or
+when it cannot be parsed. Never assume `default` exists — resolve ids from `GET /api/v1/clusters`.
+
+=== In the front end, logic lives in `.ts` and rendering in `.vue`
+
+Behaviour is written as plain TypeScript modules and composables (`src/*.ts`,
+`src/composables/use*.ts`, and per-component `*.ts` files beside their `.vue`), so it is testable
+without a DOM. The `.vue` file renders the result. That is why the front-end test suite runs in
+the Maven gate with no browser: sorting, column fitting, palette matching, diff derivation,
+watch batching and the rest are all functions, not components.
+
+See xref:development.adoc[Development] for the gates that enforce this and the instruments used
+to measure the running app.

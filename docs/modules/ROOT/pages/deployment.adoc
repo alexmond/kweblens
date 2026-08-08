@@ -1,0 +1,302 @@
+include::_header.adoc[]
+= Deploying to Kubernetes
+
+kweblens ships as one Spring Boot jar that runs three ways — standalone, as a container, or
+as an in-cluster pod — and the same binary can monitor the hosting cluster, external clusters,
+or both. Only the configuration changes.
+
+This page covers the in-cluster deployment: the Helm chart in `deploy/helm/kweblens`, the
+image, how the pod finds its credentials, and the RBAC it needs.
+
+[IMPORTANT]
+====
+*There is no published image and no workflow that builds one.* `.github/workflows/` contains
+`ci.yml` and `maven_release.yml` only, and the release workflow publishes libraries to Maven
+Central, not a container. The chart's `image.repository` default is the bare name `kweblens`
+with no registry — so *the chart assumes an image you built and pushed yourself*. Set
+`image.repository` to your own registry path before installing.
+====
+
+== The image
+
+Built by https://buildpacks.io[Cloud Native Buildpacks] via Spring Boot's `build-image` goal.
+There is no Dockerfile. The `docker` Maven profile carries the configuration, and it also
+re-adds `kweblens-ui` and `kweblens-web` to the reactor (they live in an `activeByDefault`
+profile that any explicit `-P` deactivates):
+
+[source,bash]
+----
+# local image, tagged kweblens:<project.version>
+./mvnw -Pdocker -pl kweblens-web -am package
+
+# named tag, pushed straight to a registry
+./mvnw -Pdocker -pl kweblens-web -am package \
+  -Ddocker.image.name=registry.example.com/kweblens:0.1.0 \
+  -Ddocker.publish=true
+----
+
+Only `kweblens-web` declares the Spring Boot plugin, so only it produces an image. A Docker
+daemon must be running. `scripts/deploy-k8s.sh` wraps build, push and `helm upgrade` in one
+arg-driven command:
+
+[source,bash]
+----
+scripts/deploy-k8s.sh \
+  --registry registry.example.com \
+  --namespace kweblens \
+  --pull-secret regcred \
+  --values ./my-values.yaml
+----
+
+The script has no defaults of its own beyond the namespace and release name (`kweblens`);
+`--registry` is required and the tag defaults to the Maven project version.
+
+== Installing the chart
+
+[source,bash]
+----
+helm upgrade --install kweblens deploy/helm/kweblens \
+  --namespace kweblens --create-namespace \
+  --set image.repository=registry.example.com/kweblens \
+  --set image.tag=0.1.0 \
+  --set auth.openMode=false \
+  --set auth.existingSecret=kweblens-auth
+----
+
+The chart renders a Deployment, a Service, an optional Ingress, an optional ServiceAccount, an
+optional PVC, and — for hosting-cluster monitoring — a ClusterRole and binding. Chart version
+`0.1.0`, `appVersion` `0.1.0-SNAPSHOT`; the image tag defaults to `appVersion` when
+`image.tag` is empty.
+
+== Which clusters the pod sees
+
+`clusterScope` decides, and the two halves combine.
+
+[cols="1,3"]
+|===
+| Setting | Effect
+
+| `clusterScope.local` (default `true`)
+| Sets `KWEBLENS_LOAD_KUBECONFIG`. With it true and no kubeconfig mounted, the fabric8 client
+auto-detects *in-cluster config* from the pod's ServiceAccount and the hosting cluster
+registers itself. Set it `false` to monitor only external clusters.
+
+| `clusterScope.external[]`
+| A list of `{id, name, context}`. Each becomes a `kweblens.clusters[*]` entry
+(`KWEBLENS_CLUSTERS_<i>_ID`, `_NAME`, `_CONTEXT`, `_KUBECONFIG`) pointing at
+`/kubeconfigs/kubeconfig`.
+
+| `clusterScope.kubeconfigSecret`
+| Name of a Secret with a single key `kubeconfig`. Mounted read-only at `/kubeconfigs`.
+Required when `external` is non-empty.
+|===
+
+*In-cluster vs out-of-cluster is a detection, not a setting.* Building a fabric8 client only
+resolves configuration — the first API call is what reaches the cluster. So a bad kubeconfig
+fails lazily on first use, not at boot, and the pod starts either way.
+
+One cluster is registered per kubeconfig *context*, with the context name as its id. Do not
+assume an id called `default` exists — resolve ids from `GET /api/v1/clusters`. See
+xref:clusters.adoc[Connecting clusters] for the runtime add/edit/remove API and where those
+credentials are stored.
+
+== RBAC
+
+Rendered only when `rbac.create` and `clusterScope.local` are both true — an instance that
+monitors only external clusters carries its credentials in the mounted kubeconfig instead.
+
+`rbac.role` picks one of two ClusterRoles, both bound to the pod's ServiceAccount:
+
+[cols="1,3"]
+|===
+| Role | Grants
+
+| `viewer` *(the default — start here)*
+| `get`, `list`, `watch` on `apiGroups: ["*"]`, `resources: ["*"]`. Pure monitoring; the
+mutating drawer actions come back 403.
+
+| `editor`
+| The above plus `create`, `update`, `patch`, `delete` — scale, restart, rollback, delete,
+drain, exec, port-forward and Helm against the hosting cluster.
+|===
+
+Both roles additionally grant `get` on `services/proxy`, `nodes/proxy` and `pods/log` (metrics
+via the API-server service proxy, and log streaming), and `get` on the non-resource URLs
+`/metrics`, `/healthz`, `/version`.
+
+`editor` deliberately omits `escalate`, `bind` and `impersonate`, so the grant cannot be used
+to widen itself.
+
+[NOTE]
+====
+`resources: ["*"]` is broad by design — kweblens browses 39 built-in kinds plus whatever CRDs
+the cluster has, so it cannot enumerate them in advance. Narrow it if you know your kinds; the
+chart's role is the starting point, not a recommendation to keep it forever. Since kweblens
+has no RBAC-awareness of its own, *this role is the entire blast radius* of anyone who can
+sign in — see xref:security.adoc[Security and identity].
+====
+
+A second, *namespaced* Role is rendered when `rbac.clusterStore` is true (the default):
+`get`/`list`/`create`/`update`/`patch`/`delete` on `secrets` in kweblens's own namespace. That
+is not about the cluster kweblens browses — it is how runtime-added clusters
+(`POST /api/v1/clusters`) are persisted, one Secret per cluster. It is independent of
+`clusterScope.local`; an instance that watches only external clusters is exactly the one that
+needs it. Set it `false` to refuse the grant, and either point `kweblens.cluster-store.path`
+at a mounted volume with `mode=file`, or accept that clusters can only come from
+configuration.
+
+== The admin login
+
+The chart defaults to `auth.openMode: true`, matching the application default. *Change it.*
+`auth.existingSecret` names a Secret loaded wholesale into the container's environment
+(`envFrom`), so it supplies the credential without it ever appearing in a values file:
+
+[source,bash]
+----
+kubectl -n kweblens create secret generic kweblens-auth \
+  --from-literal=KWEBLENS_SECURITY_ADMIN_USERNAME=admin \
+  --from-literal=KWEBLENS_SECURITY_ADMIN_PASSWORD='<strong-password>'
+
+helm upgrade --install kweblens deploy/helm/kweblens \
+  --set auth.existingSecret=kweblens-auth --set auth.openMode=false
+----
+
+The same Secret can carry `ANTHROPIC_API_KEY` if you enable the AI enrichment. If no password
+is supplied, kweblens generates one per run and logs it at `WARN` — recoverable with
+`kubectl logs`, but it changes on every restart.
+
+== Networking
+
+`service.type` defaults to `ClusterIP` on port `8080`; the same value is passed to the
+container as `PORT` and used as the container port, so changing it changes both.
+
+The Ingress is off by default. When `ingress.enabled=true`, `ingress.host` is *required* —
+the template fails rendering rather than inventing a hostname. `ingress.className` defaults to
+`traefik` and `ingress.tls` to `true` (a TLS block listing the host, with no `secretName`, so
+it expects a default certificate or an issuer annotation). Put TLS termination and your
+identity provider here.
+
+Liveness and readiness probes hit `/actuator/health/liveness` and `/actuator/health/readiness`,
+which are public in both security modes.
+
+== Storage
+
+`persistence` is off by default. Enabling it provisions a `ReadWriteOnce` PVC and sets
+`KWEBLENS_HELM_HOME` to `persistence.mountPath` (default `/data/helm`), so the Helm repository
+list, index cache and saved values library survive a restart. Because the volume is RWO the
+chart forces `replicas: 1` and a `Recreate` strategy while it is enabled.
+
+== Resources — and why the default matters
+
+[source,yaml]
+----
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+----
+
+There is no CPU limit, and no `JAVA_TOOL_OPTIONS`. *The JVM therefore defaults to about a
+quarter of the memory limit — roughly 256 MB of heap — and a container that exceeds its limit
+is OOM-killed, not slowed down.* That number is load-bearing at scale: see
+xref:performance.adoc[Performance and scale], which measures exactly how many objects fit
+under it and what bounds the heap.
+
+The pod runs non-root as uid `1002` / gid `1001` (matching the buildpack image), with
+`allowPrivilegeEscalation: false` and all capabilities dropped. `readOnlyRootFilesystem` is
+`false` — the JVM and buildpack layers write to the container filesystem.
+
+== Chart values reference
+
+[cols="1,2"]
+|===
+| Value | Purpose
+
+| `image.repository` / `image.tag` / `image.pullPolicy`
+| Image. `repository` defaults to a bare `kweblens` with no registry; tag defaults to
+`appVersion`.
+
+| `imagePullSecrets`
+| e.g. `[{name: regcred}]`. The Secret must already exist in the namespace.
+
+| `clusterScope.local` / `.external[]` / `.kubeconfigSecret`
+| Which clusters this instance monitors.
+
+| `rbac.create` / `rbac.role` / `rbac.clusterStore`
+| ClusterRole for the hosting cluster (`viewer` / `editor`), and the namespaced Role for the
+runtime cluster store.
+
+| `serviceAccount.create` / `.name`
+| Defaults to creating one named after the release fullname.
+
+| `auth.existingSecret` / `auth.openMode`
+| Admin credential Secret, and the `KWEBLENS_SECURITY_OPEN_MODE` switch.
+
+| `persistence.enabled` / `.storageClass` / `.size` / `.mountPath`
+| PVC for `KWEBLENS_HELM_HOME`. RWO, so it forces one replica.
+
+| `service.type` / `service.port`
+| Also sets `PORT` and the container port.
+
+| `ingress.enabled` / `.className` / `.host` / `.tls` / `.annotations`
+| `host` is required when enabled.
+
+| `resources`
+| Requests and limits. See the warning above about the default heap.
+
+| `springProfiles`
+| `SPRING_PROFILES_ACTIVE`, default `prod`.
+
+| `extraEnv`
+| A list of `{name, value}` for any other `KWEBLENS_*` setting — see
+xref:configuration.adoc[Configuration].
+
+| `podSecurityContext` / `containerSecurityContext`
+| Non-root defaults matching the buildpack image.
+
+| `replicaCount`, `podAnnotations`, `podLabels`, `nodeSelector`, `tolerations`, `affinity`
+| The usual scheduling knobs.
+|===
+
+Chart defaults are deliberately neutral placeholders: no registry, no ingress host, no pull
+secret. Environment-specific values belong in your own values file, never in the chart.
+
+== The other two run modes
+
+*Standalone jar* — every context in the ambient kubeconfig becomes a cluster:
+
+[source,bash]
+----
+KUBECONFIG=~/.kube/config \
+KWEBLENS_SECURITY_ADMIN_USERNAME=admin \
+KWEBLENS_SECURITY_ADMIN_PASSWORD=change-me \
+java -jar kweblens-web/target/kweblens.jar
+----
+
+*Container, outside a cluster* — `deploy/docker/compose.yaml` mounts a host kubeconfig
+read-only at `/kubeconfig` and sets `KWEBLENS_LOAD_KUBECONFIG=true`:
+
+[source,bash]
+----
+KWEBLENS_KUBECONFIG=/path/to/kubeconfig \
+KWEBLENS_ADMIN_PASSWORD='<strong-password>' \
+docker compose -f deploy/docker/compose.yaml up
+----
+
+The compose file defaults the admin password to `admin` for a throwaway local run. Override
+it for anything else.
+
+[WARNING]
+====
+A kubeconfig is a credential. `.gitignore` blocks `*.kubeconfig`, `kubeconfig` and `.kube/`
+for a reason — mount one into the container or point `KUBECONFIG` at it, never commit it.
+====
+
+== Related
+
+* xref:security.adoc[Security and identity] — read before exposing this
+* xref:performance.adoc[Performance and scale] — what the 1 GiB limit actually buys
+* xref:clusters.adoc[Connecting clusters] — adding clusters at runtime, and credential storage
+* xref:configuration.adoc[Configuration] — every `kweblens.*` property

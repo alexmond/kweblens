@@ -1,0 +1,240 @@
+include::_header.adoc[]
+= Security and identity
+
+Read this page before you put kweblens anywhere another person can reach. It says what
+kweblens protects, what it deliberately does not, and what you must add around it.
+
+[IMPORTANT]
+====
+*kweblens acts with its own credentials, not yours.* There is one shared admin account, no
+OIDC, no per-user identity and no RBAC-awareness. Anyone who can sign in can do everything
+the credentials kweblens holds can do, and no action can be attributed to a person.
+
+That is a *decided position* — ADR-001, accepted 2026-07-30 — not a gap awaiting a fix. It is
+only an honest position if the product keeps saying so, which is why this page says it first.
+====
+
+== The two modes
+
+Authentication lives in one Spring Security filter chain (`web/security/SecurityConfig`) with
+a single switch, `kweblens.security.open-mode`.
+
+[cols="1,3"]
+|===
+| Mode | Rule
+
+| `open-mode=true` *(the default)*
+| Every `GET` is public. Every non-`GET` — apply, patch, scale, restart, rollback, delete,
+exec, port-forward, Helm, runtime cluster changes — requires the admin login.
+
+| `open-mode=false`
+| Everything requires the admin login except the health endpoints, the login page and the SPA
+shell (see the always-public list below).
+|===
+
+The default exists so a freshly started server and CI are usable without a credential dance.
+It is not a deployment posture. *Set `kweblens.security.open-mode=false` for anything that is
+not a laptop.*
+
+=== What is public in both modes
+
+`/actuator/health/**`, `/actuator/info`, `/login`, `/error`, and the SPA entry points `/`,
+`/ui` and `/ui/**`. Everything else follows the mode.
+
+Note what is *not* on that list: `/actuator/metrics` and `/actuator/prometheus` are ordinary
+`GET` endpoints, so they are public in open-mode and authenticated when `open-mode=false`. If
+you scrape them, the scraper needs the admin credential in closed mode.
+
+=== What is authenticated even in open-mode
+
+Three path families are always authenticated, including their `GET`s, because what they
+return is itself a secret. Their matchers are declared *before* the open-mode rule, so they
+win.
+
+[cols="1,3"]
+|===
+| Family | Why
+
+| `/ws/**` — pod exec and attach
+| A shell inside a container is not a read. The WebSocket handshake always requires auth.
+
+| `/api/v1/clusters/*/pods/*/*/files`, `/api/v1/clusters/*/pods/*/*/files/**`
+| The pod file browser reads arbitrary paths out of a container — including projected Secret
+volumes and the service-account token under `/var/run/secrets`. Letting those `GET`s ride the
+public read path would make secret exfiltration an *unauthenticated* operation. The feature
+is also off unless `kweblens.files.enabled=true`.
+
+| `GET /api/v1/helm/values`, `/api/v1/helm/values/**`,
+`/api/v1/clusters/*/helm/releases/*/*/values`
+| A release's stored config and the saved values-file library routinely carry plaintext
+secrets, and are returned raw.
+|===
+
+The MCP surface follows the same chain and is not exempted: the SSE handshake at `/sse` is a
+`GET` (public in open-mode), while the JSON-RPC messages that actually call a tool are
+`POST /mcp/message` and therefore need the admin login in *both* modes. `/api/**` and
+`/mcp/**` are exempt from CSRF — they are called by non-browser clients that authenticate per
+request and cannot obtain a token — and that exemption is what makes MCP callable at all, not
+a relaxation of authentication. See xref:mcp.adoc[MCP server].
+
+== The single admin account
+
+There is *one* in-memory user: `kweblens.security.admin-username` (default `admin`) and
+`kweblens.security.admin-password`, BCrypt-encoded at startup. No user store, no registration,
+no second account.
+
+*If no password is set, one is generated for that run and logged at `WARN`:*
+
+[source]
+----
+No kweblens.security.admin-password set — generated one for this run: <uuid>
+----
+
+It changes on every restart. That is deliberate: a default password in the source would be a
+default password in every deployment, so kweblens has none and never should. Supply the
+password out of band — an environment variable from a Secret, not a value in
+`application.yml` and not a literal in a chart.
+
+== Why the session cookie exists
+
+The authenticated context is persisted to *both* the request and the `HttpSession`
+(`DelegatingSecurityContextRepository` over `RequestAttributeSecurityContextRepository` and
+`HttpSessionSecurityContextRepository`).
+
+The reason is the terminal. The SPA signs in once with HTTP Basic
+(`POST /api/v1/auth/session`); the exec terminal then opens a WebSocket, and *a browser
+cannot attach Basic credentials to a WebSocket handshake*. Only a cookie rides that
+handshake, so the one-shot Basic login has to establish a `JSESSIONID` for the socket to
+authenticate with. Stateless Basic on every other API call keeps working unchanged.
+
+Two consequences worth knowing: a failed Basic login answers a bare `401` with no
+`WWW-Authenticate`, so the browser does not hijack the SPA's sign-in with its native prompt;
+and `/api/**` and `/ws/**` answer unauthenticated calls with `401` rather than a redirect to
+the login page.
+
+== Identity: what kweblens does not do
+
+This is ADR-001 (`docs/design/adr-001-identity-model.md`, ACCEPTED). Stated without softening:
+
+* *No per-user identity.* No OIDC, no header trust, no user directory. One shared admin
+  account is the whole model.
+* *kweblens acts as itself.* Every cluster call rides the one `KubernetesClient` the
+  `ClusterRegistry` owns for that cluster, built from the kubeconfig or the pod's
+  ServiceAccount. Your identity is never presented to the API server. There is no token
+  pass-through and no impersonation in the shipped code.
+* *No RBAC-awareness.* kweblens does not ask the cluster what you may do, so the UI offers
+  actions that then fail with a 403 from the API server. That refusal is the API server's,
+  not kweblens's.
+* *Authorization is the credential's, not the person's.* Anyone who can sign in can do
+  everything the underlying credentials can do — every cluster in the rail, every namespace,
+  every kind, and every write verb the ServiceAccount holds.
+* *Actions cannot be attributed to a person.* Audit entries name the account (`admin`), which
+  is the same account for everyone.
+* `GET /api/v1/about` reports this in machine-readable form: `security.perUserIdentity` is
+  `false` and `security.rbacAware` is `false`, alongside the effective mode. The diagnostics
+  panel shows the same row. That disclosure is deliberate and signed off, not a placeholder.
+
+Why the position is defensible: kweblens targets a *single trusted operator*. Multi-tenancy
+is not a goal, so authentication exists to stop drive-by writes, not to separate people. When
+identity does arrive, impersonation (`Impersonate-User` / `Impersonate-Group`) is the
+sanctioned mechanism, and the ADR names the trigger for revisiting: a second person needing
+their own view, exposure beyond a trusted network, or a feature that must attribute an action
+to a human.
+
+[WARNING]
+====
+`SelfSubjectAccessReview` is sanctioned *only* as a UI affordance — greying out a button that
+would 403 — and never as an authorization gate. Gating on it means the privileged read has
+already executed and kweblens is deciding afterwards whether you should have seen it, so any
+path that forgets to ask, asks the wrong question, or is added later leaks. It *fails open*.
+Enforcement belongs at the API server. (No SSAR call exists in the code today.)
+====
+
+== Audit
+
+Every mutating action — apply, patch, scale, restart, rollback, delete, exec/attach,
+port-forward, Helm actions, runtime cluster add/edit/remove, pod file read/write/delete —
+goes through `AuditService` and is recorded *twice*.
+
+. *To the `kweblens.audit` logger*, one structured line per entry. This is the durable copy:
+  whatever already ships the application log keeps it, so it survives a restart, and it can be
+  routed to its own file or appender *by logger name* without changing kweblens.
+. *To a bounded in-memory ring* — the newest 500 entries, newest first, surfaced at `/audit`
+  and `GET /api/v1/audit`. This is a live view only. Because the line is already in the log,
+  eviction from the ring no longer loses the record.
+
+A line looks like:
+
+[source]
+----
+kweblens-audit seq=42 ts=2026-07-31T10:15:30.123456Z user="admin" cluster="prod" action="scale=3" target="Deployment/web/api"
+----
+
+`seq` is a per-process counter, so a gap means lines were lost in shipping rather than that
+nothing happened.
+
+*Values are quoted, escaped and stripped of control characters.* Quotes and backslashes are
+escaped and every `\p{Cntrl}` character is replaced with a space, because a target can carry
+attacker-influenceable text — a pod file path, a Helm release name — and a newline in it could
+otherwise forge a second, entirely fake audit line. One entry is always exactly one parseable
+line.
+
+*The category is pinned to `INFO`* in `application.yml` (`logging.level.kweblens.audit: INFO`)
+so setting `logging.level.root=WARN` cannot silently switch the trail off. If you tune log
+levels, leave that key alone.
+
+*Entries carry references, never contents.* A kubeconfig upload is audited as
+`cluster-update-credential` against the cluster id; a pod file write as `file-write=<n>B`
+against the file's path. No credential, request body or file byte reaches the trail — keep it
+that way when you add a write endpoint.
+
+The one thing the trail cannot tell you is *who*, in the human sense. See the identity section
+above.
+
+== Exposing kweblens: what to actually do
+
+If kweblens is reachable by anyone other than you, all four of these, not a subset:
+
+. *Set `kweblens.security.open-mode=false`* (chart: `auth.openMode=false`). In open-mode a
+  reader who never signs in can enumerate every object in every cluster kweblens holds. That
+  includes Secret *keys* — list rows ship ConfigMap/Secret values as `null`, but the drawer
+  fetches the full object, and the drawer is a `GET`.
+. *Put an identity provider in front.* kweblens has one shared account and cannot give you
+  per-person access; a reverse proxy doing OIDC/SSO in front of it is where individual
+  sign-in and revocation live. kweblens still holds one credential behind that gate — the
+  proxy tells you who came in, not who did what inside.
+. *Terminate TLS in front.* kweblens serves plain HTTP in the pod. The admin password travels
+  as HTTP Basic and the session as a cookie; both are in the clear without TLS at the ingress.
+. *Scope the cluster credential tightly.* Grant the read-only role first and add write verbs
+  only when you need the mutating actions — see xref:deployment.adoc[Deploying to Kubernetes].
+  kweblens's blast radius *is* its RBAC, because it has no second layer of its own.
+
+And these, in proportion to how exposed it is:
+
+* *Set a strong admin password explicitly.* A generated one is logged in plaintext and changes
+  every restart.
+* *Leave the pod file browser off* (`kweblens.files.enabled` defaults to `false`) unless you
+  need it. It reads mounted Secrets and the service-account token off a container's disk,
+  which no other surface does. If you enable it, `kweblens.files.writable=false` gives you
+  browse-and-download only, and `kweblens.files.allowed-roots` confines it to listed prefixes
+  (resolved through `readlink -f`, so a symlink cannot step outside).
+* *Leave port-forward binding on loopback.* `kweblens.port-forward.bind-address` is blank by
+  default, which binds loopback only; `0.0.0.0` publishes a forwarded cluster port on the
+  kweblens host's network.
+* *Ship the audit log off the box*, so the record outlives the container that made it.
+* *Treat every stored kubeconfig as a credential.* Runtime-added clusters are persisted as
+  Secrets in kweblens's own namespace (or `0600` files off-cluster); anyone with the admin
+  login can add one, and the RBAC that comes with it.
+* *Remember the AI path is off by default.* `kweblens.ai.enabled` gates it, and a `GET` never
+  calls a model — only the explicit `POST …/diagnose/summary` does, and it is audited. Cluster
+  findings leave the machine when you turn it on.
+* *Remember MCP tool output leaves the machine too.* It is redacted at the boundary — Secret
+  values and `last-applied-configuration` replaced, `managedFields` dropped — precisely
+  because it lands in someone's inference logs. The dashboard is deliberately not redacted.
+
+== Related
+
+* xref:deployment.adoc[Deploying to Kubernetes] — the RBAC role, the auth Secret, the chart
+* xref:configuration.adoc[Configuration] — every `kweblens.*` property
+* xref:mcp.adoc[MCP server] — what the tool surface exposes, and what is redacted
+* xref:logs-exec-and-files.adoc[Logs, exec and pod files] — the surfaces this page gates

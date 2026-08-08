@@ -1,0 +1,277 @@
+include::_header.adoc[]
+= Logs, exec and pod files
+
+Four ways into a running container: read its logs, get a shell in it, forward a port out of it,
+and — if you turn it on — browse its filesystem. All four are more privileged than looking at
+YAML, and the security model reflects that.
+
+[IMPORTANT]
+====
+**Exec and the whole pod-file family require the admin login even in open-mode.** Open-mode makes
+`GET` endpoints public so the dashboard works out of the box, but a shell in a container and a
+file read out of one are not ordinary reads — a container's disk holds mounted Secrets and its
+service-account token. Those path families are matched as `authenticated()` *before* the
+open-mode rule, so a file read is never an unauthenticated `GET`.
+
+Logs and port-forward listing follow the ordinary rule: readable in open-mode, and starting or
+stopping a forward requires the login. See xref:security.adoc[Security and identity].
+====
+
+== Pod logs
+
+Logs open in the **dock** — a resizable panel across the bottom of the window with a tab per
+session. Any tab can be popped out into a floating window with `⧉` and docked again; the stream
+survives the move, because the session's DOM is relocated rather than rebuilt.
+
+Reach them from a row's `⋮` menu or the detail drawer:
+
+* **Logs** on a Pod — one container, or all of that pod's containers at once
+* **Logs (all pods)** on a Deployment, StatefulSet, DaemonSet, ReplicaSet or Job — every pod
+  behind the workload, in one stream
+
+Both require no login in open-mode.
+
+=== Multi-source streaming
+
+`GET /api/v1/clusters/{id}/logs/stream` multiplexes many containers onto one SSE stream. Each
+source is one container of one pod, identified as `namespace/pod/container`.
+
+Sources are resolved either from a pod's containers (init containers can be included, and are
+listed last) or from a workload's `spec.selector.matchLabels`, with the pods sorted by name so a
+given replica keeps the same colour and label across reconnects.
+
+* **Up to 24 sources.** Past that the stream still works on the first 24 and **says so** —
+  _Following N of M matching containers — the rest are not being streamed_ — rather than quietly
+  dropping the rest.
+* **Each source gets a colour and a text prefix.** Colour is never the only cue. In workload
+  scope the shared pod-name prefix is stripped so replicas are distinguishable as text.
+* **Ordering is best-effort and declared as such.** Lines are accumulated and timestamp-sorted
+  within a short window before being sent; the stream tells the client that this is the contract
+  rather than implying a total ordering across pods that does not exist.
+* History comes first: each source's tail snapshot (200 lines by default) is taken *before* its
+  follow opens, so you do not get live lines interleaved ahead of the backlog.
+
+=== New pods join a stream already running
+
+During a rollout the pods you started watching go quiet and new ones appear — which is precisely
+when someone is watching. kweblens **re-resolves the workload's pods every 4 seconds** and attaches
+readers to whatever is new, so replicas created mid-rollout join the stream in flight.
+
+That is polling, and deliberately so: a new pod is not readable the moment it appears, so a watch
+would still need the retry loop that polling already is, and would additionally own watch
+re-establishment.
+
+A source that fails is reported per-source (the rest keep streaming) and reported again when it
+recovers. Sources that ended are re-attached by a later refresh.
+
+=== Reading the stream
+
+The log pane offers a container selector, a text filter applied **at render** so it re-reveals
+lines already received, `wrap`, `pause`, `copy`, and a source legend where clicking a source
+toggles it and double-clicking isolates it. It follows the tail unless you scroll up, and tells you
+when it is paused at a scroll position.
+
+=== Refusals are not log lines
+
+fabric8 returns an API-server refusal **as log content**: asking for the log of a container that
+has not started answers HTTP 400 with a `Status` body, and neither `getLog()` nor `watchLog()`
+throws — both hand you that JSON as though the application had printed it.
+
+kweblens recognises both wire forms (an API-server `Status` object, and the kubelet's prose for
+garbage-collected previous-run logs) and reports them as errors against the source. Without that,
+every pod a rollout created contributed a fabricated line attributed to your application.
+
+=== Other log endpoints
+
+* `GET …/pods/{ns}/{pod}/log?container=&tailLines=` — a plain-text snapshot, 200 lines by default
+* `GET …/pods/{ns}/{pod}/log/stream?container=` — single-container SSE follow
+* `GET …/pods/{ns}/{pod}/log/previous?container=&tailLines=` — the **previous** container instance's
+  log, 500 lines by default. This is the crash-loop view: what the container said before it died
+* `GET …/logs/sources` — which sources a given scope resolves to, and whether the set was truncated
+
+The SPA drives the multi-source endpoint; the per-pod endpoints remain for scripting and the MCP
+tool surface.
+
+[NOTE]
+====
+Every log stream carries the 15-second SSE keepalive. It is load-bearing here: an `SseEmitter`
+learns its client is gone only from a failed write, and a **quiet** pod produces no writes — so
+without it a closed tab left the API-server connection and its reader thread alive, measured at
+over five minutes. Releasing a log follow also has to close the stream, not just the watch handle;
+`LogWatch.close()` alone does not stop a follow.
+====
+
+== Exec into a container
+
+`Shell` on a pod opens a terminal session in the dock — xterm.js in the browser, a WebSocket to
+`/ws/exec`, and the Kubernetes exec API at the far end. `Attach to Pod` uses the same socket in
+attach mode, which connects to the container's existing main process rather than starting a new
+one.
+
+The handshake **always requires authentication**, in both security modes. Because a browser cannot
+attach Basic auth to a WebSocket handshake, the SPA's sign-in establishes a session cookie that
+the socket then rides — which is why the authenticated context is persisted to the HTTP session
+and not only to the request.
+
+Every exec and attach is audited against the pod.
+
+Two limits worth knowing:
+
+* **The shell is `sh`.** Not configurable, and there is no `bash` fallback. A container without a
+  shell cannot be exec'd into.
+* **The terminal does not resize the remote PTY.** The browser refits xterm locally on resize, but
+  no resize message is sent, so a full-screen program's idea of the window size is whatever it
+  started with.
+
+Exec runs with a TTY and stderr merged into stdout. The separate one-shot exec path used by the
+file browser deliberately runs **without** a TTY, because a PTY merges the two streams and performs
+newline translation, which corrupts binary payloads.
+
+== Port-forward
+
+`Port Forward` on a Service opens a dialog; forwards are then listed and stopped from the
+Port Forwards view, which refreshes every few seconds and shows each forward's status as `Active`,
+`Closed` or `Failed`.
+
+* `GET  /api/v1/clusters/{id}/port-forwards` — list
+* `POST /api/v1/clusters/{id}/port-forwards` — start `{kind, namespace, name, remotePort, localPort}`
+* `POST /api/v1/clusters/{id}/port-forwards/{id}/stop` — stop
+
+Starting and stopping are audited and require the login.
+
+**Targets are Pod and Service.** Not Deployment — the API refuses any other kind by name rather
+than guessing. A Service target is resolved to a concrete pod: the requested port is matched
+against the Service's ports, a `Running` pod is preferred among those the selector matches, and a
+named `targetPort` is resolved against that pod's declared container ports. Each failure says
+which step failed — no selector, no pods, no such port, or a named port the pod does not declare.
+
+That resolution is why the dialog warns that a Service port may land on a different number: the
+forward goes to the pod's `targetPort`, and the list shows `remotePort → podPort` when they differ.
+
+**Leave the local port blank and the OS picks one**, which is then reported back. Forwards are
+server-side and outlive the tab that started them — that is intended, which is also why they have
+no heartbeat: unlike an SSE stream, a port-forward is a named resource you can come back and stop.
+
+Because the listening socket is bound by kweblens rather than by the cluster, closing a cluster's
+client is not enough to release it. Removing or re-pointing a cluster stops that cluster's
+forwards, since otherwise there would be no screen left on which to list them and they would hold
+the port until the process restarted.
+
+== The pod file browser
+
+Browse, view, download, edit, upload and delete files inside a container, over the same Kubernetes
+exec API the terminal uses. The UI is the pod detail drawer's **Files** tab.
+
+=== Off by default, on purpose
+
+[WARNING]
+====
+`kweblens.files.enabled` defaults to **`false`**.
+
+A container's disk holds things no other kweblens view exposes: projected Secret volumes, and the
+service-account token under `/var/run/secrets`. kweblens runs as a single shared identity and is
+not RBAC-aware, so enabling this widens what one compromised session yields. It is opt-in by
+design, and that is a signed-off condition of the identity model, not an oversight.
+====
+
+=== Configuration
+
+[cols="2,1,3"]
+|===
+| Property | Default | Effect
+
+| `kweblens.files.enabled` | `false` | Turns the feature on at all. Everything below is inert until it is `true`.
+| `kweblens.files.writable` | `true` | `false` makes it browse-and-download only — no edit, upload or delete.
+| `kweblens.files.max-read-bytes` | `1048576` | Largest file that may be viewed or downloaded.
+| `kweblens.files.max-write-bytes` | `1048576` | Largest payload that may be written into a container.
+| `kweblens.files.max-entries` | `1000` | Largest number of directory entries in one listing.
+| `kweblens.files.command-timeout` | `20s` | How long a single in-container command may run.
+| `kweblens.files.allowed-roots` | empty | Absolute path prefixes to confine the browser to. Empty means the whole container filesystem.
+|===
+
+The first five have `KWEBLENS_FILES_*` environment variables in the shipped configuration.
+
+Oversized files are **refused**, not truncated — a silently truncated copy that you then saved
+would replace the whole file with a fragment.
+
+=== Confinement with `allowed-roots`
+
+When roots are set, the check runs **twice**: once on the requested path after normalisation, and
+again on the path the container itself resolves it to (`readlink -f`). So a symlink *inside* a root
+that points outside it is refused (`path-outside-roots`), and a path the container cannot resolve
+at all is refused too (`unresolvable-path`).
+
+It fails closed. A path that cannot be checked is not allowed.
+
+Paths must be absolute, are length-limited, and a `..` that would climb above `/` is rejected
+rather than clamped. Paths are never spliced into a shell string — they are passed as arguments —
+so quoting is not a defence that could be got wrong.
+
+`/api/v1/about` reports the roots to the browser (only when authenticated), so the Files tab opens
+*inside* a root instead of on `/`, and a breadcrumb crumb outside the roots is shown disabled and
+labelled as such rather than silently missing.
+
+=== What the Files tab offers
+
+The tab appears on Pods only, and only when the feature is not known to be disabled. Signed out,
+it shows an explanation and a sign-in button — it does not fire a request that would 401.
+
+* A **container** selector (init containers listed last and marked)
+* A breadcrumb trail, `Up` and `Refresh`
+* Name, Type, Size, Mode, Owner and Modified columns; symlinks render as `name → target`
+* **Download** on any file
+* **Edit** only when the file is editable *and* writes are enabled
+* **Upload**, likewise only when writes are enabled
+* **Delete**, with confirmation, only when writes are enabled
+
+The write capabilities come from `/api/v1/about` (`podFiles.enabled`, `.writable`,
+`.maxWriteBytes`), so Edit and Upload are offered only where a write can actually succeed, and the
+UI still learns from the first real listing if it is talking to an older server.
+
+A binary file is not opened in an editor at all — saving it there would corrupt it. A truncated
+read is shown read-only for the same reason.
+
+Upload takes **one file at a time**, by picker or drag-and-drop, and replacing an existing name
+asks first. A dropped folder, or several files at once, is refused with an explanation and nothing
+is sent. Oversize uploads are refused before the file is read.
+
+=== How it works, and what it needs from the container
+
+Every operation is one short-lived one-shot `sh` command, bounded by `command-timeout`. Listings
+are parsed from NUL-delimited fields rather than by scraping `ls -la`, whose columns differ between
+busybox, toybox and GNU coreutils and which is ambiguous for filenames containing spaces or
+newlines.
+
+A container with no shell — distroless, scratch — **reports that plainly** instead of showing an
+empty tree.
+
+Two safety properties of the write path:
+
+* A write goes to a temporary file, is verified by byte count, and is then redirected over the
+  target — a redirect rather than a move, so the file keeps its inode, owner and mode.
+* The script reads **exactly the expected number of bytes** from stdin. The Kubernetes exec API
+  gives the client no way to signal end-of-input, so a script that read to EOF would hang for the
+  whole `command-timeout`, return a 504 — and then land anyway once the connection dropped, having
+  already reported failure for a write that happened. Anything new piped into a container must
+  bound its own read of stdin for the same reason.
+
+Deleting is restricted to regular files and symlinks; a directory is refused. `rm -rf` driven from
+a browser is not a mistake anyone recovers from.
+
+=== Auditing
+
+Every content read, download, write and delete is audited **with its path**. Directory listings are
+not — drowning the bounded audit ring in them would hide the reads that matter.
+
+Failures come back as stable codes rather than raw shell noise: `file-not-found`,
+`not-a-directory`, `is-a-directory`, `file-not-readable`, `file-not-writable`, `file-too-large`,
+`path-outside-roots`, `unresolvable-path`, `no-shell`, `container-not-running`,
+`container-command-timeout`, and the two gate refusals `files-disabled` and `files-read-only`. The
+browser has an explanation for each, and a test fails the build if the server grows a code the UI
+cannot explain.
+
+== Related
+
+* xref:security.adoc[Security and identity] — why these surfaces are authenticated in both modes
+* xref:configuration.adoc[Configuration] — every `kweblens.*` property
+* xref:browsing-resources.adoc[Browsing resources] — the drawer these tabs live in

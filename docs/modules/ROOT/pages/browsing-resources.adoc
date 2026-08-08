@@ -1,0 +1,239 @@
+include::_header.adoc[]
+= Browsing resources
+
+The left navigation, the resource lists it opens, and the detail drawer behind a row. This is
+the surface you spend most of your time in, so it is worth knowing exactly what it shows — and,
+in one important case, what it deliberately does not send.
+
+== The navigation
+
+The left menu is a declarative registry, not a hand-built menu. `NavCatalog` holds **39 built-in
+kinds across 7 static categories**, in this order:
+
+[cols="1,1,4"]
+|===
+| Category | Kinds | Contents
+
+| Cluster | 3 | Nodes, Namespaces, Events
+| Workloads | 8 | Pods, Deployments, Stateful Sets, Daemon Sets, Replica Sets, Jobs, Cron Jobs, Replication Controllers
+| Config | 13 | Config Maps, Secrets, Resource Quotas, Limit Ranges, Horizontal Pod Autoscalers, Pod Disruption Budgets, Priority Classes, Runtime Classes, Leases, Mutating Webhook Configs, Validating Webhook Configs, Validating Admission Policies, Validating Admission Policy Bindings
+| Network | 6 | Services, Ingresses, Endpoint Slices, Endpoints, Ingress Classes, Network Policies
+| Storage | 3 | Persistent Volume Claims, Persistent Volumes, Storage Classes
+| Access Control | 5 | Service Accounts, Cluster Roles, Roles, Cluster Role Bindings, Role Bindings
+| Custom Resources | 1 | Definitions (the CRDs themselves)
+|===
+
+The catalog is served per cluster at `GET /api/v1/clusters/{id}/nav`, because two of its parts
+depend on what the cluster actually has installed.
+
+=== Custom Resources are discovered, not configured
+
+Under **Custom Resources**, kweblens adds one collapsible sub-group per **API group**, generated
+from the cluster's own CRDs and sorted alphabetically; the kinds inside each group are sorted by
+label. Nothing has to be registered, and a CRD installed after startup appears when the catalog
+is next fetched.
+
+Custom resource lists are rendered with the **CRD's own printer columns** — the same
+`additionalPrinterColumns` that `kubectl get` uses — so a custom kind gets meaningful columns
+rather than just name and age.
+
+=== The Gateway category is promoted at runtime
+
+Gateway API is delivered as CRDs, but it is networking, not a curiosity. When the
+`gateway.networking.k8s.io` group is discovered, its kinds are lifted out of Custom Resources
+into their own **Gateway** category, placed **immediately after Network** — where someone
+looking for ingress-shaped things will actually look. The kinds are removed from Custom
+Resources at the same time, so they never appear twice.
+
+Inside the category the order follows traffic flow rather than the alphabet — `GatewayClass`,
+`Gateway`, `ListenerSet`, `HTTPRoute`, `GRPCRoute`, `TLSRoute`, `ReferenceGrant`,
+`BackendTLSPolicy` — because reading top to bottom then follows a request. Kinds outside that
+list (a newer API version, an extension of the same group) sort after the known ones rather than
+being dropped.
+
+The promotion is **conditional**. A static entry for a CRD-delivered kind would give every
+cluster without Gateway API a dead category that errors when clicked, so the category only exists
+where the group does.
+
+== Namespace filter and badge counts
+
+The top-bar namespace selector — `All namespaces` plus the cluster's namespaces — scopes the
+lists. The filter is applied **server-side**, as a `namespace` query parameter on the list, watch
+and count requests, not by filtering a full list in the browser. Cluster-scoped kinds send no
+namespace at all: a PersistentVolume or a ClusterRole has none to filter on.
+
+The choice is remembered **per cluster**, so switching clusters does not carry one cluster's
+namespace over to another where it may not exist.
+
+Separately, the list header has its own search box that filters the rows already loaded (by name,
+namespace and kind) and reports `N of M` while it is active. That one *is* client-side, and it
+only ever narrows what the namespace filter already fetched.
+
+Each nav entry carries a **badge count**. Those come from `GET /api/v1/clusters/{id}/counts`,
+which computes all of them without listing anything: one `limit=1` request per kind plus the
+`metadata.remainingItemCount` the API server returns. That matters because the badges are
+recomputed on every namespace switch, and doing it by listing was measured at 22.1 MB of
+API-server traffic per call on a real cluster.
+
+`remainingItemCount` is best-effort, so its absence is handled explicitly rather than guessed:
+no continue token means the page *is* the whole collection and the count is exact; a truncated
+page without the field falls back to a full list.
+
+A category badge is the sum of its kinds' counts, and counts **only the kinds it actually has a
+number for**. A category with no counts available shows no badge at all rather than a number that
+looks like a total but is really the number of menu entries.
+
+== What a list row shows
+
+Every list has the same frame — a selection checkbox, `Name`, `Namespace` (for namespaced kinds;
+clicking it sets the namespace filter), the kind's own columns, `Age`, and a `⋮` menu — with the
+middle columns varying by kind. ConfigMaps add a `Keys` count; Secrets add `Type` and `Keys`.
+Custom resources get the CRD's printer columns, taking the CRD's stored version and dropping the
+wide-only ones, which is the same view `kubectl get` gives you by default.
+
+== Live updates
+
+Lists are live. `GET …/resources/{resourceId}/objects` fetches the current objects and
+`…/objects/watch` streams Kubernetes watch events over SSE, so rows appear, change and disappear
+without a refresh.
+
+Two properties of that stream are worth knowing:
+
+* **Events are batched per animation frame.** A burst of watch events on a large list is coalesced
+  into at most one update per frame, which is what stops a busy namespace freezing the tab. This
+  is guarded by a test, not just by intent.
+* **Every stream carries a keepalive.** An `SseEmitter` only learns its client is gone from a
+  failed write, and a quiet cluster produces no writes — so a departed subscriber would otherwise
+  hold a cluster-side watch open indefinitely (measured at over five minutes). A `:keepalive`
+  comment every 15 seconds fails fast on a closed socket, completes the emitter and closes the
+  watch.
+
+== A list row is not the whole object
+
+This is the one place where what you see in a list is deliberately less than what exists, and it
+is worth being precise about, because it is **not redaction**.
+
+List payloads pass through a projection at the web boundary that does two things:
+
+* **`managedFields` is stripped** from every object. It is per-manager field-ownership
+  bookkeeping, nothing in the UI renders it, and it is 37–48% of a real Pods or ReplicaSets
+  payload.
+* **ConfigMap and Secret values are dropped, keys kept.** `data`, `stringData` and `binaryData`
+  arrive as their keys mapped to JSON `null`. The list only ever shows a key *count*, and that
+  data is 96–99% of those payloads.
+
+Across six kinds on a real cluster this took a listing from 9.85 MB to 1.28 MB, 98.8% of the
+saving on Secrets alone.
+
+The strip is restricted to ConfigMap and Secret on purpose — on a custom resource `data` can be
+the entire spec, and a CRD's printer columns are free to render it.
+
+[IMPORTANT]
+====
+A `null` value renders as **`—`**, never as an empty string. The two are different claims:
+`—` means *kweblens did not send this value*, whereas `""` would mean *the value is empty*.
+Inventing an empty string here would be a lie about the cluster.
+====
+
+Both the `objects` endpoint and the `objects/watch` stream go through the same projection —
+separate code paths, one rule.
+
+=== The drawer still shows every value
+
+Opening a row's detail drawer refetches the **full object** from `GET …/object` whenever the row
+it was given contains a `null` inside one of those fields. The predicate reads the row rather
+than consulting a hard-coded list of kinds, deliberately: a kind list in the browser would be a
+second copy of the server's rule, and the copy that goes stale silently.
+
+So the projection bounds what a *listing* pushes into the browser. It does not hide anything from
+you. Per the identity model, an operator may read any Secret the underlying credentials can
+reach, and the drawer shows the real values — see xref:security.adoc[Security and identity].
+
+== Global search
+
+The command palette (`Ctrl`/`⌘`-`K`) is both the navigation jump — switch cluster, jump to a kind
+— and the global object search. Typing at least two characters queries
+`GET /api/v1/clusters/{id}/search?q=…`, debounced, and merges matching objects into the results
+alongside the navigation entries.
+
+The search spans **13 kinds** rather than every kind in the catalog, querying up to 8 at a time:
+Deployments, StatefulSets, DaemonSets, CronJobs, Services, Ingresses, ConfigMaps, Secrets,
+PersistentVolumeClaims, Namespaces, Nodes, and — ranked below those — Pods and Jobs. ReplicaSets
+are deliberately excluded: they are generated, numerous, and almost never what someone is looking
+for by name.
+
+Ranking prefers a prefix match over a word-boundary match over a substring, prefers shorter names,
+and gives a bonus to the eleven primary kinds — so searching a Deployment's name finds the
+Deployment before the pods it generated.
+
+Results are capped (20 by default, 100 maximum). Crucially, a kind that was **not** searched is
+reported rather than silently omitted: if a query is superseded by a newer one, or a kind is
+skipped, the response names it and the reason. An incomplete search says it is incomplete.
+
+Search respects the namespace filter.
+
+== The detail drawer
+
+Clicking a row opens a drawer served by
+`GET /api/v1/clusters/{id}/detail/{resourceId}/{namespace}/{name}`, which returns the object plus
+its resolved relations. The joins are done **server-side, in one request** — the alternative was
+N extra requests per drawer open from the browser, and the same payload also serves other
+consumers.
+
+Alongside the overview it offers the object's YAML (see xref:editing-and-applying.adoc[Editing
+and applying]), its events, and — for pods — logs, a shell, and optionally
+xref:logs-exec-and-files.adoc[files].
+
+=== The twelve relation sections
+
+Sections appear only where they apply, so you will never see all twelve at once:
+
+[cols="1,3"]
+|===
+| Section | Shown for, and what it answers
+
+| **Endpoints** | A Service — its backing addresses, ready and not-ready distinguished
+| **Routed By** | A Service — the Ingresses that route traffic to it
+| **Selected Pods** | Anything with a pod selector — the pods that selector actually matches
+| **Mounted By** | A ConfigMap, Secret or PersistentVolumeClaim — which pods mount it
+| **Replica Sets** | A Deployment — its ReplicaSets, which is also its rollout history
+| **Autoscaled By** | A Deployment, StatefulSet, ReplicaSet or ReplicationController — the HPAs targeting it
+| **Disruption Budgets** | A Pod, Deployment, StatefulSet, DaemonSet or ReplicaSet — the PDBs covering it
+| **Bound Volume** | A PersistentVolumeClaim — the PersistentVolume it is bound to
+| **Bound Claim** | A PersistentVolume — the claim bound to it
+| **Service Account** | A Pod — the ServiceAccount it runs as
+| **Granted By** | A ServiceAccount — the RoleBindings and ClusterRoleBindings that grant it permissions
+| **Owned By** | Anything with owner references — the owner chain upwards, to a depth of three
+|===
+
+Three of them — Endpoints, Selected Pods and Mounted By — get kind-specific columns; the rest
+render as name/kind/namespace tables.
+
+Each section is bounded at **100 items**, and says so when it truncates rather than quietly
+showing a prefix: _Showing the first N only — there are more._ An empty section renders the
+literal word `None.`, and a section kweblens is not permitted to read says that too — a
+permission error is reported, not folded into an empty list.
+
+[NOTE]
+====
+The drawer requests relations for **namespaced objects only**, because the detail endpoint takes
+the namespace in its path. **Bound Claim** is therefore reachable through the API but never
+requested by the current UI, since PersistentVolumes are cluster-scoped.
+====
+
+=== What relations deliberately do not answer
+
+`Relation` carries objects, so a join whose interesting answer is that the referenced object is
+**missing** cannot be expressed: an absent reference could only be dropped (claiming a
+completeness that is false) or fabricated (claiming an existence that is false). Ingress TLS
+secret expiry is the usual request and is not implemented for that reason.
+
+Requests-and-limits versus actual usage is not a relation either — that is the metrics path, see
+xref:metrics.adoc[Metrics].
+
+== Limits
+
+* **No server-side pagination.** Very large clusters will be slow to list. See
+  xref:performance.adoc[Performance and scale] for what has been measured and where the limits bite.
+* **Not RBAC-aware.** The nav offers every kind in the catalog whether or not the credentials
+  kweblens holds can list it; a kind it cannot read fails when opened rather than being greyed out.

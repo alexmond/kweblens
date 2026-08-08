@@ -1,0 +1,19 @@
+name: kweblens
+title: kweblens
+version: true
+start_page: ROOT:index.adoc
+nav:
+  - modules/ROOT/nav.adoc
+asciidoc:
+  attributes:
+    # No `api-*` javadoc.io attributes yet, deliberately. javadoc.io serves versioned Javadoc
+    # only for artifacts that are actually on Maven Central, and kweblens has never been
+    # released — no tags, version still 0.1.0-SNAPSHOT. Adding the links now would ship a page
+    # full of 404s. Add `api-core` / `api-cli` here, and the API section to installation.adoc,
+    # in the same change that cuts the first release.
+    toc: left
+    sectnums: ''
+    keywords: 'Kubernetes, Kubernetes IDE, Kubernetes dashboard, Spring Boot, fabric8, Helm, MCP, Vue'
+    author: 'Alexander Mondshain'
+    email: 'alex.mondshain@gmail.com'
+    imagesdir: ../images

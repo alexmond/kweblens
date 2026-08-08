@@ -1,0 +1,94 @@
+include::_header.adoc[]
+= Contributing
+
+Issues and pull requests go to https://github.com/alexmond/kweblens[github.com/alexmond/kweblens].
+This page is the short version; xref:development.adoc[Development] has the detail behind every
+command here.
+
+== Before you push
+
+[source,bash]
+----
+scripts/dev-verify.sh
+----
+
+That is the gate: `spring-javaformat:apply`, then `./mvnw -B verify` over the whole reactor —
+compile, Checkstyle, PMD, Java tests, JaCoCo, and the front-end `npm run check`. CI runs the same
+`./mvnw -B verify` on JDK 21, so **green here means green on the PR**.
+
+While iterating, `scripts/dev-test.sh <selector>` runs one test or one pattern without a full
+reactor build.
+
+== Code style
+
+* **spring-javaformat** (tabs, Spring conventions) — `./mvnw spring-javaformat:apply`, or just
+  let `dev-verify.sh` do it.
+* **Checkstyle** hard-fails at **800 lines per file** and **80 lines per method**. Target
+  **under ~500 lines** per source file as a guideline — split a fat controller into per-page
+  `*PageService` helpers rather than growing it.
+* **PMD** (`pmd-ruleset.xml`) fails on violation.
+* **Lombok** `@RequiredArgsConstructor` for constructor injection; `@ConfigurationProperties`
+  for configuration.
+* Front end: logic in `.ts`, rendering in `.vue`, so behaviour is testable without a DOM.
+
+The lint rules that most often fail a build are not fixed by `:apply`, so they surface at
+`validate` on the next run: **SpringLambda** wants `(e) -> …`; **SpringTernary** wants
+`(a != b) ? x : y`; **InnerTypeLast**; **UseUnderscoresInNumericLiterals** (`86_400`);
+**AppendCharacterWithChar** (`sb.append('m')`).
+
+== Tests must not hit a real cluster
+
+The suite is hermetic. Use the fabric8 mock — `@EnableKubernetesMockClient(crud = true)` — and
+set `kweblens.load-kubeconfig=false` in web tests so `ClusterBootstrap` skips ambient discovery;
+then register the mock client into the autowired `ClusterRegistry`.
+
+**The CRUD mock ignores `limit` and `dryRun`**, so a test that seeds objects and asserts on the
+outcome passes whether or not the flag was ever sent. Assert on the **exact outgoing request**
+instead. Coverage is gated: `kweblens-core` 0.70, `kweblens-web` 0.50, `kweblens-cli` 0.60 line
+coverage.
+
+If you add a live-updated list, add its watch to the per-animation-frame batching pattern — a
+test in the gate asserts that invariant. If you add an SSE endpoint, attach `SseKeepAlive`;
+another test fails the build if you do not.
+
+== A few standing constraints
+
+Worth knowing before proposing a change, because these are decided rather than open:
+
+* **One shared operator identity is the design, not a gap.** No OIDC, no per-user identity, no
+  RBAC-aware authorization. See xref:security.adoc[Security and identity] — user-facing text must
+  keep saying this plainly.
+* **Helm goes through the jhelm library, never the `helm` binary.**
+* **Every surface is a `web/<area>/` slice over a `kweblens-core` access service** — cluster
+  access is never reimplemented in a controller. See xref:architecture.adoc[Architecture].
+* **Remediation is suggest → approve → apply.** Never autonomous, always audited, all writes
+  behind auth.
+* **Never commit a kubeconfig.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig` and `.kube/`;
+  screenshots under `.playwright/` are gitignored for the same reason — they carry a live
+  cluster's hostnames, node names and namespaces.
+
+== How a pull request is verified
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: JDK 21 (Temurin),
+`./mvnw -B verify`, with surefire and JaCoCo reports uploaded as artifacts even on failure.
+That is the same command `dev-verify.sh` runs, so there should be no surprises.
+
+`scripts/pr-watch.sh <pr>` waits for the checks and prints each result as it lands, exiting 1 on
+any failure. Adding `--merge` squash-merges, but **only** when every check passed.
+
+Commit subjects in this repository read as prose sentences describing the change, with the PR
+number in parentheses — for example `Say what the server said, and never call an unanswered
+check clear (#306)`.
+
+== License
+
+The repository is dual-licensed by module, and a contribution is taken under the license of the
+module it touches:
+
+* `kweblens-core` and `kweblens-cli` — **Apache-2.0** (`LICENSE-APACHE-2.0.txt`). These are
+  libraries other code compiles against.
+* `kweblens-web` and `kweblens-it` — **AGPL-3.0** (`LICENSE-AGPL-3.0.txt`). This is the
+  self-hosted server.
+
+Keep new code on the right side of that line: if something belongs in the permissive access layer,
+put it in `kweblens-core` rather than reaching for it from the server module.

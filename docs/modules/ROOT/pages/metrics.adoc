@@ -1,0 +1,215 @@
+include::_header.adoc[]
+= Metrics
+
+kweblens reads usage numbers from two independent sources, and neither is required. What is
+missing degrades to an empty result rather than an error, so the dashboard works on a bare
+cluster.
+
+[cols="1,2,2"]
+|===
+| Source | What it gives | When it is absent
+
+| *metrics-server* (`metrics.k8s.io`)
+| Current CPU and memory per node and per pod — the live usage columns and bars.
+| Every usage call returns an empty list. No error.
+
+| *A Prometheus-compatible backend* (Prometheus, VictoriaMetrics, Thanos)
+| Time-series charts, per-node disk usage, and per-PVC volume fullness.
+| Charts report `available: false` and render "unavailable"; disk and volume figures are empty.
+|===
+
+Neither source is polled in the background. Every number is fetched when something asks for it.
+
+== metrics-server
+
+`MetricService` calls the cluster's `top` API and formats the result for display: CPU in
+millicores (`120m`), memory in mebibytes (`512Mi`). Pod usage is summed across the pod's
+containers, and can be scoped to one namespace.
+
+metrics-server is optional, so a `KubernetesClientException` is caught and reported as an empty
+list. That is deliberate but it is also ambiguous — an empty result means both "not installed" and
+"installed, no samples yet" — which is why the
+xref:health-and-diagnostics.adoc[diagnostics capability report] probes for the `metrics.k8s.io`
+API *group* instead of inferring presence from an empty list.
+
+Endpoints:
+
+* `GET /api/v1/clusters/{clusterId}/metrics/nodes`
+* `GET /api/v1/clusters/{clusterId}/metrics/pods[?namespace=…]`
+
+== The Prometheus-compatible backend
+
+=== How it is reached
+
+Queries go through the *kube-apiserver service proxy*:
+
+[source]
+----
+/api/v1/namespaces/{ns}/services/{svc}:{port}/proxy/api/v1/query_range?…
+----
+
+That is the whole point of the design. Cluster RBAC is the only credential involved, and kweblens
+needs no network path to the backend at all — it already has an authenticated connection to the
+API server.
+
+=== How it is found
+
+By default the backend is discovered by Service name across all namespaces. A Service matches if
+its name contains `prometheus`, or contains one of `prometheus-operated`, `prometheus-k8s`,
+`prometheus-server`, `vmsingle`, `victoria-metrics-single`, `thanos-query`,
+`thanos-query-frontend` — and does *not* contain any of `node-exporter`, `operator`,
+`alertmanager`, `pushgateway`, `kube-state-metrics`, `adapter`. The port is the one named `http`
+or `web`, else the first.
+
+Discovery fails *closed*: a wrong Service 404s and the charts read "unavailable" rather than
+showing another cluster's numbers. So the risk is a blank chart, not a wrong one.
+
+The case discovery cannot handle is a cluster with *two* valid backends of different scope —
+typically a global Thanos querier beside a local Prometheus. Both answer, and which one is picked
+depends on API ordering. That is what configuration exists for.
+
+=== Configuring it
+
+[source,yaml]
+----
+kweblens:
+  metrics:
+    prometheus-service: monitoring/prometheus-k8s:9090
+----
+
+The key is `kweblens.metrics.prometheus-service` (`MetricsProperties`, prefix
+`kweblens.metrics` — that one field is the whole class).
+
+*The value is a Service reference, `namespace/service:port` — not a URL.* An `http(s)://` value is
+not supported, because reaching a backend outside the cluster needs bearer/basic/mTLS handling and
+somewhere to keep the credential, which is deliberately not built until a deployment needs it.
+Such a value is *refused and reported*, not quietly ignored: `resolve()` returns
+`UNSUPPORTED_URL`, and the diagnostics panel renders it as its own row saying so.
+
+[WARNING]
+====
+*The configured value is process-wide, not per cluster.*
+
+`PrometheusMetricService.resolve(clusterId)` checks configuration *first* and returns immediately
+if a usable Service reference is set — `clusterId` is never consulted on that branch. The argument
+is used only when falling through to discovery, to pick which cluster's Services to list.
+
+So setting this key points *every* cluster kweblens is connected to at the same
+`namespace/service:port`. On a multi-cluster instance that is almost certainly wrong for all but
+one of them. Leave it unset and let discovery run per cluster, unless you have a single cluster or
+the ambiguous-backend problem. A per-cluster override would be new work, not a spelling change.
+====
+
+=== Ambiguity is reported, not just the choice
+
+`resolve()` returns *how* the backend was chosen, because that is exactly when the pick is a guess
+and the user is looking for why the charts are empty:
+
+[cols="1,3"]
+|===
+| Origin | Reported as
+
+| `CONFIGURED` | `configured: <value> (queried via the kube-apiserver service proxy)`
+| `DISCOVERED` | Exactly one candidate matched, so the guess was not really a guess.
+| `AMBIGUOUS` | `picked X from N matching services (…) — set kweblens.metrics.prometheus-service to choose`, naming every candidate.
+| `NONE` | No matching Service; the charts will show "unavailable".
+| `UNSUPPORTED_URL` | The configured value is a URL, which is the unbuilt direct-access path.
+|===
+
+Naming the concrete `namespace/service:port` is what makes a wrong auto-discovery obvious. The
+failure mode is picking the *wrong* service, not picking none.
+
+`GET /api/v1/clusters/{clusterId}/metrics/prometheus` returns the flat answer —
+`{"available": …, "service": …}` — for the UI. The full resolution, including the candidate list,
+is in xref:health-and-diagnostics.adoc[the diagnostics capability report].
+
+== Charts
+
+`GET /api/v1/clusters/{clusterId}/metrics/graph?target=…&minutes=60`
+
+PromQL is *built server-side from a fixed `target`*, never accepted raw from the client, and
+`namespace`/`name` are stripped to `[a-zA-Z0-9._-]` before being interpolated. The supported
+targets are:
+
+`pod-cpu`, `pod-mem`, `node-cpu`, `node-mem`, `node-disk`, `cluster-cpu`, `cluster-mem`.
+
+Anything else returns an unavailable series rather than an error.
+
+The response is a `MetricSeries`: `available`, a `unit` hint (`cores` or `bytes`), and the samples
+oldest-first as `{t, v}` with `t` in epoch seconds. Note the two-state distinction — `available:
+false` means no backend was reachable, while `available: true` with an empty `points` means the
+backend answered and had no data.
+
+The range is sampled at 60 steps across the window, with a floor of 15 seconds per step.
+
+=== Node identity
+
+node-exporter labels its series by `instance = <ip>:<port>`, not by node name. kweblens resolves
+each node's `InternalIP` from the Kubernetes API — *server-side, never from the client* — and
+builds the label matcher from that.
+
+The dots in the matcher are escaped with a double backslash on purpose: the matcher value is a
+PromQL *string literal*, so `\\.` in the query text unescapes to `\.` for the regex engine. A
+single backslash is not a valid string escape, and strict backends (VictoriaMetrics) reject the
+whole query with a 422.
+
+== Node disk usage
+
+`GET /api/v1/clusters/{clusterId}/metrics/nodes/disk`
+
+metrics-server does not expose disk, so this comes from node-exporter through the same backend.
+Per node, aggregated across all *real* filesystems: virtual and pseudo filesystem types
+(`tmpfs`, `ramfs`, `overlay`, `squashfs`, `iso9660`, `devtmpfs`, `nsfs`, `fuse.*`) are excluded,
+and series are deduplicated by device before summing, so a bind mount of the same device is not
+counted twice.
+
+Instances that do not map back to a known node are dropped rather than reported under their IP.
+
+== PVC capacity — read this before trusting the number
+
+Per-PVC fullness comes from kubelet's own stats (`kubelet_volume_stats_capacity_bytes` /
+`kubelet_volume_stats_used_bytes`), keyed `namespace/claim`. Those series exist wherever kubelet
+is scraped, which is the backend already serving the charts, so this needs no new source and no
+new credentials.
+
+What it does need is care at the point of display:
+
+[WARNING]
+====
+*The reported capacity is not necessarily the claim's size.* kubelet reports the *filesystem
+backing* the volume. For provisioners that enforce no per-volume quota — hostPath, local-path,
+plain NFS mounts — that is the node's disk or the whole share.
+
+Measured on a real cluster: ten NFS claims requesting between 1Gi and 30Gi all reported the same
+3.2 TB, and four local-path claims requesting 64Mi to 10Gi all reported the same 41.6 GB.
+====
+
+So every reading is checked against the claim's own requested size before it is used. A reading is
+accepted only if `capacity / requested <= 4`. The ratio is deliberately generous — filesystem
+overhead and rounding mean a claim legitimately reports a bit more or less than requested, while
+the mismatch this catches is orders of magnitude (3.2 TB against a 1Gi request is a factor of
+3,000).
+
+A claim with no stated request, or a capacity of zero, fails the check: without something to
+compare against there is no way to tell a real per-volume quota from a whole node's disk, and the
+honest answer is "we cannot say".
+
+A claim whose reading fails the check is reported as simply *bound* in the
+xref:health-and-diagnostics.adoc[Storage overview], not flagged on a figure that is not about it.
+Presenting it blindly would report a 64Mi claim as "41.6 GB, 38% used" — not a rounding error but
+a different volume entirely. A claim that passes the check and is at or above 90% is flagged
+"Nearly full".
+
+== What is not built
+
+Direct (non-proxy) HTTP access to a backend *outside* the cluster — Grafana Cloud, a central
+Thanos, Mimir — needs bearer/basic/mTLS handling and a place to keep the credential, and is not
+implemented. The proxy path covers every in-cluster backend and needs no credentials at all.
+Configuring a URL is refused with an explanation rather than failing quietly.
+
+== Related
+
+* xref:health-and-diagnostics.adoc[Health and diagnostics] — the capability report, and the
+  storage check that consumes volume usage
+* xref:configuration.adoc[Configuration] — every `kweblens.*` property
+* xref:rest-api.adoc[REST API] — the metrics endpoints in context

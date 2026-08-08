@@ -1,0 +1,262 @@
+include::_header.adoc[]
+= Installation
+
+There is only one way to get kweblens today: build it. Nothing has ever been released.
+
+[IMPORTANT]
+====
+*No artifact is published anywhere.* `kweblens-core` and `kweblens-cli` are configured to
+publish to Maven Central but no release has been cut — the version is still
+`0.1.0-SNAPSHOT`, there are no tags, and nothing resolves from a repository. There is also
+**no published container image**: the Helm chart's `values.yaml` defaults to
+`repository: kweblens` with no registry, so it assumes an image you built locally and
+pushed somewhere the cluster can pull from.
+
+Every route below therefore starts from a clone of the source.
+====
+
+== What you need
+
+[cols="1,3"]
+|===
+| Requirement | Notes
+
+| JDK 21
+| The build sets `java.version`, `maven.compiler.source` and `maven.compiler.target` to 21.
+
+| Maven
+| Not separately — use the bundled `./mvnw` wrapper.
+
+| Node / npm
+| *Not* separately. The `kweblens-ui` module downloads Node `v22.14.0` and npm `10.9.2`
+into `kweblens-ui/.node` via `frontend-maven-plugin` and builds the SPA itself.
+
+| A Docker daemon
+| Only for the container image (`-Pdocker`). Not needed to build or run the jar.
+
+| A kubeconfig
+| Optional. kweblens starts with no clusters, and the built-in simulator gives you one
+without a cluster at all — see xref:getting-started.adoc[First run].
+|===
+
+Tests are hermetic: they run against an in-JVM mock API server, so a build never touches a
+real cluster.
+
+== Build from source
+
+[source,bash]
+----
+git clone https://github.com/alexmond/kweblens.git
+cd kweblens
+./mvnw verify
+----
+
+`verify` is the full gate: spring-javaformat, Checkstyle, PMD, JaCoCo, and the front-end
+check (prettier, `vue-tsc`, eslint, knip, vitest). It is what CI runs. The repository also
+ships `scripts/dev-verify.sh`, which applies formatting first and then runs the same
+reactor.
+
+To build only the runnable app and what it depends on:
+
+[source,bash]
+----
+./mvnw -pl kweblens-web -am package
+----
+
+`-am` is required — `kweblens-web` depends on sibling modules and a `-pl` build without it
+cannot resolve them.
+
+The build produces:
+
+[cols="2,3"]
+|===
+| Artifact | What it is
+
+| `kweblens-web/target/kweblens.jar`
+| The runnable app: REST API, the Vue SPA, and the MCP server in one jar.
+
+| `kweblens-cli/target/kweblens-cli-exec.jar`
+| The dependency-light cluster inspector. The `exec` classifier is the runnable one; the
+plain jar stays a library.
+|===
+
+== Run the jar
+
+[source,bash]
+----
+KWEBLENS_SECURITY_ADMIN_USERNAME=admin \
+KWEBLENS_SECURITY_ADMIN_PASSWORD='<a password you chose>' \
+java -jar kweblens-web/target/kweblens.jar
+----
+
+Then open `http://localhost:8080/`. The SPA is served at `/` (and at `/ui`).
+
+[WARNING]
+====
+*Set a password, or one will be set for you.* If `kweblens.security.admin-password` is
+blank, `SecurityConfig` generates a random UUID at startup, logs it at `WARN`
+(`No kweblens.security.admin-password set — generated one for this run: …`) and uses it for
+that process only. There is no default password in the source and there must never be one.
+====
+
+`PORT` moves the listener off 8080. Everything else is configured through `kweblens.*` —
+see xref:configuration.adoc[Configuration].
+
+=== For local development
+
+[source,bash]
+----
+scripts/dev-run.sh          # build if stale, then run on :8080, login admin/admin
+scripts/dev-run.sh --sim    # the built-in simulator: no cluster needed
+scripts/dev-run.sh --stop   # stop whatever is on the port
+----
+
+`dev-run.sh` exists because starting the jar by hand is easy to get subtly wrong: it always
+passes the dev credentials, so the login is the same every run, and it fails loudly if a
+password was generated anyway. `admin`/`admin` are *development* credentials passed as
+environment at run time; they are not a repository default and must never be written into
+`application.yml`.
+
+== The CLI
+
+[source,bash]
+----
+java -jar kweblens-cli/target/kweblens-cli-exec.jar            # what the ambient kubeconfig points at
+java -jar kweblens-cli/target/kweblens-cli-exec.jar -c staging # select a context
+----
+
+== Container image
+
+The image is built by Cloud Native Buildpacks through the Spring Boot Maven plugin — there
+is no Dockerfile. Only `kweblens-web` declares that plugin, so only it produces an image.
+
+[source,bash]
+----
+./mvnw -Pdocker -pl kweblens-web -am package
+----
+
+That builds `kweblens:0.1.0-SNAPSHOT` locally. To name it and push it:
+
+[source,bash]
+----
+./mvnw -Pdocker -pl kweblens-web -am package \
+  -Ddocker.image.name=registry.example.com/kweblens:0.1.0-SNAPSHOT \
+  -Ddocker.publish=true
+----
+
+`docker.image.name` defaults to `kweblens:${project.version}` and `docker.publish` to
+`false`. A running Docker daemon is required.
+
+[NOTE]
+====
+The `docker` profile exists partly for a structural reason: `kweblens-web` is not in the
+top-level `<modules>` list — it is added by an `activeByDefault` `default` profile, so that
+`-Prelease` drops the app from the reactor. Explicitly activating any other profile
+deactivates `default`, which is why `docker` re-adds `kweblens-ui` and `kweblens-web`. A new
+profile that needs the app has to do the same.
+====
+
+== Helm chart
+
+The chart is in `deploy/helm/kweblens` (chart version `0.1.0`, `appVersion`
+`0.1.0-SNAPSHOT`). It is not published to a chart repository either — install it from the
+checkout.
+
+[source,bash]
+----
+helm upgrade --install kweblens deploy/helm/kweblens \
+  --namespace kweblens --create-namespace \
+  --set image.repository=registry.example.com/kweblens \
+  --set image.tag=0.1.0-SNAPSHOT \
+  --set auth.existingSecret=kweblens-auth \
+  --set auth.openMode=false
+----
+
+`image.tag` defaults to the chart's `appVersion` when left empty.
+
+The values that decide how the deployment behaves:
+
+[cols="2,1,3"]
+|===
+| Value | Default | What it does
+
+| `image.repository` / `image.tag`
+| `kweblens` / `""`
+| No registry is baked in. Left at the default the pod will only start where the image
+already exists locally — set a real registry you pushed to.
+
+| `imagePullSecrets`
+| `[]`
+| e.g. `[{ name: regcred }]`; the Secret must already exist in the namespace.
+
+| `clusterScope.local`
+| `true`
+| Register the *hosting* cluster through the pod's ServiceAccount. Rendered as
+`KWEBLENS_LOAD_KUBECONFIG`.
+
+| `clusterScope.external`
+| `[]`
+| External clusters read from a mounted kubeconfig. Each entry (`id`, optional `name`,
+optional `context`) becomes a `kweblens.clusters[*]` entry pointed at
+`/kubeconfigs/kubeconfig`.
+
+| `clusterScope.kubeconfigSecret`
+| `""`
+| Name of a Secret with a single key `kubeconfig`, mounted read-only at `/kubeconfigs`.
+Required when `external` is non-empty.
+
+| `rbac.create` / `rbac.role`
+| `true` / `viewer`
+| The ClusterRole for the hosting cluster — rendered only when `clusterScope.local` is also
+true. `viewer` is `get`/`list`/`watch`; `editor` adds `create`/`update`/`patch`/`delete` so
+the mutating drawer actions work. `editor` deliberately excludes `escalate`, `bind` and
+`impersonate`.
+
+| `rbac.clusterStore`
+| `true`
+| A namespaced Role (`secrets` only, in the release namespace) letting kweblens keep
+runtime-added clusters in Secrets. Needs `rbac.create` but is independent of
+`clusterScope.local` — an instance that watches only external clusters is exactly the one
+that needs it.
+
+| `auth.existingSecret`
+| `""`
+| A Secret supplying `KWEBLENS_SECURITY_ADMIN_USERNAME` and
+`KWEBLENS_SECURITY_ADMIN_PASSWORD` (and optionally `ANTHROPIC_API_KEY`), mounted with
+`envFrom`. Create it out of band. Without it the pod runs with a generated password that
+only appears in its log.
+
+| `auth.openMode`
+| `true`
+| Rendered as `KWEBLENS_SECURITY_OPEN_MODE`. Set `false` for a real deployment.
+
+| `persistence.enabled`
+| `false`
+| A PVC for the Helm repository list, index cache and saved values files
+(`KWEBLENS_HELM_HOME`, mounted at `/data/helm`). RWO, so enabling it forces one replica and
+a `Recreate` strategy.
+
+| `ingress.enabled` / `ingress.host`
+| `false` / `""`
+| `host` is required when the Ingress is enabled — no default host is baked in.
+
+| `springProfiles`
+| `"prod"`
+| `SPRING_PROFILES_ACTIVE` in the pod.
+
+| `extraEnv`
+| `[]`
+| A list of `{name, value}` for anything else, including the rest of `kweblens.*`.
+|===
+
+Probes use `/actuator/health/liveness` and `/actuator/health/readiness`. The pod runs
+non-root as uid 1002 with all capabilities dropped.
+
+For RBAC detail, in-cluster credentials and multi-cluster layouts, see
+xref:deployment.adoc[Deploying to Kubernetes] and xref:clusters.adoc[Connecting clusters].
+
+== Next
+
+* xref:getting-started.adoc[First run] — start it, sign in, connect a cluster
+* xref:configuration.adoc[Configuration] — every `kweblens.*` property
+* xref:security.adoc[Security and identity] — read this before anyone else can reach it

@@ -13,7 +13,8 @@
 
     <artifactId>kweblens-web</artifactId>
     <name>kweblens-web</name>
-    <description>kweblens Spring Boot application — REST API and Thymeleaf/htmx Kubernetes dashboard</description>
+    <description>kweblens Spring Boot application — REST API, MCP server, and the Vue single-page
+        Kubernetes dashboard it serves</description>
 
     <!-- The self-hosted server -> AGPL-3.0 (overrides the parent's Apache; see root LICENSE).
          Not published to Maven Central. -->
