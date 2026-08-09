@@ -276,6 +276,12 @@ that provider — **keep the count correct here and in the README**, it is the n
 messages POST to `/mcp/message`. **There is no `POST /mcp`** — it 404s. This was probed against a
 running server, so don't "correct" it from `application.yml`. It is also why the CSRF exemption
 `ignoringRequestMatchers("/api/**", "/mcp/**")` matters — it is what makes MCP callable at all.
+It is a **CSRF** exemption, not an authentication one: `GET /sse` rides open-mode's public read
+path, but the JSON-RPC messages are `POST /mcp/message`, so `anyRequest().authenticated()` catches
+them and an unauthenticated call measures **401 in open-mode too**. **An MCP client always needs
+the admin credential**, and a client given none handshakes and then reports a flat "failed to
+connect". Attach commands, per client, verified against a running instance:
+[`docs/modules/ROOT/pages/attach-an-agent.adoc`](docs/modules/ROOT/pages/attach-an-agent.adoc).
 
 **Tool output is redacted at the boundary** by `ToolRedaction` (Secret values and
 `last-applied-configuration` replaced, keys kept; `managedFields` dropped). The asymmetry with

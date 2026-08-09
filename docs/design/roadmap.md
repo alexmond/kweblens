@@ -60,7 +60,7 @@ Each row is checked against the code, not the tracker.
 | **T4** error and empty states are inconsistent | **STILL TRUE, slightly worse** | `ErrorNotice` renders in 8 files (was 6), still Helm/Clusters-dominated. **11** bare `<div class="error">` with no retry, unchanged. **~20** ad-hoc empty-state sites under five different class names, and no `EmptyState` component exists. `ResourceTable.vue` has no `#empty` slot at all. And it is a defect class, not cosmetics — `HelmResourcesModal.vue` used `<ErrorNotice>` without importing it, so its error path rendered *nothing* (fixed in this PR). |
 | **T5** RBAC-awareness in its reduced form | **STILL TRUE** | Zero hits for `SelfSubjectAccessReview` / `SelfSubjectRulesReview` / `canI` in any `.java`, `.ts` or `.vue` file. All 24 hits are prose. |
 | **D1** relations breadth | **SHIPPED** | `RelationService` is now a dispatcher over five resolvers (`NetworkRelations`, `ReferenceRelations`, `WorkloadRelations`, `StorageRelations`, `AccessRelations`) resolving **12** relation keys, up from 3 (#220). [`detail-sections-audit.md`](detail-sections-audit.md) §"Group B status" is the current record. Not resolved, deliberately: Ingress → TLS secret **expiry** (`Relation` carries objects, so a *missing* reference can only be dropped or fabricated), requests-vs-usage (a metrics path, not a relation), and a general reverse index. |
-| **D2** agent-attach story | **NOT STARTED** | No attach page, no `mcpServers` snippet, no `claude mcp add` anywhere in `README.md` or `docs/`; `docs/deployment.md` has zero MCP mentions. The transport *is* documented correctly (`README.md` and `CLAUDE.md` both say SSE over WebMVC, `GET /sse`). |
+| **D2** agent-attach story | **DONE** — see [R5](#r5--d2-the-agent-attach-page--done) | `docs/modules/ROOT/pages/attach-an-agent.adoc` + an MCP section in `docs/deployment.md` + an *Attach an agent* block in `README.md`. The transport was documented correctly; the *auth* was not — `mcp.adoc` claimed the tool endpoints were public in open-mode, and `POST /mcp/message` measures `401`. |
 | **D3** analyzer breadth / cross-manifest rules | **NOT STARTED, now cheaper** | It was ranked below D1 because it depended on D1's joins. Those joins exist. |
 | **D4** guarded MCP write tools | **UNBLOCKED, unscoped** | 15 `@Tool` methods across three beans, none mutating. The T1 gate has lifted; what is left is Radar's scoping question (destructive-annotated, no delete, no shell), not a missing guardrail. |
 | **Chore I** docs currency | **DONE** | `README.md` and `CLAUDE.md` both say 15 read-only tools and SSE; the README frames identity per ADR-001 rather than as "the gap that matters". Only `competitor-analysis.md` still says 3, and it is a dated research snapshot. |
@@ -160,12 +160,30 @@ service-level only, in core (`RelationServiceTest`, `RelationBreadthTest`,
 missing object and the unknown-`resourceId` path are all unverified — and this endpoint is what
 D3, GH#148 and GH#143 all build on.
 
-### R5 — D2: the agent-attach page
+### R5 — D2: the agent-attach page — **DONE**
 
-Still the cheapest differentiator on the list and still unwritten: a copy-paste "attach Claude
-Code / Codex / Copilot CLI in three lines" page, a generated cluster-context surface, and an MCP
-section in `docs/deployment.md` (which currently has none). The transport documentation is already
-correct, so this is purely additive.
+Shipped as `docs/modules/ROOT/pages/attach-an-agent.adoc` (in the nav under *Integrating*), an
+`## MCP` section in `docs/deployment.md`, and an *Attach an agent* block in `README.md`. Every
+command on those pages was executed against a running instance.
+
+Writing it turned up one thing the docs had wrong, which is the whole reason the page exists:
+**an MCP client needs the admin credential in `open-mode` too.** `GET /sse` is a `GET` and rides
+the public read path, but the JSON-RPC messages are `POST /mcp/message`, which
+`anyRequest().authenticated()` catches — measured, `401`. `mcp.adoc` had said the tool endpoints
+were "reachable without signing in, like every other read"; `security.adoc` had it right. Fixed.
+A client configured without credentials handshakes and then reports a flat "failed to connect",
+so this was the single highest-value fact to get onto an attach page.
+
+Also settled by measurement while writing it: `codex mcp add --url` speaks *Streamable HTTP* and
+authenticates only with a bearer token, so neither half matches kweblens — Codex and Copilot CLI
+attach through an `npx mcp-remote … --transport sse-only` stdio bridge, verified healthy.
+
+**The "generated cluster-context surface" was deliberately not built as an artifact.** An attached
+agent already has `listClusters` and `listResourceKinds`, which are live; a generated file is a
+snapshot that goes stale silently, and a stale cluster id is worse than no file because it
+produces a confident tool call against nothing. What shipped instead is a two-line `curl | jq`
+recipe on the attach page for people who want a snapshot in a prompt or an `AGENTS.md`, labelled
+as a snapshot. Revisit only if someone wants context for a client that cannot call tools at all.
 
 ### Then, in no strong order
 
@@ -255,7 +273,7 @@ three are parked by decision and one is this epic.
 | R2 — cut `0.1.0`, publish the image, correct the README's Central claim | **new** | P1 |
 | R3 — shared `EmptyState` + `ErrorNotice` everywhere, empty copy a required prop | **new** (was T4/G) | P2 |
 | R4 — server-side contract tests for the detail endpoint | **new** (was part of D) | P2 |
-| R5 — agent-attach page + generated cluster context + MCP in deployment.md | **new** (was E/D2) | P2 |
+| R5 — agent-attach page + MCP in deployment.md | **done** (was E/D2) | — |
 | 6 — list-header filter syntax: regex, negation, label selector | **new** (was C/T3, now client-side) | P3 |
 | 7 — security/RBAC checks and the first cross-manifest rule | **new** (was F/D3) | P3 |
 | 8 — SSAR affordances | **new** (was H/T5) | P3 |

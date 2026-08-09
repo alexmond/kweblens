@@ -138,18 +138,22 @@ one that matches when the property is absent. Point your client at `GET /sse` an
 the endpoint event.
 ====
 
-Client configuration is the URL plus nothing else:
+Client configuration is the URL plus the admin credential (see the warning below — a client with no
+credential handshakes and then fails):
 
 [source,json]
 ----
 {
   "mcpServers": {
     "kweblens": {
-      "url": "https://kweblens.example.com/sse"
+      "url": "https://kweblens.example.com/sse",
+      "headers": { "Authorization": "Basic <base64 of user:password>" }
     }
   }
 }
 ----
+
+For the per-CLI commands, see xref:attach-an-agent.adoc[Attach an agent].
 
 The MCP session keep-alive is on (`spring.ai.mcp.server.keep-alive-interval: 30s`). The SDK ships
 it off, and measured on a live server three disconnected MCP clients still had their
@@ -172,8 +176,19 @@ list every tool call is rejected with a 403 — the server accepts the SSE hands
 refuses every JSON-RPC message posted back to it, so the tool surface *exists but is unreachable*.
 This is the failure mode where everything looks configured and nothing works.
 
-In the default `open-mode` the tool endpoints are reachable without signing in, like every other
-read. See xref:security.adoc[Security and identity] for what that means and how to close it.
+[IMPORTANT]
+====
+*The CSRF exemption is not an authentication exemption, and the tool surface is not public in
+`open-mode`.*
+
+`GET /sse` is a `GET`, so open-mode's public read path covers it. The JSON-RPC messages that
+actually call a tool are `POST /mcp/message`, and *every* non-`GET` requires the admin login —
+measured against a running server, an unauthenticated `POST /mcp/message` answers `401` in
+open-mode. So an MCP client always needs credentials, in both security modes.
+
+xref:attach-an-agent.adoc[Attach an agent] has the copy-paste form for Claude Code, Codex and
+Copilot CLI, and the status code for each way this goes wrong.
+====
 
 == Redaction at the boundary
 
@@ -216,6 +231,8 @@ kubeconfig to.
 
 == Related
 
+* xref:attach-an-agent.adoc[Attach an agent] — the copy-paste commands for Claude Code, Codex and
+  Copilot CLI
 * xref:health-and-diagnostics.adoc[Health and diagnostics] — the checks behind `HealthTools`
 * xref:security.adoc[Security and identity] — open-mode, and the one shared identity
 * xref:rest-api.adoc[REST API] — the same data over plain HTTP

@@ -1,0 +1,244 @@
+include::_header.adoc[]
+= Attach an agent
+
+kweblens's xref:mcp.adoc[MCP server] runs inside the same jar as the web app, so there is no
+second process to install and no second copy of your kubeconfig. Attaching a coding agent to it is
+one command.
+
+Every command on this page was executed against a running kweblens instance, except where a note
+says otherwise. The status codes and the tool output quoted are what the server actually returned,
+not what the source suggests it would.
+
+[IMPORTANT]
+====
+*Read this before you copy anything: the MCP client needs the admin login, in both security modes.*
+
+`GET /sse` is a `GET`, so in the default `open-mode` it is public. But the JSON-RPC messages that
+actually call a tool are `POST /mcp/message`, and every non-`GET` requires the admin login. A
+client configured with no credentials completes the handshake and then gets `401` on `initialize`,
+which most clients report as a flat "failed to connect".
+
+Measured against a running server in `open-mode`:
+
+[cols="3,1"]
+|===
+| Request | Status
+
+| `GET /sse`, no credentials | `200`
+| `POST /mcp/message?sessionId=…`, no credentials | `401`
+| `POST /mcp/message?sessionId=…`, `admin:…` | `200`
+|===
+
+With `kweblens.security.open-mode=false` the `GET /sse` handshake is `401` too. So: *always give
+the client credentials.* See xref:security.adoc[Security and identity].
+====
+
+== Claude Code
+
+[source,bash]
+----
+KWEBLENS=https://kweblens.example.com
+AUTH="Basic $(printf 'admin:%s' "$KWEBLENS_PASSWORD" | base64)"
+
+claude mcp add --transport sse kweblens "$KWEBLENS/sse" --header "Authorization: $AUTH"
+----
+
+`--transport sse` is not optional: `claude mcp add` defaults to `stdio`, and `--transport http`
+speaks Streamable HTTP, which kweblens does not serve.
+
+Confirm it:
+
+[source,bash]
+----
+claude mcp list
+# kweblens: https://kweblens.example.com/sse (SSE) - ✔ Connected
+----
+
+That line is a real health check — Claude Code opens the stream and runs `initialize` through it.
+Dropping the `--header` turns the same line into `✘ Failed to connect`, which is the 401 above.
+
+[CAUTION]
+====
+Every form on this page ends with the admin credential sitting in a client config file, Base64-
+encoded — which is *encoding, not encryption*. Whatever file your client stores it in (`~/.claude.json`,
+`~/.codex/config.toml`, `~/.copilot/mcp-config.json`) is now as sensitive as a kubeconfig: keep it
+`0600`, keep it out of a repo, and do not use it as the project-scoped config that gets committed.
+====
+
+== Codex CLI
+
+Codex's native remote transport (`codex mcp add --url …`) is *Streamable HTTP*, and it
+authenticates only with a bearer token. kweblens serves SSE and expects Basic, so neither half
+matches. Bridge it with `mcp-remote`, which turns a remote SSE server into a stdio one:
+
+[source,bash]
+----
+KWEBLENS=https://kweblens.example.com
+AUTH="Basic $(printf 'admin:%s' "$KWEBLENS_PASSWORD" | base64)"
+
+codex mcp add kweblens -- \
+  npx -y mcp-remote "$KWEBLENS/sse" --transport sse-only --header "Authorization:$AUTH"
+----
+
+Note *no space* after `Authorization:` — `mcp-remote` splits an argument containing a space into
+two, and the header is then malformed.
+
+`codex mcp get kweblens` echoes the stored entry; the equivalent hand-written
+`~/.codex/config.toml` block is:
+
+[source,toml]
+----
+[mcp_servers.kweblens]
+command = "npx"
+args = ["-y", "mcp-remote", "https://kweblens.example.com/sse",
+        "--transport", "sse-only",
+        "--header", "Authorization:Basic <base64 of user:password>"]
+----
+
+== GitHub Copilot CLI
+
+Copilot CLI reads `~/.copilot/mcp-config.json`. The same bridge command works, as a stdio server:
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "kweblens": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://kweblens.example.com/sse",
+               "--transport", "sse-only",
+               "--header", "Authorization:Basic <base64 of user:password>"]
+    }
+  }
+}
+----
+
+[NOTE]
+====
+The *bridge command* in this block is the one verified above — it was registered as a stdio server
+and reported healthy. The Copilot CLI *wrapper* around it was not executed, because that CLI is not
+installed on the machine these checks were run on. If it disagrees with what is written here,
+the file it reads is the authority, not this page.
+====
+
+== Any other client
+
+A client that speaks the SSE transport natively needs the URL and a header, and nothing else:
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "kweblens": {
+      "url": "https://kweblens.example.com/sse",
+      "headers": { "Authorization": "Basic <base64 of user:password>" }
+    }
+  }
+}
+----
+
+A client that only speaks Streamable HTTP needs the `mcp-remote` bridge, because *there is no
+`POST /mcp`* — both `GET /mcp` and `POST /mcp` answer `404`.
+
+== Cluster ids are not guessable — resolve them
+
+Every tool except `listClusters` takes a `clusterId`, and *there is no id called `default` unless
+your deployment happens to produce one.* `ClusterBootstrap` registers one cluster per kubeconfig
+context, using the *context name* as the id; `default` is only the fallback when there is no
+readable kubeconfig at all, which is what happens for an in-cluster ServiceAccount.
+
+So the first tool call in any session is `listClusters`, and the second is `listResourceKinds` —
+resource ids are per cluster, because they include that cluster's CRDs.
+
+=== A cluster-context snapshot, if you want one in a prompt
+
+An attached agent does not need this: `listClusters` and `listResourceKinds` are live, and a
+checked-in context file goes stale silently, which is worse than no file — an id that no longer
+exists produces a confident tool call against nothing. But for a project `CLAUDE.md`, an
+`AGENTS.md`, or a one-off prompt, the same two facts come straight out of the REST API:
+
+[source,bash]
+----
+KWEBLENS=https://kweblens.example.com
+
+curl -s "$KWEBLENS/api/v1/clusters" | jq -r '.[] | "- `\(.id)` — \(.name)"'
+
+CLUSTER=$(curl -s "$KWEBLENS/api/v1/clusters" | jq -r '.[0].id')
+curl -s "$KWEBLENS/api/v1/clusters/$CLUSTER/nav" |
+  jq -r '.[] | select(.items | length > 0)
+         | "- \(.label): " + ([.items[].id] | join(", "))'
+----
+
+Both are `GET`s, so in `open-mode` they need no credentials. Against the built-in simulator that
+prints:
+
+[source]
+----
+- `sim` — Simulator
+- Cluster: nodes, namespaces, events
+- Workloads: pods, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, replicationcontrollers
+- Config: configmaps, secrets, resourcequotas, limitranges, horizontalpodautoscalers, …
+- Network: services, ingresses, endpointslices, endpoints, ingressclasses, networkpolicies
+- Storage: persistentvolumeclaims, persistentvolumes, storageclasses
+- Access Control: serviceaccounts, clusterroles, roles, clusterrolebindings, rolebindings
+- Custom Resources: customresourcedefinitions
+----
+
+Paste it with a date on it, and treat it as a snapshot rather than a contract.
+
+== What the agent can and cannot do
+
+* *Nothing on the tool surface writes.* All 15 tools are reads. Changing the cluster stays on the
+  guarded suggest → preview → confirm → apply path in the UI, which is deliberately not reachable
+  from here.
+* *Tool output is redacted at the boundary*, more strictly than the dashboard redacts anything —
+  Secret `data`/`stringData` values and the `last-applied-configuration` annotation are replaced
+  (keys kept), `managedFields` is dropped. The asymmetry is the point: tool output leaves the
+  machine, crosses a network and lands in somebody's inference logs. See
+  xref:mcp.adoc#_redaction_at_the_boundary[Redaction at the boundary].
+* *Redaction is not a permission boundary.* kweblens acts with one shared credential and is not
+  RBAC-aware, and per ADR-001 (`docs/design/adr-001-identity-model.md`, ACCEPTED) that is a decided
+  position, not a gap. An agent attached to this server can read whatever kweblens can read, minus
+  what is redacted. *Do not hand out `/sse` credentials you would not hand out the kubeconfig to.*
+* *The audit trail names an action, not a person.* There is one identity, so a tool call and a
+  browser click are indistinguishable in the log.
+
+== When it does not connect
+
+Every row below is a status code observed against a running server.
+
+[cols="2,1,3"]
+|===
+| Symptom | Status | Cause
+
+| Client reports "failed to connect"; `GET /sse` succeeds by hand
+| `401` on `POST /mcp/message`
+| No credentials on the client. Add the `Authorization` header. This is the common one.
+
+| `GET /sse` itself is refused
+| `401`
+| `open-mode=false`. Same fix — the header is needed on the handshake too.
+
+| Client posts to `/mcp` and gets nothing
+| `404`
+| It is using Streamable HTTP. kweblens serves SSE only; use `--transport sse` or `mcp-remote`.
+
+| Tool calls fail after working for a while
+| `404` on `POST /mcp/message`
+| The session id is dead — the SSE stream dropped and the client kept posting to the old
+`sessionId`. Reconnect. (An unknown `sessionId` answers `404`, not `400`.)
+
+| Everything handshakes, tools return empty
+| `200`
+| The `clusterId` does not exist. Call `listClusters`; do not assume `default`.
+|===
+
+If a proxy sits in front of kweblens, it must not buffer responses and must tolerate a long-lived
+connection — `/sse` is held open for the life of the session, exactly like the log and watch
+streams the SPA uses.
+
+== Related
+
+* xref:mcp.adoc[MCP server] — the 15 tools, the transport, and what redaction does
+* xref:security.adoc[Security and identity] — open-mode, and the one shared identity
+* xref:clusters.adoc[Connecting clusters] — where cluster ids come from
