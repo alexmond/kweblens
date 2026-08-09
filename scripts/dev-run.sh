@@ -86,6 +86,41 @@ done
 JAR=kweblens-web/target/kweblens.jar
 LOG="${TMPDIR:-/tmp}/kweblens-dev-${PORT}.log"
 
+# Terminate pids and CONFIRM they are gone, rather than assuming SIGTERM was obeyed.
+#
+# The earlier version signalled, slept 2s and printed success unconditionally. That is the
+# "never call an unanswered check clear" failure this repo keeps re-learning: a run reported
+# "stopping pid(s)" while the JVM stayed resident at over a gigabyte with the simulator's mock
+# API-server port still bound, and only `--list` (afterwards, by chance) showed it. This app
+# closes cluster watches and log streams on the way down, so a clean shutdown is not instant
+# and 2 seconds is sometimes not enough — but "slow" and "ignored the signal" must not look
+# the same from here.
+#
+# So: SIGTERM, wait, escalate to SIGKILL, wait again, and say which of those happened. Exits
+# non-zero if anything is still alive at the end, so a caller cannot treat a failed stop as a
+# stop.
+terminate() {
+	local pids=("$@") grace=20 pid alive=()
+	[[ ${#pids[@]} -eq 0 ]] && return 0
+	kill "${pids[@]}" 2>/dev/null || true
+	for ((i = 0; i < grace; i++)); do
+		alive=()
+		for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && alive+=("$pid"); done
+		[[ ${#alive[@]} -eq 0 ]] && return 0
+		sleep 1
+	done
+	echo "!!  pid(s) ${alive[*]} ignored SIGTERM after ${grace}s — sending SIGKILL" >&2
+	kill -9 "${alive[@]}" 2>/dev/null || true
+	sleep 2
+	local left=()
+	for pid in "${alive[@]}"; do kill -0 "$pid" 2>/dev/null && left+=("$pid"); done
+	if [[ ${#left[@]} -gt 0 ]]; then
+		echo "!!  STILL RUNNING after SIGKILL: ${left[*]} — investigate, do not assume stopped" >&2
+		return 1
+	fi
+	return 0
+}
+
 stop_port() {
 	local pids
 	# Match on the port rather than a process-name pattern: pkill -f on something
@@ -94,8 +129,8 @@ stop_port() {
 	if [[ -n "$pids" ]]; then
 		echo "==> stopping pid(s) on :${PORT}: ${pids}"
 		# shellcheck disable=SC2086
-		kill $pids 2>/dev/null || true
-		sleep 2
+		terminate $pids || return 1
+		echo "==> stopped :${PORT}"
 	fi
 }
 
@@ -200,7 +235,7 @@ list_instances() {
 stop_pid() {
 	local pid="$1" port="$2"
 	echo "==> stopping :${port:-?} (pid $pid)"
-	kill "$pid" 2>/dev/null || true
+	terminate "$pid" || return 1
 }
 
 if [[ "$SELF_CHECK" == true ]]; then
@@ -214,30 +249,36 @@ if [[ "$LIST" == true ]]; then
 fi
 
 if [[ "$STOP_ALL" == true ]]; then
-	for pid in $(instances); do stop_pid "$pid" "$(port_of "$pid")"; done
-	sleep 2
+	# Keep going when one refuses to die, but remember it: stopping three of four and
+	# exiting 0 is the same lie `terminate` was written to stop telling.
+	failed=0
+	for pid in $(instances); do stop_pid "$pid" "$(port_of "$pid")" || failed=1; done
 	list_instances
-	exit 0
+	exit $failed
 fi
 
 if [[ "$STOP_STALE" == true ]]; then
 	# Only the ones whose source tree has moved on under them. A deliberately-kept instance
 	# on current code survives, which is why this is not just --stop-all with extra steps.
 	stopped=0
+	failed=0
 	for pid in $(instances); do
 		started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
 		if [[ -n "$(find pom.xml kweblens-*/pom.xml kweblens-*/src -newermt "$started" -print -quit 2>/dev/null)" ]]; then
-			stop_pid "$pid" "$(port_of "$pid")"; stopped=$((stopped + 1))
+			if stop_pid "$pid" "$(port_of "$pid")"; then
+				stopped=$((stopped + 1))
+			else
+				failed=1
+			fi
 		fi
 	done
 	echo "==> stopped $stopped stale instance(s)"
-	sleep 1
 	list_instances
-	exit 0
+	exit "${failed:-0}"
 fi
 
 if [[ "$STOP" == true ]]; then
-	stop_port
+	stop_port || exit 1
 	exit 0
 fi
 
