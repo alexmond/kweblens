@@ -15,6 +15,7 @@
 ** xref:metrics.adoc[Metrics]
 
 * Integrating
+** xref:attach-an-agent.adoc[Attach an agent]
 ** xref:mcp.adoc[MCP server]
 ** xref:rest-api.adoc[REST API]
 

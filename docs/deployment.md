@@ -190,6 +190,80 @@ raising the root log level cannot silently switch the trail off — if you set
 | `ingress.enabled` / `ingress.host` | Traefik ingress (host required when enabled) |
 | `persistence.enabled` / `storageClass` / `size` | PVC for `KWEBLENS_HELM_HOME` (Helm repo list + index cache + saved values). RWO ⇒ forces `replicas: 1` + `Recreate`. |
 
+## MCP — exposing the cluster view to an AI agent
+
+The MCP server is **in the same jar**. There is nothing extra to deploy, no second port and no
+second credential: if the web app is reachable, so is the tool surface. It exposes **15 read-only
+tools**; nothing on it writes.
+
+### The two endpoints
+
+| Endpoint | Method | Auth in `open-mode` (default) | Auth with `open-mode=false` |
+|---|---|---|---|
+| `/sse` — holds the stream open, emits `event:endpoint` with `data:/mcp/message?sessionId=…` | `GET` | public | **admin login** |
+| `/mcp/message?sessionId=…` — where the client posts JSON-RPC | `POST` | **admin login** | **admin login** |
+
+**There is no `POST /mcp`** — both `GET /mcp` and `POST /mcp` answer `404`. This is the SSE
+transport, not Streamable HTTP. A client that assumes Streamable HTTP needs an `mcp-remote` bridge.
+
+The consequence that catches people: **an MCP client always needs the admin credential, in both
+security modes.** `GET /sse` rides open-mode's public read path, so the handshake succeeds, and then
+the first `initialize` message is a `POST` and comes back `401` — which most clients report as a
+flat "failed to connect". Measured against a running server in `open-mode`: `GET /sse` → `200`,
+unauthenticated `POST /mcp/message` → `401`, the same POST with `admin:…` → `200`.
+
+That is also why `SecurityConfig` exempts `/mcp/**` from CSRF alongside `/api/**`. An MCP client has
+no session cookie to ride and cannot obtain a token; without the exemption every tool call is `403`
+and the surface exists but is unreachable. It is a CSRF exemption, **not** an authentication one.
+
+### Attaching a client
+
+```bash
+KWEBLENS=https://kweblens.example.com
+AUTH="Basic $(printf 'admin:%s' "$KWEBLENS_PASSWORD" | base64)"
+
+claude mcp add --transport sse kweblens "$KWEBLENS/sse" --header "Authorization: $AUTH"
+claude mcp list   # → kweblens: … (SSE) - ✔ Connected
+```
+
+Codex and Copilot CLI go through `npx -y mcp-remote "$KWEBLENS/sse" --transport sse-only --header
+"Authorization:$AUTH"` as a stdio server (note: no space after `Authorization:`). Full page,
+including the failure-mode table: [Attach an agent](modules/ROOT/pages/attach-an-agent.adoc).
+
+### What to weigh before exposing it
+
+- **Tool output is redacted at the boundary**, more strictly than the dashboard: Secret `data` /
+  `stringData` values and the `kubectl.kubernetes.io/last-applied-configuration` annotation are
+  replaced (keys kept), `managedFields` is dropped. The asymmetry is deliberate — tool output leaves
+  the machine, crosses a network and lands in somebody's inference logs, possibly in training data.
+- **Redaction is not a permission boundary.** kweblens acts with one shared credential and is not
+  RBAC-aware ([ADR-001](design/adr-001-identity-model.md), accepted — a decided position, not a
+  gap). Anyone holding the `/sse` credential can read everything kweblens can read, minus what is
+  redacted above. Treat it exactly like handing over the kubeconfig, and scope `rbac.role` to
+  `viewer` if the agent is the only consumer.
+- **The audit trail records the action, not a person.** A tool call and a browser click are
+  indistinguishable in the log, because there is one identity to record.
+- **The stream is long-lived.** An ingress or reverse proxy in front of kweblens must not buffer
+  responses and must tolerate a connection held open for the life of the session — the same
+  requirement the log and watch streams already impose.
+- **The MCP session keep-alive is on** (`spring.ai.mcp.server.keep-alive-interval: 30s`), because
+  the SDK ships it off and disconnected sessions were otherwise still resident with sockets in
+  `CLOSE_WAIT` minutes later. A leaked session is bounded process memory, not a held cluster
+  resource.
+
+### Cluster ids in agent prompts
+
+Every tool but `listClusters` takes a `clusterId`, and **`default` is not a safe assumption** —
+`ClusterBootstrap` uses each kubeconfig context name as the id, and `default` only appears when
+there is no readable kubeconfig at all (the in-cluster ServiceAccount case). Tell the agent to call
+`listClusters` first, then `listResourceKinds` (resource ids are per cluster, because they include
+that cluster's CRDs). If you want a snapshot for a prompt or a project `AGENTS.md`, generate it from
+the REST API rather than typing it:
+
+```bash
+curl -s "$KWEBLENS/api/v1/clusters" | jq -r '.[] | "- `\(.id)` — \(.name)"'
+```
+
 ## Lab / private overlay
 
 Anything environment-specific (real registry host, ingress domain, pull-secret name,

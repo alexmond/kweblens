@@ -168,6 +168,27 @@ Nothing on the tool surface writes. Output is redacted at the tool boundary: Sec
 and `managedFields` is dropped — because tool output goes to a model and off the machine, which
 is a different rule from what the dashboard shows a logged-in operator.
 
+### Attach an agent
+
+```bash
+KWEBLENS=https://kweblens.example.com
+AUTH="Basic $(printf 'admin:%s' "$KWEBLENS_PASSWORD" | base64)"
+
+claude mcp add --transport sse kweblens "$KWEBLENS/sse" --header "Authorization: $AUTH"
+claude mcp list   # → kweblens: … (SSE) - ✔ Connected
+```
+
+**The credential is not optional, in either security mode.** `GET /sse` is a `GET`, so open-mode
+makes the handshake public — but the JSON-RPC messages that call a tool are `POST /mcp/message`,
+and every non-`GET` needs the admin login. A client without it handshakes and then gets `401`,
+which most clients report as a flat "failed to connect". There is also **no `POST /mcp`** (it
+`404`s): this is the SSE transport, so a Streamable-HTTP-only client needs an `mcp-remote` bridge.
+
+Codex, Copilot CLI, the failure-mode table and how to generate a cluster-context snippet:
+[docs/modules/ROOT/pages/attach-an-agent.adoc](docs/modules/ROOT/pages/attach-an-agent.adoc).
+Also note that tools take a `clusterId` and **`default` is not a safe assumption** — ids are
+kubeconfig context names; call `listClusters` first.
+
 ## CLI
 
 ```bash
