@@ -146,6 +146,20 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-09 — **`--stop` reported success on a process that was still running.** `stop_port`
+  sent SIGTERM, slept 2 s and printed its message unconditionally; a run left the JVM resident
+  at over a gigabyte with the simulator's mock API-server port still bound, and only a later
+  `--list` revealed it. The app closes cluster watches and log streams on the way down, so a
+  clean shutdown is not instant — but "slow" and "ignored the signal" must not look the same
+  from outside. → `terminate()` now signals, polls for exit, escalates to SIGKILL after 20 s
+  **saying so**, re-checks, and returns non-zero if anything survives; `--stop`, `--stop-all`
+  and `--stop-stale` all propagate that. **The first positive control for this was itself
+  broken**: `bash -c 'trap "" TERM; sleep 300'` exec-optimises into `sleep`, which does not
+  inherit the trap, so the "ignores SIGTERM" process died on SIGTERM and the escalation path
+  was never exercised — the test passed while testing nothing. A trailing `; true` prevents the
+  exec, and the control now asserts the pid really does survive a plain SIGTERM *before*
+  trusting what the escalation does. Same rule as everywhere else here: **build the control,
+  then check the control.**
 - 2026-08-07 — **`dev-run.sh --list` reported "(none running)" against a server answering on
   :8080**, and `--stop-stale` / `--stop-all` therefore silently stopped nothing. The guard was
   `pgrep -x java -f "<jar pattern>"`, added after a `--stop-all` SIGTERMed its own shell
