@@ -6,8 +6,16 @@
 replicaCount: 1
 
 image:
-  # Overlay sets a real registry, e.g. registry.example.com/kweblens
-  repository: kweblens
+  # The project's own public image, built and pushed by .github/workflows/image.yml on a
+  # `v*` tag. This is NOT a "specific environment" in the sense the note above means — that
+  # rule is about lab-internal registries, hosts and secrets, which still come from a private
+  # overlay. A private mirror overrides this, e.g. registry.example.com/kweblens.
+  #
+  # NOTE: no release has been cut yet (roadmap R2), so this tag does not exist in GHCR until
+  # the first `v*` tag is pushed. Until then, build locally:
+  #   ./mvnw -Pdocker -pl kweblens-web -am package
+  # and point `repository` at whatever that produced.
+  repository: ghcr.io/alexmond/kweblens
   # Defaults to Chart.appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent
