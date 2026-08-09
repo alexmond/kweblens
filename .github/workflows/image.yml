@@ -1,0 +1,140 @@
+# Build and publish the kweblens-web container image.
+#
+# Roadmap R2's second half. Only `kweblens-web` declares the Spring Boot plugin, so it is the
+# only module that produces an image; the `docker` profile re-adds it (and `kweblens-ui`) to the
+# reactor, because the default `release` path deliberately drops the app so it cannot reach
+# Maven Central.
+#
+# Two ways in, both deliberate:
+#
+#   push of a `v*` tag  — the release path. A tag only exists because someone ran the
+#                         `Maven release` workflow by hand, so this is a consequence of a
+#                         deliberate human action, never an autonomous publish.
+#   workflow_dispatch   — build any ref, with `publish` defaulting to FALSE so the common
+#                         case (does the image still build?) pushes nothing.
+#
+# The image is built into the local Docker daemon and then pushed with the CLI, rather than
+# via the Boot plugin's `publish=true`. The plugin's publish path needs `<publishRegistry>`
+# credentials configured in the POM; keeping the push in the workflow means the registry
+# lives next to the login that authorises it, and `docker.publish` stays false everywhere.
+#
+# ON A ROOTLESS-PODMAN DEV BOX THIS BUILD DOES NOT RUN LOCALLY. The buildpack asks the daemon
+# to bind-mount `/var/run/docker.sock` into the build container, and rootless podman refuses:
+#
+#   container create: statfs /var/run/docker.sock: permission denied
+#
+# That is the environment, not the build — CI has a real Docker daemon and takes the standard
+# path. Do not "fix" the workflow in response to that failure. To prove a change here, run
+# this workflow with `publish: false`, which builds and smoke-tests and pushes nothing.
+name: Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image tag (e.g. 0.1.0). Defaults to the project version.'
+        required: false
+      publish:
+        description: 'Push to GHCR. Leave false to only prove the image builds.'
+        type: boolean
+        default: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # A tag push publishes; a manual run publishes only when asked. Resolved once, here,
+      # so every later step agrees about what this run is doing.
+      # Every value that originates outside the workflow file reaches the shell through `env:`,
+      # never through `${{ }}` interpolated into the script. A dispatch input is written by a
+      # human with write access, but an interpolated value containing a quote is a shell
+      # injection whoever typed it — and the habit is what keeps the next one safe.
+      - name: Resolve version and whether to publish
+        id: cfg
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_VERSION}" ]; then
+            version="${INPUT_VERSION}"
+          elif [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version=$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)
+          fi
+          if [ "${GITHUB_REF_TYPE}" = tag ] || [ "${INPUT_PUBLISH}" = true ]; then
+            publish=true
+          else
+            publish=false
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "Building ${version}, publish=${publish}"
+
+      - name: Log in to GHCR
+        if: steps.cfg.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `-am` is required: kweblens-web depends on sibling modules (the built UI among them),
+      # and an image-only `-pl kweblens-web` fails to resolve them.
+      - name: Build the image
+        env:
+          REF: ${{ steps.cfg.outputs.image }}:${{ steps.cfg.outputs.version }}
+        run: |
+          ./mvnw -B -Pdocker -pl kweblens-web -am package -Ddocker.image.name="${REF}"
+
+      # Prove the thing that was built actually starts before it is published. A buildpack
+      # image that boots to a stack trace is still a successful `package`.
+      - name: Smoke-test the image
+        env:
+          REF: ${{ steps.cfg.outputs.image }}:${{ steps.cfg.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker run -d --name kweblens-smoke -p 8080:8080 \
+            -e KWEBLENS_LOAD_KUBECONFIG=false "${REF}"
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/actuator/health >/dev/null 2>&1; then
+              echo "healthy after ${i}s"
+              curl -fsS http://localhost:8080/actuator/health
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "image did not become healthy within 60s" >&2
+          docker logs kweblens-smoke >&2
+          exit 1
+
+      - name: Push
+        if: steps.cfg.outputs.publish == 'true'
+        env:
+          IMAGE: ${{ steps.cfg.outputs.image }}
+          REF: ${{ steps.cfg.outputs.image }}:${{ steps.cfg.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker push "${REF}"
+          # `latest` tracks tag pushes only — a manual publish of an arbitrary ref must not
+          # silently become what `helm install` pulls by default.
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            docker tag "${REF}" "${IMAGE}:latest"
+            docker push "${IMAGE}:latest"
+          fi
