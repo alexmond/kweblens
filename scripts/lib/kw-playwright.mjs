@@ -121,9 +121,37 @@ export async function setTheme(page, want) {
   if (got !== want) throw new Error(`theme toggle did not reach '${want}' (still '${got}')`);
 }
 
+/**
+ * Split `fill:`/`upload:`'s `<selector>=<text>` into its two halves.
+ *
+ * <p>It used to be `lastIndexOf('=')`, which is right about selectors (`input[type=password]`
+ * carries an `=`) and wrong about VALUES. The list header's filter box now takes a Kubernetes
+ * label selector — `app=web`, `env notin (dev)` — so `fill:.content-head input=app=web` split
+ * into the selector `.content-head input=app` and the value `web`: a step that types the wrong
+ * thing into an element that does not exist, and fails naming a selector nobody wrote.
+ *
+ * <p>So the split is at the first `=` at bracket depth zero: inside `[…]` or `(…)` the
+ * character belongs to the selector, everywhere after it belongs to the value. Both cases
+ * above come out right, and `?` optionality keeps testing the selector it will really use.
+ */
+export function splitFill(arg) {
+  let depth = 0;
+  for (let i = 0; i < arg.length; i++) {
+    const c = arg[i];
+    if (c === '[' || c === '(') {
+      depth++;
+    } else if (c === ']' || c === ')') {
+      depth--;
+    } else if (c === '=' && depth === 0) {
+      return { selector: arg.slice(0, i), value: arg.slice(i + 1) };
+    }
+  }
+  // No unbracketed `=` at all: the old reading, so a malformed step still says something.
+  return { selector: arg.slice(0, arg.lastIndexOf('=')), value: arg.slice(arg.lastIndexOf('=') + 1) };
+}
+
 /** What a PREPARE step waits for, so an optional one can be tested before it runs. */
-const selectorOf = (verb, arg) =>
-  verb === 'fill' || verb === 'upload' ? arg.slice(0, arg.lastIndexOf('=')) : arg;
+const selectorOf = (verb, arg) => (verb === 'fill' || verb === 'upload' ? splitFill(arg).selector : arg);
 
 /**
  * Run a PREPARE spec — semicolon-separated steps that bring a surface on screen before
@@ -184,11 +212,11 @@ export async function runPrepare(page, spec) {
       await page.goto(new URL(arg, BASE_URL).href, { waitUntil: 'networkidle' });
       await page.waitForTimeout(600);
     } else if (verb === 'fill') {
-      const at = arg.lastIndexOf('=');
-      await page.fill(arg.slice(0, at), arg.slice(at + 1));
+      const { selector, value } = splitFill(arg);
+      await page.fill(selector, value);
     } else if (verb === 'upload') {
-      const at = arg.lastIndexOf('=');
-      await page.setInputFiles(arg.slice(0, at), arg.slice(at + 1));
+      const { selector, value } = splitFill(arg);
+      await page.setInputFiles(selector, value);
     } else throw new Error(`unknown PREPARE verb: ${verb}`);
     await page.waitForTimeout(250);
   }

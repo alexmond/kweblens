@@ -3,6 +3,7 @@ import { failureNotice, isSessionExpiry } from './apiFailure';
 import type { DialogApi } from './dialog';
 import type { LogScope } from './dock';
 import { containerNames, objKey, objName, objNs } from './kube';
+import { matchesFilter, parseFilter } from './objectFilter';
 import type { RowAction } from './rowActions';
 import { ROW_ACTIONS } from './rowActions';
 import type { DockKind, KubeObject, NavCategory, NavItem } from './types';
@@ -92,19 +93,23 @@ export function withSyntheticNav(cats: NavCategory[]): NavCategory[] {
   return result;
 }
 
-/** Filter the object list by the active Helm scope and the search query. */
+/**
+ * Filter the object list by the active Helm scope and the search query.
+ *
+ * <p>The query is a filter expression, not a substring — see `objectFilter.ts` for the grammar
+ * and for why it is client-side. A single bare word still means what it always did.
+ *
+ * <p>The query is parsed ONCE per call and the regexes compiled with it, so the per-object work
+ * is the same shape as the three `.includes()` calls this replaced: nothing here is O(objects)
+ * in parsing.
+ */
 export function filterObjects(objects: KubeObject[], query: string, helmScope: Set<string> | null): KubeObject[] {
-  const q = query.trim().toLowerCase();
   const scoped = helmScope ? objects.filter((o) => helmScope.has(`${o.kind ?? ''}/${objName(o)}`)) : objects;
-  if (!q) {
+  const filter = parseFilter(query);
+  if (filter.terms.length === 0) {
     return scoped;
   }
-  return scoped.filter(
-    (o) =>
-      objName(o).toLowerCase().includes(q) ||
-      (objNs(o) ?? '').toLowerCase().includes(q) ||
-      (o.kind ?? '').toLowerCase().includes(q),
-  );
+  return scoped.filter((o) => matchesFilter(o, filter));
 }
 
 /**

@@ -3,6 +3,7 @@ import { NButton, NCheckbox, NInput, NPopover } from 'naive-ui';
 import { computed } from 'vue';
 
 import { resourceListEmpty } from '../emptyState';
+import { activeQuery, FILTER_HELP, FILTER_HELP_NOTES, parseFilter } from '../objectFilter';
 import type { RowAction } from '../rowActions';
 import { listCountLabel } from '../shell';
 import type { TableColumn } from '../table';
@@ -50,8 +51,16 @@ const emit = defineEmits<{
   (e: 'row-action', action: RowAction, obj: KubeObject, container?: string): void;
 }>();
 
+// The filter expression behind the search box (objectFilter.ts owns the grammar). Parsed here
+// as well as in `filterObjects` so the header can say WHY a pattern was not applied; parsing
+// walks the query string, not the object list.
+const filter = computed(() => parseFilter(props.query));
+// A query that did not parse narrowed nothing, so the count and the empty state must not
+// describe a filtered list — "0 of 137" over a full table is the header contradicting the body.
+const narrowedBy = computed(() => activeQuery(props.query, filter.value));
+
 const countLabel = computed(() =>
-  listCountLabel(props.filtered.length, props.objects.length, props.query, props.scope !== null),
+  listCountLabel(props.filtered.length, props.objects.length, narrowedBy.value, props.scope !== null),
 );
 
 // Why the table is empty, worked out here and rendered there — three unrelated situations
@@ -61,7 +70,7 @@ const emptyCopy = computed(() =>
     loading: props.loading,
     failed: props.failed,
     total: props.objects.length,
-    query: props.query,
+    query: narrowedBy.value,
     scope: props.scope,
     noun: props.selected.label,
     namespace: props.namespace,
@@ -83,6 +92,24 @@ const emptyCopy = computed(() =>
         style="width: 220px"
         @update:value="(v) => emit('update:query', v)"
       />
+      <!-- The syntax is opt-in and therefore invisible: the placeholder still says "Search",
+           because a bare word is still a plain substring search and that is the common case.
+           This is the affordance that says there is more, without changing the common one. -->
+      <NPopover trigger="click" placement="bottom-start">
+        <template #trigger>
+          <NButton size="tiny" quaternary class="filter-help-btn" title="Filter syntax" aria-label="Filter syntax">
+            ?
+          </NButton>
+        </template>
+        <div class="filter-help">
+          <div class="filter-help-title">Filter syntax</div>
+          <div v-for="row in FILTER_HELP" :key="row.example" class="filter-help-row">
+            <code>{{ row.example }}</code>
+            <span>{{ row.meaning }}</span>
+          </div>
+          <p v-for="note in FILTER_HELP_NOTES" :key="note" class="filter-help-note">{{ note }}</p>
+        </div>
+      </NPopover>
       <div class="spacer" />
       <NButton size="small" type="primary" @click="emit('create')">+ Create</NButton>
       <span v-if="!selected.namespaced" class="ns-note">Cluster-scoped</span>
@@ -113,6 +140,16 @@ const emptyCopy = computed(() =>
         </div>
       </NPopover>
     </div>
+    <!-- A pattern that did not compile. NOT an ErrorNotice: nothing failed to load, its Retry
+         would re-run a fetch that is fine, and the list below is complete rather than empty.
+         It has to be said out loud all the same — silently showing every row would read as a
+         filter that does nothing, and silently showing none would blame the cluster (#306). -->
+    <div v-if="filter.error" class="filter-error">
+      <span class="filter-error-msg">{{ filter.error }}</span>
+      <!-- `filtered`, not `objects`: with a Helm scope on, the rows still on screen are the
+           scoped ones, and the filter is the only narrowing that was dropped. -->
+      <span class="filter-error-note">Showing all {{ filtered.length }} rows — the filter was not applied.</span>
+    </div>
     <div v-if="selection.size > 0" class="bulk-bar">
       <span>{{ selection.size }} selected</span>
       <NButton size="small" type="error" @click="emit('bulk-delete')">Delete</NButton>
@@ -139,6 +176,80 @@ const emptyCopy = computed(() =>
 </template>
 
 <style scoped>
+/* The filter-syntax popover. Same colour reasoning as `.cols-note` below: inside a Naive
+   popover the panel is NOT the app's panel, so `--muted` measures under AA on its dark
+   surface. `--text` for everything, hierarchy carried by size and weight. */
+.filter-help {
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.filter-help-title {
+  font-weight: 600;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+}
+.filter-help-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+/* `justify-self: start` so the chip hugs its example. Stretched across the whole 150px grid
+   column, a filled box with left-aligned monospace in it reads as an empty text INPUT — the
+   first capture of this popover had eleven of them stacked above a real search box. */
+.filter-help-row code {
+  justify-self: start;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--subtle-bg);
+  color: var(--text);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+.filter-help-note {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+}
+.filter-help-btn {
+  font-weight: 700;
+}
+
+/* A refused pattern, on the warn palette rather than the danger one: nothing broke, the
+   query is simply not usable yet — and the row underneath says what is on screen instead. */
+.filter-error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin: 0 12px 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--warn-line);
+  border-radius: 4px;
+  background: var(--warn-wash);
+  font-size: 12px;
+}
+/* `--text`, not `--warn-fg`. Measured: #a35b00 on this box's own composited fill
+   (rgb(242,238,225)) is 4.46:1 in light — under AA, and passing at 9.67:1 in dark, which is
+   exactly the shape of a one-theme colour defect. The warn tone is carried by the border and
+   the wash; weight carries the hierarchy. */
+.filter-error-msg {
+  color: var(--text);
+  font-weight: 600;
+}
+.filter-error-note {
+  color: var(--text);
+}
+
 .cols-pop {
   display: flex;
   flex-direction: column;
