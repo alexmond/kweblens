@@ -10,6 +10,7 @@ import { shallowRef, computed, ref, watch } from 'vue';
 import { api } from '../api';
 import { failureNotice } from '../apiFailure';
 import { stripManagedFields } from '../kube';
+import LoadingNotice from './LoadingNotice.vue';
 import YamlEditorModal from './YamlEditorModal.vue';
 import YamlView from './YamlView.vue';
 
@@ -123,7 +124,7 @@ const copy = () => {
       </label>
     </div>
     <div v-if="yamlError" class="error">{{ yamlError }}</div>
-    <div v-if="!yamlError && yaml === null" class="empty">Loading…</div>
+    <LoadingNotice v-if="!yamlError && yaml === null" />
     <YamlView v-if="displayYaml !== null" :text="displayYaml" />
     <div v-if="msg" :class="'act-msg' + (msgErr ? ' err' : '')">{{ msg }}</div>
 

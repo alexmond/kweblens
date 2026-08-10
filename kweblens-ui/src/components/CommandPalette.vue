@@ -32,7 +32,9 @@ import {
   STRONG_MATCH,
   wrapIndex,
 } from '../commandPalette';
+import { paletteEmpty } from '../emptyState';
 import type { ClusterInfo, NavCategory, SearchResponse } from '../types';
+import EmptyState from './EmptyState.vue';
 
 const props = defineProps<{
   show: boolean;
@@ -122,6 +124,19 @@ const navHits = computed(() =>
 const hits = computed(() => mergeCommands(navHits.value, objectHits.value));
 const notes = computed(() => scopeNotes(result.value, objectHits.value.length));
 
+// "No match" is an answer, and until R3 the palette gave it while the object search was
+// still running or had failed — the line sat directly above "Object search failed: …".
+// Nav and cluster rows are matched locally, so a short query that never triggers a request
+// is genuinely answered and still gets the sentence.
+const emptyCopy = computed(() =>
+  paletteEmpty({
+    loading: searching.value,
+    failed: searchError.value !== null,
+    count: hits.value.length,
+    query: query.value,
+  }),
+);
+
 // Reopening with the previous query still in the box would make the palette feel stale, so
 // each open starts empty with the first row armed.
 watch(
@@ -199,7 +214,7 @@ const choose = (command: Command | undefined) => {
         <span class="palette-hint">{{ c.hint }}</span>
       </li>
     </ul>
-    <p v-else-if="!searching" class="palette-empty">No match for “{{ query }}”.</p>
+    <EmptyState v-else-if="emptyCopy" :title="emptyCopy.title" :body="emptyCopy.body" variant="inline" />
 
     <!-- What the search covered. A dropdown that shows rows and says nothing else implies it
          looked everywhere; it looked in a bounded set of kinds, and the rest are named here. -->

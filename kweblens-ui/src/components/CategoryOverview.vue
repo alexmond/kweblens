@@ -19,7 +19,9 @@ import { api } from '../api';
 import { failureNotice } from '../apiFailure';
 import type { CheckState } from '../checkState';
 import { checkedData, uncheckedNote } from '../checkState';
+import { attentionEmpty } from '../emptyState';
 import type { EventSummary, KindHealth } from '../types';
+import EmptyState from './EmptyState.vue';
 import EventsPane from './EventsPane.vue';
 import StatCard from './StatCard.vue';
 import { OVERVIEW_CATEGORIES } from './overviewCategories';
@@ -94,6 +96,22 @@ const attention = computed(() => (health.value ?? []).flatMap((k) => k.needsAtte
 const attentionTruncated = computed(() => (health.value ?? []).some((k) => k.truncated));
 const unavailable = computed(() => (health.value ?? []).filter((k) => k.error));
 
+/**
+ * What an empty attention table means here — and in particular whether the category's own
+ * all-clear may be said at all. It may not when some kind's check errored: an overview
+ * assembles one verdict out of several per-kind checks, so "Everything is healthy." can be
+ * built from checks that never ran.
+ */
+const attentionCopy = computed(() =>
+  attentionEmpty({
+    loading: health.value === null,
+    failed: error.value !== null,
+    count: attention.value.length,
+    unavailable: unavailable.value.map((k) => k.label),
+    clean: copy.value.clean,
+  }),
+);
+
 const EVENT_LIMIT = 25;
 const eventData = computed(() => checkedData(events.value));
 const recentEvents = computed(() => (eventData.value ? eventData.value.slice(0, EVENT_LIMIT) : null));
@@ -127,8 +145,8 @@ const eventsUnchecked = computed(() => uncheckedNote(events.value, 'events'));
     <!-- Then the detail: what is wrong, named. -->
     <section v-if="health" class="ov-sec">
       <h3>{{ copy.attention }}</h3>
-      <div v-if="attention.length === 0" class="empty">{{ copy.clean }}</div>
-      <template v-else>
+      <EmptyState v-if="attentionCopy" :title="attentionCopy.title" :body="attentionCopy.body" variant="inline" />
+      <template v-else-if="attention.length > 0">
         <!-- `.mini-scroll` is the table's own sideways scroller — see the wrap policy in
              styles.css (#278). -->
         <div class="mini-scroll">

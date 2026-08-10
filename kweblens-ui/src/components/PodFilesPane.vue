@@ -35,8 +35,11 @@ import {
   withinRoots,
 } from '../podFiles';
 import type { FileDirection, FileNotice as FileNoticeShape, UploadPlan } from '../podFiles';
+import { directoryEmpty } from '../emptyState';
 import type { KubeObject, PodDirectoryListing, PodFileEntry } from '../types';
+import EmptyState from './EmptyState.vue';
 import FileNotice from './FileNotice.vue';
+import LoadingNotice from './LoadingNotice.vue';
 import PodFileView from './PodFileView.vue';
 
 const props = defineProps<{ cluster: string; namespace: string; pod: string; obj: KubeObject; authed: boolean }>();
@@ -53,6 +56,18 @@ const listing = shallowRef<PodDirectoryListing | null>(null);
 const notice = ref<FileNoticeShape | null>(null);
 const loading = ref(false);
 const selected = ref<string | null>(null);
+
+// The listing shown is `listing.path`, not `path` — the reader can already have clicked on
+// into a directory whose answer has not arrived, and naming the one they are about to leave
+// would put the wrong path in the sentence.
+const emptyCopy = computed(() =>
+  directoryEmpty({
+    loading: loading.value,
+    failed: notice.value !== null,
+    count: listing.value?.entries.length ?? 0,
+    path: listing.value?.path ?? path.value,
+  }),
+);
 
 // Upload state. `pending` holds a read-and-checked file waiting for the "replace what is
 // already there?" answer — an upload that silently overwrites is the one destructive thing
@@ -293,7 +308,7 @@ function onDrop(event: DragEvent) {
       <p v-else-if="uploaded" class="files-saved">Uploaded {{ uploaded }}.</p>
       <p v-if="dragging && canUpload" class="files-hint">Drop to upload into {{ path }}.</p>
 
-      <p v-if="loading && !listing" class="empty">Loading…</p>
+      <LoadingNotice v-if="loading && !listing" />
       <template v-else-if="listing">
         <p v-if="listing.resolvedPath && listing.resolvedPath !== listing.path" class="files-hint">
           Resolves to <span class="mono">{{ listing.resolvedPath }}</span> inside the container.
@@ -301,8 +316,8 @@ function onDrop(event: DragEvent) {
         <p v-if="listing.truncated" class="files-hint">
           This directory holds more entries than are listed (kweblens.files.max-entries).
         </p>
-        <p v-if="listing.entries.length === 0" class="empty">This directory is empty.</p>
-        <div v-else class="files-list">
+        <EmptyState v-if="emptyCopy" :title="emptyCopy.title" :body="emptyCopy.body" variant="inline" />
+        <div v-else-if="listing.entries.length > 0" class="files-list">
           <table class="mini files-table">
             <thead>
               <tr>

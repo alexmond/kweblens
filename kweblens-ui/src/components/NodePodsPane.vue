@@ -12,8 +12,11 @@ import { computed, h, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 
 import { api } from '../api';
 import { failureNotice } from '../apiFailure';
+import { nodePodsEmpty } from '../emptyState';
 import { gib, objKey, objName, objNs, parseCpuCores, parseMemBytes } from '../kube';
 import type { KubeObject, UsageSummary } from '../types';
+import EmptyState from './EmptyState.vue';
+import LoadingNotice from './LoadingNotice.vue';
 import StatusBadge from './StatusBadge.vue';
 import UsageBar from './UsageBar.vue';
 
@@ -23,6 +26,15 @@ const emit = defineEmits<{ (e: 'open', obj: KubeObject): void }>();
 const pods = shallowRef<KubeObject[] | null>(null);
 const usage = shallowRef<Record<string, UsageSummary>>({});
 const error = ref<string | null>(null);
+
+const emptyCopy = computed(() =>
+  nodePodsEmpty({
+    loading: pods.value === null,
+    failed: error.value !== null,
+    count: pods.value?.length ?? 0,
+    node: props.node,
+  }),
+);
 
 const podPhase = (o: KubeObject): string => String((o.status as Record<string, unknown>)?.phase ?? '—');
 /** A pod's requested CPU/memory summed over its containers — the usage bar's denominator. */
@@ -149,8 +161,8 @@ const rowProps = (o: KubeObject) => ({ style: 'cursor: pointer', onClick: () => 
 <template>
   <div class="node-pods">
     <div v-if="error" class="error">{{ error }}</div>
-    <div v-else-if="pods === null" class="empty">Loading…</div>
-    <div v-else-if="pods.length === 0" class="empty">No pods scheduled on this node.</div>
+    <LoadingNotice v-else-if="pods === null" />
+    <EmptyState v-else-if="emptyCopy" :title="emptyCopy.title" :body="emptyCopy.body" variant="inline" />
     <NDataTable v-else :columns="columns" :data="pods" :row-key="objKey" :row-props="rowProps" size="small" />
   </div>
 </template>

@@ -919,9 +919,14 @@ body {
   font-weight: 600;
 }
 
-.empty {
+/* A request still in flight. Was `.empty`, shared with "there is nothing here" and with
+   "this failed" — one grey line for three different claims, which is the defect R3 names.
+   The styling is deliberately the dimmest of the three: a pane that is still working has
+   nothing to tell the reader yet, while an empty state has a sentence they need to read. */
+.pane-loading {
   color: var(--muted);
   padding: 20px 4px;
+  margin: 0;
 }
 
 /* The shared empty state (GH#298). Deliberately a block with room in it rather than one grey
@@ -958,6 +963,28 @@ body {
 
 .empty-state-action {
   margin-top: 18px;
+}
+
+/* The inline variant, for a pane / modal / dropdown that already has a frame. Everything
+   structural is dropped and only the two-tier wording survives — the title in --text so the
+   sentence is read, the explanation in --muted. That two-tier shape is the whole difference
+   from the `.empty` line this replaced: "No data." in grey was indistinguishable from
+   "Loading…" in grey, and the reader had to guess which of the two had happened. */
+.empty-state-inline {
+  max-width: none;
+  margin: 0;
+  padding: 16px 4px;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+
+.empty-state-inline .empty-state-title {
+  font-size: 14px;
+}
+
+.empty-state-inline .empty-state-body {
+  margin-top: 6px;
 }
 
 /* Cluster overview landing */
@@ -2091,11 +2118,6 @@ body {
   content: '+';
   color: var(--ok-fg);
   margin-right: 4px;
-}
-.diff-empty {
-  color: var(--muted);
-  font-size: 13px;
-  padding: 8px 2px;
 }
 .diff-host {
   flex: 1;
@@ -3417,6 +3439,10 @@ body.dragging {
 .ov-seg.tone-err {
   background: var(--danger-fg);
 }
+/* `tone-empty` is a BAR TONE, not an empty state: it is the neutral fill an aria-hidden
+   stacked bar wears when the kind has no objects to break down, and it belongs to the
+   `tone-*` family beside it. A sweep for empty-state class names will match the name — it is
+   not one, and rendering an `EmptyState` here would put a paragraph inside a 6px bar. */
 .ov-seg.tone-idle,
 .ov-seg.tone-empty {
   background: var(--border);
@@ -3563,10 +3589,8 @@ body.dragging {
   color: var(--muted);
 }
 
-.palette-empty {
-  margin: 12px 2px 0;
-  color: var(--muted);
-}
+/* The palette's own no-match line is gone: it renders the shared `.empty-state` inline
+   (R3), which is also what stopped it claiming "no match" over a search that failed. */
 
 /* An object row's status sits between the name and the Kind · namespace hint, so the eye
    reads name → state → where it lives. Kept at full text strength rather than a semantic
