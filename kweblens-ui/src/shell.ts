@@ -192,7 +192,14 @@ export interface RowActionDeps {
    * must not close it, which is why this is a key to compare rather than a flag.
    */
   detailKey?: string | null;
-  setError: (e: string) => void;
+  /**
+   * Report a row action that did not complete: what was attempted, and the thrown value.
+   *
+   * <p>The title comes from the registry entry rather than from the caller, so a new row
+   * action cannot ship an unattributed error — the shell's one error slot is shared with
+   * every fetch, and "Forbidden" on its own does not say which click it belongs to.
+   */
+  reportFailure: (title: string, e: unknown) => void;
   setObjects: (updater: (prev: KubeObject[]) => KubeObject[]) => void;
   setShowLogin: (v: boolean) => void;
 }
@@ -214,8 +221,11 @@ export function dispatchRowAction(
     deps.setShowLogin(true);
     return;
   }
+  // "Scale…" is a menu label; "Scale… failed" is not a sentence. The ellipsis means "opens a
+  // dialog" and has nothing to say once the dialog is answered.
+  const reportFailure = (e: unknown) => deps.reportFailure(`${def.label.replace(/…$/, '')} failed`, e);
   const confirmRun = (fn: () => Promise<unknown>, confirmMsg?: string) => {
-    const go = () => fn().catch((e) => deps.setError(failureNotice(e)));
+    const go = () => fn().catch(reportFailure);
     if (!confirmMsg) {
       go();
       return;
@@ -240,7 +250,7 @@ export function dispatchRowAction(
     openLogs: deps.openLogs,
     setForward: deps.setForward,
     setDetail: deps.setDetail,
-    setError: deps.setError,
+    reportFailure,
     removeObject: (o) => {
       deps.setObjects((prev) => prev.filter((x) => objKey(x) !== objKey(o)));
       // Close the drawer only when it is showing THIS object.
@@ -301,11 +311,19 @@ export async function runBulkDelete(deps: {
   selection: Set<string>;
   objects: KubeObject[];
   dialog: DialogApi;
-  setError: (e: string) => void;
+  /**
+   * The one line naming what happened, called only when something failed.
+   *
+   * <p>Takes the rendered message rather than a thrown value because there is no single
+   * throw to classify: the loop gets an answer per object and this run may have deleted some
+   * and not others. `bulkDeleteMessage` states that outcome exactly, which is also why the
+   * shell adds no general "nothing was changed" hedge on top of it.
+   */
+  reportOutcome: (message: string) => void;
   onAuthCleared: () => void;
   clearSelection: () => void;
 }): Promise<BulkDeleteOutcome | null> {
-  const { cluster, selected, selection, objects, dialog, setError, onAuthCleared, clearSelection } = deps;
+  const { cluster, selected, selection, objects, dialog, reportOutcome, onAuthCleared, clearSelection } = deps;
   const ok = await dialog.confirm({
     title: 'Delete',
     message: `Delete ${selection.size} ${selected.label}? This cannot be undone.`,
@@ -338,7 +356,7 @@ export async function runBulkDelete(deps: {
   }
   clearSelection();
   if (outcome.failed.length > 0) {
-    setError(bulkDeleteMessage(outcome, selected.label));
+    reportOutcome(bulkDeleteMessage(outcome, selected.label));
   }
   return outcome;
 }

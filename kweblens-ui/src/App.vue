@@ -17,6 +17,8 @@ import { defaultHiddenCols } from './columns';
 import { useDialog } from './dialog';
 import { clusterListEmpty } from './emptyState';
 import { objKey } from './kube';
+import type { PaneFailure } from './paneFailure';
+import { actionFailed, bulkDeleteIncomplete, mayRetry, readMessage } from './paneFailure';
 import { loadDark, loadHiddenCols, loadKeptCols, loadNamespace, saveCluster, saveDark, saveNamespace } from './prefs';
 import { HELM_VIEW_IDS, NAV, filterObjects, isSynthetic } from './shell';
 import { buildResourceColumns } from './table';
@@ -34,6 +36,7 @@ import DiagnosticsModal from './components/DiagnosticsModal.vue';
 import { overviewCategoryOf } from './components/overviewCategories';
 import DialogHost from './components/DialogHost.vue';
 import DockArea from './components/DockArea.vue';
+import FailureNotice from './components/FailureNotice.vue';
 import ForwardModal from './components/ForwardModal.vue';
 import HelmView from './components/HelmView.vue';
 import LoginModal from './components/LoginModal.vue';
@@ -42,7 +45,18 @@ import ResourceListView from './components/ResourceListView.vue';
 import Sidebar from './components/Sidebar.vue';
 
 // --- UI state (the shell owns selection/detail/query/auth/modals; data comes from composables) ---
-const error = ref<string | null>(null);
+/**
+ * The shell's one failure slot — and the reason it is a union rather than a string.
+ *
+ * The roadmap framed R3's error half as "classify each site". This site cannot be classified,
+ * because six different code paths write to it and they are not the same kind of thing: the
+ * clusters fetch, the nav fetch, the object-list fetch and opening a search hit are READS,
+ * while every row action (delete, drain, scale, rollout-restart) and bulk delete are WRITES.
+ * A Retry button here would have re-run whichever of those failed last, so on a failed Drain
+ * it would have offered to drain the node again — unattended, and against the standing rule
+ * that remediation is suggest → approve → apply. The classification belongs to the writer.
+ */
+const failure = ref<PaneFailure | null>(null);
 const namespace = ref<string | null>(null);
 const helmRelease = ref<{ namespace: string; name: string } | null>(null);
 const selected = ref<NavItem | null>(null);
@@ -62,7 +76,33 @@ const showDiagnostics = ref(false);
 const forward = ref<{ kind: string; namespace: string; name: string; ports: number[] } | null>(null);
 const helmTarget = ref<{ namespace: string; name: string } | null>(null);
 
-const setError = (e: string | null) => (error.value = e);
+/** A composable's read failure, already rendered by `failureNotice` on its way up. */
+const setError = (e: string | null) => (failure.value = e === null ? null : readMessage(e));
+/** A row action that did not complete — never cleared by a later read, and never retryable. */
+const reportFailure = (title: string, e: unknown) => (failure.value = actionFailed(title, e));
+/** A bulk delete's own summary of what it did and did not delete. */
+const reportOutcome = (message: string) => (failure.value = bulkDeleteIncomplete(message));
+
+/**
+ * Whether the thing on screen is a failed READ — which is a different question from "is there
+ * an error", and the one the two guards below actually mean.
+ *
+ * A failed delete does not make the cluster list unknown, so it must not suppress the
+ * zero-cluster empty state, and it does not make the cluster overview wrong, so it must not
+ * blank the page the operator was looking at when they pressed the button.
+ */
+const readFailed = computed(() => mayRetry(failure.value));
+
+/**
+ * Re-run every read the shell owns.
+ *
+ * A single Retry has to cover all of them because a single slot showed all of them: the
+ * clusters list, the nav tree, the namespace list, the Helm scope and the object list each
+ * write here. `reloadReads` is a nonce the cluster-scoped watches take as a dependency, so
+ * bumping it re-runs exactly the requests a cluster change would.
+ */
+const reloadReads = ref(0);
+
 const dialog = useDialog();
 
 // Theme: Naive UI light/dark, toggled from the brand bar and persisted.
@@ -112,6 +152,11 @@ const toggleTheme = () => {
 document.documentElement.classList.toggle('kw-dark', dark.value);
 
 const { clusters, cluster, loaded: clustersLoaded, refresh: refreshClusters } = useClusters(setError);
+const retryRead = () => {
+  failure.value = null;
+  reloadReads.value += 1;
+  void refreshClusters();
+};
 // Closed-mode: the session cookie outlives the in-memory creds. On load, restore an existing
 // session (so write controls appear + data loads after a reload) and re-fetch once authed.
 api
@@ -147,12 +192,14 @@ const { nav, counts, helmCounts, namespaces, namespacesKnown, helmReleaseList, f
   namespace,
   helmRelease,
   setError,
+  reloadReads,
 );
 const { objects, setObjects, loading, failed, live, cols, usage, nodeDisk } = useResourceData(
   cluster,
   selected,
   namespace,
   setError,
+  reloadReads,
 );
 const {
   sessions: dockSessions,
@@ -219,7 +266,8 @@ const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDele
   openLogs,
   setForward: (f) => (forward.value = f),
   setDetail: (d) => (detail.value = d),
-  setError,
+  reportFailure,
+  reportOutcome,
   setObjects,
   setShowLogin: (v) => (showLogin.value = v),
   setAuthUser: (v) => (authUser.value = v),
@@ -276,7 +324,9 @@ const openClusterFromPage = (id: string) => {
 const clustersEmptyCopy = computed(() =>
   clusterListEmpty({
     loaded: clustersLoaded.value,
-    failed: error.value !== null,
+    // A failed READ, specifically: a delete that came back 403 leaves the cluster list exactly
+    // as trustworthy as it was, so it must not suppress this page's own explanation.
+    failed: readFailed.value,
     count: clusters.value.length,
     canWrite: authUser.value !== null,
   }),
@@ -330,7 +380,10 @@ const visibleCols = computed(() => tableCols.value.filter((c) => !hiddenCols.val
 const mergedCounts = computed(() => ({ ...counts.value, ...helmCounts.value }));
 
 const id = computed(() => selected.value?.id);
-const showClusterOverview = computed(() => (!selected.value || id.value === NAV.overviewCluster) && !error.value);
+// Hidden when a READ failed — there is nothing to summarise — but NOT when an action did: a
+// failed Restart used to blank the dashboard the operator was standing on, so the only trace
+// of what they had just done was an error over an empty page.
+const showClusterOverview = computed(() => (!selected.value || id.value === NAV.overviewCluster) && !readFailed.value);
 /** Which category dashboard to render, if the selected nav item is one. */
 const overviewCategory = computed(() => overviewCategoryOf(id.value));
 const showHelm = computed(() => id.value !== undefined && HELM_VIEW_IDS.includes(id.value));
@@ -419,7 +472,7 @@ const onForwardStarted = () => {
 
         <div class="content-col">
           <main class="content">
-            <div v-if="error" class="error">{{ error }}</div>
+            <FailureNotice v-if="failure" :failure="failure" @retry="retryRead" />
             <!-- OUTSIDE the cluster guard, deliberately (GH#298): this is the page that adds
                  one, so gating it on a cluster existing made the empty install a dead end. -->
             <ClustersPage

@@ -19,6 +19,7 @@ import { warningsEmpty } from '../emptyState';
 import { eventObjectKind } from '../kube';
 import type { EventSummary, KubeObject } from '../types';
 import EmptyState from './EmptyState.vue';
+import ErrorNotice from './ErrorNotice.vue';
 import MetricChart from './MetricChart.vue';
 import StatCard from './StatCard.vue';
 import { WARN_TABLE_MIN_WIDTH, warnColumns } from './warningsTable';
@@ -47,31 +48,45 @@ const nodes = shallowRef<CheckState<KubeObject[]>>({ status: 'checking' });
 const warnings = shallowRef<CheckState<EventSummary[]>>({ status: 'checking' });
 const err = ref<string | null>(null);
 
-let reqId = 0;
+// Two independent reads, so two independent retries. Both are GETs — a Retry on either costs
+// one more request and changes nothing — but they must not share a button: the nodes call and
+// the events call fail for different reasons, and re-running the one that worked in order to
+// re-try the one that did not would blank a card that is currently right.
+let nodeReq = 0;
+const loadNodes = () => {
+  const my = ++nodeReq;
+  nodes.value = { status: 'checking' };
+  err.value = null;
+  api
+    .objects(props.cluster, 'nodes')
+    .then((n) => my === nodeReq && (nodes.value = { status: 'checked', data: n }))
+    .catch((e) => {
+      if (my === nodeReq) {
+        // Both, not just the banner: a card still showing "…" after the request has
+        // finished says "any moment now" about something that already failed.
+        nodes.value = { status: 'unchecked', message: failureNotice(e) };
+        err.value = failureNotice(e);
+      }
+    });
+};
+
+let warnReq = 0;
+const loadWarnings = () => {
+  const my = ++warnReq;
+  warnings.value = { status: 'checking' };
+  api
+    .events(props.cluster, props.namespace ?? undefined)
+    .then(
+      (ev) => my === warnReq && (warnings.value = { status: 'checked', data: ev.filter((x) => x.type === 'Warning') }),
+    )
+    .catch((e) => my === warnReq && (warnings.value = { status: 'unchecked', message: failureNotice(e) }));
+};
+
 watch(
   () => [props.cluster, props.namespace] as const,
-  ([cluster, namespace]) => {
-    const my = ++reqId;
-    nodes.value = { status: 'checking' };
-    warnings.value = { status: 'checking' };
-    err.value = null;
-    api
-      .objects(cluster, 'nodes')
-      .then((n) => my === reqId && (nodes.value = { status: 'checked', data: n }))
-      .catch((e) => {
-        if (my === reqId) {
-          // Both, not just the banner: a card still showing "…" after the request has
-          // finished says "any moment now" about something that already failed.
-          nodes.value = { status: 'unchecked', message: failureNotice(e) };
-          err.value = failureNotice(e);
-        }
-      });
-    api
-      .events(cluster, namespace ?? undefined)
-      .then(
-        (ev) => my === reqId && (warnings.value = { status: 'checked', data: ev.filter((x) => x.type === 'Warning') }),
-      )
-      .catch((e) => my === reqId && (warnings.value = { status: 'unchecked', message: failureNotice(e) }));
+  () => {
+    loadNodes();
+    loadWarnings();
   },
   { immediate: true },
 );
@@ -162,7 +177,7 @@ const warningsCopy = computed(() =>
         <MetricChart :cluster="cluster" target="cluster-mem" label="Cluster Memory" />
       </div>
     </div>
-    <div v-if="err" class="error">{{ err }}</div>
+    <ErrorNotice v-if="err" :message="err" :retrying="nodes.status === 'checking'" @retry="loadNodes" />
     <!-- Diagnosis sits above Warnings: warnings are raw events, diagnosis is the reading
          of them plus what to do. Reason before evidence. -->
     <DiagnosisPanel
@@ -177,8 +192,15 @@ const warningsCopy = computed(() =>
       <div v-if="warningsTruncated" class="ov-truncated">
         Showing the {{ WARNING_LIMIT }} most recent of {{ warnData?.length }} warnings.
       </div>
-      <!-- The failure gets its own line and suppresses both the count and the all-clear. -->
-      <div v-if="warningsUnchecked" class="error">{{ warningsUnchecked }}</div>
+      <!-- The failure gets its own line and suppresses both the count and the all-clear. The
+           wording stays `uncheckedNote`'s — "unknown, not clear" — because that is the claim;
+           what is new is that the reader can act on it without reloading the whole page. -->
+      <ErrorNotice
+        v-if="warningsUnchecked"
+        :message="warningsUnchecked"
+        :retrying="warnings.status === 'checking'"
+        @retry="loadWarnings"
+      />
       <EmptyState v-else-if="warningsCopy" :title="warningsCopy.title" :body="warningsCopy.body" variant="inline" />
       <!-- `table-layout="fixed"` is what makes the declared widths binding and hands the
            remainder to Message; `scroll-x` is the floor below which it scrolls instead. -->

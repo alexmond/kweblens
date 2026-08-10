@@ -8,14 +8,15 @@
 // on the Metrics tab.
 import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { computed, h, onBeforeUnmount, shallowRef, watch } from 'vue';
 
 import { api } from '../api';
-import { failureNotice } from '../apiFailure';
+import { useAsyncData } from '../composables/useAsyncData';
 import { nodePodsEmpty } from '../emptyState';
 import { gib, objKey, objName, objNs, parseCpuCores, parseMemBytes } from '../kube';
 import type { KubeObject, UsageSummary } from '../types';
 import EmptyState from './EmptyState.vue';
+import ErrorNotice from './ErrorNotice.vue';
 import LoadingNotice from './LoadingNotice.vue';
 import StatusBadge from './StatusBadge.vue';
 import UsageBar from './UsageBar.vue';
@@ -23,13 +24,22 @@ import UsageBar from './UsageBar.vue';
 const props = defineProps<{ cluster: string; node: string }>();
 const emit = defineEmits<{ (e: 'open', obj: KubeObject): void }>();
 
-const pods = shallowRef<KubeObject[] | null>(null);
+// The pod list is a plain read, so its failure is retryable: pressing Retry costs one more
+// GET and cannot change anything on the node.
+const {
+  data: pods,
+  loading,
+  error,
+  reload,
+} = useAsyncData(
+  () => [props.cluster, props.node],
+  () => api.nodePods(props.cluster, props.node),
+);
 const usage = shallowRef<Record<string, UsageSummary>>({});
-const error = ref<string | null>(null);
 
 const emptyCopy = computed(() =>
   nodePodsEmpty({
-    loading: pods.value === null,
+    loading: loading.value,
     failed: error.value !== null,
     count: pods.value?.length ?? 0,
     node: props.node,
@@ -123,15 +133,11 @@ const columns = computed<DataTableColumns<KubeObject>>(() => [
   },
 ]);
 
-// Load the node's pods, plus pod usage (refreshed on the same 15s cadence as the node list).
+// Pod usage, refreshed on the same 15s cadence as the node list. Kept apart from the pod
+// fetch above: a metrics call that fails is not a failed pane — the bars just read `—` — so
+// it must not put an error, or a Retry, over a table that loaded fine.
 let timer = 0;
-const load = (first: boolean) => {
-  if (first) {
-    api
-      .nodePods(props.cluster, props.node)
-      .then((p) => (pods.value = p))
-      .catch((e) => (error.value = failureNotice(e)));
-  }
+const loadUsage = () => {
   api
     .podMetrics(props.cluster)
     .then((list) => {
@@ -145,11 +151,9 @@ const load = (first: boolean) => {
 watch(
   () => [props.cluster, props.node],
   () => {
-    pods.value = null;
-    error.value = null;
-    load(true);
+    loadUsage();
     window.clearInterval(timer);
-    timer = window.setInterval(() => load(false), 15000);
+    timer = window.setInterval(loadUsage, 15000);
   },
   { immediate: true },
 );
@@ -160,9 +164,9 @@ const rowProps = (o: KubeObject) => ({ style: 'cursor: pointer', onClick: () => 
 
 <template>
   <div class="node-pods">
-    <div v-if="error" class="error">{{ error }}</div>
-    <LoadingNotice v-else-if="pods === null" />
+    <ErrorNotice v-if="error" :message="error" :retrying="loading" @retry="reload" />
+    <LoadingNotice v-else-if="loading" />
     <EmptyState v-else-if="emptyCopy" :title="emptyCopy.title" :body="emptyCopy.body" variant="inline" />
-    <NDataTable v-else :columns="columns" :data="pods" :row-key="objKey" :row-props="rowProps" size="small" />
+    <NDataTable v-else :columns="columns" :data="pods ?? []" :row-key="objKey" :row-props="rowProps" size="small" />
   </div>
 </template>

@@ -7,28 +7,35 @@ import type { DataTableColumns } from 'naive-ui';
 import { shallowRef, computed, h, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { failureNotice } from '../apiFailure';
+import type { PaneFailure } from '../paneFailure';
+import { actionFailed, mayRetry, readFailed } from '../paneFailure';
 import type { PortForward } from '../types';
+import FailureNotice from './FailureNotice.vue';
 
 const props = defineProps<{ cluster: string; authed: boolean }>();
 const emit = defineEmits<{ (e: 'require-auth'): void }>();
 
 const forwards = shallowRef<PortForward[] | null>(null);
-const error = ref<string | null>(null);
+// ONE slot, TWO kinds of failure — which is why it is not a string. The 3-second poll is a
+// read and may offer a Retry; Stop is a DELETE that tears down a bound socket, and a Retry
+// beside "Stop failed" would offer to tear it down again on the operator's behalf. Which of
+// the two is on screen is a property of the code path that failed, not of this pane, so the
+// pane carries the discriminated union and lets FailureNotice pick the rendering.
+const failure = ref<PaneFailure | null>(null);
 const busy = ref<string | null>(null);
 
 const refresh = () =>
   api
     .portForwards(props.cluster)
     .then((f) => (forwards.value = f))
-    .catch((e) => (error.value = failureNotice(e)));
+    .catch((e) => (failure.value = readFailed(e)));
 
 watch(
   () => props.cluster,
   (cluster, _old, onCleanup) => {
     let cancelled = false;
     forwards.value = null;
-    error.value = null;
+    failure.value = null;
     const tick = () => {
       if (cancelled) {
         return;
@@ -36,7 +43,10 @@ watch(
       api
         .portForwards(cluster)
         .then((f) => !cancelled && (forwards.value = f))
-        .catch((e) => !cancelled && (error.value = failureNotice(e)));
+        // Deliberately does not clear a Stop's failure on the next tick: the poll answering
+        // does not make "Stop failed" untrue, and a message that vanishes after three seconds
+        // is one the operator never gets to read.
+        .catch((e) => !cancelled && (failure.value = readFailed(e)));
     };
     tick();
     const timer = window.setInterval(tick, 3000);
@@ -57,7 +67,7 @@ const stop = (id: string) => {
   api
     .stopPortForward(props.cluster, id)
     .then(() => refresh())
-    .catch((e) => (error.value = failureNotice(e)))
+    .catch((e) => (failure.value = actionFailed('Stop failed', e)))
     .finally(() => (busy.value = null));
 };
 
@@ -112,11 +122,11 @@ const columns = computed<DataTableColumns<PortForward>>(() => [
       otherwise). Start one from a Pod or Service detail. A Service port is translated to the pod's
       <code>targetPort</code>; the Port column shows that translation (80 → 9898) when the two differ.
     </p>
-    <div v-if="error" class="error">{{ error }}</div>
+    <FailureNotice v-if="failure" :failure="failure" @retry="refresh" />
     <NDataTable
       :columns="columns"
       :data="forwards ?? []"
-      :loading="forwards === null && !error"
+      :loading="forwards === null && !mayRetry(failure)"
       :row-key="(f) => f.id"
       size="small"
     />

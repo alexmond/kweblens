@@ -8,8 +8,9 @@ import { NButton, NSwitch } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
-import { failureNotice } from '../apiFailure';
+import { useAsyncData } from '../composables/useAsyncData';
 import { stripManagedFields } from '../kube';
+import ErrorNotice from './ErrorNotice.vue';
 import LoadingNotice from './LoadingNotice.vue';
 import YamlEditorModal from './YamlEditorModal.vue';
 import YamlView from './YamlView.vue';
@@ -27,8 +28,18 @@ const props = defineProps<{
 // and take this editor, its child — the moment you click inside the editor).
 const emit = defineEmits<{ (e: 'auth-expired'): void; (e: 'editing', v: boolean): void }>();
 
-const yaml = ref<string | null>(null);
-const yamlError = ref<string | null>(null);
+// Fetching the manifest is a read, so the failure gets a Retry. The APPLY that this tab can
+// launch is not in this slot at all — it lives in the pop-out editor and reports through
+// `msg` below — which is what keeps the Retry here honest: it re-runs a GET and nothing else.
+const {
+  data: yaml,
+  loading: yamlLoading,
+  error: yamlError,
+  reload: reloadYaml,
+} = useAsyncData(
+  () => [props.cluster, props.resourceId, props.name, props.ns],
+  () => api.yaml(props.cluster, props.resourceId, props.name, props.ns || undefined),
+);
 const hideManaged = ref(true);
 const copied = ref(false);
 const showEditor = ref(false);
@@ -47,19 +58,6 @@ watch(
       .schema(props.cluster, id)
       .then((s) => (schema.value = s))
       .catch(() => undefined);
-  },
-  { immediate: true },
-);
-
-watch(
-  () => [props.cluster, props.resourceId, props.name, props.ns],
-  (_now, _prev, onCleanup) => {
-    let cancelled = false;
-    onCleanup(() => (cancelled = true));
-    api
-      .yaml(props.cluster, props.resourceId, props.name, props.ns || undefined)
-      .then((t) => !cancelled && (yaml.value = t))
-      .catch((e) => !cancelled && (yamlError.value = failureNotice(e)));
   },
   { immediate: true },
 );
@@ -123,8 +121,8 @@ const copy = () => {
         Hide Managed Fields
       </label>
     </div>
-    <div v-if="yamlError" class="error">{{ yamlError }}</div>
-    <LoadingNotice v-if="!yamlError && yaml === null" />
+    <ErrorNotice v-if="yamlError" :message="yamlError" :retrying="yamlLoading" @retry="reloadYaml" />
+    <LoadingNotice v-if="!yamlError && yamlLoading" />
     <YamlView v-if="displayYaml !== null" :text="displayYaml" />
     <div v-if="msg" :class="'act-msg' + (msgErr ? ' err' : '')">{{ msg }}</div>
 

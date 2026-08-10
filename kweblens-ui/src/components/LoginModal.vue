@@ -3,7 +3,10 @@
 // Callback prop (emits can't return a promise): onSubmit(user,pass) => Promise<boolean>
 // Emits: cancel () — user dismissed the modal
 import { NButton, NForm, NFormItem, NInput, NModal } from 'naive-ui';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+
+import { signInRejected } from '../paneFailure';
+import ActionNotice from './ActionNotice.vue';
 
 const props = defineProps<{ onSubmit: (user: string, pass: string) => Promise<boolean> }>();
 const emit = defineEmits<{ (e: 'cancel'): void }>();
@@ -23,6 +26,10 @@ const submit = () => {
     }
   });
 };
+// A rejected sign-in is an ACTION result, not a failed fetch: the re-try is the Sign in
+// button two lines below, which the operator presses after correcting the password. An
+// automatic Retry would re-post the same credentials that were just refused.
+const failure = computed(() => (failed.value ? signInRejected() : null));
 const onShow = (v: boolean) => {
   if (!v) {
     emit('cancel');
@@ -33,7 +40,7 @@ const onShow = (v: boolean) => {
 <template>
   <NModal :show="true" preset="card" title="Sign in" :bordered="false" style="max-width: 420px" @update:show="onShow">
     <p class="modal-note">Credentials are kept in memory for this tab only and sent over HTTP Basic.</p>
-    <div v-if="failed" class="error">Invalid credentials.</div>
+    <ActionNotice v-if="failure" :failure="failure" />
     <NForm @submit.prevent="submit">
       <NFormItem label="Username">
         <NInput v-model:value="user" autofocus @keyup.enter="submit" />

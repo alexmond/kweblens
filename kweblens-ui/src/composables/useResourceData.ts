@@ -15,6 +15,12 @@ export function useResourceData(
   selected: Ref<NavItem | null>,
   namespace: Ref<string | null>,
   setError: (e: string | null) => void,
+  /**
+   * Bumped by the shell's Retry. A dependency of the object-list watch and nothing else: the
+   * columns, the metrics poll and the watch stream all recover on their own, and the list is
+   * the only one of the four whose failure reaches the shell's error slot.
+   */
+  reload?: Ref<number>,
 ) {
   const objects = shallowRef<KubeObject[]>([]);
   const loading = ref(false);
@@ -33,7 +39,7 @@ export function useResourceData(
   const scopedNs = (sel: NavItem): string | undefined => (sel.namespaced ? (namespace.value ?? undefined) : undefined);
 
   watch(
-    [cluster, selected, namespace],
+    [cluster, selected, namespace, () => reload?.value],
     ([c, sel], _prev, onCleanup) => {
       if (!c || !sel || isSynthetic(sel.id)) {
         objects.value = [];
