@@ -11,22 +11,30 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
  * The three-state shape is the point. A relation that fails must never render as an empty
  * list, because "there are none" is a <em>factual claim about the cluster</em> and
  * getting it wrong is worse than showing nothing: a user told a Service has no endpoints
- * will go looking for a broken selector rather than a permissions problem. So each
- * relation carries either items, or an error, or {@code notPermitted} — and the UI is
- * expected to say which.
+ * will go looking for a broken selector rather than a permissions problem. So a relation
+ * either carries items or reports a failure, and the UI is expected to say which.
  *
  * <p>
- * {@code notPermitted} is separated from a generic error because it is the expected
- * outcome of a least-privilege deployment, not a malfunction: the joins read more kinds
- * than the object itself, so a service account scoped to the object's kind will
- * legitimately be refused here. See {@code docs/design/adr-001-identity-model.md}.
+ * The two failure states are <em>not</em> alternatives on the wire: {@link #notPermitted}
+ * sets {@code error} as well as the flag, because the refusal still has a sentence worth
+ * showing. A client therefore branches on {@code notPermitted} FIRST and treats
+ * {@code error} as the generic case; reading them as exclusive renders every refusal as a
+ * malfunction. {@code DetailEndpointsTest} pins the wire shape.
+ *
+ * <p>
+ * {@code notPermitted} is flagged separately from a generic error because it is the
+ * expected outcome of a least-privilege deployment, not a malfunction: the joins read
+ * more kinds than the object itself, so a service account scoped to the object's kind
+ * will legitimately be refused here. See {@code docs/design/adr-001-identity-model.md}.
  *
  * @param items the related objects (empty and non-null when the fetch succeeded but
  * matched nothing)
  * @param truncated true when {@code items} was cut off by a bound, so the UI can say so
  * rather than implying completeness
- * @param error a human-readable reason the relation could not be resolved, or null
- * @param notPermitted true when the credential kweblens used was refused (403)
+ * @param error a human-readable reason the relation could not be resolved, or null — set
+ * for a refusal too, alongside {@code notPermitted}
+ * @param notPermitted true when the credential kweblens used was refused (403); such a
+ * relation also carries {@code error}
  */
 public record Relation(List<Object> items, boolean truncated, String error, boolean notPermitted) {
 
