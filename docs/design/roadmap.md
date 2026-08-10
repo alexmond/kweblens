@@ -57,7 +57,7 @@ Each row is checked against the code, not the tracker.
 | **T1** write path cannot be previewed; audit is volatile | **DONE** | `ResourceService.dryRunApply` / `dryRunPatch` send `withDryRun(List.of("All"))`; `YamlApiController` `/apply/dry-run`; the Review Changes tab's second diff (#274). Audit goes to a dedicated `kweblens.audit` logger as well as the ring (#212). Remediation previews are server-validated where a patch exists and say `notChecked` where one does not (#209). |
 | **T2** nothing in the list path is bounded | **ANSWERED — do not build paging** | [`scale-measurements.md`](scale-measurements.md) §"Is server-side paging still worth building?". Wire: 16.78 MB / 637 ms for 3 000 pods after #279. Browser: main-thread block **flat** at 370 / 371 / 299 ms across a 15× range in object count, DOM rows pinned at 20 (#286). `/counts`: one `limit=1` request per kind + `metadata.remainingItemCount` (#283), 330→112 ms, 22.1 MB→111 KB. Fan-out: accept N + `SseKeepAlive` (#283, #288), argued in [`watch-fanout.md`](watch-fanout.md). **The unbounded axis is heap, not wire → GH#293.** |
 | **T3** finding a specific object is weak | **HALF SHIPPED** | Palette now indexes **objects**: `web/search/SearchService` over 13 kinds, ranked, reporting what it did not search; `commandPalette.ts` `objectCommands` / `mergeCommands` / `scopeNotes` (#263). Still true: `shell.ts:filterObjects` is three `.includes()` calls, and there is no regex, negation, label selector or field selector anywhere. |
-| **T4** error and empty states are inconsistent | **STILL TRUE, slightly worse** | `ErrorNotice` renders in 8 files (was 6), still Helm/Clusters-dominated. **11** bare `<div class="error">` with no retry, unchanged. **~20** ad-hoc empty-state sites under five different class names, and no `EmptyState` component exists. `ResourceTable.vue` has no `#empty` slot at all. And it is a defect class, not cosmetics — `HelmResourcesModal.vue` used `<ErrorNotice>` without importing it, so its error path rendered *nothing* (fixed in this PR). |
+| **T4** error and empty states are inconsistent | **EMPTY HALF DONE, error half open** | One `EmptyState` (required `title`) over `emptyState.ts`, everywhere: the four ad-hoc empty-state class names are gone, loading has its own `LoadingNotice`, and `ResourceTable.vue` has its `#empty` slot (#306). `ErrorNotice` is in 9 files; 12 `v-if`-guarded `class="error"` divs remain, some of them correctly (see R3). It was never cosmetics — `HelmResourcesModal.vue` used `<ErrorNotice>` without importing it, so its error path rendered *nothing*. |
 | **T5** RBAC-awareness in its reduced form | **STILL TRUE** | Zero hits for `SelfSubjectAccessReview` / `SelfSubjectRulesReview` / `canI` in any `.java`, `.ts` or `.vue` file. All 24 hits are prose. |
 | **D1** relations breadth | **SHIPPED** | `RelationService` is now a dispatcher over five resolvers (`NetworkRelations`, `ReferenceRelations`, `WorkloadRelations`, `StorageRelations`, `AccessRelations`) resolving **12** relation keys, up from 3 (#220). [`detail-sections-audit.md`](detail-sections-audit.md) §"Group B status" is the current record. Not resolved, deliberately: Ingress → TLS secret **expiry** (`Relation` carries objects, so a *missing* reference can only be dropped or fabricated), requests-vs-usage (a metrics path, not a relation), and a general reverse index. |
 | **D2** agent-attach story | **DONE** — see [R5](#r5--d2-the-agent-attach-page--done) | `docs/modules/ROOT/pages/attach-an-agent.adoc` + an MCP section in `docs/deployment.md` + an *Attach an agent* block in `README.md`. The transport was documented correctly; the *auth* was not — `mcp.adoc` claimed the tool endpoints were public in open-mode, and `POST /mcp/message` measures `401`. |
@@ -133,22 +133,39 @@ item on this list improves software nobody can install.
 
 ### R3 — T4: one error state, one empty state
 
-11 bare error divs with no retry, ~20 ad-hoc empty states under five class names, no shared
-`EmptyState`, and the main resource table falling through to naive-ui's default "No Data". The
-`HelmResourcesModal` bug found while writing this — a component used without being imported, so
-the error path silently rendered nothing, past `vue-tsc` and `eslint` — is the argument that this
-is correctness and not decoration. Octant's convention is the fix: make the empty-state string a
-**required prop** so no list can ship without one.
+The rule the whole item exists for: **an empty pane is a claim.** "Still loading", "this failed"
+and "there is genuinely nothing here" are three different sentences and must never render as the
+same one. The `HelmResourcesModal` bug found while writing the previous cut — a component used
+without being imported, so the error path silently rendered nothing, past `vue-tsc` and `eslint`
+— is the argument that this is correctness and not decoration. Octant's convention is the fix:
+make the empty-state string a **required prop** so no list can ship without one.
 
-**Partly started (#298).** The zero-cluster fix needed exactly this component, so it now exists:
-`components/EmptyState.vue` (title **required**, per the convention above) over `emptyState.ts`,
-which holds the branching — still-loading vs failed vs genuinely empty, and writer vs signed-out
-— because those are different sentences and the difference is testable without a DOM. Two of the
-~20 sites use it. **What a follow-up covers:** the other ~18, the five class names they use
-(`.empty`, `.cp-empty` — now gone — `.palette-empty`, `.diff-empty`, `.tone-empty`) collapsing
-into one, a `#empty` slot on `ResourceTable.vue`, and the 11 bare `<div class="error">` moving to
-`ErrorNotice`. The rule to carry into it: an empty pane is a claim, and "nothing here" and "this
-failed" have to be told apart.
+**Empty half: DONE.** `components/EmptyState.vue` (title **required**) over `emptyState.ts`,
+which holds the branching so it is testable without a DOM. `#298` created it and used it twice;
+`#306` gave `ResourceTable.vue` its `#empty` slot and `resourceListEmpty`; the sweep did the
+rest. Every ad-hoc site now renders `EmptyState` (`variant="inline"` where the pane already has
+a frame) or the new `LoadingNotice`, and **`.empty` / `.palette-empty` / `.diff-empty` /
+`.cp-empty` are gone** — `.tone-empty` survives and is *not* one of them: it is the neutral fill
+of an `aria-hidden` stat-card bar, in the `tone-*` family, and is commented as such so the next
+sweep does not count it.
+
+The sweep found three live defects, each the same shape — a pane answering a question that had
+not been answered. `HelmValuesModal` left "Loading…" on screen forever underneath its own error,
+because the loading branch keyed off `values === null` and a failure never fills `values`.
+`MetricChart`'s `.catch` wrote `{ available: false }`, so **every** failed `/metrics/graph` call
+rendered as "Graphs need a Prometheus / VictoriaMetrics backend" — a confident claim about the
+operator's cluster produced by an error nobody read; it now shows the error with a retry.
+`CommandPalette` printed "No match for “x”" directly above "Object search failed". A shared
+`mayClaimEmpty` predicate and one `it.each` over every builder pin the rule.
+
+**Error half: NOT done, and the "0 bare error divs" reading was an artefact of the grep** —
+`<div class="error">` never appears literally because every one of them carries a `v-if`.
+`<div v-if="…" class="error">` still stands in **12** places (`App.vue`, `CategoryOverview`,
+`ClusterOverview` ×2, `EventsPane`, `ForwardModal`, `HelmActionModal`, `HelmValuesModal`,
+`LoginModal`, `NodePodsPane`, `PortForwards`, `YamlTab`), against `ErrorNotice` in 9 files.
+Not all 12 should move: `ErrorNotice`'s Retry re-runs a *fetch*, and "Invalid credentials." or a
+failed Helm upgrade is the result of an action, where a Retry button would offer to repeat a
+write. **What is left of R3 is deciding that split and moving the ones that are failed reads.**
 
 ### R4 — Contract-test the detail endpoint
 

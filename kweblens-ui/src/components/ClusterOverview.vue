@@ -15,8 +15,10 @@ import { api } from '../api';
 import { failureNotice } from '../apiFailure';
 import type { CheckState } from '../checkState';
 import { checkedData, checkedDanger, checkedValue, uncheckedNote } from '../checkState';
+import { warningsEmpty } from '../emptyState';
 import { eventObjectKind } from '../kube';
 import type { EventSummary, KubeObject } from '../types';
+import EmptyState from './EmptyState.vue';
 import MetricChart from './MetricChart.vue';
 import StatCard from './StatCard.vue';
 import { WARN_TABLE_MIN_WIDTH, warnColumns } from './warningsTable';
@@ -106,6 +108,16 @@ const warnData = computed(() => checkedData(warnings.value));
 const warnRows = computed(() => (warnData.value ?? []).slice(0, WARNING_LIMIT));
 const warningsTruncated = computed(() => (warnData.value?.length ?? 0) > WARNING_LIMIT);
 const warningsUnchecked = computed(() => uncheckedNote(warnings.value, 'warnings'));
+// Reads the CheckState directly rather than `warnData?.length`, because `warnData` is null
+// for both "checking" and "unchecked" and this pane has to tell those apart (checkState.ts).
+const warningsCopy = computed(() =>
+  warningsEmpty({
+    loading: warnings.value.status === 'checking',
+    failed: warnings.value.status === 'unchecked',
+    count: warnData.value?.length ?? 0,
+    namespace: props.namespace ?? null,
+  }),
+);
 </script>
 
 <template>
@@ -167,7 +179,7 @@ const warningsUnchecked = computed(() => uncheckedNote(warnings.value, 'warnings
       </div>
       <!-- The failure gets its own line and suppresses both the count and the all-clear. -->
       <div v-if="warningsUnchecked" class="error">{{ warningsUnchecked }}</div>
-      <div v-else-if="warnData && warnData.length === 0" class="empty">No warnings.</div>
+      <EmptyState v-else-if="warningsCopy" :title="warningsCopy.title" :body="warningsCopy.body" variant="inline" />
       <!-- `table-layout="fixed"` is what makes the declared widths binding and hands the
            remainder to Message; `scroll-x` is the floor below which it scrolls instead. -->
       <NDataTable

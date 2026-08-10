@@ -21,6 +21,7 @@ import { filesFeature, formatSize, isAuthFailure, noticeFor } from '../podFiles'
 import type { FileDirection, FileNotice as FileNoticeShape } from '../podFiles';
 import type { PodFileContent } from '../types';
 import FileNotice from './FileNotice.vue';
+import LoadingNotice from './LoadingNotice.vue';
 
 const props = defineProps<{ cluster: string; namespace: string; pod: string; container: string; path: string }>();
 const emit = defineEmits<{ (e: 'deleted'): void; (e: 'auth-required'): void }>();
@@ -173,7 +174,7 @@ function remove() {
     <FileNotice v-if="notice" :notice="notice" :retrying="loading" @retry="load()" />
     <p v-if="saved" class="files-saved">Saved.</p>
 
-    <p v-if="loading" class="empty">Loading…</p>
+    <LoadingNotice v-if="loading" />
     <template v-else-if="content">
       <p v-if="content.binary" class="files-hint">
         Binary file — not text, so kweblens will not open it in an editor where saving would corrupt it. Download it to

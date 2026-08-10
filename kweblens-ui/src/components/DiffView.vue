@@ -9,8 +9,15 @@ import { EditorView } from '@codemirror/view';
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { editorChrome, themeVariant, yamlHighlightStyle } from '../editor-theme';
+import { noChangesEmpty } from '../emptyState';
+import EmptyState from './EmptyState.vue';
 
 const props = defineProps<{ original: string; modified: string }>();
+
+// Both documents are already in hand, so there is no request and no third state — but the
+// wording still comes from emptyState.ts, so the editor's "nothing to see" reads in the
+// same voice as every other pane instead of being one more class of its own.
+const unchanged = noChangesEmpty();
 
 const host = ref<HTMLDivElement | null>(null);
 let mergeView: MergeView | null = null;
@@ -47,7 +54,7 @@ onBeforeUnmount(() => mergeView?.destroy());
       <span class="diff-old">Current</span>
       <span class="diff-new">Edited</span>
     </div>
-    <div v-if="original === modified" class="diff-empty">No changes.</div>
+    <EmptyState v-if="original === modified" :title="unchanged.title" :body="unchanged.body" variant="inline" />
     <div v-show="original !== modified" ref="host" class="diff-host" />
   </div>
 </template>

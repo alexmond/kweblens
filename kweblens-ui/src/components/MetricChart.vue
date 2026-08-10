@@ -8,10 +8,15 @@ import { computed, ref, watch } from 'vue';
 import VChart from 'vue-echarts';
 
 import { api } from '../api';
+import { failureNotice } from '../apiFailure';
 import { useThemeTokens } from '../composables/useThemeTokens';
+import { metricSeriesEmpty } from '../emptyState';
 import { fmtStamp, fmtValue } from '../format';
 import { buildMetricOption, CHART_TOKENS } from '../metric-chart-option';
 import type { MetricPoint, MetricSeries } from '../types';
+import EmptyState from './EmptyState.vue';
+import ErrorNotice from './ErrorNotice.vue';
+import LoadingNotice from './LoadingNotice.vue';
 
 use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
@@ -29,30 +34,34 @@ const props = defineProps<{
 
 const series = ref<MetricSeries | null>(null);
 const selected = ref<MetricPoint | null>(null);
+// A failed call used to be written as `{ available: false }`, which the chart rendered as
+// "Graphs need a Prometheus / VictoriaMetrics backend" — a confident statement about how the
+// operator's cluster is configured, produced by a `.catch` that never looked at the error.
+// `available: false` now means only what the server said it means, and a failure is a
+// failure, with a retry (R3, same rule as #306).
+const error = ref<string | null>(null);
 
-watch(
-  () => [props.cluster, props.target, props.namespace, props.name],
-  () => {
-    series.value = null;
-    selected.value = null;
-    api
-      .metricGraph(props.cluster, props.target, { namespace: props.namespace, name: props.name, minutes: 60 })
-      .then((s) => (series.value = s))
-      .catch(() => (series.value = { available: false, unit: '', points: [] }));
-  },
-  { immediate: true },
+const load = () => {
+  series.value = null;
+  selected.value = null;
+  error.value = null;
+  api
+    .metricGraph(props.cluster, props.target, { namespace: props.namespace, name: props.name, minutes: 60 })
+    .then((s) => (series.value = s))
+    .catch((e) => (error.value = failureNotice(e)));
+};
+
+watch(() => [props.cluster, props.target, props.namespace, props.name], load, { immediate: true });
+
+const loading = computed(() => series.value === null && error.value === null);
+const emptyCopy = computed(() =>
+  metricSeriesEmpty({
+    loading: loading.value,
+    failed: error.value !== null,
+    available: series.value?.available ?? false,
+    points: series.value?.points.length ?? 0,
+  }),
 );
-
-const state = computed<'loading' | 'unavailable' | 'empty' | 'ok'>(() => {
-  const s = series.value;
-  if (s === null) {
-    return 'loading';
-  }
-  if (!s.available) {
-    return 'unavailable';
-  }
-  return s.points.length === 0 ? 'empty' : 'ok';
-});
 
 const meta = computed(() => {
   const s = series.value;
@@ -76,9 +85,9 @@ const onPointClick = (params: unknown) => {
 <template>
   <div class="chart">
     <div class="chart-title">{{ label }}</div>
-    <div v-if="state === 'loading'" class="empty">Loading…</div>
-    <div v-else-if="state === 'unavailable'" class="empty">Graphs need a Prometheus / VictoriaMetrics backend.</div>
-    <div v-else-if="state === 'empty'" class="empty">No data.</div>
+    <LoadingNotice v-if="loading" />
+    <ErrorNotice v-else-if="error" :message="error" @retry="load()" />
+    <EmptyState v-else-if="emptyCopy" :title="emptyCopy.title" :body="emptyCopy.body" variant="inline" />
     <div v-else class="spark">
       <VChart class="metric-echart" :option="option" autoresize @click="onPointClick" />
       <div class="spark-meta">
