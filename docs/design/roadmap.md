@@ -56,7 +56,7 @@ Each row is checked against the code, not the tracker.
 |---|---|---|
 | **T1** write path cannot be previewed; audit is volatile | **DONE** | `ResourceService.dryRunApply` / `dryRunPatch` send `withDryRun(List.of("All"))`; `YamlApiController` `/apply/dry-run`; the Review Changes tab's second diff (#274). Audit goes to a dedicated `kweblens.audit` logger as well as the ring (#212). Remediation previews are server-validated where a patch exists and say `notChecked` where one does not (#209). |
 | **T2** nothing in the list path is bounded | **ANSWERED — do not build paging** | [`scale-measurements.md`](scale-measurements.md) §"Is server-side paging still worth building?". Wire: 16.78 MB / 637 ms for 3 000 pods after #279. Browser: main-thread block **flat** at 370 / 371 / 299 ms across a 15× range in object count, DOM rows pinned at 20 (#286). `/counts`: one `limit=1` request per kind + `metadata.remainingItemCount` (#283), 330→112 ms, 22.1 MB→111 KB. Fan-out: accept N + `SseKeepAlive` (#283, #288), argued in [`watch-fanout.md`](watch-fanout.md). **The unbounded axis is heap, not wire → GH#293.** |
-| **T3** finding a specific object is weak | **HALF SHIPPED** | Palette now indexes **objects**: `web/search/SearchService` over 13 kinds, ranked, reporting what it did not search; `commandPalette.ts` `objectCommands` / `mergeCommands` / `scopeNotes` (#263). Still true: `shell.ts:filterObjects` is three `.includes()` calls, and there is no regex, negation, label selector or field selector anywhere. |
+| **T3** finding a specific object is weak | **DONE** | Palette indexes **objects**: `web/search/SearchService` over 13 kinds, ranked, reporting what it did not search; `commandPalette.ts` `objectCommands` / `mergeCommands` / `scopeNotes` (#263). The remainder shipped as item 6 below: `objectFilter.ts` replaces the three `.includes()` calls with a filter grammar — regex, negation, `name:`/`ns:`/`kind:` and Kubernetes label requirements. Still absent, deliberately: field selectors over arbitrary paths (`status.phase`), which the browser does not hold for every kind. |
 | **T4** error and empty states are inconsistent | **EMPTY HALF DONE, error half open** | One `EmptyState` (required `title`) over `emptyState.ts`, everywhere: the four ad-hoc empty-state class names are gone, loading has its own `LoadingNotice`, and `ResourceTable.vue` has its `#empty` slot (#306). `ErrorNotice` is in 9 files; 12 `v-if`-guarded `class="error"` divs remain, some of them correctly (see R3). It was never cosmetics — `HelmResourcesModal.vue` used `<ErrorNotice>` without importing it, so its error path rendered *nothing*. |
 | **T5** RBAC-awareness in its reduced form | **STILL TRUE** | Zero hits for `SelfSubjectAccessReview` / `SelfSubjectRulesReview` / `canI` in any `.java`, `.ts` or `.vue` file. All 24 hits are prose. |
 | **D1** relations breadth | **SHIPPED** | `RelationService` is now a dispatcher over five resolvers (`NetworkRelations`, `ReferenceRelations`, `WorkloadRelations`, `StorageRelations`, `AccessRelations`) resolving **12** relation keys, up from 3 (#220). [`detail-sections-audit.md`](detail-sections-audit.md) §"Group B status" is the current record. Not resolved, deliberately: Ingress → TLS secret **expiry** (`Relation` carries objects, so a *missing* reference can only be dropped or fabricated), requests-vs-usage (a metrics path, not a relation), and a general reverse index. |
@@ -204,9 +204,18 @@ as a snapshot. Revisit only if someone wants context for a client that cannot ca
 
 ### Then, in no strong order
 
-6. **T3 remainder** — a real filter syntax on the list header (regex, negation, label selector).
-   Unblocked and now unambiguously *client-side*, because there is no server-side truncation for
-   it to lie about.
+6. **T3 remainder** — **DONE.** A filter grammar on the list header: `objectFilter.ts` parses
+   whitespace-separated terms ANDed together, any of them negatable with `-`, over bare
+   substrings (unchanged), `"quoted text"`, `/regex/`, `name:`/`ns:`/`kind:` fields, and
+   Kubernetes label requirements with apimachinery's own semantics — `!=` and `notin` match an
+   object that lacks the key. Client-side, because the list endpoint returns the whole
+   collection and a filter over a truncated page reports "no matches" for an object that
+   exists. **A query that does not parse is not applied**: every row stays, and the header says
+   what is wrong, rather than an empty table blaming the cluster. Presence/absence is spelled
+   `label:k` / `-label:k` rather than Kubernetes' bare `k` / `!k`, because a bare word had to
+   stay a text search; that, and the two other subsets (`key>1`, field selectors), are named in
+   the UI's help popover. Syntax:
+   [`browsing-resources.adoc`](../modules/ROOT/pages/browsing-resources.adoc).
 7. **D3** — security/RBAC checks and the first cross-manifest rule over the 12 relations.
 8. **T5** — SSAR affordances: grey out what this deployment's service account cannot do. Never an
    authorization gate (ADR-001: it fails open).
@@ -291,7 +300,7 @@ three are parked by decision and one is this epic.
 | R3 — shared `EmptyState` + `ErrorNotice` everywhere, empty copy a required prop | **new** (was T4/G) | P2 |
 | R4 — server-side contract tests for the detail endpoint | **new** (was part of D) | P2 |
 | R5 — agent-attach page + MCP in deployment.md | **done** (was E/D2) | — |
-| 6 — list-header filter syntax: regex, negation, label selector | **new** (was C/T3, now client-side) | P3 |
+| 6 — list-header filter syntax: regex, negation, label selector | **done** (was C/T3, client-side) | — |
 | 7 — security/RBAC checks and the first cross-manifest rule | **new** (was F/D3) | P3 |
 | 8 — SSAR affordances | **new** (was H/T5) | P3 |
 | 9 — guarded MCP write tools, Radar scoping | **new** (was D4) | P3 |

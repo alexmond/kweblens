@@ -7,7 +7,7 @@ import type { KubeObject } from './types';
 vi.mock('./api', async (orig) => ({ ...((await orig()) as object), api: { del: vi.fn(() => Promise.resolve()) } }));
 
 const { ApiError } = await import('./api');
-const { dispatchRowAction, helmScopeFailure, listCountLabel } = await import('./shell');
+const { dispatchRowAction, filterObjects, helmScopeFailure, listCountLabel } = await import('./shell');
 
 const obj = (name: string, ns = 'default'): KubeObject => ({
   kind: 'Pod',
@@ -79,6 +79,39 @@ describe('delete closes the drawer only when it is showing the deleted object', 
     // The updater drops the deleted object and keeps the rest.
     const updater = setObjects.mock.calls[0][0] as (p: KubeObject[]) => KubeObject[];
     expect(updater([obj('web-1'), obj('api-9')]).map((o) => o.metadata?.name)).toEqual(['api-9']);
+  });
+});
+
+describe('the list narrows by the Helm scope and the filter expression', () => {
+  // The grammar itself is pinned in objectFilter.test.ts; what is tested here is the join —
+  // that the Helm scope is applied FIRST and independently, so a filter that cannot be
+  // compiled still leaves the scope in force.
+  const labelled = (name: string, app: string): KubeObject => ({
+    kind: 'Pod',
+    metadata: { name, namespace: 'default', labels: { app } },
+  });
+  const fleet = [labelled('web-1', 'web'), labelled('db-0', 'db'), labelled('web-2', 'web')];
+  const scope = new Set(['Pod/web-1', 'Pod/db-0']);
+
+  it('applies the Helm scope with no query at all', () => {
+    expect(filterObjects(fleet, '', scope).map((o) => o.metadata?.name)).toEqual(['web-1', 'db-0']);
+    expect(filterObjects(fleet, '   ', null)).toHaveLength(3);
+  });
+
+  it('still treats a bare word as a substring, which is what it always did', () => {
+    expect(filterObjects(fleet, 'web', null).map((o) => o.metadata?.name)).toEqual(['web-1', 'web-2']);
+  });
+
+  it('applies both narrowings, in either order', () => {
+    expect(filterObjects(fleet, 'web', scope).map((o) => o.metadata?.name)).toEqual(['web-1']);
+    expect(filterObjects(fleet, 'app=db', scope).map((o) => o.metadata?.name)).toEqual(['db-0']);
+  });
+
+  it('keeps the scope but drops the filter when the query does not parse', () => {
+    // A pattern that could not be compiled hid nothing — the scope is a different control and
+    // is still on, so this is the scoped rows, not the whole cluster and not none of it.
+    expect(filterObjects(fleet, '/bad(/', scope).map((o) => o.metadata?.name)).toEqual(['web-1', 'db-0']);
+    expect(filterObjects(fleet, '/bad(/', null)).toHaveLength(3);
   });
 });
 

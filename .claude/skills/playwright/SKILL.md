@@ -146,6 +146,19 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-10 — **`PREPARE`'s `fill:` could not type the app's own filter syntax.** Both
+  dispatchers split `<selector>=<text>` on the **last** `=` — right about selectors
+  (`input[type=password]` carries one) and wrong about values. The list header now takes a
+  Kubernetes label selector, so `fill:.content-head input=app=web` became the selector
+  `.content-head input=app` and the value `web`: a step that types the wrong thing into an
+  element that does not exist and then fails naming a selector nobody wrote. → One shared
+  `splitFill()` in `lib/kw-playwright.mjs`, used by both runners, splits at the first `=` at
+  **bracket depth zero**; a five-case positive control covers the new case *and* the
+  `input[type=password]=admin` one it must not break. **When a feature makes a character
+  meaningful inside a text field, check that the tools which drive that field can still type
+  it — a PREPARE verb that cannot express the surface under test silently limits what can be
+  measured about it.**
+
 - 2026-08-09 — **`--stop` reported success on a process that was still running.** `stop_port`
   sent SIGTERM, slept 2 s and printed its message unconditionally; a run left the JVM resident
   at over a gigabyte with the simulator's mock API-server port still bound, and only a later

@@ -65,9 +65,8 @@ namespace at all: a PersistentVolume or a ClusterRole has none to filter on.
 The choice is remembered **per cluster**, so switching clusters does not carry one cluster's
 namespace over to another where it may not exist.
 
-Separately, the list header has its own search box that filters the rows already loaded (by name,
-namespace and kind) and reports `N of M` while it is active. That one *is* client-side, and it
-only ever narrows what the namespace filter already fetched.
+Separately, the list header has its own filter box, which narrows the rows already loaded and
+reports `N of M` while it is active. That one *is* client-side — see <<filtering>>.
 
 Each nav entry carries a **badge count**. Those come from `GET /api/v1/clusters/{id}/counts`,
 which computes all of them without listing anything: one `limit=1` request per kind plus the
@@ -82,6 +81,60 @@ page without the field falls back to a full list.
 A category badge is the sum of its kinds' counts, and counts **only the kinds it actually has a
 number for**. A category with no counts available shows no badge at all rather than a number that
 looks like a total but is really the number of menu entries.
+
+[#filtering]
+== Filtering a list
+
+The box in the list header takes a filter expression. Typing a plain word is a case-insensitive
+substring search over name, namespace and kind, exactly as it has always been; everything else is
+opt-in on a character a substring never contained. The `?` button beside the box shows the same
+table at any time.
+
+A query is whitespace-separated **terms**, and every one of them has to match — the same
+conjunction `kubectl -l a=b,c=d` uses. A leading `-` negates any term.
+
+[cols="1,3"]
+|===
+| Term | Matches
+
+| `nginx`               | name, namespace or kind contains `nginx`
+| `-nginx`              | everything that does not
+| `web prod`            | both, ANDed
+| `"two words"`         | text with a space in it
+| `/^web-\d+$/`         | a regex over name, namespace and kind, case-insensitive
+| `ns:kube-system`      | one field only — also `name:` and `kind:`
+| `name:/^web/`         | a field matched by regex
+| `app=web`, `app==web` | label equality
+| `app!=db`             | the label differs **or the object has no `app` label**
+| `env in (dev,stage)`  | set membership — also `notin`
+| `label:app`           | the label exists; `-label:app` for objects without it
+|===
+
+Label matching is Kubernetes' own, taken from `apimachinery`'s `labels.Requirement.Matches`,
+including the part that surprises people: `!=` and `notin` match an object that does not carry the
+key at all. Label values compare exactly, case and all, like `kubectl -l`; only the free-text
+matching is case-insensitive.
+
+Three deliberate differences from `kubectl -l`, stated in the help popover as well as here:
+
+* Kubernetes writes label presence as a bare `partition` and absence as `!partition`. Here they are
+  `label:partition` and `-label:partition`, because a bare word is a text search and has to stay one.
+* The numeric requirements `key>1` / `key<1` are not supported, and a term shaped like one is an
+  error rather than a silent substring search.
+* Field selectors (`--field-selector status.phase=Running`) are not implemented. `name:`, `ns:` and
+  `kind:` are the fields the browser holds for every kind.
+
+**A query that does not parse is not applied**, and the header says why — an invalid regex, an
+unterminated quote, a missing label key. Every row stays on screen and the count goes back to the
+plain total, because "nothing matched" and "your pattern is broken" are different claims and only
+one of them is true. The parser is `kweblens-ui/src/objectFilter.ts`; its grammar and every
+malformed input are pinned by `objectFilter.test.ts`.
+
+The filter is client-side, and that is a decision rather than an accident. A filter evaluated over
+a truncated page reports "no matches" for an object that exists, which is the failure the
+xref:performance.adoc[Performance and scale] page's paging question was closed to avoid. The list endpoint returns
+the whole collection — chunked internally, which the client never sees and which never truncates —
+so a filter that runs in the browser sees every object and cannot give that answer.
 
 == What a list row shows
 

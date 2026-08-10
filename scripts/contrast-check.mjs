@@ -75,7 +75,7 @@
 
 import { createRequire } from 'module';
 
-import { resizeDrawer, resolveLeaf } from './lib/kw-playwright.mjs';
+import { resizeDrawer, resolveLeaf, splitFill } from './lib/kw-playwright.mjs';
 
 const require = createRequire(process.env.HOME + '/.local/lib/playwright/node_modules/');
 const { chromium } = require('playwright');
@@ -504,8 +504,7 @@ async function pixelBackdrops(page, rects) {
 }
 
 /** What a step waits for, so an optional one can be tested before it is run. */
-const selectorOf = (verb, arg) =>
-  (verb === 'fill' || verb === 'upload') ? arg.slice(0, arg.lastIndexOf('=')) : arg;
+const selectorOf = (verb, arg) => ((verb === 'fill' || verb === 'upload') ? splitFill(arg).selector : arg);
 
 /**
  * Make the nav clickable before PREPARE walks it.
@@ -633,13 +632,15 @@ async function runPrepare(page, spec) {
     // teaching is that two copies of a walker drift and then disagree silently (#278).
     else if (verb === 'drawer') await resizeDrawer(page, Number(arg));
     else if (verb === 'fill') {
-      const at = arg.lastIndexOf('=');
-      await page.fill(arg.slice(0, at), arg.slice(at + 1));
+      // splitFill, not lastIndexOf('='): the list header's filter box takes `app=web`, and
+      // the old split moved half the VALUE into the selector (see lib/kw-playwright.mjs).
+      const { selector, value } = splitFill(arg);
+      await page.fill(selector, value);
     } else if (verb === 'upload') {
       // A file input, for UI that only appears once something has been picked — the pod
       // file browser's upload confirmation, for one, which is otherwise unreachable here.
-      const at = arg.lastIndexOf('=');
-      await page.setInputFiles(arg.slice(0, at), arg.slice(at + 1));
+      const { selector, value } = splitFill(arg);
+      await page.setInputFiles(selector, value);
     } else throw new Error(`unknown PREPARE verb: ${verb}`);
     await page.waitForTimeout(250);
   }
