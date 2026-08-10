@@ -300,6 +300,23 @@ export const podFiles = {
   },
 };
 
+/**
+ * Namespace path segment standing for "this kind is cluster-scoped".
+ *
+ * A Node / PersistentVolume / ClusterRole has no namespace, and an empty segment does not
+ * match the server's mapping — `…/resources/nodes//node-1/delete` 404s. A namespace is a
+ * DNS-1123 label, so it can never be `_`; `ResourceActionApiController.NO_NAMESPACE` maps it
+ * back to none (#297), and `DetailApiController` does the same for the detail route (#313).
+ *
+ * Exported so a caller can name the contract instead of restating `'_'`.
+ */
+export const NO_NAMESPACE = '_';
+
+/** The namespace path segment for an object that may or may not have a namespace. */
+function nsSegment(namespace: string | undefined): string {
+  return encodeURIComponent(namespace || NO_NAMESPACE);
+}
+
 export const api = {
   // Validates HTTP Basic creds and establishes the session cookie the exec WebSocket rides.
   verifySession: () => postJson<{ user: string }>('/api/v1/auth/session'),
@@ -341,9 +358,13 @@ export const api = {
   overview: (cluster: string, category: string, namespace?: string) =>
     getJson<KindHealth[]>(`${clusterBase(cluster)}/overview/${category}` + nsQuery(namespace)),
   // One object plus its resolved relations (GH#136) — one request rather than N per drawer.
-  detail: (cluster: string, resourceId: string, namespace: string, name: string) =>
+  // The route has no cluster-scoped form, so a PersistentVolume / Node / ClusterRole sends
+  // `NO_NAMESPACE` in the segment rather than skipping the call: `boundClaim` resolves from a
+  // cluster-scoped PersistentVolume, and gating the fetch on a namespace made that relation
+  // unreachable from this client (#313).
+  detail: (cluster: string, resourceId: string, namespace: string | undefined, name: string) =>
     getJson<ObjectDetail>(
-      `${clusterBase(cluster)}/detail/${encodeURIComponent(resourceId)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+      `${clusterBase(cluster)}/detail/${encodeURIComponent(resourceId)}/${nsSegment(namespace)}/${encodeURIComponent(name)}`,
     ),
   // Build/version metadata from Actuator (public). build.version + build.time when present.
   info: () =>
@@ -531,19 +552,9 @@ export const api = {
     postJson<ActionResult>(`${clusterBase(cluster)}/nodes/${encodeURIComponent(name)}/uncordon`),
 };
 
-/**
- * Namespace path segment standing for "this kind is cluster-scoped".
- *
- * <p>A Node / PersistentVolume / ClusterRole has no namespace, and an empty segment does not
- * match the server's mapping — `…/resources/nodes//node-1/delete` 404s. A namespace is a
- * DNS-1123 label, so it can never be `_`; `ResourceActionApiController.NO_NAMESPACE` maps it
- * back to none (#297).
- */
-const NO_NAMESPACE = '_';
-
 function actionUrl(cluster: string, resourceId: string, namespace: string, name: string, action: string): string {
   return (
     `${clusterBase(cluster)}/resources/${encodeURIComponent(resourceId)}` +
-    `/${encodeURIComponent(namespace || NO_NAMESPACE)}/${encodeURIComponent(name)}/${action}`
+    `/${nsSegment(namespace)}/${encodeURIComponent(name)}/${action}`
   );
 }

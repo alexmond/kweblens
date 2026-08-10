@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, api } from './api';
+import { ApiError, NO_NAMESPACE, api } from './api';
 
 /** Stub `fetch`, recording the URL each call was made against. */
 function stubFetch(res: () => Response) {
@@ -31,6 +31,38 @@ describe('the action URL carries a namespace segment even when there is none', (
     const calls = stubFetch(okJson);
     await api.del('c1', 'configmaps', 'scratch', 'cm-1');
     expect(calls[0]).toBe('/api/v1/clusters/c1/resources/configmaps/scratch/cm-1/delete');
+  });
+});
+
+describe('the detail URL carries a namespace segment even when there is none', () => {
+  // #313: `boundClaim` resolves from a PersistentVolume, which is cluster-scoped. The drawer
+  // used to skip the fetch entirely when the object had no namespace, so that relation was
+  // never requested by the only shipped client — not empty, not errored, never asked for.
+  const detailBody = () =>
+    new Response('{"object":{},"relations":{}}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  it('sends the sentinel for a cluster-scoped object rather than skipping the call', async () => {
+    const calls = stubFetch(detailBody);
+    await api.detail('c1', 'persistentvolumes', undefined, 'pv-1');
+    expect(calls[0]).toBe(`/api/v1/clusters/c1/detail/persistentvolumes/${NO_NAMESPACE}/pv-1`);
+  });
+
+  it('treats an empty namespace the same as an absent one', async () => {
+    const calls = stubFetch(detailBody);
+    await api.detail('c1', 'nodes', '', 'node-1');
+    expect(calls[0]).toBe(`/api/v1/clusters/c1/detail/nodes/${NO_NAMESPACE}/node-1`);
+  });
+
+  it('sends the real namespace for a namespaced object', async () => {
+    const calls = stubFetch(detailBody);
+    await api.detail('c1', 'configmaps', 'scratch', 'cm-1');
+    expect(calls[0]).toBe('/api/v1/clusters/c1/detail/configmaps/scratch/cm-1');
+  });
+
+  it('escapes a namespace and name rather than pasting them into the path', async () => {
+    const calls = stubFetch(detailBody);
+    await api.detail('c1', 'configmaps', 'a/b', 'c d');
+    expect(calls[0]).toBe('/api/v1/clusters/c1/detail/configmaps/a%2Fb/c%20d');
   });
 });
 

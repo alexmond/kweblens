@@ -57,13 +57,15 @@ const relationsLoading = ref(false);
 const relationsError = ref<string | null>(null);
 
 watch(
-  // Namespaced objects only: the relations resolved today are all namespace-scoped, and the
-  // endpoint's path requires a namespace.
+  // A missing namespace is NOT a reason to skip the fetch (#313). `boundClaim` resolves from
+  // a PersistentVolume, which is cluster-scoped, so gating on one left a relation the server
+  // resolves unreachable from this client — never asked for, rather than empty or errored.
+  // The route still needs some segment there; `api.detail` puts the `_` sentinel in it.
   () => [props.cluster, props.resourceId, objNs(props.obj), objName(props.obj)],
   ([cluster, resourceId, namespace, name]) => {
     relations.value = undefined;
     relationsError.value = null;
-    if (!cluster || !resourceId || !namespace || !name) {
+    if (!cluster || !resourceId || !name) {
       return;
     }
     relationsLoading.value = true;

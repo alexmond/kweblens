@@ -28,10 +28,19 @@ import org.alexmond.kweblens.web.nav.ClusterNavService;
  * implementation and lets the server bound the cost.
  *
  * <p>
- * Relations are always present as an object, and each carries items OR an error OR
- * {@code notPermitted} — never a bare empty list on failure. "There are none" is a
- * factual claim about the cluster, and asserting it wrongly sends the reader after the
- * wrong problem.
+ * Relations are always present as an object, and each either carries items or reports a
+ * failure — never a bare empty list on failure. "There are none" is a factual claim about
+ * the cluster, and asserting it wrongly sends the reader after the wrong problem. A
+ * failure always carries {@code error}, and a refusal carries {@code error} <em>and</em>
+ * {@code notPermitted: true} — the two are not alternatives, so a client branches on
+ * {@code notPermitted} FIRST and only then on {@code error}. See {@link Relation}.
+ *
+ * <p>
+ * The {@code {namespace}} segment is {@value ResourceActionApiController#NO_NAMESPACE}
+ * for a cluster-scoped kind: the route has no cluster-scoped form and an empty segment
+ * does not match the mapping. {@code ResourceService.getRaw} ignores the namespace for
+ * such a kind anyway, but mapping the sentinel here makes the URL contract the same one
+ * the action routes use rather than something that happens to work (#313).
  */
 @RestController
 @RequiredArgsConstructor
@@ -49,9 +58,10 @@ public class DetailApiController {
 			@PathVariable String namespace, @PathVariable String name) {
 		ResourceDescriptor descriptor = this.clusterNav.find(clusterId, resourceId)
 			.orElseThrow(() -> new UnknownResourceException(resourceId));
-		GenericKubernetesResource object = this.resources.getRaw(clusterId, descriptor, namespace, name);
+		String ns = namespaceOf(namespace);
+		GenericKubernetesResource object = this.resources.getRaw(clusterId, descriptor, ns, name);
 		if (object == null) {
-			throw new IllegalArgumentException("No such " + descriptor.kind() + ": " + namespace + "/" + name);
+			throw new IllegalArgumentException("No such " + descriptor.kind() + ": " + ref(ns, name));
 		}
 		Map<String, Relation> resolved = this.relations.relationsFor(clusterId, descriptor, object);
 		Map<String, Object> body = new LinkedHashMap<>();
@@ -62,6 +72,20 @@ public class DetailApiController {
 		// (apiVersion/kind/metadata/spec/status) rather than Jackson's view of the model
 		// types.
 		return Serialization.asJson(body);
+	}
+
+	/**
+	 * The placeholder segment back to "no namespace"; anything else is passed through.
+	 * The sentinel itself is {@link ResourceActionApiController#NO_NAMESPACE} — one
+	 * constant for the whole URL contract, not a second spelling of it.
+	 */
+	private static String namespaceOf(String namespace) {
+		return ResourceActionApiController.NO_NAMESPACE.equals(namespace) ? "" : namespace;
+	}
+
+	/** {@code ns/name}, or just the name when the kind is cluster-scoped. */
+	private static String ref(String namespace, String name) {
+		return namespace.isEmpty() ? name : namespace + "/" + name;
 	}
 
 }

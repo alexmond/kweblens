@@ -41,15 +41,18 @@ import org.springframework.web.context.WebApplicationContext;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.resource.Relation;
 import org.alexmond.kweblens.resource.RelationService;
+import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.web.api.DetailApiController;
+import org.alexmond.kweblens.web.api.ResourceActionApiController;
 import org.alexmond.kweblens.web.nav.ClusterNavService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -641,15 +644,65 @@ class DetailEndpointsTest {
 	 * — the route has no cluster-scoped form — and the server ignores whatever it is.
 	 * Pinned because it is the difference between a client that can open a
 	 * PersistentVolume's drawer and one that cannot construct the URL at all.
+	 *
+	 * <p>
+	 * {@code _} is the one the SPA actually sends (#313), and it is mapped back to "no
+	 * namespace" deliberately rather than surviving because the segment happens to be
+	 * ignored — hence its own case in
+	 * {@link #theClusterScopedSentinelIsMappedBackToNoNamespace()}.
 	 */
 	@Test
 	void aClusterScopedKindIgnoresTheNamespaceSegmentRatherThanFailing() throws Exception {
-		for (String placeholder : List.of("-", "default", NS)) {
+		for (String placeholder : List.of("-", "default", NS, ResourceActionApiController.NO_NAMESPACE)) {
 			this.mvc.perform(get("/api/v1/clusters/test/detail/persistentvolumes/{ns}/pv1", placeholder))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.object.metadata.name").value("pv1"))
 				.andExpect(jsonPath("$.relations.boundClaim.items[0].metadata.name").value("pvc1"));
 		}
+	}
+
+	/**
+	 * The sentinel reaches {@code ResourceService} as an EMPTY namespace, not as the
+	 * literal {@code _}. Asserting only through the CRUD mock could not tell those apart
+	 * — a cluster-scoped get ignores the argument either way — so the service is stubbed
+	 * and the argument itself is the assertion.
+	 */
+	@Test
+	void theClusterScopedSentinelIsMappedBackToNoNamespace() throws Exception {
+		ResourceDescriptor volumes = ResourceDescriptor.coreCluster("persistentvolumes", "Persistent Volumes",
+				"PersistentVolume", "persistentvolumes");
+		ResourceService resources = mock(ResourceService.class);
+		RelationService relations = mock(RelationService.class);
+		ClusterNavService nav = mock(ClusterNavService.class);
+		GenericKubernetesResource volume = Serialization.unmarshal(
+				Serialization
+					.asJson(new PersistentVolumeBuilder().withNewMetadata().withName("pv1").endMetadata().build()),
+				GenericKubernetesResource.class);
+		given(nav.find("c", "persistentvolumes")).willReturn(Optional.of(volumes));
+		given(resources.getRaw("c", volumes, "", "pv1")).willReturn(volume);
+		given(relations.relationsFor(eq("c"), eq(volumes), any())).willReturn(Map.of());
+
+		MockMvcBuilders.standaloneSetup(new DetailApiController(resources, relations, nav))
+			.build()
+			.perform(get("/api/v1/clusters/c/detail/persistentvolumes/{ns}/pv1",
+					ResourceActionApiController.NO_NAMESPACE))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.object.metadata.name").value("pv1"));
+
+		then(resources).should().getRaw("c", volumes, "", "pv1");
+	}
+
+	/**
+	 * A real namespace segment is passed through untouched — the sentinel mapping must
+	 * not turn into "the namespace is optional everywhere". Addressed with the WRONG
+	 * namespace, a namespaced object is not found, which is what proves the segment is
+	 * still used.
+	 */
+	@Test
+	void aRealNamespaceSegmentIsStillPassedThrough() throws Exception {
+		this.mvc.perform(get("/api/v1/clusters/test/detail/configmaps/{ns}/cm1", NS)).andExpect(status().isOk());
+		this.mvc.perform(get("/api/v1/clusters/test/detail/configmaps/{ns}/cm1", "other-ns"))
+			.andExpect(status().isBadRequest());
 	}
 
 	// --- the error paths ------------------------------------------------------------

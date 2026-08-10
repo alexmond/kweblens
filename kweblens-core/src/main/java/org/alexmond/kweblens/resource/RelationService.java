@@ -99,7 +99,10 @@ public class RelationService {
 		}
 		if ("PersistentVolume".equals(kind)) {
 			// Cluster-scoped, so it is reachable only outside the namespaced branch — and
-			// it is why this method no longer requires a namespace at all.
+			// it is why this method no longer requires a namespace at all. The ROUTE
+			// still
+			// does: `/detail/{resourceId}/{namespace}/{name}` has no cluster-scoped form,
+			// so a caller sends the `_` sentinel there (#313).
 			out.put("boundClaim", this.storage.boundClaim(clusterId, object));
 		}
 		if (hasOwner(object)) {
