@@ -3,7 +3,10 @@ import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal } fr
 import { shallowRef, onMounted, ref } from 'vue';
 
 import { api } from '../api';
-import { failureNotice, isSessionExpiry } from '../apiFailure';
+import { isSessionExpiry } from '../apiFailure';
+import type { ActionFailure } from '../paneFailure';
+import { actionFailed, previewFailed } from '../paneFailure';
+import ActionNotice from './ActionNotice.vue';
 import HelmValuesEditor from './HelmValuesEditor.vue';
 import HelmAdvancedOptions from './HelmAdvancedOptions.vue';
 import YamlView from './YamlView.vue';
@@ -61,7 +64,12 @@ const valueStrategy = ref('');
 const maxHistory = ref('');
 const preview = ref<HelmMutationResult | null>(null);
 const busy = ref(false);
-const error = ref<string | null>(null);
+// One slot for two requests that are NOT the same risk — and that is exactly why it carries
+// no Retry. The dry run is safe to repeat; the apply beneath it installs, upgrades or rolls
+// back a release. Nothing in the slot says which produced the message, so a Retry button here
+// could not know whether it was offering a preview or a write. The footer already has both,
+// labelled, and the operator picks.
+const failure = ref<ActionFailure | null>(null);
 
 onMounted(() => {
   api
@@ -116,7 +124,7 @@ const mutation = (dryRun: boolean): Promise<HelmMutationResult> => {
 
 const run = (dryRun: boolean) => {
   busy.value = true;
-  error.value = null;
+  failure.value = null;
   mutation(dryRun)
     .then((res) => {
       if (dryRun) {
@@ -130,8 +138,11 @@ const run = (dryRun: boolean) => {
         emit('auth-expired');
       }
       // The dry run goes through this same path, so a chart or values file the cluster
-      // rejects has no other surface that would print the reason — it has to be here.
-      error.value = failureNotice(err);
+      // rejects has no other surface that would print the reason — it has to be here. The
+      // two get different builders because they leave the cluster in different states: a
+      // failed dry run applied nothing, full stop, while a failed upgrade may or may not
+      // have landed. Rendering them identically was the old div's actual defect.
+      failure.value = dryRun ? previewFailed(err) : actionFailed(`${applyLabel} failed`, err);
     })
     .finally(() => (busy.value = false));
 };
@@ -146,7 +157,7 @@ const run = (dryRun: boolean) => {
     @update:show="(v) => !v && emit('close')"
   >
     <p class="modal-note">Preview a dry-run first; Apply is enabled once the render succeeds.</p>
-    <div v-if="error" class="error">{{ error }}</div>
+    <ActionNotice v-if="failure" :failure="failure" />
 
     <NForm label-placement="top" :show-feedback="false">
       <template v-if="action.mode === 'install'">

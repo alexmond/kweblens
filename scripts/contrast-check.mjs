@@ -246,6 +246,32 @@ const SCENES = [
     prepare: 'close;leaf:Cluster/Overview;wait:2000;?hover:.metric-echart;wait:800',
     selectors: ['.chart-tip-t', '.chart-tip-v'],
   },
+  {
+    // `ActionNotice` — the failed-ACTION notice added for roadmap R3's error half. It is a
+    // third rendering beside `ErrorNotice` and `EmptyState`, with its own three text classes,
+    // and until this scene existed nothing in the run could reach any of them: every other way
+    // of producing one needs a write to fail, which means either a broken cluster or actually
+    // performing the write. A refused sign-in is the one that costs nothing and reproduces on
+    // any instance.
+    //
+    // `signin:` cannot be reused — that verb exists to get IN, and what needs measuring here
+    // is exactly the failure it was built to avoid. It leads with `signout`, which clears the
+    // session cookie: PREPARE runs once per theme, and by the second pass an earlier scene has
+    // established a session that the app's own Sign out does not invalidate (GH#320), so the
+    // deliberately-wrong password SUCCEEDS and all three selectors report `not present`.
+    //
+    // LAST on purpose. `signout` reloads the page, and a reload mid-walk cost the scene that
+    // used to follow this one its whole surface — it timed out clicking through a shell that
+    // had just been rebuilt underneath it, and reported four unmeasured selectors rather than
+    // an error. Nothing runs after this, so the reload has nothing left to disturb.
+    name: 'rejected sign-in',
+    prepare:
+      'close;signout;' +
+      '?click:.bar-btn:has-text("Sign in");wait:500;' +
+      '?fill:.n-modal input >> nth=1=not-the-admin-password;' +
+      '?click:.n-modal button:has-text("Sign in");wait:1500',
+    selectors: ['.action-notice-title', '.action-notice-message', '.action-notice-consequence'],
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -610,6 +636,26 @@ async function runPrepare(page, spec) {
         await page.getByRole('button', { name: /^sign/i }).last().click();
         await page.waitForTimeout(1800);
       }
+    }
+    // `signout` — the real inverse of `signin`, and it has to clear the COOKIE, not just the
+    // UI state. The app's own Sign out drops the in-memory Basic credentials but leaves the
+    // `JSESSIONID` alone, and `loginSubmit` decides success by calling `verifySession()` — so
+    // after any successful sign-in, a subsequent sign-in with a WRONG password still returns
+    // 200 and succeeds. That made the rejected-sign-in scene unmeasurable in the second theme
+    // and only there: the first theme's pass runs signed out and works, the second runs after
+    // an earlier scene established a session, so the deliberate failure quietly became a
+    // success and all three selectors reported `not present` — a failed measurement wearing
+    // the same face as a surface the app does not have. Filed as GH#320; this verb is what
+    // lets the scene be measured either way.
+    else if (verb === 'signout') {
+      const out = page.locator('.bar-btn:has-text("Sign out")').first();
+      if (await out.isVisible().catch(() => false)) {
+        await out.click();
+        await page.waitForTimeout(300);
+      }
+      await page.context().clearCookies();
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
     }
     // `close` (no argument) shuts an open drawer or modal if there is one. `?press:Escape`
     // cannot express this — `?` needs a selector to test — and an unconditional Escape is not

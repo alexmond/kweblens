@@ -159,6 +159,22 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   it — a PREPARE verb that cannot express the surface under test silently limits what can be
   measured about it.**
 
+- 2026-08-10 — **A scene whose whole point is a FAILED sign-in passed in the first theme and
+  measured nothing in the second — because the failure had quietly become a success.** The new
+  `ActionNotice` (roadmap R3) can only be rendered by a write that fails, and the one that costs
+  nothing is a refused login, so the scene types a wrong password. In the dark pass, signed out,
+  it worked. In the light pass an earlier scene had signed in, and **the app's own Sign out does
+  not invalidate the `HttpSession`** — `loginSubmit` decides success by calling
+  `verifySession()`, which rides the surviving cookie — so the wrong password returned 200, no
+  notice rendered, and all three selectors printed `not present`: a failed measurement wearing
+  the same face as a surface the app does not have. → A `signout` PREPARE verb that clicks Sign
+  out **and clears cookies and reloads**, plus **GH#320** for the product bug it exposed.
+  Two follow-on traps, both now in the scene's own comment: `signin:` cannot be reused to test
+  the failure it exists to avoid, and the reload broke the *next* scene (four more unmeasured
+  selectors, reported as a click timeout naming a leaf), so a scene that reloads goes **last**.
+  **When a scene depends on being signed out, force that state rather than assuming the previous
+  scene left you in it — and when a negative test can silently turn positive, that is a product
+  bug before it is a script bug.**
 - 2026-08-09 — **`--stop` reported success on a process that was still running.** `stop_port`
   sent SIGTERM, slept 2 s and printed its message unconditionally; a run left the JVM resident
   at over a gigabyte with the simulator's mock API-server port still bound, and only a later

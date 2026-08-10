@@ -3508,6 +3508,41 @@ body.dragging {
   flex: 0 0 auto;
 }
 
+/* A failed ACTION and no retry — see ActionNotice.vue. Same `.error` box and the same
+   severity as above; what differs is that there is no button, because the re-do is the
+   modal's own Apply / Sign in and belongs to the operator. Stacked rather than one line
+   because it says three things: what was attempted, what came back, and what is now true. */
+.action-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Bold, and NOT monospace: `.error` sets a mono face for the server's own words, and the
+   attempt is ours. The distinction is what makes the server's sentence readable as a quote. */
+.action-notice-title {
+  margin: 0;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.action-notice-message {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The hedge about cluster state recedes: it is context for the message above it, not a
+   second alarm. `--danger-fg` at full strength on three stacked lines reads as three errors.
+   `--muted` was the obvious choice and MEASURED 4.21:1 on the danger tint in dark — under AA
+   on the one line that tells the operator whether to go and check the cluster. `--text` is
+   the body colour: it recedes from the alarm red without receding from being read. */
+.action-notice-consequence {
+  margin: 0;
+  font-family: inherit;
+  color: var(--text);
+}
+
 /* Command palette (Ctrl/Cmd-K). Styled from the semantic tokens so both themes follow
    automatically — see the palette work in docs/design/cluster-selection.md. */
 .palette-input {

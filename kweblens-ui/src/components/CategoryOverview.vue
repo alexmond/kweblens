@@ -19,9 +19,11 @@ import { api } from '../api';
 import { failureNotice } from '../apiFailure';
 import type { CheckState } from '../checkState';
 import { checkedData, uncheckedNote } from '../checkState';
+import { useAsyncData } from '../composables/useAsyncData';
 import { attentionEmpty } from '../emptyState';
 import type { EventSummary, KindHealth } from '../types';
 import EmptyState from './EmptyState.vue';
+import ErrorNotice from './ErrorNotice.vue';
 import EventsPane from './EventsPane.vue';
 import StatCard from './StatCard.vue';
 import { OVERVIEW_CATEGORIES } from './overviewCategories';
@@ -32,39 +34,45 @@ const props = defineProps<{ cluster: string; category: string; namespace?: strin
 // navigation; the overview only says where it wants to go.
 const emit = defineEmits<{ (e: 'navigate', kind: string, namespace?: string): void }>();
 
-const health = shallowRef<KindHealth[] | null>(null);
-// The events call gets the same three states the health check has always had. Its failure
-// used to be written as `[]` and then handed to EventsPane as `:error="null"` — the one
-// component built to tell those apart, told there was nothing to tell.
-const events = shallowRef<CheckState<EventSummary[]>>({ status: 'checking' });
-const error = shallowRef<string | null>(null);
-
 const copy = computed(() => OVERVIEW_CATEGORIES[props.category]);
 /** Events are about workloads; on a storage or config page they would be noise. */
 const showEvents = computed(() => props.category === 'workloads');
 
-let reqId = 0;
+// Both requests here are reads, so both failures may offer to run themselves again. They are
+// retried SEPARATELY because they fail separately: the overview check going down does not
+// make the events list stale, and one button that re-ran both would re-fetch the half that
+// worked in order to re-try the half that did not.
+const {
+  data: health,
+  loading: healthLoading,
+  error,
+  reload: reloadHealth,
+} = useAsyncData<KindHealth[]>(
+  () => [props.cluster, props.category, props.namespace],
+  () => api.overview(props.cluster, props.category, props.namespace ?? undefined),
+);
+
+// The events call gets the same three states the health check has always had. Its failure
+// used to be written as `[]` and then handed to EventsPane as `:error="null"` — the one
+// component built to tell those apart, told there was nothing to tell.
+const events = shallowRef<CheckState<EventSummary[]>>({ status: 'checking' });
+let eventReq = 0;
+const loadEvents = () => {
+  if (!showEvents.value) {
+    return;
+  }
+  const my = ++eventReq;
+  events.value = { status: 'checking' };
+  api
+    .events(props.cluster, props.namespace ?? undefined)
+    .then((e) => my === eventReq && (events.value = { status: 'checked', data: e }))
+    .catch((e) => my === eventReq && (events.value = { status: 'unchecked', message: failureNotice(e) }));
+};
 watch(
   // Re-fetch on namespace as well as cluster: the filter is in the header the whole time this
   // page is open, so ignoring it here made it look broken rather than inapplicable.
   () => [props.cluster, props.category, props.namespace] as const,
-  ([cluster, category, namespace]) => {
-    const my = ++reqId;
-    health.value = null;
-    events.value = { status: 'checking' };
-    error.value = null;
-    const ns = namespace ?? undefined;
-    api
-      .overview(cluster, category, ns)
-      .then((h) => my === reqId && (health.value = h))
-      .catch((e) => my === reqId && (error.value = failureNotice(e)));
-    if (showEvents.value) {
-      api
-        .events(cluster, ns)
-        .then((e) => my === reqId && (events.value = { status: 'checked', data: e }))
-        .catch((e) => my === reqId && (events.value = { status: 'unchecked', message: failureNotice(e) }));
-    }
-  },
+  loadEvents,
   { immediate: true },
 );
 
@@ -104,7 +112,7 @@ const unavailable = computed(() => (health.value ?? []).filter((k) => k.error));
  */
 const attentionCopy = computed(() =>
   attentionEmpty({
-    loading: health.value === null,
+    loading: healthLoading.value,
     failed: error.value !== null,
     count: attention.value.length,
     unavailable: unavailable.value.map((k) => k.label),
@@ -126,7 +134,7 @@ const eventsUnchecked = computed(() => uncheckedNote(events.value, 'events'));
          reading gets trusted for the wrong cluster slice. -->
     <div class="ov-scope-note">{{ namespace ? `Namespace: ${namespace}` : 'All namespaces' }}</div>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <ErrorNotice v-if="error" :message="error" :retrying="healthLoading" @retry="reloadHealth" />
 
     <!-- Cards first: they are the orientation — how much is here, and how much of it is fine —
          and the table below is the detail. The Cluster overview reads the same way. -->
@@ -195,7 +203,7 @@ const eventsUnchecked = computed(() => uncheckedNote(events.value, 'events'));
         Showing the {{ EVENT_LIMIT }} most recent of {{ eventData?.length }} events.
       </div>
       <!-- The pane distinguishes "loaded nothing" from "could not load"; give it the truth. -->
-      <EventsPane :events="recentEvents" :error="eventsUnchecked" />
+      <EventsPane :events="recentEvents" :error="eventsUnchecked" @retry="loadEvents" />
     </section>
   </div>
 </template>

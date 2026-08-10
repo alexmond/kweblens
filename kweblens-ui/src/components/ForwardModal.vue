@@ -8,7 +8,10 @@ import { NButton, NForm, NFormItem, NInputNumber, NModal, NSelect } from 'naive-
 import { computed, ref } from 'vue';
 
 import { api } from '../api';
-import { failureNotice, isSessionExpiry } from '../apiFailure';
+import { isSessionExpiry } from '../apiFailure';
+import type { ActionFailure } from '../paneFailure';
+import { actionFailed, actionReport } from '../paneFailure';
+import ActionNotice from './ActionNotice.vue';
 
 const props = defineProps<{
   cluster: string;
@@ -22,7 +25,11 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'started'): void; (e: 'auth-e
 const remotePort = ref<number | null>(props.ports[0] ?? null);
 const localPort = ref<number | null>(null);
 const busy = ref(false);
-const error = ref<string | null>(null);
+// Starting a forward BINDS A SOCKET on the kweblens host, so it is an action and never gets a
+// Retry: a button that re-posts it would try to bind again, and a start that timed out may
+// already hold the port. The modal's own "Start forward" is the re-do, once the reader has
+// read why the first one did not.
+const failure = ref<ActionFailure | null>(null);
 
 const portOptions = computed(() => props.ports.map((p) => ({ label: String(p), value: p })));
 const isService = computed(() => props.kind.toLowerCase() === 'service');
@@ -31,11 +38,12 @@ const portLabel = computed(() => (isService.value ? 'Service port' : 'Pod port')
 const submit = () => {
   const remote = remotePort.value ?? 0;
   if (!Number.isFinite(remote) || remote <= 0) {
-    error.value = `Enter a valid ${portLabel.value.toLowerCase()}.`;
+    // Rejected here, so nothing was attempted and there is nothing to say about the cluster.
+    failure.value = actionReport('Start forward failed', `Enter a valid ${portLabel.value.toLowerCase()}.`);
     return;
   }
   busy.value = true;
-  error.value = null;
+  failure.value = null;
   api
     .startPortForward(props.cluster, {
       kind: props.kind,
@@ -49,7 +57,7 @@ const submit = () => {
       if (isSessionExpiry(err)) {
         emit('auth-expired');
       }
-      error.value = failureNotice(err);
+      failure.value = actionFailed('Start forward failed', err);
       busy.value = false;
     });
 };
@@ -75,7 +83,7 @@ const onShow = (v: boolean) => {
         The service port is resolved to the pod's <code>targetPort</code>, so it may land on a different number.
       </template>
     </p>
-    <div v-if="error" class="error">{{ error }}</div>
+    <ActionNotice v-if="failure" :failure="failure" />
     <NForm @submit.prevent="submit">
       <NFormItem :label="portLabel">
         <NSelect v-if="ports.length > 0" v-model:value="remotePort" :options="portOptions" />

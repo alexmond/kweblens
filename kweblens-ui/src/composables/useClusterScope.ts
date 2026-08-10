@@ -12,6 +12,13 @@ export function useClusterScope(
   namespace: Ref<string | null>,
   helmRelease: Ref<{ namespace: string; name: string } | null>,
   setError: (e: string | null) => void,
+  /**
+   * Bumped by the shell's Retry. A dependency of the two watches whose failures reach the
+   * shell's error slot — the nav tree and the Helm scope — so pressing Retry re-runs exactly
+   * what could have put a message there. The counts and the Helm badges swallow their own
+   * errors and are left to their existing triggers.
+   */
+  reload?: Ref<number>,
 ) {
   const nav = shallowRef<NavCategory[]>([]);
   const counts = shallowRef<Record<string, number>>({});
@@ -26,8 +33,8 @@ export function useClusterScope(
   const helmScope = ref<Set<string> | null>(null);
 
   watch(
-    cluster,
-    (c) => {
+    [cluster, () => reload?.value],
+    ([c]) => {
       if (!c) {
         return;
       }
@@ -58,7 +65,7 @@ export function useClusterScope(
   );
 
   watch(
-    [cluster, helmRelease],
+    [cluster, helmRelease, () => reload?.value],
     ([c, hr], _prev, onCleanup) => {
       if (!c || !hr) {
         helmScope.value = null;

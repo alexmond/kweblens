@@ -32,7 +32,15 @@ export function useAppActions(a: {
   ) => void;
   setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
   setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean } | null) => void;
-  setError: (e: string) => void;
+  /**
+   * A write that did not complete: a row action, or a bulk delete's own summary line.
+   *
+   * <p>Kept apart from the shell's read failures because they are not interchangeable — the
+   * shell renders one with a Retry and the other without, and everything under this composable
+   * is a write (`paneFailure.ts`).
+   */
+  reportFailure: (title: string, e: unknown) => void;
+  reportOutcome: (message: string) => void;
   setObjects: (updater: (prev: KubeObject[]) => KubeObject[]) => void;
   setShowLogin: (v: boolean) => void;
   setAuthUser: (v: string | null) => void;
@@ -59,7 +67,7 @@ export function useAppActions(a: {
       openLogs: a.openLogs,
       setForward: a.setForward,
       setDetail: a.setDetail,
-      setError: a.setError,
+      reportFailure: a.reportFailure,
       setObjects: a.setObjects,
       setShowLogin: a.setShowLogin,
       detailKey: a.detailKey.value,
@@ -110,7 +118,7 @@ export function useAppActions(a: {
       selection: a.selection.value,
       objects: a.objects.value,
       dialog: a.dialog,
-      setError: a.setError,
+      reportOutcome: a.reportOutcome,
       onAuthCleared: () => {
         signOut();
         a.setShowLogin(true);

@@ -24,7 +24,7 @@ function deps(over: Record<string, unknown> = {}) {
     openLogs: vi.fn(),
     setForward: vi.fn(),
     setDetail: vi.fn(),
-    setError: vi.fn(),
+    reportFailure: vi.fn(),
     setObjects: vi.fn(),
     setShowLogin: vi.fn(),
     ...over,
@@ -112,6 +112,51 @@ describe('the list narrows by the Helm scope and the filter expression', () => {
     // is still on, so this is the scoped rows, not the whole cluster and not none of it.
     expect(filterObjects(fleet, '/bad(/', scope).map((o) => o.metadata?.name)).toEqual(['web-1', 'db-0']);
     expect(filterObjects(fleet, '/bad(/', null)).toHaveLength(3);
+  });
+});
+
+describe('a row action that fails is attributed to the action', () => {
+  // The shell has ONE error slot, shared with every fetch. "Forbidden" arriving into it says
+  // nothing about which click produced it, and by then the kebab menu is long shut — so the
+  // registry's own label is what names the attempt. The thrown value is passed through rather
+  // than rendered, because what a failed WRITE leaves behind depends on whether the cluster
+  // answered at all (paneFailure.actionConsequence).
+
+  it('names the action and hands over the thrown value, not a string', async () => {
+    const { api } = await import('./api');
+    const del = api.del as ReturnType<typeof vi.fn>;
+    del.mockImplementationOnce(() => Promise.reject(new ApiError(403, 'is forbidden', 'cluster-refused')));
+    const reportFailure = vi.fn();
+
+    dispatchRowAction('pods', 'delete', obj('web-1'), undefined, deps({ reportFailure, detailKey: null }) as never);
+    await settle();
+    await settle();
+
+    expect(reportFailure).toHaveBeenCalledTimes(1);
+    expect(reportFailure.mock.calls[0][0]).toBe('Delete failed');
+    expect(reportFailure.mock.calls[0][1]).toBeInstanceOf(ApiError);
+  });
+
+  it('drops the menu label’s ellipsis — "Scale…" is a menu item, "Scale… failed" is not a sentence', async () => {
+    const { api } = await import('./api');
+    const scale = vi.fn(() => Promise.reject(new Error('boom')));
+    (api as unknown as Record<string, unknown>).scale = scale;
+    const reportFailure = vi.fn();
+
+    dispatchRowAction(
+      'deployments',
+      'scale',
+      { kind: 'Deployment', metadata: { name: 'web', namespace: 'default' }, spec: { replicas: 1 } } as KubeObject,
+      undefined,
+      deps({
+        reportFailure,
+        dialog: { confirm: () => Promise.resolve(true), prompt: () => Promise.resolve('3') },
+      }) as never,
+    );
+    await settle();
+    await settle();
+
+    expect(reportFailure.mock.calls[0][0]).toBe('Scale failed');
   });
 });
 

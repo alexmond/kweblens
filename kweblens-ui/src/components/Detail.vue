@@ -122,18 +122,25 @@ useEscapeKey(() => {
   }
 });
 
+// Fetched once, when the Events tab is first shown. `loadEvents` is also what the pane's
+// Retry calls, which is why the "already tried" guard is the caller's and not part of it: a
+// retry is exactly the case where the previous error must NOT stop the request.
+let eventReq = 0;
+const loadEvents = () => {
+  const my = ++eventReq;
+  eventsError.value = null;
+  api
+    .objectEvents(props.cluster, kind.value, name.value, ns.value || undefined)
+    .then((e) => my === eventReq && (events.value = e))
+    .catch((e) => my === eventReq && (eventsError.value = failureNotice(e)));
+};
+
 watch(
   () => tab.value,
-  (_now, _prev, onCleanup) => {
-    if (tab.value !== 'events' || events.value !== null || eventsError.value !== null) {
-      return;
+  () => {
+    if (tab.value === 'events' && events.value === null && eventsError.value === null) {
+      loadEvents();
     }
-    let cancelled = false;
-    onCleanup(() => (cancelled = true));
-    api
-      .objectEvents(props.cluster, kind.value, name.value, ns.value || undefined)
-      .then((e) => !cancelled && (events.value = e))
-      .catch((e) => !cancelled && (eventsError.value = failureNotice(e)));
   },
   { immediate: true },
 );
@@ -237,7 +244,7 @@ watch(
           />
         </NTabPane>
         <NTabPane name="events" tab="Events" display-directive="if">
-          <EventsPane :events="events" :error="eventsError" />
+          <EventsPane :events="events" :error="eventsError" @retry="loadEvents" />
         </NTabPane>
         <NTabPane v-if="kind === 'Pod' && showFiles" name="files" tab="Files" display-directive="if">
           <PodFilesPane

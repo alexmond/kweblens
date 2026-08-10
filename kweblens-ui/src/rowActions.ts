@@ -1,5 +1,4 @@
 import { api } from './api';
-import { failureNotice } from './apiFailure';
 import type { DialogApi } from './dialog';
 import type { LogScope } from './dock';
 import { containerNames, objectPorts } from './kube';
@@ -63,7 +62,15 @@ interface RowActionCtx {
   ) => void;
   setForward: (f: { kind: string; namespace: string; name: string; ports: number[] }) => void;
   setDetail: (d: { resourceId: string; obj: KubeObject; edit?: boolean }) => void;
-  setError: (msg: string) => void;
+  /**
+   * Report that this action did not complete.
+   *
+   * <p>Takes the THROWN VALUE, not a rendered string: every row action is a write, and what a
+   * failed write leaves behind depends on whether the cluster gave a verdict or never answered
+   * at all (`paneFailure.actionConsequence`). Rendering it here would throw that away, and the
+   * shell would be left offering a Retry it cannot reason about.
+   */
+  reportFailure: (e: unknown) => void;
   removeObject: (obj: KubeObject) => void;
   // Optional-confirm wrapper: run fn and surface errors; confirm first when confirmMsg is set.
   confirmRun: (fn: () => Promise<unknown>, confirmMsg?: string) => void;
@@ -103,7 +110,7 @@ function confirmDelete(c: RowActionCtx, force: boolean) {
       }
       api.del(c.cluster, c.resourceId, c.ns, c.name, force).then(
         () => c.removeObject(c.obj),
-        (e) => c.setError(failureNotice(e)),
+        (e) => c.reportFailure(e),
       );
     });
 }

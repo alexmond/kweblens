@@ -5,7 +5,10 @@
 // Amber rather than red, and matching the Events LIST exactly: an event is read the same way
 // wherever it appears, so a Warning must not look more severe in the drawer than in the list.
 // See eventTypeTone for why a Warning is not an error.
-// Emits nothing — purely presentational.
+//
+// Emits: retry () — the OWNER re-runs the events fetch. The pane holds no request of its own,
+// so it cannot retry anything itself; listing events is a read, though, so a Retry is safe to
+// offer and the owner is the only one that can honour it.
 import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { computed, h } from 'vue';
@@ -13,9 +16,11 @@ import { computed, h } from 'vue';
 import { badgeTone, eventTypeTone } from '../columns';
 import { ageToSeconds } from '../kube';
 import type { EventSummary } from '../types';
+import ErrorNotice from './ErrorNotice.vue';
 import StatusBadge from './StatusBadge.vue';
 
 const props = defineProps<{ events: EventSummary[] | null; error: string | null }>();
+const emit = defineEmits<{ (e: 'retry'): void }>();
 
 const columns = computed<DataTableColumns<EventSummary>>(() => [
   {
@@ -50,7 +55,7 @@ const data = computed(() => props.events ?? []);
 <template>
   <!-- An error means the load finished, unsuccessfully — so the table must stop spinning.
        `events === null` alone cannot say which of the two happened. -->
-  <div v-if="error" class="error">{{ error }}</div>
+  <ErrorNotice v-if="error" :message="error" @retry="emit('retry')" />
   <NDataTable
     v-else
     :columns="columns"

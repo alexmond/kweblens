@@ -57,7 +57,7 @@ Each row is checked against the code, not the tracker.
 | **T1** write path cannot be previewed; audit is volatile | **DONE** | `ResourceService.dryRunApply` / `dryRunPatch` send `withDryRun(List.of("All"))`; `YamlApiController` `/apply/dry-run`; the Review Changes tab's second diff (#274). Audit goes to a dedicated `kweblens.audit` logger as well as the ring (#212). Remediation previews are server-validated where a patch exists and say `notChecked` where one does not (#209). |
 | **T2** nothing in the list path is bounded | **ANSWERED — do not build paging** | [`scale-measurements.md`](scale-measurements.md) §"Is server-side paging still worth building?". Wire: 16.78 MB / 637 ms for 3 000 pods after #279. Browser: main-thread block **flat** at 370 / 371 / 299 ms across a 15× range in object count, DOM rows pinned at 20 (#286). `/counts`: one `limit=1` request per kind + `metadata.remainingItemCount` (#283), 330→112 ms, 22.1 MB→111 KB. Fan-out: accept N + `SseKeepAlive` (#283, #288), argued in [`watch-fanout.md`](watch-fanout.md). **The unbounded axis is heap, not wire → GH#293.** |
 | **T3** finding a specific object is weak | **DONE** | Palette indexes **objects**: `web/search/SearchService` over 13 kinds, ranked, reporting what it did not search; `commandPalette.ts` `objectCommands` / `mergeCommands` / `scopeNotes` (#263). The remainder shipped as item 6 below: `objectFilter.ts` replaces the three `.includes()` calls with a filter grammar — regex, negation, `name:`/`ns:`/`kind:` and Kubernetes label requirements. Still absent, deliberately: field selectors over arbitrary paths (`status.phase`), which the browser does not hold for every kind. |
-| **T4** error and empty states are inconsistent | **EMPTY HALF DONE, error half open** | One `EmptyState` (required `title`) over `emptyState.ts`, everywhere: the four ad-hoc empty-state class names are gone, loading has its own `LoadingNotice`, and `ResourceTable.vue` has its `#empty` slot (#306). `ErrorNotice` is in 9 files; 12 `v-if`-guarded `class="error"` divs remain, some of them correctly (see R3). It was never cosmetics — `HelmResourcesModal.vue` used `<ErrorNotice>` without importing it, so its error path rendered *nothing*. |
+| **T4** error and empty states are inconsistent | **DONE** | One `EmptyState` (required `title`) over `emptyState.ts`, everywhere: the four ad-hoc empty-state class names are gone, loading has its own `LoadingNotice`, and `ResourceTable.vue` has its `#empty` slot (#306). The error half then split the last 12 `v-if`-guarded `class="error"` divs into failed *reads* (`ErrorNotice`, with Retry) and failed *actions* (`ActionNotice`, without) over `paneFailure.ts` — see [R3](#r3--t4-one-error-state-one-empty-state). It was never cosmetics — `HelmResourcesModal.vue` used `<ErrorNotice>` without importing it, so its error path rendered *nothing*. |
 | **T5** RBAC-awareness in its reduced form | **STILL TRUE** | Zero hits for `SelfSubjectAccessReview` / `SelfSubjectRulesReview` / `canI` in any `.java`, `.ts` or `.vue` file. All 24 hits are prose. |
 | **D1** relations breadth | **SHIPPED** | `RelationService` is now a dispatcher over five resolvers (`NetworkRelations`, `ReferenceRelations`, `WorkloadRelations`, `StorageRelations`, `AccessRelations`) resolving **12** relation keys, up from 3 (#220). [`detail-sections-audit.md`](detail-sections-audit.md) §"Group B status" is the current record. Not resolved, deliberately: Ingress → TLS secret **expiry** (`Relation` carries objects, so a *missing* reference can only be dropped or fabricated), requests-vs-usage (a metrics path, not a relation), and a general reverse index. |
 | **D2** agent-attach story | **DONE** — see [R5](#r5--d2-the-agent-attach-page--done) | `docs/modules/ROOT/pages/attach-an-agent.adoc` + an MCP section in `docs/deployment.md` + an *Attach an agent* block in `README.md`. The transport was documented correctly; the *auth* was not — `mcp.adoc` claimed the tool endpoints were public in open-mode, and `POST /mcp/message` measures `401`. |
@@ -131,7 +131,7 @@ artifacts to Central through the existing `maven_release.yml`, a workflow that b
 the `kweblens-web` image, and a chart default that points at it. Until this exists every other
 item on this list improves software nobody can install.
 
-### R3 — T4: one error state, one empty state
+### R3 — T4: one error state, one empty state — **DONE**
 
 The rule the whole item exists for: **an empty pane is a claim.** "Still loading", "this failed"
 and "there is genuinely nothing here" are three different sentences and must never render as the
@@ -158,14 +158,40 @@ operator's cluster produced by an error nobody read; it now shows the error with
 `CommandPalette` printed "No match for “x”" directly above "Object search failed". A shared
 `mayClaimEmpty` predicate and one `it.each` over every builder pin the rule.
 
-**Error half: NOT done, and the "0 bare error divs" reading was an artefact of the grep** —
-`<div class="error">` never appears literally because every one of them carries a `v-if`.
-`<div v-if="…" class="error">` still stands in **12** places (`App.vue`, `CategoryOverview`,
-`ClusterOverview` ×2, `EventsPane`, `ForwardModal`, `HelmActionModal`, `HelmValuesModal`,
-`LoginModal`, `NodePodsPane`, `PortForwards`, `YamlTab`), against `ErrorNotice` in 9 files.
-Not all 12 should move: `ErrorNotice`'s Retry re-runs a *fetch*, and "Invalid credentials." or a
-failed Helm upgrade is the result of an action, where a Retry button would offer to repeat a
-write. **What is left of R3 is deciding that split and moving the ones that are failed reads.**
+**Error half: DONE.** The remaining 12 were `<div v-if="…" class="error">` — which is why
+`grep '<div class="error"'` had reported **0** and the previous cut read that as finished. The
+honest pattern is `grep -rnE '<div [^>]*class="error"'`, and it now returns none.
+
+They did **not** all become `ErrorNotice`. `ErrorNotice`'s Retry re-runs a *fetch*; a failed
+Helm upgrade, a refused port-forward or "Invalid credentials." is the result of an **action**,
+where the same button would offer to repeat a write nobody re-authorised. So the split is:
+
+- **7 failed reads → `ErrorNotice` with Retry** — `CategoryOverview`, `ClusterOverview` ×2
+  (nodes and warnings retry separately: they fail separately, and one button would re-fetch
+  the half that worked), `EventsPane` (which owns no request, so it emits `retry` to its two
+  owners), `HelmValuesModal`, `NodePodsPane`, `YamlTab`. Four moved onto `useAsyncData`,
+  which already had `reload`.
+- **3 action results → the new `ActionNotice`, no Retry** — `LoginModal`, `ForwardModal`,
+  `HelmActionModal`. The modal's own Sign in / Start forward / Apply is the re-do, and it is
+  one the operator presses knowingly.
+- **2 slots hold BOTH**, which is where the "classify each site" framing was wrong: the
+  verdict belongs to the *writer*, not the pane. `App.vue`'s single `error` ref was written by
+  four reads **and** by every row action plus bulk delete, so a Retry there would have offered
+  to re-run a failed Drain; `PortForwards` writes its 3-second poll and its Stop button into
+  one slot. Both now carry a `PaneFailure` union and render `FailureNotice`, which dispatches.
+
+`paneFailure.ts` holds the logic, so the copy and the split are testable without a DOM. Its
+load-bearing rule is that **a failed write is not a write that did not happen**: only a verdict
+(400/403/409/422, per `isRefusal`) or kweblens's own 401 licenses "nothing was changed", and a
+timeout gets an explicit "unknown — check before trying again". CLAUDE.md already records the
+shipped case where a write lands after the UI reports failure. The one exception is a Helm
+dry-run, which applies nothing whatever goes wrong and says so.
+
+Two things fell out of verifying it. `App.vue`'s `showClusterOverview` and its zero-cluster
+empty state both keyed off "is there an error", so a failed **Restart** blanked the dashboard
+the operator was standing on; both now ask whether a *read* failed. And the Playwright scene
+that renders a rejected sign-in exposed **GH#320**: Sign out clears the in-memory credentials
+but not the `HttpSession`, so after one successful sign-in any password signs back in.
 
 ### R4 — Contract-test the detail endpoint
 
@@ -291,13 +317,14 @@ What remains genuinely unknown:
 ## 9. Issues
 
 Open at the time of this re-cut: **GH#143, GH#146, GH#147, GH#148, GH#293** — five, of which
-three are parked by decision and one is this epic.
+three are parked by decision and one is this epic. Opened since, out of R3's verification:
+**GH#320** (Sign out does not invalidate the `HttpSession`, so any password signs back in).
 
 | Plan item | Issue | Priority |
 |---|---|---|
 | R1 — measure the heap split, then stream the list response | **GH#293** (open) | P1 |
 | R2 — cut `0.1.0`, publish the image, correct the README's Central claim | **new** | P1 |
-| R3 — shared `EmptyState` + `ErrorNotice` everywhere, empty copy a required prop | **new** (was T4/G) | P2 |
+| R3 — shared `EmptyState` + `ErrorNotice`/`ActionNotice` everywhere, empty copy a required prop | **done** (was T4/G) | — |
 | R4 — server-side contract tests for the detail endpoint | **new** (was part of D) | P2 |
 | R5 — agent-attach page + MCP in deployment.md | **done** (was E/D2) | — |
 | 6 — list-header filter syntax: regex, negation, label selector | **done** (was C/T3, client-side) | — |

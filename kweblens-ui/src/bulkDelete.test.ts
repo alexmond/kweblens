@@ -38,7 +38,7 @@ function deps(over: Record<string, unknown> = {}) {
     selection: new Set<string>(),
     objects: [] as KubeObject[],
     dialog: { confirm: () => Promise.resolve(true), prompt: () => Promise.resolve(null) },
-    setError: vi.fn(),
+    reportOutcome: vi.fn(),
     onAuthCleared: vi.fn(),
     clearSelection: vi.fn(),
     ...over,
@@ -97,18 +97,18 @@ describe('bulk delete reports what failed', () => {
       name === 'cm-b' ? Promise.reject(new ApiError(409, '409 Conflict')) : Promise.resolve(),
     );
     const objects = [namespaced('cm-a'), namespaced('cm-b'), namespaced('cm-c')];
-    const setError = vi.fn();
+    const reportOutcome = vi.fn();
     const clearSelection = vi.fn();
 
     const outcome = await runBulkDelete(
-      deps({ objects, selection: new Set(objects.map(keyOf)), setError, clearSelection }),
+      deps({ objects, selection: new Set(objects.map(keyOf)), reportOutcome, clearSelection }),
     );
 
     expect(del).toHaveBeenCalledTimes(3);
     expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a', 'default/cm-c'], authCleared: false });
     expect(outcome?.failed).toEqual([{ ref: 'default/cm-b', error: '409 Conflict' }]);
-    expect(setError).toHaveBeenCalledTimes(1);
-    const message = setError.mock.calls[0][0] as string;
+    expect(reportOutcome).toHaveBeenCalledTimes(1);
+    const message = reportOutcome.mock.calls[0][0] as string;
     expect(message).toContain('Deleted 2 of 3 Config Maps; 1 failed');
     expect(message).toContain('default/cm-b: 409 Conflict');
     expect(clearSelection).toHaveBeenCalled();
@@ -118,20 +118,20 @@ describe('bulk delete reports what failed', () => {
   it('says nothing when every delete succeeded', async () => {
     del.mockClear();
     const objects = [namespaced('cm-a'), namespaced('cm-b')];
-    const setError = vi.fn();
-    await runBulkDelete(deps({ objects, selection: new Set(objects.map(keyOf)), setError }));
+    const reportOutcome = vi.fn();
+    await runBulkDelete(deps({ objects, selection: new Set(objects.map(keyOf)), reportOutcome }));
 
-    expect(setError).not.toHaveBeenCalled();
+    expect(reportOutcome).not.toHaveBeenCalled();
   });
 
   it('truncates a long list of failures but keeps the counts', async () => {
     del.mockClear();
     del.mockImplementation(() => Promise.reject(new Error('boom')));
     const objects = ['a', 'b', 'c', 'd', 'e'].map((n) => namespaced(n));
-    const setError = vi.fn();
-    await runBulkDelete(deps({ objects, selection: new Set(objects.map(keyOf)), setError }));
+    const reportOutcome = vi.fn();
+    await runBulkDelete(deps({ objects, selection: new Set(objects.map(keyOf)), reportOutcome }));
 
-    const message = setError.mock.calls[0][0] as string;
+    const message = reportOutcome.mock.calls[0][0] as string;
     expect(message).toContain('Deleted 0 of 5 Config Maps; 5 failed');
     expect(message).toContain('and 2 more');
     del.mockImplementation(() => Promise.resolve());
@@ -148,17 +148,17 @@ describe('bulk delete still stops on an auth failure', () => {
     );
     const objects = [namespaced('cm-a'), namespaced('cm-b'), namespaced('cm-c')];
     const onAuthCleared = vi.fn();
-    const setError = vi.fn();
+    const reportOutcome = vi.fn();
 
     const outcome = await runBulkDelete(
-      deps({ objects, selection: new Set(objects.map(keyOf)), onAuthCleared, setError }),
+      deps({ objects, selection: new Set(objects.map(keyOf)), onAuthCleared, reportOutcome }),
     );
 
     expect(onAuthCleared).toHaveBeenCalledTimes(1);
     // cm-c was never tried: the loop breaks rather than firing two more rejected requests.
     expect(del).toHaveBeenCalledTimes(2);
     expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a'], authCleared: true });
-    expect(setError.mock.calls[0][0]).toContain('the rest were not tried');
+    expect(reportOutcome.mock.calls[0][0]).toContain('the rest were not tried');
     del.mockImplementation(() => Promise.resolve());
   });
 
@@ -173,16 +173,16 @@ describe('bulk delete still stops on an auth failure', () => {
     );
     const objects = [namespaced('cm-a'), namespaced('cm-b'), namespaced('cm-c')];
     const onAuthCleared = vi.fn();
-    const setError = vi.fn();
+    const reportOutcome = vi.fn();
 
     const outcome = await runBulkDelete(
-      deps({ objects, selection: new Set(objects.map(keyOf)), onAuthCleared, setError }),
+      deps({ objects, selection: new Set(objects.map(keyOf)), onAuthCleared, reportOutcome }),
     );
 
     expect(onAuthCleared).not.toHaveBeenCalled();
     expect(del).toHaveBeenCalledTimes(3);
     expect(outcome).toMatchObject({ attempted: 3, deleted: ['default/cm-a', 'default/cm-c'], authCleared: false });
-    expect(setError.mock.calls[0][0]).toContain('is forbidden: User cannot delete');
+    expect(reportOutcome.mock.calls[0][0]).toContain('is forbidden: User cannot delete');
     del.mockImplementation(() => Promise.resolve());
   });
 });
