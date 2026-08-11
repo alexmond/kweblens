@@ -108,11 +108,39 @@ user who cannot obtain the software.
 Ranked for the single trusted operator ADR-001 describes. Two items, then a tail of polish. If
 that reads short, it is because it is — see §4.
 
-### R1 — GH#293: stop materialising the list
+**Status, 2026-08-10.** R1, R3, R4, R5 and the T3 remainder are **done**; R2 is half done and its
+remaining half — publishing to Maven Central — is irreversible and belongs to a human, not to
+this list. What is genuinely left below is D3, T5 and D4.
 
-Measure **first**: one `jcmd GC.class_histogram` at peak during a large Secrets list, against a
-*live* cluster (the simulator's API server shares the JVM and is inside the reading). That single
-number decides the fix and has not been taken.
+Worth noting before picking the next item, because it has now happened repeatedly: **most of what
+this plan actually bought was found while doing something else.** R4's contract tests uncovered a
+dead relation (GH#313); R3's error sweep uncovered an authentication defect where sign-out left
+the session valid so any password signed back in (GH#320); R5's attach page uncovered docs
+asserting the MCP tool endpoints need no credential when they answer 401. None of the three was
+on any list. Budget for the sweep, not just the item.
+
+### R1 — GH#293: stop materialising the list — **DONE** (#302)
+
+`ResourceService.listRawChunked` walks a kind with `limit` + `metadata.continue`; `ListJson`
+projects and serialises each page straight into the payload buffer, so a page becomes garbage as
+soon as it is written. **The response does not change** — chunking is invisible to the caller, so
+GH#263's refusal of a client-visible `limit` is untouched, and `ListJsonTest` asserts the
+assembled bytes are byte-identical to `Serialization.asJson` over the whole collection.
+
+**The measurement this item prescribed was the wrong one, twice over, and that is the durable
+lesson.** A `jcmd GC.class_histogram` *cannot* separate the output `String` from the model graph:
+since JDK 9 compact strings, both land in `byte[]`. And `heap-probe.sh`'s `transient`
+(peak − base) scored chunking **worse** — 80–96 MB against 67–69 MB — because it measures
+allocation *churn*, not the live set: five bounded pages allocate more total garbage than one big
+graph while far less of it is live at any instant. Reading either would have got this reverted.
+
+What answered it was the question an OOM-kill actually asks — **the smallest `-Xmx` in which the
+request still completes**, where collector timing drops out because only live bytes can push a
+squeezed heap over. On 8 150 live Secrets (54.89 MB stored, 2.08 MB on the wire): unchunked needs
+**256m** and OOMs at 224m; chunked completes at **176m**, the app's own boot floor, at identical
+wall-clock. That 256m is the number that mattered — the chart sets `limits.memory: 1Gi` and the
+JVM takes a quarter of the container limit as its default max heap. Full workings:
+[`scale-measurements.md`](scale-measurements.md).
 
 - If the spike is dominated by the output `String`, stream the projected list straight to the
   response body. That removes it without touching the list contract, the filter semantics, or
@@ -124,12 +152,32 @@ number decides the fix and has not been taken.
 `scripts/heap-probe.sh` is the probe. **Secret count per cluster is the thing to watch**, not pod
 count and not payload size.
 
-### R2 — Cut a release and publish an image
+### R2 — Cut a release and publish an image — **HALF DONE** (#311); the rest needs a human
 
-The gap in §4(b), closed. Concretely: a numeric `0.1.0` (never `-RC`/`-M`), the two library
-artifacts to Central through the existing `maven_release.yml`, a workflow that builds and pushes
-the `kweblens-web` image, and a chart default that points at it. Until this exists every other
-item on this list improves software nobody can install.
+The gap in §4(b). Concretely: a numeric `0.1.0` (never `-RC`/`-M`), the two library artifacts to
+Central through the existing `maven_release.yml`, a workflow that builds and pushes the
+`kweblens-web` image, and a chart default that points at it. Until this exists every other item
+on this list improves software nobody can install.
+
+**Shipped (#311).** `.github/workflows/image.yml` builds `kweblens-web` through the `docker`
+profile, **smoke-tests that the image reaches a healthy actuator before publishing** — a
+buildpack image that boots to a stack trace is still a successful `package` — and pushes to
+GHCR. It publishes on a `v*` tag, or on a `workflow_dispatch` where `publish` is explicitly
+true; `publish` defaults to **false**, so "does the image still build?" pushes nothing, and
+`latest` moves only on a tag. The chart default is `ghcr.io/alexmond/kweblens`, with a comment
+saying plainly that the tag does not exist until the first `v*` tag is pushed.
+
+**Not done, and deliberately not automatable: the release itself.** Publishing to Maven Central
+is irreversible, so `maven_release.yml` is `workflow_dispatch` only and must be triggered by a
+person who has decided to release. Nothing in this repo should ever trigger it on your behalf.
+Note the image workflow's tag trigger is downstream of that same human decision — a `v*` tag
+exists only because someone ran the release workflow.
+
+Local caveat worth knowing before debugging a red build: **the image cannot be built on a
+rootless-podman box.** The buildpack asks the daemon to bind-mount `/var/run/docker.sock` and
+podman refuses (`statfs /var/run/docker.sock: permission denied`). That is the environment, not
+the build; CI has a real Docker daemon. Prove a change by running the workflow with
+`publish: false`.
 
 ### R3 — T4: one error state, one empty state — **DONE**
 
@@ -193,15 +241,27 @@ the operator was standing on; both now ask whether a *read* failed. And the Play
 that renders a rejected sign-in exposed **GH#320**: Sign out clears the in-memory credentials
 but not the `HttpSession`, so after one successful sign-in any password signs back in.
 
-### R4 — Contract-test the detail endpoint
+### R4 — Contract-test the detail endpoint — **DONE** (#312)
 
-`DetailApiController` returns a `{object, relations}` envelope carrying 12 relations and has
-**zero** HTTP-level coverage: no test file mentions `/detail`, `relations` or `RelationService`
-anywhere under `kweblens-web/src/test` (18 MockMvc classes, none on this path). Coverage is
-service-level only, in core (`RelationServiceTest`, `RelationBreadthTest`,
-`RelationStorageAccessTest` — 23 tests). The envelope, `Relation`'s null-omission, the 400 on a
-missing object and the unknown-`resourceId` path are all unverified — and this endpoint is what
-D3, GH#148 and GH#143 all build on.
+`DetailApiController` returns a `{object, relations}` envelope carrying 12 relations and had
+**zero** HTTP-level coverage — the endpoint D3, GH#148 and GH#143 all build on. `DetailEndpointsTest`
+now pins it: the envelope's exact key set, `object` shipped **whole** (a ConfigMap's values are
+present, where the list endpoint's `ListProjection` nulls them — an asymmetry a second client
+needs and nothing stated), `relations` always an object rather than absent or null, `Relation`'s
+three states in one response, all twelve relations asserted **as a set** so a thirteenth without
+a test fails, and the 400 / unknown-`resourceId` / unknown-cluster paths.
+
+Each relation is seeded with a **decoy** so an assertion cannot pass on "non-empty" — the
+sharpest being a Deployment whose own labels are `app=db` while its pod template's are `app=web`,
+with a PodDisruptionBudget on each, so a join reading the wrong labels returns exactly one item
+of the wrong name. Everything passed first run, so the expectations were then **mutated 11 ways**
+(wrong key set, each decoy substituted for the real answer, owner chain reversed, 400→404, a
+relation dropped from the coverage set, the null-omission control inverted); all 11 failed before
+being reverted. A green test that has never been shown to fail pins nothing.
+
+**It found a live bug in the process** — GH#313, fixed in #319: `Overview.vue` skipped the
+relations fetch for any object without a namespace, so a cluster-scoped PersistentVolume never
+asked for `boundClaim` and 1 of the 12 relations was dead in the only shipped client.
 
 ### R5 — D2: the agent-attach page — **DONE**
 
