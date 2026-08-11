@@ -18,6 +18,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.context.DelegatingSecurityContextRepository;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
@@ -112,8 +114,24 @@ public class SecurityConfig {
 			// but
 			// is unreachable.
 			.csrf((csrf) -> csrf.ignoringRequestMatchers("/api/**", "/mcp/**"))
+			// Sign out has to be a SERVER event (#320). Dropping the SPA's in-memory
+			// credentials leaves the JSESSIONID above valid, and that cookie still
+			// authorises every write and still opens the exec WebSocket — a tab that
+			// says "signed out" while holding a shell is a false assurance. The
+			// LogoutFilter runs ahead of authorization, so this ends the session in
+			// both modes and needs no credentials; /api/** is already CSRF-exempt.
+			.logout((logout) -> logout
+				.logoutRequestMatcher(PathPatternRequestMatcher.pathPattern(HttpMethod.DELETE,
+						PresentedCredentialsFilter.SESSION_PATH))
+				.invalidateHttpSession(true)
+				.clearAuthentication(true)
+				.deleteCookies("JSESSIONID")
+				.logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler(HttpStatus.NO_CONTENT)))
 			// Materialise the CSRF token before view rendering commits the response.
 			.addFilterAfter(new CsrfTokenEagerFilter(), CsrfFilter.class)
+			// ...and sign IN has to check the password presented, not the cookie the
+			// request happened to carry. See PresentedCredentialsFilter.
+			.addFilterBefore(new PresentedCredentialsFilter(), BasicAuthenticationFilter.class)
 			// The JSON API and WebSocket answer unauthenticated calls with 401, not a
 			// redirect.
 			.exceptionHandling(

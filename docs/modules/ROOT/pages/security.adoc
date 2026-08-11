@@ -112,6 +112,15 @@ Two consequences worth knowing: a failed Basic login answers a bare `401` with n
 and `/api/**` and `/ws/**` answer unauthenticated calls with `401` rather than a redirect to
 the login page.
 
+A third is the whole of issue #320. Because that cookie is a credential — one that opens a
+shell in a pod — *Sign out has to reach the server*: `DELETE /api/v1/auth/session` invalidates
+the session, and the SPA awaits it before clearing its own state. And *Sign in has to be judged
+by the credentials it presents*: Spring Security's `BasicAuthenticationFilter` skips validating
+a Basic header whose username matches the context already loaded from the session, so a stale
+cookie used to make every password correct. `PresentedCredentialsFilter` drops that context for
+a sign-in request that carries credentials, leaving them no choice but to be checked. A request
+carrying no credentials is untouched — that is the reloaded tab restoring its session.
+
 == Identity: what kweblens does not do
 
 This is ADR-001 (`docs/design/adr-001-identity-model.md`, ACCEPTED). Stated without softening:

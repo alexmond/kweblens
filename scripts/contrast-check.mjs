@@ -255,10 +255,10 @@ const SCENES = [
     // any instance.
     //
     // `signin:` cannot be reused — that verb exists to get IN, and what needs measuring here
-    // is exactly the failure it was built to avoid. It leads with `signout`, which clears the
-    // session cookie: PREPARE runs once per theme, and by the second pass an earlier scene has
-    // established a session that the app's own Sign out does not invalidate (GH#320), so the
-    // deliberately-wrong password SUCCEEDS and all three selectors report `not present`.
+    // is exactly the failure it was built to avoid. It leads with `signout` because PREPARE
+    // runs once per theme and an earlier scene has signed in by the second pass; a wrong
+    // password cannot be refused while that session is still open. Since GH#320 the app's own
+    // Sign out ends it, and this scene is now also the browser-side check that it still does.
     //
     // LAST on purpose. `signout` reloads the page, and a reload mid-walk cost the scene that
     // used to follow this one its whole surface — it timed out clicking through a shell that
@@ -637,23 +637,26 @@ async function runPrepare(page, spec) {
         await page.waitForTimeout(1800);
       }
     }
-    // `signout` — the real inverse of `signin`, and it has to clear the COOKIE, not just the
-    // UI state. The app's own Sign out drops the in-memory Basic credentials but leaves the
-    // `JSESSIONID` alone, and `loginSubmit` decides success by calling `verifySession()` — so
-    // after any successful sign-in, a subsequent sign-in with a WRONG password still returns
-    // 200 and succeeds. That made the rejected-sign-in scene unmeasurable in the second theme
-    // and only there: the first theme's pass runs signed out and works, the second runs after
-    // an earlier scene established a session, so the deliberate failure quietly became a
-    // success and all three selectors reported `not present` — a failed measurement wearing
-    // the same face as a surface the app does not have. Filed as GH#320; this verb is what
-    // lets the scene be measured either way.
+    // `signout` — the real inverse of `signin`, and it has to end the SESSION, not just the
+    // UI state. It clicks the app's own Sign out and nothing else, deliberately: that button
+    // now awaits `DELETE /api/v1/auth/session`, so after it the cookie is dead.
+    //
+    // It used to call `page.context().clearCookies()` as well, because sign-out was a UI
+    // state change only (GH#320) — the `JSESSIONID` survived, `loginSubmit` decided success
+    // from `verifySession()`, and that request rode the surviving cookie. The rejected
+    // sign-in scene therefore passed in the first theme (which runs signed out) and reported
+    // `not present` in the second (which runs after an earlier scene signed in), because the
+    // deliberately-wrong password quietly SUCCEEDED. That is how the bug was found.
+    //
+    // Clearing the cookie here would now hide a regression of that fix behind a green run, so
+    // it is gone: if sign-out stops signing out, this scene goes back to reporting three
+    // absent selectors — which this project already reads as a failed measurement, not a pass.
     else if (verb === 'signout') {
       const out = page.locator('.bar-btn:has-text("Sign out")').first();
       if (await out.isVisible().catch(() => false)) {
         await out.click();
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(500);
       }
-      await page.context().clearCookies();
       await page.reload({ waitUntil: 'networkidle' });
       await page.waitForTimeout(500);
     }

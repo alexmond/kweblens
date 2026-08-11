@@ -1,6 +1,6 @@
 import type { Ref } from 'vue';
 
-import { auth } from '../auth';
+import * as session from '../session';
 import type { DialogApi } from '../dialog';
 import type { LogScope } from '../dock';
 import type { RowAction } from '../rowActions';
@@ -47,8 +47,10 @@ export function useAppActions(a: {
   /** `objKey` of the object the drawer is showing — see RowActionDeps.detailKey. */
   detailKey: Ref<string | null>;
 }) {
-  const signOut = () => {
-    auth.clear();
+  // Ends the SERVER session first, then the local state (`session.ts`). Sign-out used to be
+  // a UI state change only, which left the session cookie signing you back in (#320).
+  const signOut = async () => {
+    await session.signOut();
     a.setAuthUser(null);
   };
 
@@ -120,7 +122,7 @@ export function useAppActions(a: {
       dialog: a.dialog,
       reportOutcome: a.reportOutcome,
       onAuthCleared: () => {
-        signOut();
+        void signOut();
         a.setShowLogin(true);
       },
       clearSelection: () => (a.selection.value = new Set()),

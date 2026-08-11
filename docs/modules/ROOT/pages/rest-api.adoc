@@ -47,8 +47,8 @@ secret:
 
 Authenticate with HTTP Basic per request, or `POST /api/v1/auth/session` once to establish a
 `JSESSIONID` (the SPA does this because a browser cannot attach Basic auth to a WebSocket
-handshake). `/api/**` and `/mcp/**` are exempt from CSRF; a failed Basic auth answers a bare `401`
-with no `WWW-Authenticate` header.
+handshake). `DELETE` the same path to end that session. `/api/**` and `/mcp/**` are exempt from
+CSRF; a failed Basic auth answers a bare `401` with no `WWW-Authenticate` header.
 
 == Errors
 
@@ -409,7 +409,14 @@ entry is *also* written to the `kweblens.audit` logger, so the durable record su
 and eviction no longer loses it.
 
 | `POST /api/v1/auth/session`
-| Authenticate once with Basic and get a `JSESSIONID` back, for the exec WebSocket.
+| Authenticate once with Basic and get a `JSESSIONID` back, for the exec WebSocket. Sent *with*
+credentials it verifies those credentials — an existing session cookie does not answer for them.
+Sent with none it answers from the session, which is how a reloaded tab restores its sign-in.
+
+| `DELETE /api/v1/auth/session`
+| Sign out: invalidates the session and clears the cookie. `204`, and it needs no credentials of
+its own. Dropping the client's credentials without this leaves a cookie that still authorises
+every write and still opens the exec WebSocket.
 |===
 
 == Streaming endpoints
