@@ -190,6 +190,23 @@ const loadAbout = (): void => {
     .catch(() => undefined);
 };
 loadAbout();
+
+// Reset the view when the active cluster changes.
+//
+// Declared BEFORE the cluster-scoped composables below, not after, because Vue runs watchers in
+// creation order and this one has to win (GH#323). Registered after them, the Helm-scope watch
+// saw the new cluster while `helmRelease` still held the previous cluster's release, and asked
+// the new cluster for the resources of a release it has never heard of — a wasted request and a
+// flash of "could not scope to release …" for a filter that was already on its way out.
+watch(cluster, (id) => {
+  selected.value = null;
+  helmRelease.value = null;
+  // Namespace is remembered PER CLUSTER: namespaces are cluster-local, so carrying one over
+  // would filter on a namespace that may not exist here and silently show an empty list.
+  namespace.value = id ? loadNamespace(id) : null;
+  saveCluster(id);
+});
+
 const { nav, counts, helmCounts, namespaces, namespacesKnown, helmReleaseList, favorites, helmScope } = useClusterScope(
   cluster,
   namespace,
@@ -212,17 +229,10 @@ const {
   openLogs,
   closeDock,
   toggleFloat,
-} = useDock();
+} = useDock(cluster);
 
-// Reset the view when the active cluster, or the selected kind/namespace, changes.
-watch(cluster, (id) => {
-  selected.value = null;
-  helmRelease.value = null;
-  // Namespace is remembered PER CLUSTER: namespaces are cluster-local, so carrying one over
-  // would filter on a namespace that may not exist here and silently show an empty list.
-  namespace.value = id ? loadNamespace(id) : null;
-  saveCluster(id);
-});
+// Reset the view when the selected kind/namespace changes. The cluster watch that feeds this
+// one is declared further up, for the ordering reason recorded there.
 watch([selected, namespace], () => {
   detail.value = null;
   query.value = '';

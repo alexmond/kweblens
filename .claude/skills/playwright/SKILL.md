@@ -47,6 +47,7 @@ and the reason is in its own header comment — read that before changing one.
 | `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
+| `cluster-switch-check.mjs` | You touched per-cluster state. Switches cluster and fails if a value from the previous one is still on screen. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
 | `dev-verify.sh` | Before every commit. Format + full reactor. Green here means green on the PR. |
 | `dev-test.sh` | A targeted `-Dtest` run while iterating. |
@@ -165,6 +166,30 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   `clipped`'s job) or an `overflow-x` scroller such as `.mini-scroll`. Four new `--self-test`
   controls, one of which must fire. **When a check is written for one element, ask where that
   surface actually keeps its text before believing the check covers it.**
+- 2026-08-10 — **A run measured another agent's build for ten minutes and produced a confident,
+  wrong finding.** Verifying #323 on `:8099`, a first pass came back clean and a second, minutes
+  later, reported the diagnosis counts as carried over. Both were right about what was on screen
+  and wrong about whose screen it was: several agents share this box, `dev-run.sh` STOPS whatever
+  is on the port before starting its own, and another worktree's server had taken :8099 in
+  between. Nothing in the output says so — an app is an app, and the footer's build stamp is the
+  only visible clue. → `cluster-switch-check.mjs` resolves the pid listening on `PORT` and
+  compares `/proc/<pid>/cwd` with its own checkout before reading a single number, refusing to
+  run otherwise (`EXPECT_CWD=any` to override). **On a shared box, "the app answered" is not
+  "my app answered" — establish provenance before the first measurement, not after a surprise.**
+- 2026-08-10 — **A new script, `cluster-switch-check.mjs`, for a defect class nothing here
+  covered**: whether a value on screen is about the cluster named beside it (#323). Layout,
+  colour, overflow and load time were all fine; the numbers belonged to the previous cluster.
+  Its three instrument bugs, each of which produced a green or plausible line, are the reusable
+  part: (a) **a check whose verdict is gated on a failure gave up before the failure arrived** —
+  an API server that is not listening takes the client's full ~20 s timeout, and a 12 s window
+  reported "the cluster answered, not scored"; (b) **equality was treated as proof of staleness**
+  and failed a working fix on `Charts = 48` / `Repositories = 2`, which are listed from the
+  SERVER's configured Helm repositories and so are identical for every cluster, reachable or not
+  — now subtracted using a **cold control** (reload, which lands on the target with nothing to
+  carry, and discount whatever it shows anyway); (c) **the badge the bug report actually named
+  was invisible**, because the probe read `.leaf .nav-badge` while a collapsed category renders
+  its own summed `.group > summary .nav-badge` with every leaf hidden. **Read what is on screen,
+  not the level of the tree you were thinking in.**
 
 - 2026-08-10 — **`ui-measure` called a visibly ellipsized label clean, because `scrollWidth`
   is an integer.** Fixing #318 (the drawer's kind eyebrow breaking as `PERSISTENTVO`/`LUME`)

@@ -17,6 +17,15 @@ export type LogScope = 'container' | 'pod' | 'workload';
 
 export type DockSession = {
   id: string;
+  /**
+   * The cluster this session was opened against.
+   *
+   * A namespace/pod pair does not identify a pod on its own — `app/db-0` exists in every
+   * cluster that runs that StatefulSet. Without this the dock handed its sessions whatever
+   * cluster was current, so switching cluster re-pointed an open shell at a same-named pod
+   * somewhere else under the tab the operator had opened for the first one (GH#323).
+   */
+  cluster: string;
   kind: DockKind;
   namespace: string;
   pod: string;

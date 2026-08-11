@@ -1,4 +1,4 @@
-import { effectScope, ref } from 'vue';
+import { effectScope, nextTick, ref } from 'vue';
 import { describe, expect, it } from 'vitest';
 
 import { useAsyncData } from './useAsyncData';
@@ -58,6 +58,42 @@ describe('useAsyncData', () => {
     await flush();
     expect(error.value).toContain('nope');
     expect(data.value).toEqual(['first']);
+    scope.stop();
+  });
+
+  it('DISCARDS the last good data when the identity changes and the new load fails', async () => {
+    // GH#323. The rule above is about a retry of the SAME request. Across a cluster switch the
+    // rows are a statement about a different cluster: DiagnosisPanel's header kept saying
+    // "11 critical, 19 warning" — the previous cluster's counts — over its own body saying the
+    // request for this one had timed out.
+    const cluster = ref('kind-a');
+    const { scope, data, error } = run(
+      () => cluster.value,
+      () => (cluster.value === 'kind-a' ? Promise.resolve(['a-rows']) : Promise.reject(new Error('Could not reach'))),
+    );
+    await flush();
+    expect(data.value).toEqual(['a-rows']);
+
+    cluster.value = 'kind-b';
+    await flush();
+    expect(error.value).toContain('Could not reach');
+    expect(data.value).toBeNull();
+    scope.stop();
+  });
+
+  it('shows nothing rather than the old cluster while the new one is still loading', async () => {
+    const cluster = ref('kind-a');
+    const { scope, data, loading } = run(
+      () => cluster.value,
+      () => new Promise((resolve) => setTimeout(() => resolve([cluster.value]), 20)),
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    expect(data.value).toEqual(['kind-a']);
+
+    cluster.value = 'kind-b';
+    await nextTick();
+    expect(data.value).toBeNull();
+    expect(loading.value).toBe(true);
     scope.stop();
   });
 

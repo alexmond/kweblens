@@ -33,6 +33,10 @@ watch([show, () => props.cluster], ([open, cluster]) => {
   }
   loading.value = true;
   error.value = null;
+  // Discarded before the fetch, and OUTSIDE the guard below: a probe of the cluster that was
+  // current last time this opened is not a probe of this one, and "there is no cluster now" is
+  // the case where nothing will overwrite it (GH#323).
+  diag.value = null;
   const jobs: Promise<unknown>[] = [
     api
       .about()
@@ -40,7 +44,6 @@ watch([show, () => props.cluster], ([open, cluster]) => {
       .catch((e) => (error.value = failureNotice(e))),
   ];
   if (cluster) {
-    diag.value = null;
     jobs.push(
       api
         .clusterDiagnostics(cluster)
