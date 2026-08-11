@@ -121,45 +121,79 @@ function measureOne(els) {
   // minimum content width ONE GLYPH, so a squeezed column silently shreds its own label
   // instead of refusing to shrink.
   //
-  // Measured, not guessed: the longest UNBREAKABLE run is laid out in the element's own
-  // font and compared with its content box. Unbreakable, not "word" — a browser may
-  // break after `-` and `/`, so `Pod/kw251-bad-a` is legally three runs and only the
-  // longest of them has to fit. Elements that cannot wrap at all (`white-space: nowrap`)
-  // are skipped: they overflow or ellipsise instead, which the box/overflow lines above
-  // already report.
+  // Measured, not guessed: the longest UNBREAKABLE run is laid out in the font that renders
+  // it and compared with the matched element's content box. Unbreakable, not "word" — a
+  // browser may break after `-` and `/`, so `Pod/kw251-bad-a` is legally three runs and only
+  // the longest of them has to fit. Elements that cannot wrap at all (`white-space: nowrap`)
+  // are skipped: they overflow or ellipsise instead, which the box/overflow and `clipped`
+  // lines already report.
+  //
+  // DESCENDANT text counts, not only direct text nodes (#326). The first version read only
+  // `e`'s own child text nodes — inherited from the chars-per-line check above, where the
+  // restriction is load-bearing (a layout container's `textContent` is the whole page as one
+  // "line"). Here it was a hole: the drawer Overview renders half of every `.kv dd` inside a
+  // `<button class="cell-link">` or an `NTag`, so `Controlled By` and `Node` reported NO word
+  // at all while the row beside them was measured. A clean `words` line on a selector meant
+  // "nothing wrong with the text I could see", which is the shape of every false pass here.
+  // Splitting into runs is what makes this safe where chars-per-line is not: concatenating
+  // descendants cannot invent a longer WORD, only a longer line.
+  //
+  // Two guards keep it conservative. Runs are compared with `e`'s content box even when the
+  // text sits in a narrower descendant — that can only UNDER-report (a run that fits a
+  // narrower box fits `e` too), never invent a defect. And a text node is skipped when
+  // anything between it and `e` takes it out of `e`'s wrapping regime: `white-space: nowrap`
+  // (it ellipsises — `clipped`'s job) or an `overflow-x` scroller of its own such as
+  // `.mini-scroll` (it scrolls rather than shreds).
   //
   // Runs over EVERY match, not just the first — one bad header in four is the case.
   const widestWord = () => {
     const probe = document.createElement('span');
     probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0';
     document.body.appendChild(probe);
+    const owners = (e) => {
+      // [element whose font renders it, text] for every text node under `e` still bound by
+      // `e`'s own wrapping.
+      const out = [];
+      const walk = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const text = (n.textContent || '').trim();
+        if (!text) continue;
+        let escaped = false;
+        for (let a = n.parentElement; a && a !== e; a = a.parentElement) {
+          const acs = getComputedStyle(a);
+          if (/nowrap|pre$/.test(acs.whiteSpace) || /auto|scroll/.test(acs.overflowX)) {
+            escaped = true;
+            break;
+          }
+        }
+        if (!escaped) out.push([n.parentElement, text]);
+      }
+      return out;
+    };
     let worst = null;
     for (const e of els) {
       const ecs = getComputedStyle(e);
       if (/nowrap|pre$/.test(ecs.whiteSpace)) continue;
-      const text = [...e.childNodes]
-        .filter((n) => n.nodeType === 3)
-        .map((n) => n.textContent)
-        .join(' ')
-        .trim();
-      if (!text) continue;
       const er = e.getBoundingClientRect();
       const inner =
         er.width - parseFloat(ecs.paddingLeft || 0) - parseFloat(ecs.paddingRight || 0) -
         parseFloat(ecs.borderLeftWidth || 0) - parseFloat(ecs.borderRightWidth || 0);
       if (inner <= 0) continue;
-      probe.style.fontFamily = ecs.fontFamily;
-      probe.style.fontSize = ecs.fontSize;
-      probe.style.fontWeight = ecs.fontWeight;
-      probe.style.fontStyle = ecs.fontStyle;
-      probe.style.letterSpacing = ecs.letterSpacing;
-      probe.style.textTransform = ecs.textTransform;
-      for (const run of text.split(/\s+/).flatMap((w) => w.split(/(?<=[-/–—])/))) {
-        if (!run) continue;
-        probe.textContent = run;
-        const w = probe.getBoundingClientRect().width;
-        if (w > inner + 0.5 && (!worst || w - inner > worst.over)) {
-          worst = { run, w: Math.round(w), inner: Math.round(inner), over: w - inner };
+      for (const [owner, text] of owners(e)) {
+        const ocs = getComputedStyle(owner);
+        probe.style.fontFamily = ocs.fontFamily;
+        probe.style.fontSize = ocs.fontSize;
+        probe.style.fontWeight = ocs.fontWeight;
+        probe.style.fontStyle = ocs.fontStyle;
+        probe.style.letterSpacing = ocs.letterSpacing;
+        probe.style.textTransform = ocs.textTransform;
+        for (const run of text.split(/\s+/).flatMap((w) => w.split(/(?<=[-/–—])/))) {
+          if (!run) continue;
+          probe.textContent = run;
+          const w = probe.getBoundingClientRect().width;
+          if (w > inner + 0.5 && (!worst || w - inner > worst.over)) {
+            worst = { run, w: Math.round(w), inner: Math.round(inner), over: w - inner };
+          }
         }
       }
     }
@@ -287,6 +321,15 @@ const SELF_TEST_FIXTURE = `
   #roomy    { width: 400px; }
   #nowrap   { width: 40px; white-space: nowrap; }
   #hyphen   { width: 90px; }
+  /* The descendant-text controls (#326) — no backticks in here either. #nested is the .kv dd
+     shape: the value is in a CHILD element, so the direct-text-node reading measured nothing
+     at all. #nested-ok is the same shape with a word that fits. #nested-nowrap and
+     #nested-scroll are the two ways a descendant leaves the parent's wrapping regime, and
+     must NOT be reported. */
+  #nested, #nested-ok, #nested-nowrap, #nested-scroll { width: 40px; }
+  #nested-ok { width: 400px; }
+  #nested-nowrap > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  #nested-scroll > span { display: block; overflow-x: auto; }
   /* The clipped controls (#318) — no backticks in here, this fixture is a template literal.
      The hairline case has to be a FRACTION of a pixel short whatever font the box happens
      to have, so its width is derived from the text itself: the parent shrink-wraps to the
@@ -308,6 +351,10 @@ const SELF_TEST_FIXTURE = `
 <div id="roomy">Reason</div>
 <div id="nowrap">Reason</div>
 <div id="hyphen">Pod/kw251-bad-a</div>
+<div id="nested"><button>Reason</button></div>
+<div id="nested-ok"><button>Reason</button></div>
+<div id="nested-nowrap"><button>Reason</button></div>
+<div id="nested-scroll"><span>Reason</span></div>
 <div id="empty-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="full-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>
@@ -321,6 +368,10 @@ const SELF_TEST_CASES = [
   ['#roomy', 'word', false, 'the same word in a 400px box is fine'],
   ['#nowrap', 'word', false, 'white-space: nowrap cannot break, so it is not a word-break defect'],
   ['#hyphen', 'word', false, '"Pod/kw251-bad-a" breaks legally after / and -, so only "kw251-" must fit'],
+  ['#nested', 'word', true, 'the word is in a CHILD element — the .kv dd shape that reported nothing'],
+  ['#nested-ok', 'word', false, 'the same child text in a 400px box is fine'],
+  ['#nested-nowrap', 'word', false, 'a nowrap child ellipsises; that is the clipped check, not this one'],
+  ['#nested-scroll', 'word', false, 'a child with its own scroller scrolls rather than shreds'],
   ['#empty-row', 'row', true, '3x100px + gaps = 320px of a 1000px row — the shape of #236'],
   ['#full-row', 'row', false, '3x320px + gaps = 1000px, so the row is used'],
   ['#wrapped', 'row', false, '4x320px wraps to a second line; a short LAST line is not waste'],

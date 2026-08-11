@@ -146,6 +146,26 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-10 — **`ui-measure`'s `words` check could not see a word inside a child element, and
+  the surface it was pointed at keeps half its text there.** Fixing #326 (the drawer Overview's
+  `.kv dd` shredding `ValidatingWebhookConfigurati`/`on` at `drawer:360`) the check fired
+  correctly on the Kind row — a direct text node — while reporting **nothing at all** for the
+  `Node`, `Service Account`, `Controlled By` and `Managed By` rows in the same list, whose
+  values are rendered inside a `<button class="cell-link">` or an `NTag`. The restriction came
+  from the chars-per-line check above it, where "direct text nodes only" is load-bearing (a
+  layout container's `textContent` is the whole page as one "line") — but `words` splits into
+  runs, and concatenating descendants cannot invent a longer WORD, only a longer line. So a
+  clean `words` line on `.kv dd` meant "nothing wrong with the text I happened to be able to
+  see", and the identical defect one DOM level down would have needed the child selector named
+  by hand to be found at all. → `widestWord` walks every text node under each match and lays it
+  out in **its own parent's** font. Two guards keep it conservative: runs are compared with the
+  matched element's box even when the text sits in a narrower child (that can only under-report,
+  never invent a defect), and a text node is skipped when anything between it and the match
+  takes it out of that element's wrapping regime — `white-space: nowrap` (ellipsis, which is
+  `clipped`'s job) or an `overflow-x` scroller such as `.mini-scroll`. Four new `--self-test`
+  controls, one of which must fire. **When a check is written for one element, ask where that
+  surface actually keeps its text before believing the check covers it.**
+
 - 2026-08-10 — **`ui-measure` called a visibly ellipsized label clean, because `scrollWidth`
   is an integer.** Fixing #318 (the drawer's kind eyebrow breaking as `PERSISTENTVO`/`LUME`)
   with a weighted `flex-shrink` left the kind 115.94px wide for a 116.33px word. Both

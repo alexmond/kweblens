@@ -222,6 +222,17 @@ is three runs) and compares it with the content box, over every match rather tha
 `--self-test` pins it against a fixture whose answer is arithmetic, including the case where
 it must FIRE — a clean run against an already-fixed app proves only that a check is quiet.
 
+It reads **descendant** text, not only an element's own child text nodes (#326). The first
+version copied that restriction from the chars-per-line check, where it is load-bearing and
+here was a hole: the drawer Overview renders half of every `.kv dd` inside a `<button>` or an
+`NTag`, so `Controlled By` and `Node` reported no word at all while the row beside them was
+measured — a clean line meaning only "nothing wrong with the text I could see". Splitting
+into runs is what makes this safe where chars-per-line is not: concatenating descendants
+cannot invent a longer word, only a longer line. Runs are compared with the matched element's
+own box even when the text sits in a narrower child, which can only under-report; and a text
+node is skipped when something between it and the element takes it out of that element's
+wrapping regime (`white-space: nowrap`, which ellipsises, or a scroller of its own).
+
 The `clipped` line answers "what is this ellipsis actually hiding", and it is measured
 **sub-pixel** because the integer answer is not good enough (#318). `scrollWidth` and
 `clientWidth` are rounded to whole pixels, so the near-miss they most need to catch is the
