@@ -20,6 +20,8 @@
 //   words     a word too wide for its own box — i.e. one the browser must break mid-word
 //   clipped   text an ellipsis is cutting, measured sub-pixel: a fraction of a pixel short
 //             is a defect, because the ellipsis pays for itself in whole characters
+//   twins     two matches whose DIFFERENT text truncates to the SAME visible string — the
+//             row that stops naming itself, which is worse than any amount of clipping
 //   row       how much of a container's width its own children actually reach
 //   count     how many matched (a selector matching 0 is reported, never silently passed)
 //
@@ -245,6 +247,101 @@ function measureOne(els) {
     return worst;
   };
 
+  // ---- Two rows that stopped naming themselves (#327) ----
+  //
+  // `clipped` says how much of ONE label is cut. It cannot say the thing that actually made
+  // the nav unusable: that the cut fell in the same place on two neighbours, so the left rail
+  // rendered `VerticalPodAuto…` twice, one row above the other, and `Validating Admissio…`
+  // twice below that. Kubernetes kinds are built by suffixing, so a tail-ellipsis removes
+  // exactly the part that distinguishes siblings — a strictly worse failure than the mid-word
+  // breaks of #318/#326, where the text was ugly but the information survived. It was found by
+  // reading a screenshot; nothing here would have failed, because each label on its own was
+  // merely truncated, which is normal and by design.
+  //
+  // So: which characters actually get painted. Each character's own rect is compared with the
+  // element's content box, and a dropped run is replaced by `…` — the string the reader sees.
+  // The comparison is deliberately loose (equal, or one a prefix of the other) because a
+  // sibling's count badge can be a digit wider and shift the fit by a character; two labels
+  // that differ only in that character are not distinguishable in practice either.
+  //
+  // What this reports is what FITS, not what is finally painted: the browser buys room for the
+  // `…` with one or two more characters. That bias is identical for both members of a pair, so
+  // it cannot invent or hide a twin — but it does mean the printed string is a character or two
+  // longer than the screenshot's. Only truncated elements are compared, which is what keeps
+  // this quiet: the eight `Overview` leaves are identical and fit, so they are not twins.
+  //
+  // One more thing it has to know: a FRAGMENT is not a label. The fix for #327 renders a leaf
+  // as two spans, an elidable head and a protected tail, and the heads of two siblings really
+  // do truncate to the same string — that is the design, and the tail beside them is what the
+  // reader tells them apart by. Asked for `.leaf-head` the first version reported those heads
+  // as twins: a defect that does not exist, in the code that had just fixed the one that did.
+  // So an element whose neighbour's text carries on within 3px of where its own box ends reads
+  // as one continuous string with that neighbour and is skipped — measure the wrapper instead.
+  // Table cells are not caught by this: their padding puts the next cell's text well clear.
+  const isFragment = (e) => {
+    const r = e.getBoundingClientRect();
+    for (const sib of [e.previousElementSibling, e.nextElementSibling]) {
+      if (!sib || !sib.textContent.trim()) continue;
+      const sr = document.createRange();
+      sr.selectNodeContents(sib);
+      const t = sr.getBoundingClientRect();
+      if (t.width === 0 && t.height === 0) continue;
+      const sameLine = t.top < r.bottom - 1 && t.bottom > r.top + 1;
+      if (sameLine && (Math.abs(t.left - r.right) <= 3 || Math.abs(r.left - t.right) <= 3)) return true;
+    }
+    return false;
+  };
+
+  const twinLabels = () => {
+    const shown = [];
+    for (const e of els) {
+      const ecs = getComputedStyle(e);
+      if (!/hidden|clip/.test(ecs.overflowX)) continue;
+      if (isFragment(e)) continue;
+      const er = e.getBoundingClientRect();
+      const left = er.left + parseFloat(ecs.borderLeftWidth || 0) + parseFloat(ecs.paddingLeft || 0);
+      const right = er.right - parseFloat(ecs.borderRightWidth || 0) - parseFloat(ecs.paddingRight || 0);
+      if (right - left <= 0) continue;
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      const full = e.textContent.replace(/\s+/g, ' ').trim();
+      if (!full || range.getBoundingClientRect().width <= right - left + 0.02) continue;
+
+      let visible = '';
+      let dropped = false;
+      const walker = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        for (let i = 0; i < node.textContent.length; i += 1) {
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const cr = range.getBoundingClientRect();
+          if (cr.width === 0 && cr.height === 0) continue;
+          if (cr.right <= right + 0.02 && cr.left >= left - 0.02) {
+            if (dropped) visible += '…';
+            dropped = false;
+            visible += node.textContent[i];
+          } else {
+            dropped = true;
+          }
+        }
+      }
+      if (dropped) visible += '…';
+      shown.push({ full, visible: visible.replace(/\s+/g, ' ').trim() });
+    }
+
+    // Cluster by "reads the same": equal, or one the beginning of the other.
+    const groups = [];
+    for (const s of shown) {
+      const alike = (a, b) => a.visible.startsWith(b.visible) || b.visible.startsWith(a.visible);
+      const g = groups.find((grp) => grp.every((m) => alike(m, s)));
+      if (g) g.push(s);
+      else groups.push([s]);
+    }
+    return groups
+      .filter((g) => g.length > 1 && new Set(g.map((m) => m.full)).size > 1)
+      .map((g) => ({ visible: g.map((m) => m.visible).sort((a, b) => a.length - b.length)[0], full: g.map((m) => m.full) }));
+  };
+
   // ---- How much of a row its children actually reach (#236) ----
   //
   // The opposite defect to overflow, and the one nothing here could see: the cluster
@@ -288,6 +385,7 @@ function measureOne(els) {
     count: els.length,
     word: widestWord(),
     clipped: clippedText(),
+    twins: twinLabels(),
     row: rowFill(),
     box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
     scrollW: el.scrollWidth,
@@ -341,6 +439,16 @@ const SELF_TEST_FIXTURE = `
   #hairline { width: calc(100% - 0.4px); }
   #fits     { width: 100%; }
   #cut      { width: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The twins controls (#327) — still no backticks. Same box, same font, so the pair that
+     shares a long prefix truncates to one string and the pair that does not stays two. The
+     .same case must NOT fire: identical labels are not a defect, only identical RENDERINGS
+     of two different ones are. The .protected pair is the fix's own shape — a head that
+     gives way and a tail that does not — and is the control saying a fix measures as one. */
+  .tw { width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tw > span { overflow: hidden; text-overflow: ellipsis; white-space: pre; min-width: 0; }
+  .tw.split { display: flex; }
+  .tw.split > .h { flex: 0 1 auto; }
+  .tw.split > .t { flex: 0 0 auto; max-width: 100%; }
   .rowbox { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; width: 1000px; }
   .rowbox > i { height: 30px; background: #ccc; display: block; }
   #empty-row > i  { width: 100px; }
@@ -360,7 +468,15 @@ const SELF_TEST_FIXTURE = `
 <div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>
 <div id="cut">Reason</div>
 <span class="fit"><span id="hairline">PersistentVolume</span></span>
-<span class="fit"><span id="fits">PersistentVolume</span></span>`;
+<span class="fit"><span id="fits">PersistentVolume</span></span>
+<div class="tw twin">VerticalPodAutoscaler</div>
+<div class="tw twin">VerticalPodAutoscalerCheckpoint</div>
+<div class="tw apart">AlphaSomethingRatherLong</div>
+<div class="tw apart">BetaSomethingRatherLong</div>
+<div class="tw same">VerticalPodAutoscalerCheckpoint</div>
+<div class="tw same">VerticalPodAutoscalerCheckpoint</div>
+<div class="tw split protected"><span class="h">VerticalPod</span><span class="t">Autoscaler</span></div>
+<div class="tw split protected"><span class="h">VerticalPodAutoscaler</span><span class="t">Checkpoint</span></div>`;
 
 // [selector, metric, must-fire?, why]
 const SELF_TEST_CASES = [
@@ -380,6 +496,11 @@ const SELF_TEST_CASES = [
   ['#hairline', 'clipseen', true, '0.4px short is still clipped, however the integers round'],
   ['#hairline', 'clip', true, '...and sub-pixel is a defect: #318 lost two glyphs to 0.4px'],
   ['#fits', 'clipseen', false, 'the same run in exactly its own advance is not clipped'],
+  ['.twin', 'twins', true, 'two kinds sharing a prefix truncate to one string — the defect #327 shipped'],
+  ['.apart', 'twins', false, 'two kinds that differ at the front stay two strings when cut'],
+  ['.same', 'twins', false, 'the SAME label twice is not a defect; only one rendering of two labels is'],
+  ['.protected', 'twins', false, 'a protected tail keeps them apart in the same box — the shape of the fix'],
+  ['.protected > .h', 'twins', false, 'the two HEADS do read alike; a fragment of a label is not a label'],
 ];
 
 /** The reporting threshold for `row`: a third of the container AND more than a gap's worth. */
@@ -396,11 +517,13 @@ if (argv.includes('--self-test')) {
     const fired =
       metric === 'row'
         ? rowIsEmpty(got?.row)
-        : metric === 'clipseen'
-          ? !!got?.clipped
-          : metric === 'clip'
-            ? !!got?.clipped && got.clipped.over < 1
-            : !!got?.word;
+        : metric === 'twins'
+          ? (got?.twins ?? []).length > 0
+          : metric === 'clipseen'
+            ? !!got?.clipped
+            : metric === 'clip'
+              ? !!got?.clipped && got.clipped.over < 1
+              : !!got?.word;
     const ok = fired === wantDefect;
     if (!ok) bad += 1;
     const detail =
@@ -408,6 +531,10 @@ if (argv.includes('--self-test')) {
         ? got?.row
           ? `${got.row.unused}px unused of ${got.row.inner}px`
           : 'no row measured'
+        : metric === 'twins'
+        ? got?.twins?.length
+          ? `both read "${got.twins[0].visible}"`
+          : 'no two read the same'
         : metric.startsWith('clip')
           ? got?.clipped
             ? `${got.clipped.over.toFixed(2)}px cut of ${got.clipped.need.toFixed(2)}px`
@@ -486,6 +613,13 @@ try {
       console.log(
         `  words    "${m.word.run}" needs ${m.word.w}px in a ${m.word.inner}px box` +
           `  <-- DEFECT: it must break mid-word`,
+      );
+      failed = true;
+    }
+    for (const t of m.twins ?? []) {
+      console.log(
+        `  twins    ${t.full.map((f) => `"${f}"`).join(' and ')} both read "${t.visible}"` +
+          `  <-- DEFECT: the cut removed what told them apart`,
       );
       failed = true;
     }

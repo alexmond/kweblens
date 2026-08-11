@@ -44,7 +44,7 @@ and the reason is in its own header comment — read that before changing one.
 |---|---|
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
-| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
+| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `cluster-switch-check.mjs` | You touched per-cluster state. Switches cluster and fails if a value from the previous one is still on screen. |
@@ -190,6 +190,35 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   was invisible**, because the probe read `.leaf .nav-badge` while a collapsed category renders
   its own summed `.group > summary .nav-badge` with every leaf hidden. **Read what is on screen,
   not the level of the tree you were thinking in.**
+- 2026-08-10 — **The same shared-box trap, met from the other end: `dev-run.sh` said
+  "rebuilding", came up, and served the SPA from before the change.** Fixing #327 the nav
+  rendered the pre-fix labels after a restart that had just claimed to rebuild, and the served
+  stylesheet still carried the original `.leaf-label` rule — so a fixed layout measured as
+  unfixed for a full cycle. Either cause produces it (a build that did not reach the jar, or
+  the entry above: another checkout's server holding the port), and neither is visible from
+  the browser. The mtime check answers *should I build*, which is not the question a
+  measurement depends on — *is this process serving what I just wrote*. → `check_served_assets`
+  compares the content-hashed asset names in the served `index.html` with
+  `kweblens-ui/dist/index.html` after the health probe and says loudly when they differ, which
+  catches a foreign instance as well as a stale build. Both halves controlled: quiet on the
+  matching instance, firing when `dist` is doctored to name a bundle it is not serving. **"It
+  rebuilt" is a claim about the build; the asset hash is a claim about the process you are
+  about to measure — and only the second one is evidence.**
+- 2026-08-10 — **Nothing here could see two rows rendering the same string, and that is a worse
+  defect than any it could see.** #327: the rail truncated `VerticalPodAutoscaler` and
+  `VerticalPodAutoscalerCheckpoint` to one `VerticalPodAuto…`, and `Validating Admission
+  Policies` / `…Policy Bindings` to one `Validating Admissio…`. `clipped` reported the cut and
+  passed it as designed — correctly, per label. But Kubernetes kinds are built by suffixing, so
+  a tail-ellipsis removes precisely what distinguishes siblings: unlike #318/#326, where the
+  text was mangled but survived, here the information is gone and clicking a row is a guess. It
+  was found by reading a screenshot. → A `twins` line: each character's own rect against the
+  element's content box, dropped runs replaced by `…`, and any two matches whose different text
+  paints alike **fail** the run. Two traps met while writing it, both now controls: only
+  TRUNCATED elements may be compared (eight identical `Overview` leaves are not a defect), and
+  an element whose neighbour's text continues within 3px of its box edge is a **fragment** — the
+  first version reported the two halves of the fixed split label as twins, i.e. invented a
+  defect in the code that had just removed one. **A check that compares renderings has to be
+  told what the reader reads as one string.**
 
 - 2026-08-10 — **`ui-measure` called a visibly ellipsized label clean, because `scrollWidth`
   is an integer.** Fixing #318 (the drawer's kind eyebrow breaking as `PERSISTENTVO`/`LUME`)

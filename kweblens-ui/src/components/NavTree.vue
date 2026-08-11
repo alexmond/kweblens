@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 
+import { navLabelParts } from '../navLabel';
 import { allNavItems } from '../shell';
 import type { NavCategory, NavItem } from '../types';
 import NavGroup from './NavGroup.vue';
@@ -59,6 +60,21 @@ const toggle = (label: string, isOpen: boolean) => {
 
 // A category with a single kind and no sub-groups is redundant as a group — render it flat.
 const isTopLeaf = (cat: NavCategory): boolean => cat.items.length === 1 && (cat.subgroups?.length ?? 0) === 0;
+
+// Two collision sets of their own (#327). Favorites is one because pinning both halves of a
+// near-identical pair is exactly when they end up adjacent; the flat top-level kinds are one
+// because they are rendered as a run of rows with no group between them.
+const favParts = computed(() => navLabelParts(favItems.value.map((i) => i.label)));
+
+const topLeafParts = computed(() => {
+  const items = props.categories.filter(isTopLeaf).map((c) => c.items[0]);
+  const parts = navLabelParts(items.map((i) => i.label));
+  return new Map(items.map((it, i) => [it.id, parts[i]]));
+});
+
+// A label with no entry can only mean the maps and the render disagree about the set, so fall
+// back to the unsplit label rather than rendering nothing.
+const topLeafPartsFor = (item: NavItem) => topLeafParts.value.get(item.id) ?? { head: '', tail: item.label };
 </script>
 
 <template>
@@ -66,9 +82,10 @@ const isTopLeaf = (cat: NavCategory): boolean => cat.items.length === 1 && (cat.
     <div v-if="favItems.length > 0" class="fav-section">
       <div class="fav-header">★ Favorites</div>
       <ul>
-        <li v-for="it in favItems" :key="it.id">
+        <li v-for="(it, i) in favItems" :key="it.id">
           <NavLeaf
             :item="it"
+            :parts="favParts[i]"
             :selected="selected"
             :count="counts[it.id]"
             :favorited="true"
@@ -82,6 +99,7 @@ const isTopLeaf = (cat: NavCategory): boolean => cat.items.length === 1 && (cat.
       <div v-if="isTopLeaf(cat)" class="top-leaf">
         <NavLeaf
           :item="cat.items[0]"
+          :parts="topLeafPartsFor(cat.items[0])"
           :selected="selected"
           :count="counts[cat.items[0].id]"
           :favorited="favorites.includes(cat.items[0].id)"

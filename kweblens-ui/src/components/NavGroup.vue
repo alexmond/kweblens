@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { navLabelParts } from '../navLabel';
 import type { NavCategory, NavItem } from '../types';
 // Recursive component: renders nested sub-groups (Custom Resources → API groups).
 import NavGroup from './NavGroup.vue';
@@ -35,6 +36,11 @@ function categoryBadge(cat: NavCategory): string | undefined {
   return known.length > 0 ? String(known.reduce((sum, i) => sum + props.counts[i.id], 0)) : undefined;
 }
 
+// One rendered list is one collision set (#327): these items are the rows a reader compares
+// with each other. A sub-group's kinds are a separate list and are split separately, which is
+// what keeps `VerticalPodAutoscaler` competing only with its own API group.
+const labelParts = computed(() => navLabelParts(props.cat.items.map((i) => i.label)));
+
 const holdsSelected = computed(
   () =>
     props.cat.items.some((i) => i.id === props.selected) ||
@@ -55,9 +61,10 @@ const onToggle = (e: Event) => emit('toggle', props.cat.label, (e.target as HTML
       <span class="nav-badge">{{ categoryBadge(cat) }}</span>
     </summary>
     <ul v-if="cat.items.length > 0">
-      <li v-for="it in cat.items" :key="it.id">
+      <li v-for="(it, i) in cat.items" :key="it.id">
         <NavLeaf
           :item="it"
+          :parts="labelParts[i]"
           :selected="selected"
           :count="counts[it.id]"
           :favorited="favorites.includes(it.id)"
