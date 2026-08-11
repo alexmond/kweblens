@@ -44,7 +44,7 @@ and the reason is in its own header comment — read that before changing one.
 |---|---|
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
-| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
+| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
@@ -146,6 +146,24 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-10 — **`ui-measure` called a visibly ellipsized label clean, because `scrollWidth`
+  is an integer.** Fixing #318 (the drawer's kind eyebrow breaking as `PERSISTENTVO`/`LUME`)
+  with a weighted `flex-shrink` left the kind 115.94px wide for a 116.33px word. Both
+  `scrollWidth` and `clientWidth` round to 116, so the `content` line stayed silent and the
+  run printed `nothing over budget` — while the screenshot taken thirty seconds later read
+  `PERSISTENTVOLU…`, because **`text-overflow` does not drop 0.4px of text, it drops whole
+  GLYPHS** to make room for the ellipsis. A sub-pixel miss costs two characters. The `words`
+  check cannot cover this either, and correctly so: it skips `white-space: nowrap` by design,
+  so **adding `nowrap` to stop a mid-word break also switches off the check that was watching
+  the element.** → A `clipped` line measured in the browser's own sub-pixel geometry: a Range
+  over the element's contents reports the FULL laid-out advance even when the paint is clipped
+  (cross-checked against a detached clone at `width:auto` — 116.328125px both ways). A miss of
+  tens of pixels is a designed truncation and is printed; a miss under 1px **fails** the run.
+  Four new `--self-test` controls, two of which must fire, including a hairline case whose
+  width is derived from the text itself (`calc(100% - 0.4px)` inside a shrink-wrapped parent)
+  so it is 0.4px short in any font. **The screenshot caught what the measurement missed —
+  which is the argument for taking both, and for reading the image even when a number has
+  already said the thing is fine.**
 - 2026-08-10 — **GH#320 is fixed, and the workaround that hid it has been removed.** Sign out
   now awaits `DELETE /api/v1/auth/session`, and a sign-in that presents credentials has them
   checked rather than riding a cookie, so the `signout` verb no longer calls `clearCookies()`

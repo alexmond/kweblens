@@ -9,7 +9,7 @@ once — the reason is in the header comment of each script.
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
 | [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
-| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, unused row width. |
+| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, unused row width. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
@@ -221,6 +221,17 @@ out in the element's own font (a browser may break after `/` and `-`, so `Pod/kw
 is three runs) and compares it with the content box, over every match rather than the first.
 `--self-test` pins it against a fixture whose answer is arithmetic, including the case where
 it must FIRE — a clean run against an already-fixed app proves only that a check is quiet.
+
+The `clipped` line answers "what is this ellipsis actually hiding", and it is measured
+**sub-pixel** because the integer answer is not good enough (#318). `scrollWidth` and
+`clientWidth` are rounded to whole pixels, so the near-miss they most need to catch is the
+one they cannot see: the drawer's kind eyebrow was given 115.94px for a 116.33px word, both
+properties said 116, the run stayed silent — and the header rendered `PERSISTENTVOLU…`,
+because `text-overflow` does not drop 0.4px of text, it drops whole **glyphs** to make room
+for the ellipsis. A Range over the element's contents reports the full laid-out advance even
+when the paint is clipped, so the comparison is exact. A miss of tens of pixels is a designed
+truncation and is only printed; a miss under a pixel **fails** the run, because that is a
+layout accident every time. Only elements that cannot wrap and actually clip are asked.
 
 The `row` line is the opposite defect, added after #236: how much of a container's width its
 own children actually reach. The cluster overview's three stat cards sat in a 2225px row and
