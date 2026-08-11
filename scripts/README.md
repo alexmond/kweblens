@@ -9,7 +9,7 @@ once — the reason is in the header comment of each script.
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
 | [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
-| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, unused row width. |
+| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, two labels truncating alike, unused row width. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
@@ -248,6 +248,18 @@ for the ellipsis. A Range over the element's contents reports the full laid-out 
 when the paint is clipped, so the comparison is exact. A miss of tens of pixels is a designed
 truncation and is only printed; a miss under a pixel **fails** the run, because that is a
 layout accident every time. Only elements that cannot wrap and actually clip are asked.
+
+The `twins` line answers the question `clipped` cannot: not "how much of this label is cut"
+but "did the cut fall in the same place on two of them". It was added after #327, where the
+left rail rendered `VerticalPodAuto…` on two rows in a row and `Validating Admissio…` on two
+more — Kubernetes kinds are built by suffixing, so a tail-ellipsis removes exactly the part
+that tells siblings apart, and the reader is left choosing between two identical labels. Each
+character's own rect is compared with the element's content box and a dropped run replaced by
+`…`, so what is compared is what is painted; matches whose different text renders alike
+**fail** the run. Only truncated elements are compared (eight `Overview` leaves are identical
+and fit, so they are not twins), and an element whose neighbour's text carries on within 3px
+of its own box edge is skipped as a **fragment** — for a split label the thing the reader
+reads is the wrapper, not either half, and the first version reported the halves as a defect.
 
 The `row` line is the opposite defect, added after #236: how much of a container's width its
 own children actually reach. The cluster overview's three stat cards sat in a 2225px row and

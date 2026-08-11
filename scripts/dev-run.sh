@@ -282,6 +282,32 @@ if [[ "$STOP" == true ]]; then
 	exit 0
 fi
 
+# Is the instance that just came up actually serving the front end in this tree?
+#
+# The rebuild below decides from mtimes and then says "rebuilding", and that line was taken as
+# proof for a whole cycle of #327: the run printed it, the instance came up, and the CSS it
+# served was the one from before the fix — so a fixed layout measured as unfixed and the fix
+# looked wrong. The mtime check answers "should I build", which is not the same question as
+# "is the running JVM serving what I just wrote", and only the second one protects a
+# measurement. Vite content-hashes its bundles, so the answer is one string comparison:
+# the asset names in the served index.html against the ones in kweblens-ui/dist.
+#
+# A warning, not a failure: the app IS up and everything that does not touch the SPA works.
+# But it is printed loudly, because a stale bundle is invisible from the browser.
+check_served_assets() {
+	local built served
+	[[ -f kweblens-ui/dist/index.html ]] || return 0
+	built=$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.(js|css)' kweblens-ui/dist/index.html | sort -u)
+	served=$(curl -sf "localhost:${PORT}/" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.(js|css)' | sort -u)
+	[[ -n "$built" && -n "$served" ]] || return 0
+	if [[ "$built" != "$served" ]]; then
+		echo "!!  the SPA being served is NOT the one in kweblens-ui/dist" >&2
+		echo "!!    served: $(echo "$served" | tr '\n' ' ')" >&2
+		echo "!!    built:  $(echo "$built" | tr '\n' ' ')" >&2
+		echo "!!  measure nothing about the UI until this matches — rerun with --build" >&2
+	fi
+}
+
 # A jar older than the sources is the same class of trap as a generated admin
 # password: everything starts cleanly and you spend the next hour measuring code
 # you did not write. (This bit us on #228 — the merge landed at 03:42 and the run
@@ -397,6 +423,7 @@ for _ in $(seq 1 90); do
 			grep "generated one for this run" "$LOG" >&2
 			exit 1
 		fi
+		check_served_assets
 		exit 0
 	fi
 	sleep 2

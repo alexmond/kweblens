@@ -8,7 +8,7 @@ export default defineConfig({
     environment: 'jsdom',
     coverage: {
       provider: 'v8',
-      include: ['src/kube.ts', 'src/columns.ts'],
+      include: ['src/kube.ts', 'src/columns.ts', 'src/navLabel.ts'],
       thresholds: { statements: 70, branches: 70, functions: 70, lines: 70 },
     },
   },

@@ -627,12 +627,46 @@ body {
   cursor: pointer;
 }
 
+/* The label is two flex items, not one string (#327).
+
+   `.leaf-head` is the part the ellipsis may eat and `.leaf-tail` the part that says which leaf
+   this is; navLabelParts decides where the cut falls. The head is the only item that shrinks,
+   so `VerticalPodAutoscalerCheckpoint` renders `VerticalPodAut…Checkpoint` instead of the
+   `VerticalPodAuto…` it shared with its neighbour. Nothing here measures a glyph; the browser
+   fits the text, which is the only way to get it right sub-pixel.
+
+   `flex-shrink: 0` on the tail, not a weighting. A weighted 1000-against-1 was tried and it
+   looked right in the arithmetic — the tail's share of a 95px deficit is 0.03px — but that is
+   the #318 trap: `text-overflow` does not drop a hundredth of a pixel of text, it drops whole
+   GLYPHS to make room for the ellipsis, so `Bindings` shipped as `Bindin…` and the protected
+   tail was truncated after all. A tail wider than the whole row is bounded by `max-width`
+   instead, which caps it, hands the head nothing, and lets the tail carry its own ellipsis.
+
+   `white-space: pre`, not `nowrap`: a split can fall after a space (`Validating Admission ` +
+   `Policies`) and a trailing space at the end of a line is trimmed away under `nowrap`, which
+   would render the two halves joined as `Validating AdmissionPolicies`. */
 .leaf-label {
+  display: flex;
   flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+
+.leaf-head,
+.leaf-tail {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre;
+}
+
+.leaf-head {
+  flex: 0 1 auto;
+}
+
+.leaf-tail {
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 /* Single-item categories rendered as top-level leaves (Nodes, Namespaces, Events):
