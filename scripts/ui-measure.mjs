@@ -18,6 +18,8 @@
 //   overflow  width vs the nearest scrollable/clipping ancestor, and vs the viewport
 //   measure   approximate characters per line, for text-bearing elements
 //   words     a word too wide for its own box — i.e. one the browser must break mid-word
+//   clipped   text an ellipsis is cutting, measured sub-pixel: a fraction of a pixel short
+//             is a defect, because the ellipsis pays for itself in whole characters
 //   row       how much of a container's width its own children actually reach
 //   count     how many matched (a selector matching 0 is reported, never silently passed)
 //
@@ -165,6 +167,50 @@ function measureOne(els) {
     return worst && { run: worst.run, w: worst.w, inner: worst.inner };
   };
 
+  // ---- What the ellipsis actually costs, measured sub-pixel (#318) ----
+  //
+  // `scrollWidth` and `clientWidth` are INTEGERS, and the difference between them is how
+  // this script used to answer "is anything hidden inside this element". That rounding hid
+  // the near-miss it was most needed for. Fixing #318 left the kind eyebrow 115.94px wide
+  // for a 116.33px word: both properties reported 116, the line stayed silent — and the
+  // header rendered `PERSISTENTVOLU…`, because `text-overflow` does not drop 0.4px of text,
+  // it drops whole GLYPHS to make room for the ellipsis. A run said clean; the screenshot
+  // said otherwise, and the screenshot was right.
+  //
+  // So the comparison is made in the browser's own sub-pixel geometry: a Range over the
+  // element's contents reports the FULL laid-out advance even when the paint is clipped
+  // (verified against a detached clone laid out at `width:auto` — 116.328125px both ways).
+  // Only elements that cannot wrap AND actually clip are asked: anything else overflows
+  // visibly instead, which the box/clipper lines above already report.
+  //
+  // A shortfall under 1px is failed rather than merely printed. A truncation that is part
+  // of the design misses by tens of pixels — a name that will never fit its column. One
+  // that misses by a fraction of a pixel is an accident of the layout every time, and costs
+  // the reader two characters for nothing.
+  const clippedText = () => {
+    let worst = null;
+    for (const e of els) {
+      const ecs = getComputedStyle(e);
+      if (!/nowrap|pre$/.test(ecs.whiteSpace)) continue;
+      if (!/hidden|clip/.test(ecs.overflowX)) continue;
+      const text = e.textContent.trim();
+      if (!text) continue;
+      const er = e.getBoundingClientRect();
+      const inner =
+        er.width - parseFloat(ecs.paddingLeft || 0) - parseFloat(ecs.paddingRight || 0) -
+        parseFloat(ecs.borderLeftWidth || 0) - parseFloat(ecs.borderRightWidth || 0);
+      if (inner <= 0) continue;
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      const need = range.getBoundingClientRect().width;
+      const over = need - inner;
+      if (over > 0.02 && (!worst || over > worst.over)) {
+        worst = { text, need, inner, over };
+      }
+    }
+    return worst;
+  };
+
   // ---- How much of a row its children actually reach (#236) ----
   //
   // The opposite defect to overflow, and the one nothing here could see: the cluster
@@ -207,6 +253,7 @@ function measureOne(els) {
   return {
     count: els.length,
     word: widestWord(),
+    clipped: clippedText(),
     row: rowFill(),
     box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
     scrollW: el.scrollWidth,
@@ -240,6 +287,17 @@ const SELF_TEST_FIXTURE = `
   #roomy    { width: 400px; }
   #nowrap   { width: 40px; white-space: nowrap; }
   #hyphen   { width: 90px; }
+  /* The clipped controls (#318) — no backticks in here, this fixture is a template literal.
+     The hairline case has to be a FRACTION of a pixel short whatever font the box happens
+     to have, so its width is derived from the text itself: the parent shrink-wraps to the
+     run's own advance (a percentage width resolves to auto for that intrinsic sizing, so
+     there is no circularity) and the child asks for 0.4px less than its parent. #fits takes
+     the same width with nothing subtracted. */
+  .fit { display: inline-block; white-space: nowrap; padding: 0; }
+  .fit > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; }
+  #hairline { width: calc(100% - 0.4px); }
+  #fits     { width: 100%; }
+  #cut      { width: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rowbox { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; width: 1000px; }
   .rowbox > i { height: 30px; background: #ccc; display: block; }
   #empty-row > i  { width: 100px; }
@@ -252,7 +310,10 @@ const SELF_TEST_FIXTURE = `
 <div id="hyphen">Pod/kw251-bad-a</div>
 <div id="empty-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="full-row" class="rowbox"><i></i><i></i><i></i></div>
-<div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>`;
+<div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>
+<div id="cut">Reason</div>
+<span class="fit"><span id="hairline">PersistentVolume</span></span>
+<span class="fit"><span id="fits">PersistentVolume</span></span>`;
 
 // [selector, metric, must-fire?, why]
 const SELF_TEST_CASES = [
@@ -263,6 +324,11 @@ const SELF_TEST_CASES = [
   ['#empty-row', 'row', true, '3x100px + gaps = 320px of a 1000px row — the shape of #236'],
   ['#full-row', 'row', false, '3x320px + gaps = 1000px, so the row is used'],
   ['#wrapped', 'row', false, '4x320px wraps to a second line; a short LAST line is not waste'],
+  ['#cut', 'clipseen', true, 'a 30px box ellipsizes "Reason" — the cut is reported'],
+  ['#cut', 'clip', false, 'missing by many px is a DESIGNED truncation, not a defect'],
+  ['#hairline', 'clipseen', true, '0.4px short is still clipped, however the integers round'],
+  ['#hairline', 'clip', true, '...and sub-pixel is a defect: #318 lost two glyphs to 0.4px'],
+  ['#fits', 'clipseen', false, 'the same run in exactly its own advance is not clipped'],
 ];
 
 /** The reporting threshold for `row`: a third of the container AND more than a gap's worth. */
@@ -276,7 +342,14 @@ if (argv.includes('--self-test')) {
   let bad = 0;
   for (const [sel, metric, wantDefect, why] of SELF_TEST_CASES) {
     const got = await p.$$eval(sel, measureOne);
-    const fired = metric === 'row' ? rowIsEmpty(got?.row) : !!got?.word;
+    const fired =
+      metric === 'row'
+        ? rowIsEmpty(got?.row)
+        : metric === 'clipseen'
+          ? !!got?.clipped
+          : metric === 'clip'
+            ? !!got?.clipped && got.clipped.over < 1
+            : !!got?.word;
     const ok = fired === wantDefect;
     if (!ok) bad += 1;
     const detail =
@@ -284,10 +357,14 @@ if (argv.includes('--self-test')) {
         ? got?.row
           ? `${got.row.unused}px unused of ${got.row.inner}px`
           : 'no row measured'
-        : got?.word
-          ? `"${got.word.run}" ${got.word.w}px in ${got.word.inner}px`
-          : 'no word defect';
-    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${sel.padEnd(11)} ${metric.padEnd(5)} ${detail.padEnd(30)} ${why}`);
+        : metric.startsWith('clip')
+          ? got?.clipped
+            ? `${got.clipped.over.toFixed(2)}px cut of ${got.clipped.need.toFixed(2)}px`
+            : 'nothing clipped'
+          : got?.word
+            ? `"${got.word.run}" ${got.word.w}px in ${got.word.inner}px`
+            : 'no word defect';
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${sel.padEnd(11)} ${metric.padEnd(8)} ${detail.padEnd(30)} ${why}`);
   }
   await b.close();
   console.log(bad ? `\n${bad} control(s) failed.` : '\nAll positive controls hold.');
@@ -325,7 +402,20 @@ try {
           (overClip ? `  <-- OVERFLOWS by ${m.box.x + m.box.w - m.clipRight}px` : ''),
       );
     }
-    if (selfScroll) console.log(`  content  scrollWidth=${m.scrollW} (${m.scrollW - m.box.w}px hidden inside it)`);
+    // The sub-pixel line supersedes the integer one where it applies: both describe hidden
+    // content, and only one of them can see a 0.4px miss.
+    if (m.clipped) {
+      const px = (v) => v.toFixed(2).replace(/\.00$/, '');
+      const hairline = m.clipped.over < 1;
+      console.log(
+        `  clipped  "${m.clipped.text}" needs ${px(m.clipped.need)}px in a ${px(m.clipped.inner)}px box` +
+          ` (${px(m.clipped.over)}px cut)` +
+          (hairline ? '  <-- DEFECT: a sub-pixel miss still costs whole characters' : ''),
+      );
+      if (hairline) failed = true;
+    } else if (selfScroll) {
+      console.log(`  content  scrollWidth=${m.scrollW} (${m.scrollW - m.box.w}px hidden inside it)`);
+    }
     if (overView) console.log(`  viewport w=${m.viewportW}  <-- OVERFLOWS by ${m.box.x + m.box.w - m.viewportW}px`);
     if (m.measure != null) {
       const verdict = m.measure > 200 ? ' <-- DEFECT' : m.measure > 90 ? ' <-- uncomfortable' : '';

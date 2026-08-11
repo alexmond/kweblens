@@ -171,7 +171,7 @@ watch(
           <div class="drawer-title">
             <!-- Narrow keeps the kind inline before the name; wide shows it as the first of
                  the badges below, which is why both exist rather than one moving. -->
-            <span class="drawer-kind kw-when-narrow">{{ kind }}</span>
+            <span class="drawer-kind kw-when-narrow" :title="kind">{{ kind }}</span>
             <span class="drawer-name" :title="name">{{ name }}</span>
             <button
               type="button"

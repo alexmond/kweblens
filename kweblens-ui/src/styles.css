@@ -1294,17 +1294,56 @@ body {
   border-color: var(--accent);
 }
 
+/* ---- The kind eyebrow yields last, and truncates rather than shreds (#318) ----------------
+   Naive's `.n-drawer` sets `word-break: break-word` on the whole drawer, so it inherits here
+   too — the same rule behind #257 and #278. `break-word` is `overflow-wrap: anywhere`, which
+   counts toward MIN-CONTENT, so this flex item's automatic minimum was ONE GLYPH and the
+   flex algorithm was free to shrink it below its own word. Measured before this rule, in the
+   default 520px drawer: `PersistentVolume` needed 116px and was given 87px, and rendered as
+   `PERSISTENTVO` / `LUME`. Every kind past ~12 characters hit it.
+
+   Shrinkage was distributed by flex weight, so BOTH the name (390px wanted, 290px given —
+   fine, it ellipsizes) and the kind (116px wanted, 87px given — not fine) gave up width. But
+   a kind is a single PascalCase token: it has no break opportunity anywhere in it, so the
+   "wrap at a word boundary" answer that works for prose is a no-op here, and there is nothing
+   between "keep the whole word" and "cut it mid-word".
+
+   So the kind is taken OUT of the shrink entirely (`flex-shrink: 0`) and the name — which
+   already ellipsizes and already carries its full text in a `title` — absorbs the whole
+   squeeze. A weighted version of this was tried first and is the trap worth naming: with
+   `flex-shrink: 1` here against `100` on the name, only **0.4px** of a 132px squeeze reached
+   the kind (115.94px given for a 116.33px word) — and 0.4px of clipping is not 0.4px of loss,
+   because `text-overflow` drops whole GLYPHS to make room for the ellipsis. It rendered
+   `PERSISTENTVOLU…`. Nearly-not-shrinking is not a fix; only not shrinking is.
+
+   `max-width` is then what keeps "never shrinks" from becoming "overflows instead", which
+   would be the same bug wearing a different face. The reserve is the rest of the row at its
+   floor — the expand toggle (~30px), the two 8px gaps and ~50px of name — so a kind is cut
+   only when there is genuinely nothing to cut it out of, and the arithmetic guarantees the
+   row still fits: kind ≤ W-96, plus 46px of toggle and gaps, is at most W-50. That tail is
+   real rather than theoretical: `ValidatingAdmissionPolicyBinding` is a built-in kind and
+   cannot fit beside a name in the 360px minimum drawer at any type size. When it is cut it
+   ellipsizes and the whole kind is on the element's `title`. `min-width: 0` keeps that
+   ellipsis reachable — without it the automatic minimum returns and the cap cannot bite. */
 .drawer-kind {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--muted);
   font-weight: 700;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: calc(100% - 96px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* min-width:0 is the load-bearing line. A flex item defaults to min-width:auto and will
    not shrink below its content, so overflow/ellipsis alone does not stop a long name from
-   widening the row — it only clips what has already claimed the space. */
+   widening the row — it only clips what has already claimed the space. It is also the only
+   shrinkable item in the row now (#318), so everything the header has to give up comes out
+   of here; the kind's `max-width` above is what stops that reaching zero. */
 .drawer-name {
   font-weight: 600;
   min-width: 0;
