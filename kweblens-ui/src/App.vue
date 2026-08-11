@@ -6,7 +6,7 @@ import { api } from './api';
 import { failureNotice } from './apiFailure';
 import type { Command } from './commandPalette';
 import { filesFeature } from './podFiles';
-import { auth } from './auth';
+import { signIn } from './session';
 import { useAppActions } from './composables/useAppActions';
 import { useClusterScope } from './composables/useClusterScope';
 import { useClusters } from './composables/useClusters';
@@ -159,6 +159,9 @@ const retryRead = () => {
 };
 // Closed-mode: the session cookie outlives the in-memory creds. On load, restore an existing
 // session (so write controls appear + data loads after a reload) and re-fetch once authed.
+// This call carries no credentials, so it asks "is there still a session?" and nothing more —
+// which is exactly what it should ask, and is why signing out has to end that session on the
+// server rather than in the tab (#320). A reload after Sign out now restores nothing.
 api
   .verifySession()
   .then((r) => {
@@ -404,22 +407,20 @@ const fetchChildrenFn = computed(() => (selected.value?.expandable ? fetchPods :
 const resourceIdFor = (obj: KubeObject): string =>
   (obj.kind ? resourceIdForKind(obj.kind) : null) ?? selected.value?.id ?? '';
 
+// The verdict is the server's (`session.ts` — it is the only thing that can check a
+// password); this only reacts to it.
 const loginSubmit = async (user: string, pass: string): Promise<boolean> => {
-  auth.set(user, pass);
-  try {
-    await api.verifySession();
-    authUser.value = user;
-    showLogin.value = false;
-    void refreshClusters();
-    loadAbout();
-    return true;
-  } catch {
-    auth.clear();
+  if (!(await signIn(user, pass))) {
     return false;
   }
+  authUser.value = user;
+  showLogin.value = false;
+  void refreshClusters();
+  loadAbout();
+  return true;
 };
 const onCreateAuthExpired = () => {
-  signOut();
+  void signOut();
   showCreate.value = false;
   showLogin.value = true;
 };

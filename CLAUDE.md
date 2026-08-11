@@ -182,6 +182,15 @@ broken. It is not; do not "fix" it.
   SPA's one-shot Basic login must establish a `JSESSIONID` for the exec WebSocket. Pod exec, Helm
   values and the whole pod-file family are authenticated **even in open-mode**, because what they
   return is itself a secret.
+- **That session is a credential, so both ends of it are server-side.** **Sign out is a request**
+  (`DELETE /api/v1/auth/session`, the `LogoutFilter`, awaited before the client clears anything) —
+  clearing the in-memory Basic creds alone left a cookie that still authorised writes and still
+  opened a shell. **Sign in is judged by the credentials it presents**: `BasicAuthenticationFilter`
+  *skips* validating a Basic header whose username matches the context already loaded from the
+  session, so a stale cookie made every password correct (#320). `PresentedCredentialsFilter` drops
+  that context when a sign-in request carries credentials; a request carrying none is untouched,
+  because that is the reloaded tab restoring its session. **Never decide "are these credentials
+  good" from a response a cookie could have produced.**
 - **One shared identity is the accepted design, not a TODO.** No OIDC, no RBAC-awareness, so the
   UI can offer actions that then 403 and audit entries name an action but no person. Per ADR-001
   that is **decided** — do not open work to "fix" it or describe it as a gap, but do keep saying

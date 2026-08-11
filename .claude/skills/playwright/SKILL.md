@@ -146,6 +146,29 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-10 — **GH#320 is fixed, and the workaround that hid it has been removed.** Sign out
+  now awaits `DELETE /api/v1/auth/session`, and a sign-in that presents credentials has them
+  checked rather than riding a cookie, so the `signout` verb no longer calls `clearCookies()`
+  — it clicks the app's own Sign out and nothing else. That is deliberate: clearing the cookie
+  here would let a regression of the fix pass as a green run, whereas now the rejected sign-in
+  scene goes straight back to three `not present` selectors if sign-out stops signing out.
+  Verified in both themes on the fix (`.action-notice-*` at 5.16/5.16/8.24 dark, 5.62/5.62/12.61
+  light — the light pass being exactly the one that used to measure nothing). **When a product
+  bug is fixed, delete the script workaround that stood in for it; a workaround left behind is a
+  regression detector switched off.**
+- 2026-08-10 — **The exec terminal measured as broken twice while working perfectly, for two
+  independent reasons.** (1) The first row of an unfiltered Pods list on this cluster is a
+  distroless `cloudflared`: the WebSocket opened, stayed open, reported no error — and produced
+  **zero frames**, which reads identically to "exec is broken". (2) After filtering the list to
+  a pod that does have a shell, the keystrokes went into the **search box**, because opening the
+  dock does not move focus into the terminal; the prompt arrived (1 frame, `$ `) and the command
+  never did. → Drive the terminal as: filter to a pod known to have a shell, click
+  `.xterm-screen` first, then type, then read `.xterm-rows` (`.dock-bodies` innerText is empty —
+  the text lives deeper). The negative control that makes an empty read trustworthy is running
+  the same walk **signed out**: no terminal opens at all, so "nothing in the terminal" and "no
+  terminal" stop looking alike. **A socket that is open is not a socket that is carrying your
+  data, and a surface that is on screen is not a surface that has focus.**
+
 - 2026-08-10 — **`PREPARE`'s `fill:` could not type the app's own filter syntax.** Both
   dispatchers split `<selector>=<text>` on the **last** `=` — right about selectors
   (`input[type=password]` carries one) and wrong about values. The list header now takes a
@@ -168,7 +191,8 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   `verifySession()`, which rides the surviving cookie — so the wrong password returned 200, no
   notice rendered, and all three selectors printed `not present`: a failed measurement wearing
   the same face as a surface the app does not have. → A `signout` PREPARE verb that clicks Sign
-  out **and clears cookies and reloads**, plus **GH#320** for the product bug it exposed.
+  out **and clears cookies and reloads**, plus **GH#320** for the product bug it exposed. (That
+  bug is fixed and the `clearCookies()` half is gone — see the entry above.)
   Two follow-on traps, both now in the scene's own comment: `signin:` cannot be reused to test
   the failure it exists to avoid, and the reload broke the *next* scene (four more unmeasured
   selectors, reported as a click timeout naming a leaf), so a scene that reloads goes **last**.

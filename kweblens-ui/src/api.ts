@@ -319,7 +319,13 @@ function nsSegment(namespace: string | undefined): string {
 
 export const api = {
   // Validates HTTP Basic creds and establishes the session cookie the exec WebSocket rides.
+  // Sent WITH credentials it verifies them; sent with none it answers from the existing
+  // session, which is how a reloaded tab restores its sign-in.
   verifySession: () => postJson<{ user: string }>('/api/v1/auth/session'),
+  // Sign out for real: invalidates the server session behind that cookie. Clearing the
+  // in-memory credentials alone left it valid, and a still-valid session opens the exec
+  // WebSocket (#320). Handled by Spring Security's LogoutFilter, so it answers 204.
+  endSession: () => deleteReq('/api/v1/auth/session'),
   clusters: () => getJson<ClusterInfo[]>(CLUSTERS),
   // Runtime cluster management (#198). Every one of these is a non-GET, so it requires the
   // admin login in both security modes. The kubeconfig travels one way only: it is sent on
