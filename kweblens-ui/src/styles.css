@@ -1512,9 +1512,45 @@ body {
   padding: 16px 0 22px;
 }
 
+/* ---- The label column yields to the value, and neither shrinks below its own word (#326) --
+   The third instance of one family, after #257 (Naive data-table cells) and #278 (`.mini`):
+   Naive's `.n-drawer` sets `word-break: break-word` on the whole drawer and it INHERITS into
+   this list. `break-word` is the deprecated alias for `overflow-wrap: anywhere`, and
+   `anywhere` counts toward MIN-CONTENT — so every `dt` and `dd` here had a minimum content
+   width of ONE GLYPH and shredded its own token rather than refusing to shrink. Measured in
+   the drawer dragged to its 360px minimum, before these rules: a ValidatingWebhookConfiguration
+   drawer rendered its Kind row as `ValidatingWebhookConfigurati` / `on` — 203.09px of word in
+   a 190px box. The 520px default is clean, which is why it survived.
+
+   `.mini`'s fix does not reach here and could not: that one is an auto table layout with a
+   scroller of its own, this is a two-track grid whose first track was a hard `120px`. So the
+   fix has two halves and BOTH are load-bearing.
+
+   1. The wrap policy, the same as `.mini`'s. `word-break: normal` restores "min-content = the
+      longest word", so neither track can be squeezed under a word it has to show, and
+      `overflow-wrap: break-word` keeps a last-resort break for a token longer than the track
+      can ever be. Applied to `dt` as well as `dd`: the label inherits the same drawer rule, and
+      a label column squeezed to a glyph shreds `Container Runtime` exactly as readily.
+
+   2. The label track gives the width up. It is the only neighbour a `dd` has — #318's answer
+      for the kind eyebrow, in grid form. `minmax(min-content, 120px)` keeps today's 120px
+      wherever there is room and yields down to its own longest label when the value needs it,
+      and the value's `1fr` keeps its `auto` minimum — which, after (1), IS the longest word.
+      Do not "tidy" that to `minmax(0, 1fr)`: the auto minimum is the whole mechanism.
+
+   Measured after, same drawer: the tracks go 120/190 -> 106.91/203.09, the kind renders on one
+   line, and every other kind measured (Pod, Service, ConfigMap) still lays out at exactly
+   120/190 — the label yields only where the value is actually short of room.
+
+   The residual, and it is deliberate: a token wider than the pane minus the longest label word
+   (~254px, about 37 PascalCase characters — no built-in kind reaches it; the widest,
+   ValidatingAdmissionPolicyBinding, is 206.95px) makes the two minimums genuinely not fit, and
+   the grid overflows into `.drawer-body`'s own scroller rather than shredding. Same answer as
+   `.mini-scroll`: a value the reader can scroll to is recoverable, a shredded one reads as a
+   rendering fault. */
 .kv {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: minmax(min-content, 120px) 1fr;
   gap: 6px 12px;
   margin: 0;
 }
@@ -1527,7 +1563,20 @@ body {
 .kv dd {
   margin: 0;
   font-size: 13px;
-  word-break: break-word;
+}
+
+.kv dt,
+.kv dd {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* A mono value is a base64 secret, an IP list or a `kubernetes.io/...` type: one token with no
+   break opportunity in it. Preferring whole words there would let it bid for the whole row and
+   take the width the labels and the kind need, so `.mono`'s own `break-all` stands — restated
+   because `.kv dd` (0,1,1) outranks `.mono` (0,1,0) and would otherwise silently win. */
+.kv dd.mono {
+  word-break: break-all;
 }
 
 /* ---- The Overview's metadata sidebar (#232) ----------------------------------------------
