@@ -1,21 +1,41 @@
-import { shallowRef, ref } from 'vue';
+import type { Ref } from 'vue';
+import { computed, shallowRef } from 'vue';
 
+import { clusterScoped } from './clusterScoped';
 import type { DockSession, LogScope } from '../dock';
 import type { DockKind } from '../types';
 
-/** Terminal/log dock sessions: open, close, and pop out into floating windows. */
-export function useDock() {
-  const sessions = shallowRef<DockSession[]>([]);
-  const active = ref<string | null>(null);
+/**
+ * Terminal/log dock sessions: open, close, and pop out into floating windows.
+ *
+ * <p>Sessions are held per cluster and exposed for the current one only (GH#323). They are not
+ * discarded on a switch — a shell is expensive to re-open and the operator may be stepping into
+ * another cluster and back — but they are not carried over either: the dock used to hand every
+ * session whatever cluster was current, so a switch restarted an open terminal against the new
+ * cluster while its tab still named the pod from the old one.
+ */
+export function useDock(cluster: Ref<string | null>) {
+  const all = shallowRef<DockSession[]>([]);
+  const active = clusterScoped<string | null>(cluster, () => null);
   let seq = 0;
+
+  const mine = (list: DockSession[]) => list.filter((s) => s.cluster === cluster.value);
+  const sessions = computed(() => mine(all.value));
 
   const setActive = (id: string | null) => (active.value = id);
 
+  const add = (session: Omit<DockSession, 'cluster'>) => {
+    const c = cluster.value;
+    if (!c) {
+      return;
+    }
+    all.value = [...all.value, { ...session, cluster: c }];
+    active.value = session.id;
+  };
+
   const openDock = (kind: DockKind, namespace: string, pod: string, containers: string[], attach = false) => {
     seq += 1;
-    const id = `${kind}:${namespace}/${pod}#${seq}`;
-    sessions.value = [...sessions.value, { id, kind, namespace, pod, containers, attach }];
-    active.value = id;
+    add({ id: `${kind}:${namespace}/${pod}#${seq}`, kind, namespace, pod, containers, attach });
   };
 
   /**
@@ -32,21 +52,20 @@ export function useDock() {
   ) => {
     seq += 1;
     const target = logScope === 'workload' && workload ? workload.name : pod;
-    const id = `logs:${namespace}/${target}#${seq}`;
-    sessions.value = [...sessions.value, { id, kind: 'logs', namespace, pod, containers, logScope, workload }];
-    active.value = id;
+    add({ id: `logs:${namespace}/${target}#${seq}`, kind: 'logs', namespace, pod, containers, logScope, workload });
   };
 
   const closeDock = (id: string) => {
-    const next = sessions.value.filter((s) => s.id !== id);
+    const next = all.value.filter((s) => s.id !== id);
     if (active.value === id) {
-      active.value = next[next.length - 1]?.id ?? null;
+      const rest = mine(next);
+      active.value = rest[rest.length - 1]?.id ?? null;
     }
-    sessions.value = next;
+    all.value = next;
   };
 
   const toggleFloat = (id: string, floating: boolean) => {
-    sessions.value = sessions.value.map((s, i) => {
+    all.value = all.value.map((s, i) => {
       if (s.id !== id) {
         return s;
       }
@@ -55,7 +74,7 @@ export function useDock() {
     });
     if (floating) {
       if (active.value === id) {
-        const docked = sessions.value.filter((s) => s.id !== id && !s.floating);
+        const docked = mine(all.value).filter((s) => s.id !== id && !s.floating);
         active.value = docked[docked.length - 1]?.id ?? null;
       }
     } else {

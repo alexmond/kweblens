@@ -12,6 +12,7 @@ once — the reason is in the header comment of each script.
 | [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, unused row width. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
+| [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
 | [`alloc-probe.sh`](alloc-probe.sh) | *Which code* spends that heap, by call site and thread. A class histogram cannot say. |
@@ -121,6 +122,10 @@ PREPARE='press:Control+k;fill:.palette-input=pod' node scripts/contrast-check.mj
 node scripts/contrast-check.mjs --self-test             # positive controls; no running app
 
 node scripts/perf-sweep.mjs                            # needs a cluster or --sim
+
+# Does a cluster switch leave the PREVIOUS cluster's numbers on screen? (#323)
+# TO must be a cluster that cannot answer, or an equal value proves nothing — see the header.
+FROM=default TO=kind-jhelm666 node scripts/cluster-switch-check.mjs
 
 node scripts/ui-shot.mjs                               # 3 widths x 2 themes of the shell
 node scripts/ui-shot.mjs --leaf Pods --view wide

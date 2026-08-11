@@ -22,16 +22,19 @@ const props = defineProps<{ authed: boolean }>();
 const emit = defineEmits<{ (e: 'require-auth'): void; (e: 'auth-expired'): void }>();
 
 const dialog = useDialog();
-const refreshKey = ref(0);
 // Three states, not two: `loading` stops whether the request succeeds or fails, so an error
 // can never be shown over a spinner that never stops.
+//
+// Repositories are configured on the SERVER, not per cluster, so this pane's identity never
+// changes and its `deps` are constant: every re-fetch here — after an add, a remove, a refresh —
+// is a `reload()` of the same question, and keeps the last good rows if it fails (GH#323).
 const {
   data: repos,
   loading,
   error,
   reload,
 } = useAsyncData(
-  () => refreshKey.value,
+  () => null,
   () => api.helmRepos(),
 );
 const name = ref('');
@@ -60,7 +63,7 @@ const add = () => {
     .then(() => {
       name.value = '';
       url.value = '';
-      refreshKey.value += 1;
+      reload();
     })
     .catch(fail)
     .finally(() => (busy.value = false));
@@ -85,7 +88,7 @@ const remove = (repo: string) => {
       busy.value = true;
       api
         .helmRemoveRepo(repo)
-        .then(() => (refreshKey.value += 1))
+        .then(() => reload())
         .catch(fail)
         .finally(() => (busy.value = false));
     });
@@ -113,7 +116,7 @@ const editRepo = (repo: string, currentUrl: string) => {
       api
         .helmRemoveRepo(repo)
         .then(() => api.helmAddRepo(repo, next.trim()))
-        .then(() => (refreshKey.value += 1))
+        .then(() => reload())
         .catch(fail)
         .finally(() => (busy.value = false));
     });
@@ -127,7 +130,7 @@ const refresh = (repo: string) => {
   busy.value = true;
   api
     .helmRefreshRepo(repo)
-    .then(() => (refreshKey.value += 1))
+    .then(() => reload())
     .catch(fail)
     .finally(() => (busy.value = false));
 };

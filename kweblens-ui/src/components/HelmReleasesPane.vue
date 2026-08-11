@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NDataTable, NTag } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
-import { computed, h, ref } from 'vue';
+import { computed, h, watch } from 'vue';
 
 import { api } from '../api';
 import { failureNotice } from '../apiFailure';
@@ -36,16 +36,20 @@ const emit = defineEmits<{
 }>();
 
 const dialog = useDialog();
+// `deps` is the cluster and nothing else — it is the IDENTITY of what is loaded, and a
+// cluster switch must discard these rows rather than show one cluster's releases under
+// another's name (GH#323). The refresh nonce is not identity: the parent bumps it after a
+// mutation lands, which is a reload of the same question, so it drives `reload()` instead.
 const {
   data: releases,
   loading,
   error,
   reload,
 } = useAsyncData(
-  () => [props.cluster, props.refreshKey, localKey.value],
+  () => props.cluster,
   () => api.helmReleases(props.cluster),
 );
-const localKey = ref(0);
+watch(() => props.refreshKey, reload);
 
 const uninstall = (r: HelmRelease) => {
   if (!props.authed) {
@@ -65,7 +69,7 @@ const uninstall = (r: HelmRelease) => {
       }
       api
         .helmUninstall(props.cluster, r.namespace, r.name)
-        .then(() => (localKey.value += 1))
+        .then(() => reload())
         .catch((e) => (error.value = failureNotice(e)));
     });
 };

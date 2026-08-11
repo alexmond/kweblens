@@ -46,6 +46,7 @@ beforeEach(() => {
 
 const SESSION: DockSession = {
   id: 'logs:ns/web#1',
+  cluster: 'c1',
   kind: 'logs',
   namespace: 'ns',
   pod: 'web-0',

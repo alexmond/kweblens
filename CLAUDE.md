@@ -56,6 +56,14 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
 - **Colour and size are measured, not eyeballed.** Run `contrast-check.mjs` against any
   `styles.css` change. A selector that is not on screen reports `not present` / `absent` — that
   is a **failed measurement, not a pass**; bring it on screen with `PREPARE` and measure again.
+- **Per-cluster state is emptied by how it is DECLARED, not by a list of resets.** `clusterScoped`
+  (`kweblens-ui/src/composables/clusterScoped.ts`) is the shell's mechanism; `useAsyncData`'s
+  `deps` are the **identity** of what is loaded, so changing them discards the value while
+  `reload()` keeps it. **Never put a refresh nonce in `deps`** — that is a `reload()`. A number
+  about the cluster you just left is worse than no number, because it is plausible (#323).
+- **Several agents share this box, and `dev-run.sh` takes a port from whoever had it.** Two
+  measurements of "the app" can be two different builds. `cluster-switch-check.mjs` proves the
+  port's owner is this checkout before reading anything; do the same in any new script.
 - **Capture the matrix, not one image.** Defaults are three widths × both themes because ad-hoc
   single captures are how a 338-char prose line and black-on-black cards survived for weeks.
   Output lands in `.playwright/`, **gitignored and it must stay that way** — the images carry the
