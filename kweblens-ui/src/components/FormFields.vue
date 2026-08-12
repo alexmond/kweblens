@@ -40,7 +40,18 @@ const encodeB64 = (s: string): string => btoa(String.fromCharCode(...new TextEnc
 const mapValues = (m: Record<string, string>, f: (v: string) => string): Record<string, string> =>
   Object.fromEntries(Object.entries(m).map(([k, v]) => [k, f(v)]));
 
-const setIfChanged = (r: { value: Record<string, string> }, next: Record<string, string>) => {
+/**
+ * Assign only when the value has actually changed, compared STRUCTURALLY.
+ *
+ * A ref assignment always triggers, because Vue compares with `Object.is` and a freshly built
+ * object or array is never identical to the last one. So re-parsing the same document would
+ * invalidate everything downstream for no reason — and where that "downstream" feeds back into
+ * the parse, for no reason becomes forever (GH#334).
+ *
+ * Generic on purpose: the container list needs this exactly as much as the string maps do, and
+ * two copies of the same four lines is how one of them ends up not getting the fix.
+ */
+const setIfChanged = <T,>(r: { value: T }, next: T) => {
   if (JSON.stringify(r.value) !== JSON.stringify(next)) {
     r.value = next;
   }
@@ -68,8 +79,13 @@ const parse = (text: string) => {
       const raw = d ? (d as { toJSON(): Record<string, string> }).toJSON() : {};
       setIfChanged(data, isSecret.value ? mapValues(raw, decodeB64) : raw);
     }
+    // Guarded like every other ref above, and for the same reason: an unguarded assignment
+    // hands `fields` a new array on every parse even when nothing changed, so anything
+    // downstream of `fields` re-runs for no reason. That is what made the watcher below able
+    // to feed itself; the guard alone would not have fixed it, but leaving it unguarded is
+    // what let one mistake become a hang.
     const cs = doc.getIn(['spec', 'template', 'spec', 'containers']);
-    containers.value = cs ? ((cs as { toJSON(): { name?: string }[] }).toJSON() ?? []) : [];
+    setIfChanged(containers, cs ? ((cs as { toJSON(): { name?: string }[] }).toJSON() ?? []) : []);
     const next: Record<string, unknown> = {};
     for (const field of fields.value) {
       const raw = doc.getIn(pathKeys(field.path));
@@ -95,8 +111,22 @@ const immutable = computed(() => fields.value.filter((f) => f.readOnly));
 const sectionTitle = computed(() => (isCurated(kind.value) ? kind.value : `${kind.value} (from the cluster's schema)`));
 
 watch(model, parse, { immediate: true });
-// Fields depend on the schema, which arrives asynchronously — re-read once it does.
-watch(fields, () => parse(model.value));
+/**
+ * Re-read once the schema arrives — it is fetched asynchronously, so the first parse runs
+ * before the generated fields are known.
+ *
+ * **Watch the schema, not `fields`.** `fields` is computed over `containers`, and `parse`
+ * ASSIGNS `containers` — so watching `fields` made the parse its own trigger: parse wrote
+ * containers, fields recomputed to a new array, the watcher fired, parse ran again. Measured
+ * at **401 parses for a single keystroke** (a counter capped at 400), against 1 at rest; the
+ * renderer stopped yielding and the tab died with the edit unsaved and nothing reported
+ * (GH#334). The schema is the actual dependency this was reaching for, and it cannot be
+ * written by the thing it triggers.
+ */
+watch(
+  () => props.schema,
+  () => parse(model.value),
+);
 
 /**
  * Write one field back into the YAML.
