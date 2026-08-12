@@ -59,8 +59,25 @@ export interface ResourceRow {
   age: string;
 }
 
+/**
+ * The state the SERVER put this object in — the same vocabulary an overview card counts.
+ *
+ * Synthetic: no Kubernetes object carries it. `web/api/ListProjection` attaches it to every list
+ * row and every watch event, from the identical call the card's `StateCount` is tallied from, so
+ * `status:Pending` selects exactly the objects behind `3 Pending` rather than a similar-looking
+ * set (GH#336/#337). Absent — not `null` — on kinds kweblens has no verdict for; "not examined"
+ * is not a state and must not be selectable as one.
+ */
+export interface ObjectState {
+  /** e.g. `Running`, `Unavailable`, `CrashLoopBackOff`. Matched exactly by `status:`. */
+  label: string;
+  tone: 'ok' | 'warn' | 'err' | 'idle';
+}
+
 // A raw Kubernetes object (as returned by the cluster), used to render kind-specific columns.
 export interface KubeObject {
+  /** Server-computed state; see {@link ObjectState}. Only on rows from a list payload. */
+  kweblensState?: ObjectState;
   apiVersion?: string;
   kind?: string;
   metadata?: {

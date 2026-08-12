@@ -144,12 +144,125 @@ describe('field terms narrow to one field', () => {
   });
 
   it('names an unknown field instead of searching for a colon no name can contain', () => {
-    expect(parseFilter('status:Running').error).toMatch(/Unknown field “status:”/);
-    expect(parseFilter('status:Running').error).toContain('name:, ns:, kind: and label:');
+    expect(parseFilter('phase:Running').error).toMatch(/Unknown field “phase:”/);
+    expect(parseFilter('phase:Running').error).toContain('name:, ns:, kind:, status: and label:');
   });
 
   it('rejects a field prefix with nothing after it', () => {
     expect(parseFilter('ns:').error).toMatch(/Empty search text/);
+  });
+});
+
+// ---- status: --------------------------------------------------------------------------------
+// The term GH#337 exists for. Its ONE requirement is that a state an overview card counted is
+// selectable and selects exactly those objects, so most of what follows is about the ways a
+// looser match would quietly break that equality rather than fail loudly.
+
+/** A row as the server ships it: `kweblensState` is computed by StatusVocabulary, never typed. */
+const stated = (name: string, label: string, tone: 'ok' | 'warn' | 'err' | 'idle'): KubeObject => ({
+  kind: 'Pod',
+  metadata: { name, namespace: 'prod', labels: {} },
+  kweblensState: { label, tone },
+});
+
+/** One of each tone, plus the pair whose labels share a stem — the substring trap. */
+const STATED: KubeObject[] = [
+  stated('web-1', 'Running', 'ok'),
+  stated('web-2', 'Running', 'ok'),
+  stated('job-done', 'Completed', 'idle'),
+  stated('job-run', 'Complete', 'ok'),
+  stated('sched-1', 'Pending', 'warn'),
+  stated('crash-1', 'CrashLoopBackOff', 'err'),
+  stated('pull-1', 'ImagePullBackOff', 'err'),
+  stated('svc-1', 'No endpoints', 'err'),
+  pod('unjudged', 'prod'),
+];
+
+describe('status: selects on the state the server computed', () => {
+  it('matches the state label, case-insensitively', () => {
+    expect(kept('status:Running', STATED)).toEqual(['web-1', 'web-2']);
+    expect(kept('status:running', STATED)).toEqual(['web-1', 'web-2']);
+    expect(kept('status:PENDING', STATED)).toEqual(['sched-1']);
+  });
+
+  it('matches the WHOLE label, so one state cannot drag another in with it', () => {
+    // The failure this term is built to prevent. As a substring match, "Complete" would take
+    // "Completed" too — a card saying 1 Complete opening a list of 2, which is GH#336's whole
+    // premise. The stem pair is in the fleet precisely so a regression here fails.
+    expect(kept('status:Complete', STATED)).toEqual(['job-run']);
+    expect(kept('status:Completed', STATED)).toEqual(['job-done']);
+    expect(kept('status:Backoff', STATED)).toEqual([]);
+    expect(kept('status:Run', STATED)).toEqual([]);
+  });
+
+  it('takes a quoted value, because a state can have a space in it', () => {
+    expect(kept('status:"No endpoints"', STATED)).toEqual(['svc-1']);
+  });
+
+  it('takes a regex for the genuinely fuzzy question', () => {
+    expect(kept('status:/backoff/', STATED)).toEqual(['crash-1', 'pull-1']);
+    expect(kept('status:/^Complete$/', STATED)).toEqual(['job-run']);
+  });
+
+  it('negates like every other term', () => {
+    expect(kept('-status:Running', STATED)).toEqual([
+      'job-done',
+      'job-run',
+      'sched-1',
+      'crash-1',
+      'pull-1',
+      'svc-1',
+      'unjudged',
+    ]);
+  });
+
+  it('ANDs with the rest of the grammar', () => {
+    expect(kept('status:Running name:web-1', STATED)).toEqual(['web-1']);
+    expect(kept('status:Running ns:staging', STATED)).toEqual([]);
+  });
+
+  it('never selects a row the server reached no verdict about', () => {
+    // "unjudged" carries no kweblensState — an uncovered kind. No pattern may claim it, not
+    // even one that matches everything, because absence of a verdict is not a state.
+    expect(kept('status:Running', STATED)).not.toContain('unjudged');
+    expect(kept('status:/.*/', STATED)).not.toContain('unjudged');
+    expect(kept('status:/^$/', STATED)).not.toContain('unjudged');
+    // ...and the negation keeps it, which is the same fact stated the other way.
+    expect(kept('-status:Running', STATED)).toContain('unjudged');
+  });
+
+  it('ignores a state the server sent empty rather than counting it as one', () => {
+    const blank: KubeObject[] = [
+      { kind: 'Pod', metadata: { name: 'blank' }, kweblensState: { label: '', tone: 'ok' } },
+    ];
+    expect(kept('status:/.*/', blank)).toEqual([]);
+  });
+
+  it.each([
+    ['status:', /Missing state after “status:”/],
+    ['status:""', /Missing state after “status:”/],
+    ['status://', /Empty regex/],
+    ['status:/bad(/', /Invalid regex/],
+  ])('%s is refused with an explanation and leaves every row on screen', (query, expected) => {
+    const filter = parseFilter(query);
+    expect(filter.error).toMatch(expected);
+    expect(filter.terms).toHaveLength(0);
+    expect(kept(query, STATED)).toHaveLength(STATED.length);
+  });
+
+  it('partitions a fleet exactly: every state selects its own objects and no others', () => {
+    // The ticket's equality, expressed without a server: for each distinct label the rows
+    // carry — which is exactly the set of labels a card tallies — the query selects the rows
+    // with that label and nothing else, and the selections add up to the judged population.
+    const judged = STATED.filter((o) => o.kweblensState !== undefined);
+    const labels = [...new Set(judged.map((o) => o.kweblensState?.label ?? ''))];
+    let selected = 0;
+    for (const label of labels) {
+      const expected = judged.filter((o) => o.kweblensState?.label === label).map((o) => o.metadata?.name ?? '');
+      expect(kept(`status:"${label}"`, STATED)).toEqual(expected);
+      selected += expected.length;
+    }
+    expect(selected).toBe(judged.length);
   });
 });
 

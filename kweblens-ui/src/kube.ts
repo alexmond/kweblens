@@ -1,4 +1,4 @@
-import type { KubeObject } from './types';
+import type { KubeObject, ObjectState } from './types';
 
 // Small defensive accessors + pure helpers for the loosely-typed cluster objects the API
 // returns. Shared across the SPA (table columns, dashboard, feature views) so the same
@@ -16,6 +16,23 @@ export const toNum = (v: unknown): number => (typeof v === 'number' ? v : 0);
 export const objName = (o: KubeObject): string => o.metadata?.name ?? '';
 export const objNs = (o: KubeObject): string | undefined => o.metadata?.namespace;
 export const objKey = (o: KubeObject): string => (objNs(o) ?? '') + '/' + objName(o);
+
+/**
+ * The state the server computed for this row, or null when it computed none.
+ *
+ * <p>Read through here rather than off `o.kweblensState` at the call site, so the one thing that
+ * must not be guessed — "did the server actually say something about this object" — is answered
+ * in one place. A row that predates the field, or a kind kweblens has no verdict for, is null:
+ * NOT an empty label and not a cheerful "ok", because a state nobody computed must not be
+ * countable or selectable as one.
+ */
+const objState = (o: KubeObject): ObjectState | null => {
+  const s = o.kweblensState;
+  return s && typeof s.label === 'string' && s.label !== '' ? s : null;
+};
+
+/** The server's state label for a row, or '' — the value a `status:` term compares against. */
+export const objStateLabel = (o: KubeObject): string => objState(o)?.label ?? '';
 
 /**
  * Two-letter avatar for a single id, split on word boundaries.

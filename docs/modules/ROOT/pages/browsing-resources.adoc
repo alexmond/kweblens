@@ -104,6 +104,8 @@ conjunction `kubectl -l a=b,c=d` uses. A leading `-` negates any term.
 | `/^web-\d+$/`         | a regex over name, namespace and kind, case-insensitive
 | `ns:kube-system`      | one field only — also `name:` and `kind:`
 | `name:/^web/`         | a field matched by regex
+| `status:Pending`      | the state an overview card counts — the whole word, not part of it
+| `status:/backoff/`    | states matched loosely — every kind of backoff
 | `app=web`, `app==web` | label equality
 | `app!=db`             | the label differs **or the object has no `app` label**
 | `env in (dev,stage)`  | set membership — also `notin`
@@ -121,8 +123,34 @@ Three deliberate differences from `kubectl -l`, stated in the help popover as we
   `label:partition` and `-label:partition`, because a bare word is a text search and has to stay one.
 * The numeric requirements `key>1` / `key<1` are not supported, and a term shaped like one is an
   error rather than a silent substring search.
-* Field selectors (`--field-selector status.phase=Running`) are not implemented. `name:`, `ns:` and
-  `kind:` are the fields the browser holds for every kind.
+* Arbitrary field selectors (`--field-selector status.phase=Running`) are not implemented — no JSON
+  path is addressable. `status:` is the one field selector there is, and it selects on kweblens'
+  own state vocabulary rather than on `status.phase`.
+
+[#status-term]
+=== `status:` — one vocabulary for the cards and the lists
+
+`status:` matches the state the **server** computed for the object, which is the same value the
+xref:health-and-diagnostics.adoc[category overview] cards count. A card reading `80 Running · 3 Pending · 2 Failed` and
+the rows `status:Pending` selects are therefore the same objects, not two similar answers.
+
+That is the reason the state is computed on the server and shipped on the row rather than derived
+in the browser. For several kinds the browser could not derive it at all: a Service is broken when
+nothing is behind it, which lives in the *Endpoints* object; a claim is "Nearly full" only
+according to the metrics backend; a ConfigMap is "Not referenced" only after scanning the
+namespace's pods, service accounts and ingresses. And a rule transcribed into two languages drifts
+without either side going quiet — both keep answering, just differently.
+
+Two consequences worth stating:
+
+* **The match is on the whole label, case-insensitively.** Every other term is a substring search,
+  because half a pod name is a useful question. Half a state is not: as a substring, `Complete`
+  would take `Completed` with it, and the card's number and the list's rows would stop agreeing
+  without anything on screen saying so. Use a regex — `status:/backoff/` — when the loose question
+  is the one you meant, and quote a state that contains a space: `status:"No endpoints"`.
+* **A kind kweblens has no verdict for carries no state, and no `status:` term selects it.** That
+  is the absence of a claim rather than a claim of health. Today the states are computed for the
+  workload kinds — Pods, Deployments, StatefulSets, ReplicaSets, DaemonSets, Jobs and CronJobs.
 
 **A query that does not parse is not applied**, and the header says why — an invalid regex, an
 unterminated quote, a missing label key. Every row stays on screen and the count goes back to the
@@ -190,6 +218,16 @@ Inventing an empty string here would be a lie about the cluster.
 
 Both the `objects` endpoint and the `objects/watch` stream go through the same projection —
 separate code paths, one rule.
+
+=== One thing a row has that the cluster does not
+
+The same projection *adds* a field: `kweblensState`, `{"label": …, "tone": …}` — the object's
+state in the vocabulary described under xref:#status-term[`status:`], computed by the same call
+the overview cards tally their numbers from. It is what lets a filter in the browser select
+exactly the objects a card counted. Kinds with no verdict get no field at all, and it is added in
+the projection rather than in either controller for the same reason the strips are: the list and
+the watch are separate code paths feeding one table, and a field added to only one of them would
+be erased by the first watch event to arrive.
 
 === The drawer still shows every value
 
