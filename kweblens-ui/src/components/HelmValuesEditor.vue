@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 
 import { api } from '../api';
 import { failureNotice } from '../apiFailure';
+import { initialRows } from '../textareaRows';
 import type { HelmAction } from './helm-types';
 
 // The values-YAML editor: load a saved set from the library / a release's current values,
@@ -16,6 +17,11 @@ const savedValues = defineModel<string[]>('savedValues', { required: true });
 const pickValues = ref('');
 const saveName = ref('');
 const valuesMsg = ref<string | null>(null);
+
+// `rows`, not `autosize`: naive drops its resizable class whenever autosize is set, so the box
+// had no corner grip at all. A chart's values file is the field most likely to need pulling —
+// "Load current values" can drop hundreds of lines into it — and it opened five rows tall.
+const valueRows = computed(() => initialRows(valuesYaml.value, 5, 24));
 
 const pickOptions = computed<SelectOption[]>(() => [
   { label: '— saved values —', value: '' },
@@ -71,13 +77,7 @@ const save = () => {
         <NButton size="small" :disabled="!saveName.trim()" @click="save">Save</NButton>
       </div>
       <div v-if="valuesMsg" class="values-msg">{{ valuesMsg }}</div>
-      <NInput
-        v-model:value="valuesYaml"
-        type="textarea"
-        class="values"
-        :autosize="{ minRows: 5 }"
-        placeholder="key: value"
-      />
+      <NInput v-model:value="valuesYaml" type="textarea" class="values" :rows="valueRows" placeholder="key: value" />
     </div>
   </NFormItem>
 </template>

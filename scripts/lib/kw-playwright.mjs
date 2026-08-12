@@ -209,7 +209,14 @@ export async function runPrepare(page, spec) {
     // its own values mid-word (#278) — could not be measured at all.
     else if (verb === 'drawer') await resizeDrawer(page, Number(arg));
     else if (verb === 'goto') {
-      await page.goto(new URL(arg, BASE_URL).href, { waitUntil: 'networkidle' });
+      // Resolved against the page's CURRENT origin, not BASE_URL. Several agents share this box
+      // and each runs its own instance on its own port, so the two can differ: `open({ url })`
+      // takes an explicit URL while BASE_URL is fixed at import time from `PORT`. A run that
+      // opened :8093 and signed in there then had `goto:/clusters` silently jump to ANOTHER
+      // agent's server on :8080, where it was NOT signed in — so the write-gated button it came
+      // to measure was never rendered and the scene reported a click timeout naming the button.
+      // A cross-origin hop in the middle of a scene is never what a scene means.
+      await page.goto(new URL(arg, page.url()).href, { waitUntil: 'networkidle' });
       await page.waitForTimeout(600);
     } else if (verb === 'fill') {
       const { selector, value } = splitFill(arg);

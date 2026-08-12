@@ -4,10 +4,11 @@
 // the login (a 401, or a bodyless 403). A CODED 403 is the cluster's own RBAC verdict and
 // stays in the modal with its reason, because signing in again would not change it.
 import { NButton, NInput, NModal } from 'naive-ui';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { api } from '../api';
 import { failureNotice, isSessionExpiry } from '../apiFailure';
+import { initialRows } from '../textareaRows';
 
 const props = defineProps<{ cluster: string }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'auth-expired'): void }>();
@@ -18,6 +19,13 @@ const draft = ref(
 const busy = ref(false);
 const msg = ref<string | null>(null);
 const err = ref(false);
+
+// `rows`, not `autosize`. naive-ui applies its resizable class only when `resizable && !autosize`
+// (`n-input--resizable`, Input.mjs), so an autosized textarea has no corner grip anywhere — not
+// a grip that snaps back, no grip at all. Measured: NO GRABBER here and OK on ClusterEditModal's
+// `:rows="8"` box in the same run (`scripts/resize-check.mjs`). `rows` keeps what autosize
+// bought — a box that opens at the right size for its content — and adds the pull.
+const rows = computed(() => initialRows(draft.value, 12, 24));
 
 const apply = async () => {
   busy.value = true;
@@ -60,7 +68,7 @@ const onShow = (v: boolean) => {
     <NInput
       v-model:value="draft"
       type="textarea"
-      :autosize="{ minRows: 12, maxRows: 24 }"
+      :rows="rows"
       :input-props="{ spellcheck: 'false' }"
       class="yaml-mono"
     />

@@ -47,6 +47,7 @@ and the reason is in its own header comment — read that before changing one.
 | `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
+| `resize-check.mjs` | You changed a multiline field. Proves the corner grabber exists AND that a pulled height survives typing. `--self-test` checks the instrument. |
 | `cluster-switch-check.mjs` | You touched per-cluster state. Switches cluster and fails if a value from the previous one is still on screen. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
 | `dev-verify.sh` | Before every commit. Format + full reactor. Green here means green on the PR. |
@@ -60,7 +61,7 @@ and the reason is in its own header comment — read that before changing one.
 # See it — the whole matrix, then read every image
 node scripts/ui-shot.mjs                                  # shell: 3 widths x 2 themes
 node scripts/ui-shot.mjs --leaf Pods --view wide          # one nav leaf
-node scripts/ui-shot.mjs --path /clusters --full          # full page, not just viewport
+node scripts/ui-shot.mjs --full                           # full page, not just viewport
 PREPARE='click:.n-data-table-tbody tr' node scripts/ui-shot.mjs --leaf Pods   # open the drawer first
 
 # Measure it — settles "is it cut off / too wide / too long a line"
@@ -146,6 +147,41 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-11 — **Three separate ways to be wrong about one question: "can the reader pull this
+  field taller?"** (a) **The property is not on the element you would read it from.** naive-ui
+  pins every textarea it renders to `resize: none; height: 100%` and puts `resize: vertical` on
+  the WRAPPER (`.n-input--resizable .n-input-wrapper`), so `getComputedStyle(textarea).resize`
+  answers `none` for a box that resizes perfectly *and* for one that cannot — the first probe
+  written here read exactly that and would have "proved" ClusterEditModal's working kubeconfig
+  box broken. (b) **`style.height = …` is not a test of a grabber**: it moved an autosize
+  textarea from 243px to 600px with no grip anywhere on screen, so the only honest drag is a
+  real `page.mouse` drag on the corner. (c) **The suspected failure was the wrong failure.** The
+  hypothesis was "autosize draws a grip and then snaps back"; measured, autosize means there is
+  **no grip at all** (naive applies its resizable class only when `resizable && !autosize`), and
+  the non-autosize path is durable — `:rows="8"` measured 192px → 312px → still 312px after
+  typing a new line. → `scripts/resize-check.mjs`, which drags for real and then TYPES A NEW
+  LINE before re-measuring, with four `--self-test` controls, two of which must fire (a
+  `resize:none` box, and a box whose height is re-driven on `input` — the snap-back that was
+  suspected here and turns out to live elsewhere). Its first run caught its own bug: the raw
+  `<textarea>` control timed out waiting for a `textarea` *inside* a textarea. **Build the
+  control before believing the hypothesis, and check what the framework does before believing
+  the property.**
+- 2026-08-11 — **`goto:` sent a signed-in run to ANOTHER agent's server, and the error named a
+  button.** `runPrepare`'s `goto:` resolved against the module-level `BASE_URL` (fixed at import
+  from `PORT`), while the run had been opened with an explicit `open({ url })` on :8093. A scene
+  that navigated mid-way silently landed on :8080 — a different agent's instance, where it was
+  not signed in — so the write-gated "Add cluster" button was never rendered and the scene
+  reported a 30s click timeout. → `goto:` now resolves against `page.url()`, so a scene cannot
+  change origin. **A mid-scene cross-origin hop is never what a scene means, and on this box the
+  other origin is somebody else's build.**
+- 2026-08-11 — **A recipe in this very file screenshotted a Boot Whitelabel 404 for weeks.**
+  `--path /clusters` was documented here, but `SpaController` maps only `/`, `/ui` and `/ui/` —
+  the SPA has **no deep links at all**, and the clusters page is reached by clicking the rail's
+  `[aria-label="All clusters"]` tile. `--path` does not fail on a 404; it captures it, and a
+  white page full of black serif text does not look like a kweblens screenshot only if someone
+  opens the image. → The recipe is fixed and the tile is spelled out in `resize-check.mjs`'s
+  scene. **A `--path` flag on an app with no routes is a footgun; reach surfaces by clicking.**
 
 - 2026-08-10 — **`ui-measure`'s `words` check could not see a word inside a child element, and
   the surface it was pointed at keeps half its text there.** Fixing #326 (the drawer Overview's

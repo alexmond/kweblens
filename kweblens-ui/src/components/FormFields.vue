@@ -10,6 +10,7 @@ import { parseDocument } from 'yaml';
 
 import type { FormField } from '../schemaForm';
 import { formFieldsFor, isCurated } from '../schemaForm';
+import { initialRows } from '../textareaRows';
 import KeyValueEditor from './KeyValueEditor.vue';
 
 const model = defineModel<string>({ required: true });
@@ -220,9 +221,16 @@ const onData = (v: Record<string, string>) => {
               clearable
               @update:value="(v) => setField(f, v)"
             />
+            <!-- A schema string field is a textarea, not an input. These come from the
+                 cluster's own OpenAPI, so a CRD is free to declare a string that holds a
+                 script, a PEM block or an embedded config file, and there is no list of which
+                 ones do — a single-line box is a guess that only ever fails one way. At one
+                 row it looks and behaves like the input it replaces. -->
             <NInput
               v-else
               :value="(values[f.path] as string) ?? ''"
+              type="textarea"
+              :rows="initialRows((values[f.path] as string) ?? '', 1, 12)"
               size="small"
               @update:value="(v) => setField(f, v)"
             />
@@ -234,7 +242,18 @@ const onData = (v: Record<string, string>) => {
               {{ f.label }}
               <span class="form-hint">{{ f.readOnlyReason }}</span>
             </span>
-            <NInput :value="String(values[f.path] ?? '')" size="small" readonly disabled />
+            <!-- Readonly, and still a resizable textarea: an immutable value the reader cannot
+                 change is one they can only READ, and a disabled single-line input is the worst
+                 possible way to read a long one — no wrap, no selection, and the caret keys a
+                 disabled control ignores. Nothing here is editable, so this costs nothing. -->
+            <NInput
+              :value="String(values[f.path] ?? '')"
+              type="textarea"
+              :rows="initialRows(String(values[f.path] ?? ''), 1, 12)"
+              size="small"
+              readonly
+              disabled
+            />
           </label>
         </div>
       </section>
