@@ -13,6 +13,7 @@ once — the reason is in the header comment of each script.
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
+| [`resize-check.mjs`](resize-check.mjs) | Drag a multiline field's corner, then type: fail unless it has a grabber AND the pulled height survives. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
 | [`alloc-probe.sh`](alloc-probe.sh) | *Which code* spends that heap, by call site and thread. A class histogram cannot say. |
@@ -126,6 +127,12 @@ node scripts/perf-sweep.mjs                            # needs a cluster or --si
 # Does a cluster switch leave the PREVIOUS cluster's numbers on screen? (#323)
 # TO must be a cluster that cannot answer, or an equal value proves nothing — see the header.
 FROM=default TO=kind-jhelm666 node scripts/cluster-switch-check.mjs
+
+# Can the reader pull a multiline field taller, and does the pull SURVIVE typing? Reading the
+# stylesheet cannot answer either: naive puts `resize` on the input WRAPPER, never the textarea.
+node scripts/resize-check.mjs --self-test              # positive controls; no running app
+PORT=8093 node scripts/resize-check.mjs
+PORT=8093 node scripts/resize-check.mjs --scene form-tab
 
 node scripts/ui-shot.mjs                               # 3 widths x 2 themes of the shell
 node scripts/ui-shot.mjs --leaf Pods --view wide

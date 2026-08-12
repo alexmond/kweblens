@@ -2085,11 +2085,20 @@ body {
   gap: 6px;
   align-items: flex-start;
 }
+/* The value is a resizable textarea, so a row can be many lines tall. `align-items: center`
+   floated the key and the row buttons to the middle of a pulled-open value, which reads as
+   though they belong to no row in particular; `start` keeps every cell on the row's first line,
+   where the key it labels is. */
 .kv-row {
   display: grid;
   grid-template-columns: minmax(110px, 1fr) minmax(140px, 1.5fr) auto;
   gap: 6px;
   width: 100%;
+  align-items: start;
+}
+.kv-actions {
+  display: flex;
+  gap: 2px;
   align-items: center;
 }
 .form-actions {

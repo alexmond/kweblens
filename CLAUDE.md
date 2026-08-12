@@ -40,6 +40,7 @@ export NODE_PATH=$HOME/.local/lib/playwright/node_modules   # UI checks drive a 
 node scripts/ui-shot.mjs              # screenshots: viewport × theme MATRIX
 node scripts/ui-measure.mjs '.sel'    # box / overflow / chars-per-line; exits 1 over budget
 node scripts/contrast-check.mjs       # WCAG contrast, BOTH themes; exits 1 on failure
+node scripts/resize-check.mjs         # multiline fields: is there a grabber, does the pull HOLD
 node scripts/perf-sweep.mjs           # on-demand hang/long-load sweep
 ```
 
@@ -53,6 +54,15 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
 - **Start the app with `scripts/dev-run.sh`, never `java -jar`.** Without an admin password
   `SecurityConfig` generates one per run and only logs it, so `admin`/`admin` silently stops
   working. **Never move those credentials into `application.yml`.**
+- **A free-text field that can hold multiline content is a resizable `<textarea>`, never an
+  input** — a ConfigMap `data` value holds a PEM block, an annotation holds a whole JSON
+  manifest. Start it at `initialRows(value, min, max)` (real lines, never a guess at wrapped
+  ones) and let the reader pull. **Never `autosize`**: naive-ui applies its resizable class only
+  when `resizable && !autosize`, so an autosized box has no corner grip at all — and reading
+  `resize` off the `<textarea>` cannot tell you, because naive pins every textarea to
+  `resize: none` and puts the grip on the WRAPPER. Prove both halves with `resize-check.mjs`.
+  **Secret values stay masked and single-line until the reader reveals them**; masked and
+  multiline are mutually exclusive and `-webkit-text-security` fails open.
 - **Colour and size are measured, not eyeballed.** Run `contrast-check.mjs` against any
   `styles.css` change. A selector that is not on screen reports `not present` / `absent` — that
   is a **failed measurement, not a pass**; bring it on screen with `PREPARE` and measure again.
