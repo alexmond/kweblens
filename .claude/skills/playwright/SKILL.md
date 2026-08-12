@@ -44,7 +44,7 @@ and the reason is in its own header comment — read that before changing one.
 |---|---|
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
-| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
+| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, a pill squeezed below its own label, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `resize-check.mjs` | You changed a multiline field. Proves the corner grabber exists AND that a pulled height survives typing. `--self-test` checks the instrument. |
@@ -147,6 +147,40 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-12 — **Every check here can pass an element that is visibly broken, because none of
+  them asked whether it WANTED to be one line.** #331: the list header's items badge measured
+  47×42px at `narrow` — "3" over "items", a rounded pill two lines high — and `box`, `overflow`,
+  `words`, `clipped`, `twins` and `row` were all silent and all correct. Nothing overflowed (the
+  row fits, at min-content), no word was too wide for its box ("items" fits in 47px), nothing was
+  clipped (it wrapped instead of truncating). A flex item's automatic minimum is its
+  **min-content**, and min-content for a short label is its longest WORD, so the algorithm may
+  legally shrink a badge to the width of "items" and turn the space into a line break. The four
+  earlier members of this family (#257, #278, #318, #326) all mangled TEXT and so were within
+  reach of `words`/`clipped`; this one mangles a SHAPE, and nothing was watching shapes.
+  → A `chip` line: a pill (self-painted background, rounded ends, ≤40 characters) that is
+  painting more than one line **and** is narrower than its own max-content **and** whose parent
+  had room for that max-content. All three conditions are load-bearing; the third is what keeps
+  it honest, because a pill in a parent that genuinely cannot hold the label is doing the
+  least-bad thing. Scoped to pills so the same header's `h1`, which wraps to three lines beside
+  the badge and is fine, stays quiet. Four new `--self-test` controls, one of which must fire —
+  and then it was run against a rebuild of the PRE-fix stylesheet, where it names both chips
+  (`47.17px for 57.16px`, `67.75px for 102.06px`) before naming neither afterwards. **A check
+  written after the fix proves only that it is quiet; rebuild the defect and watch it fire.**
+- 2026-08-12 — **The issue's stated reproduction was not the cause, and it took one measurement
+  to know.** #331 reported the badge wrapping "when the content column is squeezed — an open
+  detail drawer at 1024px is enough". Measured with and without the drawer, `.content` is 729px
+  wide either way: Naive's `NDrawer` is an OVERLAY, so it covers the content column and never
+  narrows it. The reproduction is the 1024px viewport on its own. **Reproduce the numbers before
+  adopting the report's explanation of them — a scene that reproduces a defect is not thereby the
+  cause of it.**
+- 2026-08-12 — **`words` reports text that overflows its CONTENT box, which a padded pill absorbs
+  invisibly.** Sweeping after #331, `.nav-badge` failed the run — `"60" needs 11px in a 6px box`
+  — across 140 matches. Measured properly: the badge is 18px wide with `padding: 0 6px`, so the
+  digits spill 2.7px each side into 6px of padding and **no badge on the page exceeds its own
+  pill** (worst case 6.55px inside it). Real per the check's own definition, invisible to a
+  reader. Filed rather than fixed in passing: `words` is what four fixes rest on, and changing
+  its comparison box needs its own controls.
 
 - 2026-08-11 — **Three separate ways to be wrong about one question: "can the reader pull this
   field taller?"** (a) **The property is not on the element you would read it from.** naive-ui

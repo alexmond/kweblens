@@ -9,7 +9,7 @@ once — the reason is in the header comment of each script.
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
 | [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
-| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, two labels truncating alike, unused row width. |
+| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, two labels truncating alike, a pill squeezed below its own label, unused row width. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
@@ -267,6 +267,25 @@ character's own rect is compared with the element's content box and a dropped ru
 and fit, so they are not twins), and an element whose neighbour's text carries on within 3px
 of its own box edge is skipped as a **fragment** — for a split label the thing the reader
 reads is the wrapper, not either half, and the first version reported the halves as a defect.
+
+The `chip` line answers a question none of the others ask: whether an element *wanted* to be
+one line. It was added after #331, where the list header's items badge rendered 47px wide and
+42px **tall** at `narrow` — "3" over "items", a rounded pill two lines high — and every check
+above stayed silent, each of them correctly. Nothing overflowed (the row fits, at min-content),
+no word was too wide for its box ("items" fits in 47px), nothing was clipped (it wrapped
+rather than truncating), and no two labels read alike. A flex item's automatic minimum size is
+its **min-content**, and min-content for a short label is its longest *word*, so the algorithm
+may legally shrink a badge to the width of "items" and turn the space into a line break: valid
+CSS, and a rendering fault to the reader, because a pill's shape is what says "this is one
+value". Two signals must agree before it fires — the element really is painting more than one
+line (counted from the line boxes of a Range over its contents, clustered by top, so a
+vertically-centred dot is not read as a second line), **and** it is narrower than its own
+max-content while its parent had room for that max-content. The second half is what keeps it
+honest: a pill in a parent that genuinely cannot hold the label is doing the least-bad thing,
+and there is nothing to fix. It is scoped to pills — a self-painted background, rounded ends,
+a short label — so it stays quiet on prose that is supposed to wrap: the same header's `h1`
+wraps to three lines beside the badge and is fine. Four new `--self-test` controls, one of
+which must fire.
 
 The `row` line is the opposite defect, added after #236: how much of a container's width its
 own children actually reach. The cluster overview's three stat cards sat in a 2225px row and

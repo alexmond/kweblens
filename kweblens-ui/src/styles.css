@@ -760,6 +760,59 @@ body {
   margin: 0;
 }
 
+/* ---- The header's fixed-shape chips refuse the squeeze; the title and the search box give (#331)
+   Fifth instance of the family behind #257, #278, #318 and #326 — an element whose minimum
+   collapses under its own content — and the FOURTH mechanism, because the repair belongs to the
+   algorithm doing the squeezing. Here it is plain flex: an item's automatic minimum size
+   (`min-width: auto`) is its MIN-CONTENT, and min-content for a short label is its longest WORD,
+   not its whole string. So the squeeze is legal, silent, and turns a pill into a two-line box.
+
+   Measured at `narrow` (1024px), Config/Validating Webhook Configs, both themes. The row wants
+   948px of max-content in 689px, so ~259px has to come out of somewhere, and the flex algorithm
+   takes it from every `flex-shrink: 1` item in proportion to its base size — including the two
+   items that have no second line to give:
+
+     .count     47.17px given for 57.16px of "3 items"        -> 42px tall, "3" over "items"
+     .ns-note   67.75px given for 102.06px of "Cluster-scoped" -> 44px tall, "Cluster-" over "scoped"
+
+   Neither had shrunk BELOW its min-content — this is not #257's shredding, nothing is mangled —
+   they were shrunk exactly TO it, and for a fixed-shape pill min-content is already wrong. A
+   rounded badge two lines tall reads as a rendering fault rather than as a count.
+
+   `flex: 0 0 auto` takes them out of the distribution entirely: #318's answer, because this is
+   #318's container. The alternatives, each rejected on a measurement:
+
+   - `white-space: nowrap` would also hold them on one line (nowrap raises min-content to the
+     whole string, and `min-width: auto` then floors them there), but it ALSO switches off
+     `ui-measure`'s `words` check on the element it is applied to — that check skips a `nowrap`
+     ancestor by design, which is exactly how #318's regression hid. A fix that silences the
+     instrument watching it is worse than the same fix without that side effect.
+   - Weighting the shrink (`flex-shrink: 100` on the title) was #318's first attempt and its
+     lesson: 0.4px of squeeze still reached the element and still cost two glyphs. Nearly not
+     shrinking is not not shrinking.
+   - A `px` `min-width` per chip is a second copy of the text's width that goes stale the day
+     the wording changes.
+
+   `max-width` — #318's guard against "never shrinks" becoming "overflows instead" — is dead
+   code here and is deliberately absent. #318 capped an unbounded, unbreakable token (a kind
+   name); these two are bounded: `.ns-note` is a literal constant and `.count` is `N items` /
+   `N of M` (~100px even at six digits each). The guard that matters is the arithmetic, and it
+   holds with room: pinning both adds 50.28px to the row's floor (9.99 + 34.31), while at the
+   measured scene the two absorbers hold 148.28px of give above their own minimums — the title
+   58.09px (149.39 -> 91.30, and it wraps at word boundaries, keeping its own `min-width: auto`
+   floor so it can never shred a word) and the search box 90.19px (130.19 -> 40). The row's floor
+   goes 534.73px -> 585.01px in 689px of content column. Only past that does `.content`'s own
+   `overflow: auto` take over, which is the same answer `.mini-scroll` gives.
+
+   `.live` is deliberately NOT in this list, and the issue's guess that it needed the same
+   treatment is wrong: measured, its min-content (33.39px) EQUALS its max-content, because the
+   dot is a definite-width flex item and "live" is one word, so there is nothing in it for the
+   algorithm to take. Pinning it would be a rule that never fires. */
+.content-head .count,
+.content-head .ns-note {
+  flex: 0 0 auto;
+}
+
 .live {
   display: inline-flex;
   align-items: center;
@@ -835,6 +888,8 @@ body {
   min-width: 160px;
 }
 
+/* Whether this refuses to shrink lives with `.content-head` above (#331), because that is the
+   flex container whose algorithm squeezes it. */
 .ns-note {
   font-size: 12px;
   color: var(--muted);
@@ -908,6 +963,9 @@ body {
   text-decoration: underline;
 }
 
+/* Whether this refuses to shrink lives with `.content-head` above (#331), because that is the
+   flex container whose algorithm squeezes it. Every pane that renders a `.count` — the resource
+   list, all three Helm panes, Port Forwards — renders it inside one. */
 .count {
   font-size: 12px;
   color: var(--muted);

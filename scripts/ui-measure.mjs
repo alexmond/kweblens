@@ -18,6 +18,9 @@
 //   overflow  width vs the nearest scrollable/clipping ancestor, and vs the viewport
 //   measure   approximate characters per line, for text-bearing elements
 //   words     a word too wide for its own box — i.e. one the browser must break mid-word
+//   chip      a pill (own background, rounded ends, short label) squeezed below its own
+//             label and wrapped, in a parent that had room for it — a legal wrap that reads
+//             as a rendering fault
 //   clipped   text an ellipsis is cutting, measured sub-pixel: a fraction of a pixel short
 //             is a defect, because the ellipsis pays for itself in whole characters
 //   twins     two matches whose DIFFERENT text truncates to the SAME visible string — the
@@ -247,6 +250,95 @@ function measureOne(els) {
     return worst;
   };
 
+  // ---- A fixed-shape pill that wrapped because a flex row squeezed it (#331) ----
+  //
+  // The fifth defect in the family behind #257, #278, #318 and #326, and the first one none
+  // of the checks above could see. `.count` — the list header's items badge — rendered 47px
+  // wide and 42px TALL at `narrow`: "3" over "items", a rounded pill two lines high. Every
+  // line here stayed silent and each was right to: nothing overflowed (the row fits, at
+  // min-content), no word was too wide for its box ("items" fits in 47px), nothing was
+  // clipped (it wrapped rather than truncating), and no two labels read alike.
+  //
+  // What was wrong is a thing none of them ask: whether the element WANTED to be one line.
+  // A flex item's automatic minimum size is its MIN-CONTENT, and min-content for a short
+  // label is its longest WORD — so the flex algorithm may legally shrink a badge to the
+  // width of "items" and let the space become a line break. The wrap is correct CSS and a
+  // rendering fault to the reader, because a pill's shape is what says "this is one value".
+  //
+  // Two signals have to agree before this fires, and each rules out a different false
+  // positive:
+  //
+  //   1. It really is painting more than one line. Counted from the line boxes of a Range
+  //      over its contents, clustered by top with the same 8px tolerance `row` uses, because
+  //      a vertically-centred dot (`.live`) sits at a different top on the SAME line.
+  //   2. It is narrower than its own max-content, AND its max-content would have fitted in
+  //      the room its parent has. Measured on a clone at `width: max-content` — absolutely
+  //      positioned, so it is out of flow and cannot be a flex item of the parent it borrows
+  //      the fonts and inherited rules from. The second half is the important one: if the
+  //      parent genuinely cannot hold it, wrapping is the least-bad outcome and there is
+  //      nothing here to fix. This check is about a squeeze that was AVOIDABLE.
+  //
+  // Scoped to pills — a self-painted background and rounded ends, with a short label — so it
+  // stays quiet on the prose that is supposed to wrap. The list header's own `h1` wraps to
+  // three lines beside the badge and is fine; a `<span>` with a 10px radius and a background
+  // is not prose, it is a shape, and a shape that reflows has broken.
+  const wrappedChip = () => {
+    const px = (v) => parseFloat(v) || 0;
+    let worst = null;
+    for (const e of els) {
+      const ecs = getComputedStyle(e);
+      if (ecs.position === 'absolute' || ecs.position === 'fixed') continue;
+      if (/nowrap|pre$/.test(ecs.whiteSpace)) continue;
+      // A pill: it paints its own background and its ends are rounded.
+      if (/^(transparent|rgba\(0, 0, 0, 0\))$/.test(ecs.backgroundColor)) continue;
+      const radius = Math.max(px(ecs.borderTopLeftRadius), px(ecs.borderBottomLeftRadius));
+      if (radius < 4) continue;
+      // A label, not a paragraph. 40 characters is the same cut the chars-per-line check
+      // uses for "this is not prose".
+      const text = e.textContent.replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 40) continue;
+
+      const er = e.getBoundingClientRect();
+      if (er.width <= 0 || er.height <= 0) continue;
+
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      const tops = [];
+      for (const q of range.getClientRects()) {
+        if (q.width <= 0 || q.height <= 0) continue;
+        if (!tops.some((t) => Math.abs(t - q.top) <= 8)) tops.push(q.top);
+      }
+      if (tops.length < 2) continue;
+
+      const parent = e.parentElement;
+      if (!parent) continue;
+      const pcs = getComputedStyle(parent);
+      const pr = parent.getBoundingClientRect();
+      const parentInner =
+        pr.width - px(pcs.paddingLeft) - px(pcs.paddingRight) - px(pcs.borderLeftWidth) - px(pcs.borderRightWidth);
+      if (parentInner <= 0) continue;
+
+      const clone = e.cloneNode(true);
+      clone.style.position = 'absolute';
+      clone.style.visibility = 'hidden';
+      clone.style.left = '-9999px';
+      clone.style.top = '0';
+      clone.style.width = 'max-content';
+      clone.style.maxWidth = 'none';
+      parent.appendChild(clone);
+      const need = clone.getBoundingClientRect().width;
+      clone.remove();
+
+      if (need <= er.width + 0.5) continue;
+      if (need > parentInner + 0.5) continue;
+      const over = need - er.width;
+      if (!worst || over > worst.over) {
+        worst = { text, lines: tops.length, w: er.width, need, room: parentInner, over };
+      }
+    }
+    return worst;
+  };
+
   // ---- Two rows that stopped naming themselves (#327) ----
   //
   // `clipped` says how much of ONE label is cut. It cannot say the thing that actually made
@@ -384,6 +476,7 @@ function measureOne(els) {
   return {
     count: els.length,
     word: widestWord(),
+    chip: wrappedChip(),
     clipped: clippedText(),
     twins: twinLabels(),
     row: rowFill(),
@@ -449,6 +542,21 @@ const SELF_TEST_FIXTURE = `
   .tw.split { display: flex; }
   .tw.split > .h { flex: 0 1 auto; }
   .tw.split > .t { flex: 0 0 auto; max-width: 100%; }
+  /* The chip controls (#331) — still no backticks. Same trick as #hairline: the width is
+     derived from the TEXT, so the control is exact in whatever font the box happens to have.
+     .pillbox shrink-wraps to the pill's own max-content (a percentage width resolves to auto
+     for that intrinsic sizing, so there is no circularity), and a pill at 60% of it must
+     break at its one space, into two words each comfortably under 60%. #pill-tight is the
+     discriminator that keeps this honest: same wrapped pill, but its parent has no room for
+     the label, so the wrap is the least-bad outcome and there is nothing to fix. #prose is
+     the list header's h1 — text that wraps and is SUPPOSED to. */
+  .pillbox { display: inline-block; padding: 0; }
+  .tightbox { display: inline-block; width: 70px; padding: 0; }
+  .pill { display: block; background: #e5e7eb; border-radius: 10px; padding: 2px 8px; }
+  #pill-squeezed { width: 70%; }
+  #pill-roomy { width: 100%; }
+  #pill-tight { width: 100%; }
+  #prose { display: block; width: 70%; }
   .rowbox { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; width: 1000px; }
   .rowbox > i { height: 30px; background: #ccc; display: block; }
   #empty-row > i  { width: 100px; }
@@ -463,6 +571,10 @@ const SELF_TEST_FIXTURE = `
 <div id="nested-ok"><button>Reason</button></div>
 <div id="nested-nowrap"><button>Reason</button></div>
 <div id="nested-scroll"><span>Reason</span></div>
+<span class="pillbox"><span class="pill" id="pill-squeezed">Cluster scoped</span></span>
+<span class="pillbox"><span class="pill" id="pill-roomy">Cluster scoped</span></span>
+<span class="tightbox"><span class="pill" id="pill-tight">Cluster scoped</span></span>
+<span class="pillbox"><span id="prose">Cluster scoped</span></span>
 <div id="empty-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="full-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>
@@ -488,6 +600,10 @@ const SELF_TEST_CASES = [
   ['#nested-ok', 'word', false, 'the same child text in a 400px box is fine'],
   ['#nested-nowrap', 'word', false, 'a nowrap child ellipsises; that is the clipped check, not this one'],
   ['#nested-scroll', 'word', false, 'a child with its own scroller scrolls rather than shreds'],
+  ['#pill-squeezed', 'chip', true, 'a pill at 70% of its own label wraps — the shape of #331'],
+  ['#pill-roomy', 'chip', false, 'the same pill at its full advance is one line'],
+  ['#pill-tight', 'chip', false, 'wrapped, but its parent cannot hold the label — nothing to fix'],
+  ['#prose', 'chip', false, 'wrapped text with no pill shape is text doing what text does'],
   ['#empty-row', 'row', true, '3x100px + gaps = 320px of a 1000px row — the shape of #236'],
   ['#full-row', 'row', false, '3x320px + gaps = 1000px, so the row is used'],
   ['#wrapped', 'row', false, '4x320px wraps to a second line; a short LAST line is not waste'],
@@ -519,11 +635,13 @@ if (argv.includes('--self-test')) {
         ? rowIsEmpty(got?.row)
         : metric === 'twins'
           ? (got?.twins ?? []).length > 0
-          : metric === 'clipseen'
-            ? !!got?.clipped
-            : metric === 'clip'
-              ? !!got?.clipped && got.clipped.over < 1
-              : !!got?.word;
+          : metric === 'chip'
+            ? !!got?.chip
+            : metric === 'clipseen'
+              ? !!got?.clipped
+              : metric === 'clip'
+                ? !!got?.clipped && got.clipped.over < 1
+                : !!got?.word;
     const ok = fired === wantDefect;
     if (!ok) bad += 1;
     const detail =
@@ -535,6 +653,10 @@ if (argv.includes('--self-test')) {
         ? got?.twins?.length
           ? `both read "${got.twins[0].visible}"`
           : 'no two read the same'
+        : metric === 'chip'
+        ? got?.chip
+          ? `${got.chip.lines} lines, ${got.chip.w.toFixed(1)}px for ${got.chip.need.toFixed(1)}px`
+          : 'no avoidable pill wrap'
         : metric.startsWith('clip')
           ? got?.clipped
             ? `${got.clipped.over.toFixed(2)}px cut of ${got.clipped.need.toFixed(2)}px`
@@ -613,6 +735,15 @@ try {
       console.log(
         `  words    "${m.word.run}" needs ${m.word.w}px in a ${m.word.inner}px box` +
           `  <-- DEFECT: it must break mid-word`,
+      );
+      failed = true;
+    }
+    if (m.chip) {
+      const px = (v) => v.toFixed(2).replace(/\.00$/, '');
+      console.log(
+        `  chip     "${m.chip.text}" wrapped to ${m.chip.lines} lines: given ${px(m.chip.w)}px` +
+          ` for ${px(m.chip.need)}px, in a ${px(m.chip.room)}px row` +
+          `  <-- DEFECT: a pill was squeezed below its own label`,
       );
       failed = true;
     }
