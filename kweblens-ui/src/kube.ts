@@ -35,6 +35,17 @@ const objState = (o: KubeObject): ObjectState | null => {
 export const objStateLabel = (o: KubeObject): string => objState(o)?.label ?? '';
 
 /**
+ * The tone the SERVER gave that state, or null when it gave none.
+ *
+ * <p>Read rather than re-derived. `columns.ts`'s {@code statusTone} classifies a word by keyword
+ * — the mechanism that still serves the kinds rendering `status.phase` — but a row that carries
+ * a state carries the tone with it, computed by the same verdict the overview card coloured. Two
+ * classifications of one state is the drift GH#336 exists to remove: a card showing amber beside
+ * a row showing red is the same defect as a count that disagrees, one colour further on.
+ */
+export const objStateTone = (o: KubeObject): ObjectState['tone'] | null => objState(o)?.tone ?? null;
+
+/**
  * Two-letter avatar for a single id, split on word boundaries.
  *
  * <p>`prod-eu` is `PE` and `prod-us` is `PU`, where the old `id.slice(0, 2)` made both `PR`.

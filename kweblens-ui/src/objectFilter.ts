@@ -529,6 +529,50 @@ export function activeQuery(query: string, filter: ParsedFilter): string {
   return filter.error === null ? query : '';
 }
 
+// --- writing a term back into the query -------------------------------------------------------
+
+/**
+ * The query with its positive `status:` terms replaced by `label` — or, with `null`, removed.
+ *
+ * <p><b>Why this lives in the grammar module.</b> It is the parser's inverse, and it needs the
+ * same tokenizer: knowing where one term ends is exactly the knowledge that keeps
+ * `name:"two words"` and `env in (dev,stage)` whole while a term beside them is dropped. A
+ * second splitter written next to a caller would be a copy of that rule, and the copy is what
+ * goes stale.
+ *
+ * <p><b>Why it replaces rather than appends.</b> Terms are ANDed — that is the grammar, and
+ * the one thing it has no spelling for is "either of these". `status:Running status:Failed`
+ * selects nothing at all, so a chip rail that appended would answer a second click with an
+ * empty table. Replacing makes the positive status selection single-valued, which is what the
+ * grammar can actually express.
+ *
+ * <p><b>Negated status terms are left alone</b>, because `-status:Running` is a different
+ * question — "everything except the healthy ones" — and it ANDs with a positive term perfectly
+ * well. Every other term (names, namespaces, labels, regexes) is untouched, so the box keeps
+ * whatever else was typed.
+ *
+ * <p>A query that does not even tokenize (an unterminated quote) is returned unchanged: there is
+ * no term structure to edit, and inventing one would rewrite what the operator is mid-way
+ * through typing.
+ *
+ * <p>The term itself comes from {@link statusQuery} rather than being spelled here. A chip that
+ * quoted a state differently from the card that links to it would be a second answer to the one
+ * question this family of links exists to settle.
+ */
+export function withStatusTerm(query: string, label: string | null): string {
+  let tokens: string[];
+  try {
+    tokens = tokenize(query);
+  } catch {
+    return query;
+  }
+  const kept = tokens.filter((t) => !t.startsWith('status:'));
+  if (label !== null) {
+    kept.push(statusQuery(label));
+  }
+  return kept.join(' ');
+}
+
 // --- the help the popover renders -----------------------------------------------------------
 
 export interface FilterHelpRow {

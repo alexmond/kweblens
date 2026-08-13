@@ -15,6 +15,12 @@ import { buildResourceColumns } from './table';
 //   1200        863px      1514    1314
 //   1900       1563px      1514    1314
 //
+// Pods is 1354 now, not the 1314 measured in #238: GH#341 gave the Status column an explicit
+// 150px in place of the 110px floor, because it renders the server's state and the 110px cell
+// sliced 16.55px off a `CrashLoopBackOff` pill. That is exactly the movement this fixture is
+// here to make visible — the ticket's number stops being true, and the test says so rather
+// than the table quietly losing one more column to the width.
+//
 // A fit test written against made-up columns proves the arithmetic and nothing about the
 // tables it is for; these pin both. If a column is added to Pods or Nodes and these totals
 // move, that is the point — the numbers in the ticket stop being true and the test says so.
@@ -39,7 +45,7 @@ const kept = (cols: { key: string }[], hidden: ReadonlySet<string>) =>
 describe('what a table wants', () => {
   it('adds up to the widths measured off the running app', () => {
     expect(tableWidth(NODES, NODES_CHROME)).toBe(1514);
-    expect(tableWidth(PODS, PODS_CHROME)).toBe(1314);
+    expect(tableWidth(PODS, PODS_CHROME)).toBe(1354);
   });
 
   it('charges a column its own width, or the readable floor when it declares none', () => {

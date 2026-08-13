@@ -173,7 +173,7 @@ const columns = computed<DataTableColumns<KubeObject>>(() => {
       render: (row) =>
         c.cell
           ? renderCell(c.cell(row), row)
-          : renderCell({ type: 'text', text: c.render(row), tone: toneFor(c.key, c.render(row)) }, row),
+          : renderCell({ type: 'text', text: c.render(row), tone: toneFor(c.key, c.render(row), row) }, row),
     });
   });
   if (showAge.value) {

@@ -148,6 +148,32 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-12 — **A pill was cut in half by its cell, and the only instrument that saw it was a
+  300% crop of a screenshot.** #341 made the list's Status column render the server's state, so
+  `CrashLoopBackOff` (a 119.38px `NTag`) landed in a 102.83px `.n-ellipsis` that hides its
+  overflow: a square-ended red block reading `CrashLoopBackO`, no ellipsis anywhere, because
+  `text-overflow` does not apply to a nested inline-block. **Every check passed, and a probe
+  written to settle it agreed with them** — it measured `.n-tag__content`, which is exactly as
+  wide as its text, so the element being cut was one level up and the numbers said
+  `clientWidth === scrollWidth`, "nothing truncated". `clipped` needs a direct text node, and a
+  wrapper whose only child is a pill has none; `chip` (#331) asks whether a pill *wrapped*, and
+  this one did not. → A `sliced` line: the pill's own border box against the padding box of the
+  ancestor that clips it, failing only when that ancestor is unreachable (an `overflow-x: auto`
+  with real overflow is a scroller and nothing is lost). Four controls, one of which must fire;
+  then run against the LIVE defect before the fix, where it names `16.55px of the pill cut off`,
+  and silent after it. **When a measurement contradicts a screenshot, the element you measured
+  may not be the element that is broken — walk up before believing "nothing truncated".**
+- 2026-08-12 — **`perf-sweep` reported seven pages OVER BUDGET that it had merely failed to
+  click.** #332 split a nav leaf's label into a head span and a tail span, so a two-word label's
+  innerText now carries a newline — `Persistent Volume\nClaims` — and this script's own private
+  leaf walker kept it, anchored a regex against it, matched nothing, and recorded the 4s click
+  timeout as `LOAD -1ms … OVER BUDGET`. The shared `openLeaf` in `lib/kw-playwright.mjs` was
+  fine the whole time (`--leaf 'Ingress Classes'` opened it), which is the **third** time this
+  file's copy of a walker has drifted from the shared one. → Whitespace is collapsed on both
+  sides of the match. 37/44 within budget → 44/44, with those seven measured rather than guessed
+  at. **A nav change breaks every tool that walks the nav; and "could not measure" must never be
+  printed in the same column as "too slow".**
+
 - 2026-08-12 — **Every check here can pass an element that is visibly broken, because none of
   them asked whether it WANTED to be one line.** #331: the list header's items badge measured
   47×42px at `narrow` — "3" over "items", a rounded pill two lines high — and `box`, `overflow`,

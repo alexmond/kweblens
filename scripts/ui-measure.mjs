@@ -22,6 +22,9 @@
 //   chip      a pill (own background, rounded ends, short label) squeezed below its own
 //             label and wrapped, in a parent that had room for it — a legal wrap that reads
 //             as a rendering fault
+//   sliced    a pill whose own box is CUT by an ancestor that hides its overflow — the same
+//             shape as `chip`, truncated rather than wrapped, and invisible to `clipped`
+//             because the text fits the pill and it is the pill that does not fit
 //   clipped   text an ellipsis is cutting, measured sub-pixel: a fraction of a pixel short
 //             is a defect, because the ellipsis pays for itself in whole characters
 //   twins     two matches whose DIFFERENT text truncates to the SAME visible string — the
@@ -414,6 +417,63 @@ function measureOne(els) {
     return worst;
   };
 
+  // ---- A pill CUT OFF by a container that hides its overflow (#341) ----
+  //
+  // Sixth in the family, and the second one about a SHAPE rather than about text. The list's
+  // Status column started rendering the server's state (`CrashLoopBackOff`, 16 characters)
+  // where it had rendered `status.phase` (`Running`, 7), inside a Naive `NTag` inside a
+  // fixed-width table cell. The pill's right end was sliced flat by the cell — a square-ended
+  // red block reading `CrashLoopBackO` — and **every check in this file stayed silent**:
+  //
+  //   - `clipped` measures text against ITS OWN box, and the tag's inner span is exactly as
+  //     wide as its text. The cut happens one level up, at the wrapper. It also requires a
+  //     direct text node, and a wrapper whose only child is a pill has none.
+  //   - `chip` (#331) asks whether a pill WRAPPED. This one did not wrap; it was truncated.
+  //   - `words`, `twins`, `row`, `box` — all correct and all about something else.
+  //
+  // The measurement that caught it was a 300% crop of a screenshot, which is the same way
+  // #327 was found and is not a method. So: the pill's own border box against the padding box
+  // of the ancestor that clips it. A pill is not text — it cannot reflow, it has no ellipsis,
+  // and a rounded end that has become a straight edge is the reader's only clue that anything
+  // is missing at all.
+  //
+  // Only a clipper the reader cannot get past counts. An `overflow-x: auto` ancestor whose
+  // content overflows is a SCROLLER — `.mini-scroll` is this project's sanctioned escape
+  // hatch for exactly that — so the pill is reachable and nothing is lost. `hidden` and
+  // `clip` are unreachable, and so is an `auto` that has nothing to scroll.
+  const slicedChip = () => {
+    const px = (v) => parseFloat(v) || 0;
+    let worst = null;
+    for (const e of els) {
+      const ecs = getComputedStyle(e);
+      if (ecs.position === 'fixed') continue;
+      // The same "is it a pill" gate the wrap check uses: it paints its own background, its
+      // ends are rounded, and it carries a label rather than a paragraph.
+      if (/^(transparent|rgba\(0, 0, 0, 0\))$/.test(ecs.backgroundColor)) continue;
+      if (Math.max(px(ecs.borderTopLeftRadius), px(ecs.borderBottomLeftRadius)) < 4) continue;
+      const text = e.textContent.replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 40) continue;
+      const er = e.getBoundingClientRect();
+      if (er.width <= 0 || er.height <= 0) continue;
+
+      for (let a = e.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+        const acs = getComputedStyle(a);
+        const overflowX = acs.overflowX;
+        if (!/hidden|clip|auto|scroll/.test(overflowX)) continue;
+        if (/auto|scroll/.test(overflowX) && a.scrollWidth > a.clientWidth + 1) break; // reachable
+        const ar = a.getBoundingClientRect();
+        const left = ar.left + px(acs.borderLeftWidth) + px(acs.paddingLeft);
+        const right = ar.right - px(acs.borderRightWidth) - px(acs.paddingRight);
+        const cut = Math.max(0, left - er.left) + Math.max(0, er.right - right);
+        if (cut > 0.5 && (!worst || cut > worst.cut)) {
+          worst = { text, cut, w: er.width, room: right - left, by: a.className || a.tagName.toLowerCase() };
+        }
+        break;
+      }
+    }
+    return worst;
+  };
+
   // ---- Two rows that stopped naming themselves (#327) ----
   //
   // `clipped` says how much of ONE label is cut. It cannot say the thing that actually made
@@ -554,6 +614,7 @@ function measureOne(els) {
     word: words.worst,
     wordAbsorbed: words.absorbed,
     chip: wrappedChip(),
+    sliced: slicedChip(),
     clipped: clippedText(),
     twins: twinLabels(),
     row: rowFill(),
@@ -653,6 +714,18 @@ const SELF_TEST_FIXTURE = `
   #pill-roomy { width: 100%; }
   #pill-tight { width: 100%; }
   #prose { display: block; width: 70%; }
+  /* The sliced controls (#341) — no backticks here either. A pill inside a box that is too
+     narrow for it: overflow hidden cuts it and the reader can never see the rest, overflow-x
+     auto with real overflow is a SCROLLER and the pill stays reachable, and the roomy box is
+     the negative. white-space nowrap on the cell is what makes the pill overflow rather than
+     re-lay out, which is exactly what a Naive data-table cell does. */
+  .cell { display: block; width: 90px; white-space: nowrap; padding: 0; }
+  .tag { display: inline-block; background: #e5e7eb; border-radius: 10px; padding: 2px 8px; }
+  .notag { display: inline-block; }
+  #sliced-cell   { overflow: hidden; }
+  #scroller-cell { overflow-x: auto; }
+  #roomy-cell    { width: 300px; overflow: hidden; }
+  #plain-cell    { overflow: hidden; }
   .rowbox { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; width: 1000px; }
   .rowbox > i { height: 30px; background: #ccc; display: block; }
   #empty-row > i  { width: 100px; }
@@ -674,6 +747,10 @@ const SELF_TEST_FIXTURE = `
 <span class="pillbox"><span class="pill" id="pill-roomy">Cluster scoped</span></span>
 <span class="tightbox"><span class="pill" id="pill-tight">Cluster scoped</span></span>
 <span class="pillbox"><span id="prose">Cluster scoped</span></span>
+<div class="cell" id="sliced-cell"><span class="tag sliced-pill">CrashLoopBackOff</span></div>
+<div class="cell" id="scroller-cell"><span class="tag scrolled-pill">CrashLoopBackOff</span></div>
+<div class="cell" id="roomy-cell"><span class="tag roomy-pill">CrashLoopBackOff</span></div>
+<div class="cell" id="plain-cell"><span class="notag plain-text">CrashLoopBackOff</span></div>
 <div id="empty-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="full-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>
@@ -707,6 +784,10 @@ const SELF_TEST_CASES = [
   ['#pill-roomy', 'chip', false, 'the same pill at its full advance is one line'],
   ['#pill-tight', 'chip', false, 'wrapped, but its parent cannot hold the label — nothing to fix'],
   ['#prose', 'chip', false, 'wrapped text with no pill shape is text doing what text does'],
+  ['.sliced-pill', 'sliced', true, 'a pill wider than a hidden-overflow cell is cut flat — the shape of #341'],
+  ['.scrolled-pill', 'sliced', false, 'the same pill in a scroller is reachable, so nothing is lost'],
+  ['.roomy-pill', 'sliced', false, 'the same pill in a cell that fits it is not cut'],
+  ['.plain-text', 'sliced', false, 'clipped TEXT is the clipped check; this one is only about shapes'],
   ['#empty-row', 'row', true, '3x100px + gaps = 320px of a 1000px row — the shape of #236'],
   ['#full-row', 'row', false, '3x320px + gaps = 1000px, so the row is used'],
   ['#wrapped', 'row', false, '4x320px wraps to a second line; a short LAST line is not waste'],
@@ -740,6 +821,8 @@ if (argv.includes('--self-test')) {
           ? (got?.twins ?? []).length > 0
           : metric === 'chip'
             ? !!got?.chip
+            : metric === 'sliced'
+            ? !!got?.sliced
             : metric === 'clipseen'
               ? !!got?.clipped
               : metric === 'clip'
@@ -762,6 +845,10 @@ if (argv.includes('--self-test')) {
         ? got?.chip
           ? `${got.chip.lines} lines, ${got.chip.w.toFixed(1)}px for ${got.chip.need.toFixed(1)}px`
           : 'no avoidable pill wrap'
+        : metric === 'sliced'
+        ? got?.sliced
+          ? `${got.sliced.cut.toFixed(1)}px of the pill cut off`
+          : 'no pill cut off'
         : metric.startsWith('clip')
           ? got?.clipped
             ? `${got.clipped.over.toFixed(2)}px cut of ${got.clipped.need.toFixed(2)}px`
@@ -869,6 +956,15 @@ try {
         `  chip     "${m.chip.text}" wrapped to ${m.chip.lines} lines: given ${px(m.chip.w)}px` +
           ` for ${px(m.chip.need)}px, in a ${px(m.chip.room)}px row` +
           `  <-- DEFECT: a pill was squeezed below its own label`,
+      );
+      failed = true;
+    }
+    if (m.sliced) {
+      const px = (v) => v.toFixed(2).replace(/\.00$/, '');
+      console.log(
+        `  sliced   "${m.sliced.text}" is ${px(m.sliced.w)}px in ${px(m.sliced.room)}px of .${m.sliced.by}:` +
+          ` ${px(m.sliced.cut)}px of the pill cut off` +
+          `  <-- DEFECT: a shape with a straight end says nothing is missing`,
       );
       failed = true;
     }

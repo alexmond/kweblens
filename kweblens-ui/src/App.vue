@@ -17,6 +17,7 @@ import { defaultHiddenCols } from './columns';
 import { useDialog } from './dialog';
 import { clusterListEmpty } from './emptyState';
 import { objKey } from './kube';
+import { withStatusTerm } from './objectFilter';
 import type { PaneFailure } from './paneFailure';
 import { actionFailed, bulkDeleteIncomplete, mayRetry, readMessage } from './paneFailure';
 import { loadDark, loadHiddenCols, loadKeptCols, loadNamespace, saveCluster, saveDark, saveNamespace } from './prefs';
@@ -421,6 +422,12 @@ const openSearchHit = async (hit: { resourceId: string; kind: string; namespace:
 
 const activeCluster = computed(() => clusters.value.find((c) => c.id === cluster.value) ?? null);
 const filtered = computed(() => filterObjects(objects.value, query.value, helmScope.value));
+// What the header's status chips count: the same narrowing MINUS the status term itself, so a
+// chip's number is the number of rows its click produces rather than a number about a set
+// nobody is looking at (GH#341). Computed here because the Helm scope is the shell's, and the
+// two go through the one `filterObjects` — a second filtering mechanism is how the count and
+// the list start disagreeing.
+const statusRows = computed(() => filterObjects(objects.value, withStatusTerm(query.value, null), helmScope.value));
 const tableCols = computed(() => buildResourceColumns(selected.value?.id, cols.value, usage.value, nodeDisk.value));
 const visibleCols = computed(() => tableCols.value.filter((c) => !hiddenCols.value.has(c.key)));
 const mergedCounts = computed(() => ({ ...counts.value, ...helmCounts.value }));
@@ -576,6 +583,7 @@ const onForwardStarted = () => {
               :selected="selected"
               :filtered="filtered"
               :objects="objects"
+              :status-rows="statusRows"
               :query="query"
               :live="live"
               :table-cols="tableCols"
