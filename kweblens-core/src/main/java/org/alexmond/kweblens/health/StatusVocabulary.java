@@ -43,11 +43,20 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
  *
  * <h2>What is covered, and what an uncovered kind means</h2>
  *
- * Today: the workload kinds {@link WorkloadHealth} judges, whose verdict is a pure
- * function of the object itself and therefore costs nothing on the list path. The three
- * context-carrying checks above are <b>not</b> covered yet: labelling a Service row would
- * mean joining the Endpoints collection inside the list request, which is a per-kind
- * provider rather than a call in a projection.
+ * Today: the workload kinds {@link WorkloadHealth} judges, and the cluster-scoped Node
+ * and Namespace that {@link ClusterObjectHealth} does. What they have in common is that
+ * the verdict is a pure function of the object itself, so it costs nothing on the list
+ * path. The three context-carrying checks above are <b>not</b> covered yet: labelling a
+ * Service row would mean joining the Endpoints collection inside the list request, which
+ * is a per-kind provider rather than a call in a projection.
+ *
+ * <p>
+ * <b>Event is not covered, and that is a decision</b> (GH#339). An event's
+ * {@code Warning} / {@code Normal} is its {@code type} field — a property of a report
+ * <i>about</i> another object, not a verdict on the event itself — so a state here would
+ * be a second, differently-shaped thing wearing the same word. The Cluster overview's
+ * Warnings figure is counted from that field and stays plain text for exactly that
+ * reason.
  *
  * <p>
  * An uncovered kind ships no state, and {@link #state} returns {@code null} for it. That
@@ -73,7 +82,7 @@ public final class StatusVocabulary {
 	 * carry a state" are the same set by construction.
 	 */
 	public static boolean covers(String kind) {
-		return WorkloadHealth.supports(kind);
+		return WorkloadHealth.supports(kind) || ClusterObjectHealth.supports(kind);
 	}
 
 	/**
@@ -88,8 +97,24 @@ public final class StatusVocabulary {
 		if (object == null || !covers(kind)) {
 			return null;
 		}
-		WorkloadHealth.Verdict verdict = WorkloadHealth.verdict(kind, object);
+		WorkloadHealth.Verdict verdict = verdict(kind, object);
 		return new ObjectState(label(verdict.label()), verdict.tone());
+	}
+
+	/**
+	 * The verdict for a covered kind, whichever check owns it.
+	 *
+	 * <p>
+	 * Every caller goes through here — {@link #state} for the row, {@link HealthService}
+	 * for the card — so adding a kind is one line in {@link #covers} and one case here,
+	 * and there is no way to add it to a card without adding it to the filter. Callers
+	 * must have checked {@link #covers} first; an uncovered kind falls through to
+	 * {@link WorkloadHealth}, whose default is a bare "OK" that nothing should be counted
+	 * under by accident.
+	 */
+	static WorkloadHealth.Verdict verdict(String kind, GenericKubernetesResource object) {
+		return ClusterObjectHealth.supports(kind) ? ClusterObjectHealth.verdict(kind, object)
+				: WorkloadHealth.verdict(kind, object);
 	}
 
 	/**

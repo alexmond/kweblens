@@ -156,7 +156,11 @@ public final class WorkloadHealth {
 		return false;
 	}
 
-	private static Object get(GenericKubernetesResource o, String... path) {
+	/**
+	 * Package-private rather than private: {@link ClusterObjectHealth} reads the same
+	 * untyped object graph, and one reader is one set of null rules.
+	 */
+	static Object get(GenericKubernetesResource o, String... path) {
 		return o.get((Object[]) path);
 	}
 

@@ -2,10 +2,16 @@
 // The cluster dashboard: node/namespace/warnings stat cards, API-server line, cluster
 // CPU + memory metric charts, and a warnings table built from the cluster's events.
 //
-// Cards and warning rows navigate; the shell owns where to (this only names a kind). Note the
-// split scope: warnings follow the namespace filter, while nodes and the cluster metric charts
-// are cluster-scoped and CANNOT — so they say so instead of quietly showing unfiltered numbers
-// beside filtered ones.
+// Cards and warning rows navigate; the shell owns where to (this only names a kind, and — for a
+// state — the filter that selects it). Note the split scope: warnings follow the namespace
+// filter, while nodes, namespaces and the cluster metric charts are cluster-scoped and CANNOT —
+// so they say so instead of quietly showing unfiltered numbers beside filtered ones.
+//
+// The Nodes and Namespaces numbers come from the server's own check (`/overview/cluster`), not
+// from counting a list here. That is what makes each state under a card clickable: the breakdown
+// and the `status:` filter are the same verdict, computed once (StatusVocabulary, GH#337). The
+// page used to compute "N ready" in this file from a second predicate — the exact shape of
+// discrepancy GH#336 was opened about.
 import DiagnosisPanel from './DiagnosisPanel.vue';
 import { NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
@@ -17,19 +23,18 @@ import type { CheckState } from '../checkState';
 import { checkedData, checkedDanger, checkedValue, uncheckedNote } from '../checkState';
 import { warningsEmpty } from '../emptyState';
 import { eventObjectKind } from '../kube';
-import type { EventSummary, KubeObject } from '../types';
+import type { EventSummary, KindHealth } from '../types';
 import EmptyState from './EmptyState.vue';
 import ErrorNotice from './ErrorNotice.vue';
 import MetricChart from './MetricChart.vue';
 import StatCard from './StatCard.vue';
+import { clusterCards } from './clusterOverviewCards';
 import { WARN_TABLE_MIN_WIDTH, warnColumns } from './warningsTable';
 
 const props = defineProps<{
   cluster: string;
   name: string;
   masterUrl?: string;
-  /** null when the namespace list could not be fetched — a count nobody answered is not 0. */
-  namespaceCount: number | null;
   namespace?: string | null;
   /** Whether the shell can navigate to a kind — a row with nowhere to go must not look clickable. */
   knowsKind?: (kind: string) => boolean;
@@ -37,34 +42,43 @@ const props = defineProps<{
   authed?: boolean;
 }>();
 
+// `navigate-state` is the same request narrowed: a click on `5 Ready` opens the Nodes list showing
+// exactly the five the card counted. The QUERY travels rather than the state label — the card
+// already asked the filter grammar how to write it (`objectFilter.statusQuery`), and re-deriving
+// it here would be a second spelling of the same rule, free to drift from the one the parser
+// reads. No namespace goes with it: these kinds are cluster-scoped (#313).
 const emit = defineEmits<{
   (e: 'navigate', kind: string, namespace?: string): void;
+  (e: 'navigate-state', kind: string, query: string): void;
   (e: 'require-auth'): void;
 }>();
 
-const nodes = shallowRef<CheckState<KubeObject[]>>({ status: 'checking' });
+const health = shallowRef<CheckState<KindHealth[]>>({ status: 'checking' });
 // Three states, not two. The failure branch used to write `[]` here, and the page then said
 // "0 Warnings" and "No warnings." for a request that never came back — see checkState.ts.
 const warnings = shallowRef<CheckState<EventSummary[]>>({ status: 'checking' });
 const err = ref<string | null>(null);
 
 // Two independent reads, so two independent retries. Both are GETs — a Retry on either costs
-// one more request and changes nothing — but they must not share a button: the nodes call and
+// one more request and changes nothing — but they must not share a button: the health check and
 // the events call fail for different reasons, and re-running the one that worked in order to
 // re-try the one that did not would blank a card that is currently right.
-let nodeReq = 0;
-const loadNodes = () => {
-  const my = ++nodeReq;
-  nodes.value = { status: 'checking' };
+let healthReq = 0;
+const loadHealth = () => {
+  const my = ++healthReq;
+  health.value = { status: 'checking' };
   err.value = null;
   api
-    .objects(props.cluster, 'nodes')
-    .then((n) => my === nodeReq && (nodes.value = { status: 'checked', data: n }))
+    // No namespace argument, and not because it is optional: Nodes and Namespaces are
+    // cluster-scoped, so narrowing them is a question the API does not answer (#313). The
+    // server ignores it too; passing it here would be this file claiming otherwise.
+    .overview(props.cluster, 'cluster')
+    .then((h) => my === healthReq && (health.value = { status: 'checked', data: h }))
     .catch((e) => {
-      if (my === nodeReq) {
+      if (my === healthReq) {
         // Both, not just the banner: a card still showing "…" after the request has
         // finished says "any moment now" about something that already failed.
-        nodes.value = { status: 'unchecked', message: failureNotice(e) };
+        health.value = { status: 'unchecked', message: failureNotice(e) };
         err.value = failureNotice(e);
       }
     });
@@ -82,14 +96,12 @@ const loadWarnings = () => {
     .catch((e) => my === warnReq && (warnings.value = { status: 'unchecked', message: failureNotice(e) }));
 };
 
-watch(
-  () => [props.cluster, props.namespace] as const,
-  () => {
-    loadNodes();
-    loadWarnings();
-  },
-  { immediate: true },
-);
+// Deliberately different dependencies. Warnings are events and DO follow the namespace filter;
+// the health check is over cluster-scoped kinds and does not, so re-running it on a namespace
+// change would be a request whose answer cannot differ — and a card blinking back to "…" would
+// suggest the filter had narrowed something.
+watch(() => props.cluster, loadHealth, { immediate: true });
+watch(() => [props.cluster, props.namespace] as const, loadWarnings, { immediate: true });
 
 /** The kind a warning row would open, or null when it has nowhere to go. */
 const rowKind = (w: EventSummary): string | null => {
@@ -106,13 +118,8 @@ const rowProps = (w: EventSummary) => {
   return { class: 'row-link', style: { cursor: 'pointer' }, onClick: go };
 };
 
-const nodeReady = (o: KubeObject): boolean => {
-  const conds = ((o.status as Record<string, unknown>)?.conditions as Record<string, unknown>[]) ?? [];
-  const r = conds.find((c) => c.type === 'Ready');
-  return r ? r.status === 'True' : false;
-};
-const nodeData = computed(() => checkedData(nodes.value));
-const readyNodes = computed(() => (nodeData.value ?? []).filter(nodeReady).length);
+/** The Nodes and Namespaces cards, states and all — the rules live in a .ts and are tested. */
+const cards = computed(() => clusterCards(health.value));
 
 // Column widths and the reasoning behind them live in warningsTable.ts (#257).
 const columns = warnColumns() as DataTableColumns<EventSummary>;
@@ -146,27 +153,31 @@ const warningsCopy = computed(() =>
     <div class="ov-band">
       <div class="ov-band-cards">
         <div class="ov-cards">
+          <!-- Cards, states and all, from the server's check — see clusterOverviewCards.ts for
+               what a card shows when the check did not answer. -->
           <StatCard
-            :value="checkedValue(nodes)"
-            :label="`Nodes${nodeData ? ` · ${readyNodes} ready` : ''}`"
+            v-for="c in cards"
+            :key="c.kind"
+            :value="c.value"
+            :label="c.label"
+            :states="c.states"
             clickable
-            @select="emit('navigate', 'Node')"
-          />
-          <StatCard
-            :value="namespaceCount ?? '—'"
-            label="Namespaces"
-            clickable
-            @select="emit('navigate', 'Namespace')"
+            :states-clickable="c.selectable"
+            @select="emit('navigate', c.kind)"
+            @select-state="(q) => emit('navigate-state', c.kind, q)"
           />
           <!-- `—` when the events call failed, never 0: the number is a claim about the
-               cluster and we only make it when the cluster answered (checkState.ts). -->
+               cluster and we only make it when the cluster answered (checkState.ts).
+               No breakdown and no state links: an event's Warning/Normal is a field on a
+               report about another object, not a verdict on the event, and the warnings it
+               counts are the table below rather than a list this could open (GH#339). -->
           <StatCard :value="checkedValue(warnings)" label="Warnings" :danger="checkedDanger(warnings)" />
         </div>
-        <!-- Nodes and the charts beside them are cluster-scoped. Saying so is the honest
-             alternative to either ignoring the filter silently or pretending these can be
-             narrowed. -->
+        <!-- Nodes, Namespaces and the charts beside them are cluster-scoped. Saying so is the
+             honest alternative to either ignoring the filter silently or pretending these can
+             be narrowed. -->
         <div v-if="namespace" class="ov-scope-note">
-          Nodes and cluster metrics are cluster-wide and ignore this filter.
+          Nodes, namespaces and cluster metrics are cluster-wide and ignore this filter.
         </div>
         <div v-if="masterUrl" class="ov-api">
           API server: <span class="mono">{{ masterUrl }}</span>
@@ -177,7 +188,7 @@ const warningsCopy = computed(() =>
         <MetricChart :cluster="cluster" target="cluster-mem" label="Cluster Memory" />
       </div>
     </div>
-    <ErrorNotice v-if="err" :message="err" :retrying="nodes.status === 'checking'" @retry="loadNodes" />
+    <ErrorNotice v-if="err" :message="err" :retrying="health.status === 'checking'" @retry="loadHealth" />
     <!-- Diagnosis sits above Warnings: warnings are raw events, diagnosis is the reading
          of them plus what to do. Reason before evidence. -->
     <DiagnosisPanel

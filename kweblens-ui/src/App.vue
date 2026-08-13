@@ -207,7 +207,7 @@ watch(cluster, (id) => {
   saveCluster(id);
 });
 
-const { nav, counts, helmCounts, namespaces, namespacesKnown, helmReleaseList, favorites, helmScope } = useClusterScope(
+const { nav, counts, helmCounts, namespaces, helmReleaseList, favorites, helmScope } = useClusterScope(
   cluster,
   namespace,
   helmRelease,
@@ -535,11 +535,11 @@ const onForwardStarted = () => {
                 :cluster="cluster"
                 :name="activeCluster?.name ?? cluster"
                 :master-url="activeCluster?.masterUrl"
-                :namespace-count="namespacesKnown ? namespaces.length : null"
                 :namespace="namespace"
                 :knows-kind="knowsKind"
                 :authed="!!authUser"
                 @navigate="navigateToKind"
+                @navigate-state="navigateToState"
                 @require-auth="showLogin = true"
               />
               <CategoryOverview
