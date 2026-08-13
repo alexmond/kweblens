@@ -41,6 +41,8 @@ public class OverviewApiController {
 
 	private static final String WORKLOADS = "Workloads";
 
+	private static final String CLUSTER = "Cluster";
+
 	private final NavCatalog navCatalog;
 
 	private final HealthService health;
@@ -56,6 +58,7 @@ public class OverviewApiController {
 			@RequestParam(required = false) String namespace) {
 		return switch (category) {
 			case "workloads" -> workloads(clusterId, namespace);
+			case "cluster" -> cluster(clusterId);
 			case "network" -> this.network.summarise(clusterId, namespace);
 			case "storage" -> this.storage.summarise(clusterId, namespace);
 			case "config" -> this.config.summarise(clusterId, namespace);
@@ -72,18 +75,47 @@ public class OverviewApiController {
 	 * here.
 	 */
 	private List<KindHealth> workloads(String clusterId, String namespace) {
-		List<ResourceDescriptor> kinds = this.navCatalog.categories()
+		return this.health.summarise(clusterId, judgeable(WORKLOADS), namespace);
+	}
+
+	/**
+	 * The Cluster category: Nodes and Namespaces.
+	 *
+	 * <p>
+	 * <b>The namespace filter is deliberately not passed on.</b> Both kinds are
+	 * cluster-scoped, so narrowing them is not a filter that returns fewer — it is a
+	 * question the API does not answer, and #313 is this repo's precedent for what a
+	 * namespace assumption does to a cluster-scoped kind. The page says so beside the
+	 * cards rather than quietly showing filtered and unfiltered numbers side by side.
+	 *
+	 * <p>
+	 * <b>Events are absent, and that is the answer rather than an omission.</b> They are
+	 * the third kind in this category, and {@link StatusVocabulary#covers} excludes them
+	 * because an event's {@code Warning}/{@code Normal} is a field on a report about
+	 * another object, not a verdict on the event. The filter below is the same one the
+	 * Workloads overview uses, so this falls out of the shared rule instead of being a
+	 * special case anyone has to remember.
+	 */
+	private List<KindHealth> cluster(String clusterId) {
+		return this.health.summarise(clusterId, judgeable(CLUSTER), null);
+	}
+
+	/**
+	 * The kinds of a nav category that the health rules actually understand.
+	 *
+	 * <p>
+	 * A kind with no rule would otherwise be reported as uniformly healthy, which is a
+	 * claim rather than a measurement. Asked of {@link StatusVocabulary}, which also
+	 * decides whether a list row carries a state — so "the card has a breakdown" and "the
+	 * rows are selectable by it" are one set, not two lists that can diverge.
+	 */
+	private List<ResourceDescriptor> judgeable(String category) {
+		return this.navCatalog.categories()
 			.stream()
-			.filter((c) -> WORKLOADS.equals(c.label()))
+			.filter((c) -> category.equals(c.label()))
 			.flatMap((c) -> c.items().stream())
-			// Only kinds the health rules actually understand. A kind with no rule would
-			// otherwise be reported as uniformly healthy, which is a claim rather than a
-			// measurement. Asked of StatusVocabulary, which also decides whether a list
-			// row carries a state — so "the card has a breakdown" and "the rows are
-			// selectable by it" are one set, not two lists that can diverge.
 			.filter((d) -> StatusVocabulary.covers(d.kind()))
 			.toList();
-		return this.health.summarise(clusterId, kinds, namespace);
 	}
 
 }

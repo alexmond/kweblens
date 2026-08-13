@@ -53,7 +53,11 @@ public class HealthService {
 			List<GenericKubernetesResource> objects = this.resources.listRaw(clusterId, descriptor, namespace);
 			Tally tally = new Tally(descriptor.id(), descriptor.label(), kind);
 			for (GenericKubernetesResource o : objects) {
-				WorkloadHealth.Verdict verdict = WorkloadHealth.verdict(kind, o);
+				// Through the seam, not straight to WorkloadHealth: this is the same
+				// call StatusVocabulary.state puts on the list row, which is what makes
+				// the card's number and the rows a status: term selects one set rather
+				// than two that agree today (GH#337).
+				WorkloadHealth.Verdict verdict = StatusVocabulary.verdict(kind, o);
 				switch (verdict.state()) {
 					case ATTENTION ->
 						tally.attention(namespaceOf(o), nameOf(o), verdict.reason(), verdict.label(), verdict.tone());
