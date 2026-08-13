@@ -1,6 +1,6 @@
 import type { ColumnDef, StatusTone } from './columns';
 import { badgeTone, eventTypeTone, readyTone, statusTone } from './columns';
-import { gib, objKey, objName, parseCpuCores, parseMemBytes } from './kube';
+import { gib, objKey, objName, objStateTone, parseCpuCores, parseMemBytes } from './kube';
 import type { KubeObject, NodeDiskUsage, UsageSummary } from './types';
 
 // The React table let a column's render() return a ReactNode (string OR a rich element like a
@@ -19,14 +19,38 @@ export interface TableColumn extends ColumnDef {
 }
 
 /**
+ * A server-computed state's tone, mapped onto the table's three.
+ *
+ * `idle` has no pill and no colour: "finished", "scaled to zero by choice" and "nothing to
+ * report" are neither healthy nor broken, and the overview mutes them for exactly that reason
+ * (`StateCount.IDLE`). `ok` reaches badgeTone as `ok` and is left unbadged there, so the one
+ * convention still lives in one place.
+ */
+function serverStateTone(o: KubeObject): StatusTone | null {
+  const tone = objStateTone(o);
+  if (tone === null) {
+    return null;
+  }
+  return tone === 'idle' ? '' : tone;
+}
+
+/**
  * Tone for a text cell, keyed off the stable column key (not the display header).
  *
  * Every branch goes through badgeTone, so all three columns follow the one convention: a pill
  * is an exception, an ordinary value is plain text. See badgeTone for why, and for the cost.
+ *
+ * `row` is what lets the Status column be coloured by the verdict that produced its text
+ * instead of by a keyword search over that text. Where the server computed a state, its tone
+ * wins — a card showing `Completed` in muted grey beside a row inferring `ok` from the letters
+ * "complete" is the same drift GH#336 removed from the counts. Rows without one (Nodes,
+ * Namespaces, claims, a CRD's own printer column) still go through `statusTone`, which is why
+ * that table stays.
  */
-export function toneFor(key: string, text: string): StatusTone {
+export function toneFor(key: string, text: string, row?: KubeObject): StatusTone {
   if (key === 'status') {
-    return badgeTone(statusTone(text));
+    const served = row ? serverStateTone(row) : null;
+    return badgeTone(served ?? statusTone(text));
   }
   if (key === 'ready') {
     return badgeTone(readyTone(text));

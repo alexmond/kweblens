@@ -8,6 +8,7 @@ import {
   parseFilter,
   statusQuery,
   statusQueryable,
+  withStatusTerm,
 } from './objectFilter';
 import type { KubeObject } from './types';
 
@@ -458,6 +459,91 @@ describe('the help the popover renders stays true', () => {
     expect(notes).toContain('label:partition');
     expect(notes).toContain('field selectors');
     expect(notes).toContain('nothing is truncated');
+  });
+});
+
+// ---- writing a status term back into the query ------------------------------------------------
+// The parser's inverse (GH#341): what a status chip's click does to the box. Every case below
+// is about the query still saying the truth afterwards — the box is the one mechanism that
+// owns filtering, so a rewrite that loses a term hides rows nobody asked to hide.
+
+describe('withStatusTerm', () => {
+  it('adds one to an empty query', () => {
+    expect(withStatusTerm('', 'Running')).toBe('status:Running');
+  });
+
+  it('replaces the positive status term rather than ANDing a second one', () => {
+    // Terms are ANDed and the grammar has no "either", so two status terms select NOTHING.
+    // A rail that appended would answer its second click with an empty table.
+    expect(withStatusTerm('status:Running', 'Pending')).toBe('status:Pending');
+    expect(kept('status:Running status:Pending', STATED)).toEqual([]);
+  });
+
+  it('keeps every other term, wherever the status term sat', () => {
+    expect(withStatusTerm('ns:prod status:Running -web app=x', 'Pending')).toBe('ns:prod -web app=x status:Pending');
+  });
+
+  it('keeps quoted text, regexes and value lists whole', () => {
+    // The reason this lives beside the parser: knowing where one term ends is the tokenizer's
+    // knowledge, and a second splitter written next to a caller is a copy that goes stale.
+    expect(withStatusTerm('name:"two words" /^web-\\d+$/ env in (dev,stage)', 'Pending')).toBe(
+      'name:"two words" /^web-\\d+$/ env in (dev,stage) status:Pending',
+    );
+  });
+
+  it('leaves a NEGATED status term alone — it is a different question', () => {
+    // "everything except the healthy ones" ANDs with a positive term perfectly well, and
+    // dropping it would silently widen the list under the operator.
+    expect(withStatusTerm('-status:Running', 'Pending')).toBe('-status:Running status:Pending');
+    expect(withStatusTerm('-status:Running', null)).toBe('-status:Running');
+    expect(kept('-status:Running status:Pending', STATED)).toEqual(['sched-1']);
+  });
+
+  it('removes the term when given no label', () => {
+    expect(withStatusTerm('ns:prod status:Running', null)).toBe('ns:prod');
+    expect(withStatusTerm('status:Running', null)).toBe('');
+  });
+
+  it('quotes a state whose name has a space in it, and the term selects it back', () => {
+    // A bare `status:No endpoints` is two terms selecting nothing. No workload state has a
+    // space today; the kinds GH#336 goes on to cover do.
+    const q = withStatusTerm('', 'No endpoints');
+    expect(q).toBe('status:"No endpoints"');
+    expect(kept(q, STATED)).toEqual(['svc-1']);
+  });
+
+  it('round-trips every state the covered kinds can be in', () => {
+    // WorkloadHealth's whole vocabulary, plus the waiting reasons a pod's state is named
+    // after. A term that does not select its own label back is a chip offering a number and
+    // then showing zero rows.
+    for (const label of [
+      'Running',
+      'Completed',
+      'Pending',
+      'CrashLoopBackOff',
+      'ImagePullBackOff',
+      'ErrImagePull',
+      'Healthy',
+      'Unavailable',
+      'Idle',
+      'Ready',
+      'Active',
+      'Succeeded',
+      'Failed',
+      'Suspended',
+      'Scheduled',
+      'Unknown',
+    ]) {
+      const q = withStatusTerm('', label);
+      expect(parseFilter(q).error, `${label}: ${parseFilter(q).error}`).toBeNull();
+      expect(kept(q, [stated('hit', label, 'ok'), stated('miss', 'Something else', 'ok')]), label).toEqual(['hit']);
+    }
+  });
+
+  it('returns a query it cannot even tokenize unchanged', () => {
+    // Half-typed, not broken forever: rewriting the string someone is in the middle of typing
+    // would move the caret out from under them, and there is no term structure there to edit.
+    expect(withStatusTerm('name:"half typed', 'Running')).toBe('name:"half typed');
   });
 });
 

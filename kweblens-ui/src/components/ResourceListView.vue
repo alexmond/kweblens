@@ -6,6 +6,7 @@ import { resourceListEmpty } from '../emptyState';
 import { activeQuery, FILTER_HELP, FILTER_HELP_NOTES, parseFilter } from '../objectFilter';
 import type { RowAction } from '../rowActions';
 import { listCountLabel } from '../shell';
+import { statusChips } from '../statusChips';
 import type { TableColumn } from '../table';
 import type { KubeObject, NavItem } from '../types';
 import ResourceTable from './ResourceTable.vue';
@@ -17,6 +18,13 @@ const props = defineProps<{
   selected: NavItem;
   filtered: KubeObject[];
   objects: KubeObject[];
+  /**
+   * The rows every narrowing EXCEPT the query's positive `status:` terms already selects —
+   * namespace, Helm scope, and the rest of the filter. The status chips count these, which is
+   * what makes a chip's number the number of rows its click produces; see `statusChips.ts`.
+   * The shell owns it because the Helm scope lives there and is not visible from here.
+   */
+  statusRows: KubeObject[];
   query: string;
   live: boolean;
   /** The Helm release the view is scoped to, or null. It narrows `filtered`, so it has to
@@ -62,6 +70,11 @@ const narrowedBy = computed(() => activeQuery(props.query, filter.value));
 const countLabel = computed(() =>
   listCountLabel(props.filtered.length, props.objects.length, narrowedBy.value, props.scope !== null),
 );
+
+// The states present in the rows, each a click away from being the filter (statusChips.ts owns
+// the derivation and the promise its number makes). Recomputed when the rows or the query
+// change — one pass over rows already in memory, no request and no watch of its own.
+const chips = computed(() => statusChips(props.statusRows, props.query));
 
 // Why the table is empty, worked out here and rendered there — three unrelated situations
 // used to share naive-ui's default "No Data".
@@ -140,6 +153,30 @@ const emptyCopy = computed(() =>
         </div>
       </NPopover>
     </div>
+    <!-- The states actually present, each a click away from being the filter (GH#341).
+         Its OWN row, not another item in `.content-head`. #331 measured that row at the narrow
+         end and found it needs 585.01px of a 689px content column with nothing else in it — a
+         rail of four or five chips is 300px more, so putting it there would re-open exactly the
+         defect that ticket closed, on the two pills it had just pinned. A wrapping row of its
+         own costs one line of height and cannot squeeze anything.
+         A button, not a span: it is the same click a link would be, it is reachable by keyboard
+         and it says whether it is on. `aria-pressed` carries that to a screen reader, and the
+         `.on` class carries it to everyone else with a border rather than only a colour. -->
+    <div v-if="chips.length > 0" class="status-rail">
+      <button
+        v-for="c in chips"
+        :key="c.label"
+        type="button"
+        class="status-chip"
+        :class="[`tone-${c.tone}`, { on: c.active }]"
+        :aria-pressed="c.active"
+        :title="c.active ? `Showing only ${c.label} — click to clear` : `Show only ${c.label}`"
+        @click="emit('update:query', c.query)"
+      >
+        <span class="status-chip-label">{{ c.label }}</span>
+        <span class="status-chip-count">{{ c.count }}</span>
+      </button>
+    </div>
     <!-- A pattern that did not compile. NOT an ErrorNotice: nothing failed to load, its Retry
          would re-run a fetch that is fine, and the list below is complete rather than empty.
          It has to be said out loud all the same — silently showing every row would read as a
@@ -176,6 +213,92 @@ const emptyCopy = computed(() =>
 </template>
 
 <style scoped>
+/* ---- The status chips (GH#341) ------------------------------------------------------------
+   Wraps rather than shrinks. Every chip is `flex: 0 0 auto` for #331's reason — a flex item's
+   automatic minimum is its MIN-CONTENT, which for `CrashLoopBackOff 1` is the longest word, so
+   a squeezed rail would silently stack the count under the label and turn a pill into a
+   two-line box. Here there is somewhere for the overflow to go (the next line), which is why
+   this row can hold an unbounded number of chips where `.content-head` could not hold one. */
+.status-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+/* A `<button>` reset first: the browser's own chrome would fight every rule below. */
+.status-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 1px 9px;
+  border-radius: 11px;
+  /* Transparent rather than absent, so turning a chip on changes a colour and not the layout —
+     a rail that reflows under the pointer on every click is how a mis-click happens. */
+  border: 1px solid transparent;
+  background: var(--subtle-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Tone comes from the semantic tokens, which carry a designed dark value each (see styles.css)
+   — the alternative, a literal per tone, is how `.chip` shipped at 1.75:1 in dark (#260). The
+   tint composites over whatever panel it lands on. `idle` deliberately has no colour at all:
+   finished and scaled-to-zero are neither healthy nor broken, and the overview mutes them for
+   the same reason.
+
+   The FOREGROUND is the token mixed toward the theme's own text, not the token itself. Measured
+   here first: plain `var(--warn-fg)` on `var(--warn-tint)` read 4.19:1 in LIGHT — under AA, and
+   passing at 8.11:1 in dark, which is the exact shape of a one-theme colour defect. That pair
+   is a known bad one in this file already (`.filter-error` carries the same measurement at
+   4.46:1 and answers it with `--text`), and it is a bad one because a state's `fg` was designed
+   to read on the PANEL, not on its own tint — the mistake the nav, the palette and the drawer's
+   Naive tag each made (3.80 / 3.02 / 3.36:1).
+   `--text` is not the answer here the way it is for `.filter-error`, because there the tone is
+   carried by a border and a wash and here the colour IS the tone: six chips of one grey say
+   nothing. The mix is the construction `--bar-link` and `.chip` use — derive from the surface
+   rather than re-pick a literal per theme — and it moves each tone toward black in light and
+   toward white in dark, which is the direction that gains contrast in both. 65% keeps the hue
+   plainly readable as green / amber / red; measured after it, ok/warn/err/idle read
+   6.92 / 6.19 / 7.54 / 12.93:1 in light and 8.52 / 8.57 / 7.71 / 9.98:1 in dark, and an ACTIVE
+   chip (the one whose border is on) 7.54:1 light / 7.71:1 dark. */
+.status-chip.tone-ok {
+  background: var(--ok-tint);
+  color: color-mix(in srgb, var(--ok-fg) 65%, var(--text));
+}
+.status-chip.tone-warn {
+  background: var(--warn-tint);
+  color: color-mix(in srgb, var(--warn-fg) 65%, var(--text));
+}
+.status-chip.tone-err {
+  background: var(--danger-tint);
+  color: color-mix(in srgb, var(--danger-fg) 65%, var(--text));
+}
+
+/* On. `currentColor` rather than the accent: the border belongs to the state the chip names,
+   and an accent ring would read as a fourth tone. Weight and border together, because colour
+   alone is not a signal for everyone. */
+.status-chip.on {
+  border-color: currentcolor;
+  font-weight: 600;
+}
+
+.status-chip:hover {
+  border-color: currentcolor;
+}
+
+/* The count is the claim being made — "click and see this many" — so it is neither muted into
+   secondary text nor faded with an `opacity`, which would quietly undo the contrast the tone
+   tokens were measured for. Tabular figures so a rail of counts does not jitter under a watch. */
+.status-chip-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 /* The filter-syntax popover. Same colour reasoning as `.cols-note` below: inside a Naive
    popover the panel is NOT the app's panel, so `--muted` measures under AA on its dark
    surface. `--text` for everything, hierarchy carried by size and weight. */

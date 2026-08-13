@@ -248,4 +248,74 @@ describe('toneFor', () => {
   it('gives an unclassified column no tone', () => {
     expect(toneFor('message', 'anything')).toBe('');
   });
+
+  it('takes the SERVER’s tone when the row carries one', () => {
+    // The Status column renders `kweblensState.label`, so classifying it by keyword would be a
+    // second opinion about a state the server already judged — the drift GH#336 removed from
+    // the counts, one colour further on. `Completed` is the case that proves it: the keyword
+    // table reads "complete" as ok, the verdict behind it says idle, and the card is muted.
+    const row = (label: string, tone: 'ok' | 'warn' | 'err' | 'idle'): KubeObject => ({
+      kind: 'Pod',
+      kweblensState: { label, tone },
+    });
+    expect(toneFor('status', 'Unavailable', row('Unavailable', 'err'))).toBe('err');
+    expect(toneFor('status', 'Pending', row('Pending', 'warn'))).toBe('warn');
+    // ok and idle both render as plain text — badgeTone's convention, unchanged: a pill marks
+    // an exception, and neither "healthy" nor "finished" is one.
+    expect(toneFor('status', 'Running', row('Running', 'ok'))).toBe('');
+    expect(toneFor('status', 'Completed', row('Completed', 'idle'))).toBe('');
+    // A state the keyword table would have called an error, that the server calls idle.
+    expect(statusTone('Failed')).toBe('err');
+    expect(toneFor('status', 'Failed', row('Failed', 'idle'))).toBe('');
+  });
+
+  it('falls back to the keyword table for a row with no state', () => {
+    // Nodes, Namespaces, claims and a CRD's own printer column are not covered by the
+    // vocabulary, so they still render `status.phase` and still need classifying.
+    const node: KubeObject = { kind: 'Node', metadata: { name: 'n' } };
+    expect(toneFor('status', 'NotReady', node)).toBe('err');
+    expect(toneFor('status', 'Ready', node)).toBe('');
+  });
+});
+
+describe('the Status column of a covered kind is the server’s state', () => {
+  // The wart #337 left and #341 settles: `status.phase` said Succeeded where the card and the
+  // filter both said Completed, and six of the seven covered kinds had no Status column at all.
+  const COVERED = ['pods', 'deployments', 'statefulsets', 'daemonsets', 'replicasets', 'jobs', 'cronjobs'];
+
+  const finishedPod: KubeObject = {
+    kind: 'Pod',
+    metadata: { name: 'p' },
+    status: { phase: 'Succeeded' },
+    kweblensState: { label: 'Completed', tone: 'idle' },
+  };
+
+  const statusOf = (id: string, o: KubeObject): string | undefined =>
+    columnsFor(id)
+      .find((c) => c.key === 'status')
+      ?.render(o);
+
+  it('gives every covered kind one', () => {
+    for (const id of COVERED) {
+      expect(statusOf(id, finishedPod), id).toBe('Completed');
+    }
+  });
+
+  it('renders the state, not the phase', () => {
+    expect(statusOf('pods', finishedPod)).toBe('Completed');
+    expect(statusOf('pods', finishedPod)).not.toBe('Succeeded');
+  });
+
+  it('renders — when the server reached no verdict, rather than guessing from the phase', () => {
+    // "We did not send it" and "it is fine" are different claims, and the second one would be
+    // invented here. Same rule as ListProjection's withheld values.
+    expect(statusOf('pods', { kind: 'Pod', status: { phase: 'Running' } })).toBe('—');
+  });
+
+  it('leaves the kinds the vocabulary does not cover on their own phase', () => {
+    // Nothing there to disagree with yet: no state ships for them, so no chip counts them.
+    const claim: KubeObject = { kind: 'PersistentVolumeClaim', status: { phase: 'Bound' } };
+    expect(statusOf('persistentvolumeclaims', claim)).toBe('Bound');
+    expect(statusOf('namespaces', { kind: 'Namespace', status: { phase: 'Active' } })).toBe('Active');
+  });
 });

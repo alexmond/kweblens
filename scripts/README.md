@@ -9,7 +9,7 @@ once — the reason is in the header comment of each script.
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
 | [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
-| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, two labels truncating alike, a pill squeezed below its own label, unused row width. |
+| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, two labels truncating alike, a pill squeezed below its own label or cut off by its container, unused row width. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
@@ -309,6 +309,22 @@ and there is nothing to fix. It is scoped to pills — a self-painted background
 a short label — so it stays quiet on prose that is supposed to wrap: the same header's `h1`
 wraps to three lines beside the badge and is fine. Four new `--self-test` controls, one of
 which must fire.
+
+The `sliced` line is that same shape, truncated rather than wrapped, and it was added after
+#341 for the same reason: nothing here could see it. The list's Status column started rendering
+the server's state — `CrashLoopBackOff`, where it had rendered `status.phase`'s `Running` — and
+the 119.38px pill was cut flat at 102.83px by the Naive cell that hides its overflow: a
+square-ended red block reading `CrashLoopBackO`, with no ellipsis, because `text-overflow` does
+not apply to a nested inline-block. `clipped` compares text with **its own** box and the tag's
+inner span is exactly as wide as its text, so the cut one level up is invisible to it — and a
+wrapper whose only child is a pill has no direct text node for it to measure anyway. `chip`
+asks whether a pill wrapped; this one did not. It was found by cropping a screenshot at 300%,
+which is not a method. So: the pill's own border box against the padding box of the ancestor
+that clips it, failing only when that ancestor is one the reader cannot get past — an
+`overflow-x: auto` with real overflow is a scroller (`.mini-scroll` is this project's sanctioned
+escape hatch) and nothing is lost. Four new controls, one of which must fire, and it was then
+run against the live defect before the fix, where it reports `119.38px in 102.83px of
+.n-ellipsis: 16.55px of the pill cut off`.
 
 The `row` line is the opposite defect, added after #236: how much of a container's width its
 own children actually reach. The cluster overview's three stat cards sat in a 2225px row and

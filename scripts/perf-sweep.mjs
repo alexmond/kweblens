@@ -109,7 +109,14 @@ async function discoverLeaves(page) {
     await page.waitForTimeout(80);
   }
   const labels = await page.locator('.leaf-label').allInnerTexts().catch(() => []);
-  const uniq = [...new Set(labels.map((l) => l.trim()).filter(Boolean))];
+  // Whitespace COLLAPSED, not merely trimmed. #332 split a leaf's label into a head span that
+  // gives way and a tail span that does not, so a two-word label's innerText now carries a
+  // newline in the middle — `Persistent Volume\nClaims`. This walker kept the newline, and the
+  // anchored regex below then matched nothing, so seven pages reported a 4s click timeout and
+  // were counted OVER BUDGET: a nav change breaking the tool that walks the nav, reported as a
+  // performance defect in the pages. (`openLeaf` in lib/kw-playwright.mjs was already fine,
+  // which is the third time this file's private copy of a walker has drifted from it.)
+  const uniq = [...new Set(labels.map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean))];
   return ONLY.length ? uniq.filter((l) => ONLY.includes(l)) : uniq;
 }
 
@@ -132,7 +139,11 @@ const listState = (page) =>
 
 async function measureLeaf(page, label) {
   await resetPerf(page);
-  const leaf = page.locator('.leaf-label', { hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).first();
+  // Matched on the label with its whitespace collapsed, for the reason in `discoverLeaves`:
+  // the DOM text of a split label contains a newline the caller's label does not.
+  const wanted = label.replace(/\s+/g, ' ').trim();
+  const pattern = wanted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+  const leaf = page.locator('.leaf-label', { hasText: new RegExp(`^\\s*${pattern}\\s*$`) }).first();
   const t0 = Date.now();
   await leaf.click({ timeout: 4000 });
 

@@ -1,4 +1,4 @@
-import { gib, objSpec as spec, objStatus as status, parseMemBytes, toNum as num } from './kube';
+import { gib, objSpec as spec, objStateLabel, objStatus as status, parseMemBytes, toNum as num } from './kube';
 import type { KubeObject, PrinterColumn } from './types';
 
 // A kind-specific column: the "middle" columns between Name/Namespace and Age
@@ -279,45 +279,79 @@ function involvedObject(o: KubeObject): string {
   return dash([str(io.kind), str(io.name)].filter(Boolean).join('/'));
 }
 
+/**
+ * The Status column for every kind the server computes a state for — the SAME value the
+ * overview card counts and the `status:` filter selects (GH#341, the wart #337 left).
+ *
+ * <p>What it replaces was `status.phase` and, for four of these seven kinds, nothing at all.
+ * Both were wrong in the same way: a finished Pod read `Succeeded` in the column while the card
+ * beside it said `Completed` and `status:Completed` was what selected it, and a Deployment had
+ * no column to disagree with. Three words for one fact, and the chip rail now sits directly
+ * above the column, so the disagreement would be an inch apart on screen rather than a click.
+ *
+ * <p>`—` when the row carries no state, never a guess and never a blank: on a covered kind that
+ * means the server did not say, which is a different claim from "it is fine" — the same reason
+ * `ListProjection`'s withheld values render as `—` rather than as empty. Uncovered kinds keep
+ * their own `status.phase` column and their keyword tone (`statusTone`); they are not covered by
+ * the vocabulary yet, so there is nothing there to disagree with.
+ *
+ * <p>The 150px is measured, not chosen. A state is now as long as `CrashLoopBackOff`, which
+ * renders as a 119.38px pill, and at the 110px default the cell hid 16.55px of it behind a
+ * straight edge reading `CrashLoopBackO` — the defect `ui-measure`'s `sliced` check was written
+ * for. This buys the states an operator scans a list FOR; a longer waiting reason still
+ * truncates, but inside its own shape and with the cell's tooltip (see `StatusBadge`).
+ */
+const serverState: ColumnDef = { key: 'status', header: 'Status', render: (o) => dash(objStateLabel(o)), width: 150 };
+
 // resourceId -> the kind-specific middle columns
 const COLUMNS: Record<string, ColumnDef[]> = {
+  // Status stays after Ready here, where `kubectl get pods` puts it and where this table has
+  // always had it — the value changes, the layout does not.
   pods: [
     { key: 'ready', header: 'Ready', render: podReady, width: 90 },
-    { key: 'status', header: 'Status', render: (o) => dash(str(status(o).phase)) },
+    serverState,
     { key: 'restarts', header: 'Restarts', render: podRestarts, width: 100 },
     { key: 'node', header: 'Node', render: (o) => dash(str(spec(o).nodeName)) },
   ],
+  // The six kinds below had no Status column at all (or, for Jobs, a second guess at one):
+  // "3 Unavailable" on the card was unfindable in the table it linked to. Status leads their
+  // middle columns — first after Name/Namespace, so the verdict reads before the arithmetic
+  // behind it.
   deployments: [
+    serverState,
     { key: 'ready', header: 'Ready', render: (o) => `${num(status(o).readyReplicas)}/${num(spec(o).replicas)}` },
     { key: 'uptodate', header: 'Up-to-date', render: (o) => String(num(status(o).updatedReplicas)) },
     { key: 'available', header: 'Available', render: (o) => String(num(status(o).availableReplicas)) },
   ],
   statefulsets: [
+    serverState,
     { key: 'ready', header: 'Ready', render: (o) => `${num(status(o).readyReplicas)}/${num(spec(o).replicas)}` },
   ],
   daemonsets: [
+    serverState,
     { key: 'desired', header: 'Desired', render: (o) => String(num(status(o).desiredNumberScheduled)) },
     { key: 'current', header: 'Current', render: (o) => String(num(status(o).currentNumberScheduled)) },
     { key: 'ready', header: 'Ready', render: (o) => String(num(status(o).numberReady)) },
   ],
   replicasets: [
+    serverState,
     { key: 'desired', header: 'Desired', render: (o) => String(num(spec(o).replicas)) },
     { key: 'current', header: 'Current', render: (o) => String(num(status(o).replicas)) },
     { key: 'ready', header: 'Ready', render: (o) => String(num(status(o).readyReplicas)) },
   ],
+  // The Job column this replaces read `succeeded > 0 ? 'Complete' : active ? 'Running' : '—'`,
+  // which is a third vocabulary again: the server calls those states Succeeded, Active and
+  // Failed, and it is the only one of the three that notices a Job that failed.
   jobs: [
+    serverState,
     {
       key: 'completions',
       header: 'Completions',
       render: (o) => `${num(status(o).succeeded)}/${num(spec(o).completions)}`,
     },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (o) => (num(status(o).succeeded) > 0 ? 'Complete' : dash(str(status(o).active ? 'Running' : ''))),
-    },
   ],
   cronjobs: [
+    serverState,
     { key: 'schedule', header: 'Schedule', render: (o) => dash(str(spec(o).schedule)) },
     { key: 'suspend', header: 'Suspend', render: (o) => (spec(o).suspend ? 'Yes' : 'No') },
     { key: 'active', header: 'Active', render: (o) => String(((status(o).active as Any[]) ?? []).length) },
