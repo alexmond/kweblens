@@ -231,11 +231,32 @@ const {
   toggleFloat,
 } = useDock(cluster);
 
+/**
+ * A filter a navigation arrived WITH — an overview state opening exactly the objects it counted
+ * (#338) — held for the reset below rather than assigned to `query` at the call site, because
+ * that reset clears the box on every kind/namespace change and runs after the navigation call
+ * returns.
+ *
+ * <b>It carries the kind it was meant for, and that is not decoration.</b> The first version
+ * cleared it on `nextTick` instead, which measured as the filter never arriving at all:
+ * `requestQuery` ran BEFORE the mutation that queues the reset, so there was no flush promise to
+ * chain onto yet and the clear resolved first. Matching on the kind removes the question — the
+ * reset applies a pending filter only when it is the reset that navigation caused, and clears it
+ * either way, so no ordering between the two can either lose it or leak it into a later
+ * navigation.
+ */
+let pendingQuery: { kind: string; query: string } | null = null;
+
 // Reset the view when the selected kind/namespace changes. The cluster watch that feeds this
 // one is declared further up, for the ordering reason recorded there.
 watch([selected, namespace], () => {
   detail.value = null;
-  query.value = '';
+  // `pendingQuery !== null` first, and not merely for the type checker: written as
+  // `pendingQuery?.kind === selected.value?.kind` it is TRUE when both are absent, which is
+  // every reset that had no pending filter and no selection.
+  const arriving = pendingQuery !== null && pendingQuery.kind === selected.value?.kind;
+  query.value = arriving ? (pendingQuery?.query ?? '') : '';
+  pendingQuery = null;
   // Restore this kind's saved column choice, falling back to its defaults (e.g. Nodes offers
   // more columns than fit — the extras stay available in the Columns ▾ picker). Previously
   // this always re-seeded from the defaults, so enabling an opt-in column was lost on the
@@ -259,6 +280,18 @@ const { navigateToKind, navigateToPortForwards, navigateToHelmRelease, knowsKind
     currentNamespace: () => namespace.value,
   },
 );
+
+/**
+ * Open a kind's list already filtered to one state (#338).
+ *
+ * The namespace is deliberately not passed: `navigateToKind` keeps the filter already in force,
+ * so the list is scoped to the same slice of the cluster the card counted from (#158). Passing
+ * one would be the same value, spelled a second way.
+ */
+const navigateToState = (kind: string, filterQuery: string) => {
+  pendingQuery = { kind, query: filterQuery };
+  navigateToKind(kind);
+};
 
 // What the drawer is showing: the row the table highlights, and the object a delete has to
 // close the drawer for (#233 put delete inside the drawer). One declaration, two consumers.
@@ -515,6 +548,7 @@ const onForwardStarted = () => {
                 :category="overviewCategory"
                 :namespace="namespace"
                 @navigate="navigateToKind"
+                @navigate-state="navigateToState"
               />
               <HelmView
                 v-else-if="showHelm"

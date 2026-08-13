@@ -32,7 +32,16 @@ const props = defineProps<{ cluster: string; category: string; namespace?: strin
 
 // Emitted with the kind (and namespace, for a named object) the user asked to see. The shell owns
 // navigation; the overview only says where it wants to go.
-const emit = defineEmits<{ (e: 'navigate', kind: string, namespace?: string): void }>();
+//
+// `navigate-state` is the same request narrowed: the kind, plus the filter query that selects
+// exactly the objects the card counted under that state (#338). The QUERY travels, not the state
+// label — the card already asked the filter grammar how to write it (`objectFilter.statusQuery`),
+// and re-deriving it in the shell would be a second spelling of the same rule, free to drift from
+// the one the parser reads.
+const emit = defineEmits<{
+  (e: 'navigate', kind: string, namespace?: string): void;
+  (e: 'navigate-state', kind: string, query: string): void;
+}>();
 
 const copy = computed(() => OVERVIEW_CATEGORIES[props.category]);
 /** Events are about workloads; on a storage or config page they would be noise. */
@@ -146,7 +155,9 @@ const eventsUnchecked = computed(() => uncheckedNote(events.value, 'events'));
         :label="c.label"
         :states="c.states"
         clickable
+        states-clickable
         @select="emit('navigate', c.kind)"
+        @select-state="(q) => emit('navigate-state', c.kind, q)"
       />
     </div>
 

@@ -3648,9 +3648,61 @@ body.dragging {
 
 .ov-state {
   display: flex;
-  gap: 6px;
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* The line itself, which is a <span> or a <button> depending on whether this state opens
+   anything (#338). Everything a button would bring of its own is turned off here — including
+   `color`, which a button does NOT inherit: that is how `.ov-card.danger` reached 1.34:1 when
+   the CARD changed tag by state, and this element changes tag per LINE, so the same mistake
+   would have shipped four tones of it. The tone colours are set on the spans inside, so they
+   survive either tag. */
+.ov-state-line {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+/* Underline rather than a background pad, deliberately: a hover pad is a new colour surface
+   and the last one shipped at 1.16:1 with no dark override. An underline adds no colour, so it
+   cannot fail in one theme and pass in the other. */
+.ov-state-link,
+.ov-head-link {
+  cursor: pointer;
+}
+
+.ov-state-link:hover .ov-state-l,
+.ov-head-link:hover .ov-kind {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ov-state-link:focus-visible,
+.ov-head-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* The card's own destination when its states are buttons — a button cannot contain a button, so
+   the shell is a plain div in that case and this is what navigates (see StatCard.vue). */
+.ov-head-link {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }
 
 /* Tabular figures so the counts line up down the column rather than wandering. */
