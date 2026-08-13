@@ -539,6 +539,7 @@ const onForwardStarted = () => {
                 :knows-kind="knowsKind"
                 :authed="!!authUser"
                 @navigate="navigateToKind"
+                @navigate-state="navigateToState"
                 @require-auth="showLogin = true"
               />
               <CategoryOverview

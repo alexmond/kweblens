@@ -42,8 +42,14 @@ const props = defineProps<{
   authed?: boolean;
 }>();
 
+// `navigate-state` is the same request narrowed: a click on `5 Ready` opens the Nodes list showing
+// exactly the five the card counted. The QUERY travels rather than the state label — the card
+// already asked the filter grammar how to write it (`objectFilter.statusQuery`), and re-deriving
+// it here would be a second spelling of the same rule, free to drift from the one the parser
+// reads. No namespace goes with it: these kinds are cluster-scoped (#313).
 const emit = defineEmits<{
   (e: 'navigate', kind: string, namespace?: string): void;
+  (e: 'navigate-state', kind: string, query: string): void;
   (e: 'require-auth'): void;
 }>();
 
@@ -156,7 +162,9 @@ const warningsCopy = computed(() =>
             :label="c.label"
             :states="c.states"
             clickable
+            :states-clickable="c.selectable"
             @select="emit('navigate', c.kind)"
+            @select-state="(q) => emit('navigate-state', c.kind, q)"
           />
           <!-- `—` when the events call failed, never 0: the number is a claim about the
                cluster and we only make it when the cluster answered (checkState.ts).

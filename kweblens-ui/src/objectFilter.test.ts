@@ -299,6 +299,28 @@ describe('statusQuery writes what statusMatcher reads', () => {
     expect(kept(statusQuery('Completed'), STATED)).toEqual(['job-done']);
   });
 
+  it("keeps kubectl's comma-bearing node state whole, and apart from the plain one", () => {
+    // The Cluster overview's vocabulary (#339) is kubectl's: a cordoned node is
+    // `Ready,SchedulingDisabled`, one term with a comma in it. Two ways this could go wrong and
+    // both would be silent — the comma splitting the term, or the exact match slipping so that
+    // `status:Ready` also selects the cordoned node, which is counted on a different line of the
+    // card.
+    const nodes: KubeObject[] = [
+      { kind: 'Node', metadata: { name: 'worker-1' }, kweblensState: { label: 'Ready', tone: 'ok' } },
+      {
+        kind: 'Node',
+        metadata: { name: 'worker-3' },
+        kweblensState: { label: 'Ready,SchedulingDisabled', tone: 'warn' },
+      },
+      { kind: 'Node', metadata: { name: 'worker-4' }, kweblensState: { label: 'NotReady', tone: 'err' } },
+    ];
+
+    expect(statusQuery('Ready,SchedulingDisabled')).toBe('status:Ready,SchedulingDisabled');
+    expect(kept(statusQuery('Ready,SchedulingDisabled'), nodes)).toEqual(['worker-3']);
+    expect(kept(statusQuery('Ready'), nodes)).toEqual(['worker-1']);
+    expect(kept(statusQuery('NotReady'), nodes)).toEqual(['worker-4']);
+  });
+
   it('refuses a label the grammar cannot express rather than writing one that means something else', () => {
     // There is no escape character, so a `"` inside a value ends the quote. The honest answer
     // is that such a state has no query — the caller renders it as text — because the
