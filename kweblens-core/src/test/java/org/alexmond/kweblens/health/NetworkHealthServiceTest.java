@@ -10,6 +10,7 @@ import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.resource.ResourceService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,7 +35,7 @@ class NetworkHealthServiceTest {
 	private NetworkHealthService service() {
 		ClusterRegistry registry = new ClusterRegistry();
 		registry.register("mock", "mock", this.client);
-		return new NetworkHealthService(registry);
+		return new NetworkHealthService(registry, new ResourceService(registry));
 	}
 
 	private void service(String name, String type) {

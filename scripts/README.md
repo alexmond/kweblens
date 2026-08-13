@@ -13,6 +13,7 @@ once — the reason is in the header comment of each script.
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
+| [`state-link-check.mjs`](state-link-check.mjs) | Click every state on an overview card and fail unless the list it opens holds exactly the objects the card counted. |
 | [`resize-check.mjs`](resize-check.mjs) | Drag a multiline field's corner, then type: fail unless it has a grabber AND the pulled height survives. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
@@ -124,6 +125,11 @@ PREPARE='press:Control+k;fill:.palette-input=pod' node scripts/contrast-check.mj
 node scripts/contrast-check.mjs --self-test             # positive controls; no running app
 
 node scripts/perf-sweep.mjs                            # needs a cluster or --sim
+
+# Does `3 Pending` open a list holding exactly those three? (#336) Three numbers, not one:
+# the card's, the header's "N of M", and the rows drawn — the header alone is the list
+# agreeing with itself.
+PORT=8094 CLUSTER_NS=monitoring node scripts/state-link-check.mjs network storage config
 
 # Does a cluster switch leave the PREVIOUS cluster's numbers on screen? (#323)
 # TO must be a cluster that cannot answer, or an equal value proves nothing — see the header.

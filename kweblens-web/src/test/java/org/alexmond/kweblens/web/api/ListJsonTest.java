@@ -11,6 +11,7 @@ import io.fabric8.kubernetes.client.utils.Serialization;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.health.StatusContext;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 
@@ -82,7 +83,8 @@ class ListJsonTest {
 		List<GenericKubernetesResource> objects = java.util.Arrays.stream(secrets)
 			.map(ListJsonTest::parse)
 			.collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
-		return Serialization.asJson(ListProjection.forList(objects)).getBytes(StandardCharsets.UTF_8);
+		return Serialization.asJson(ListProjection.forList(objects, StatusContext.none()))
+			.getBytes(StandardCharsets.UTF_8);
 	}
 
 	@Test
@@ -99,7 +101,7 @@ class ListJsonTest {
 			.always();
 		server.expect().get().withPath(PATH + "?continue=t3&limit=2").andReturn(200, page(secret("s5"), "")).always();
 
-		byte[] chunked = ListJson.chunked(service(), "mock", SECRETS, "app", 2);
+		byte[] chunked = ListJson.chunked(service(), "mock", SECRETS, "app", 2, StatusContext.none());
 
 		assertThat(chunked).isEqualTo(theOldWay(secret("s1"), secret("s2"), secret("s3"), secret("s4"), secret("s5")));
 		// ...and the projection is still what makes those bytes small.
@@ -112,7 +114,7 @@ class ListJsonTest {
 	void anEmptyCollectionIsAnEmptyArray() {
 		server.expect().get().withPath(PATH + "?limit=2").andReturn(200, page("", "")).always();
 
-		assertThat(ListJson.chunked(service(), "mock", SECRETS, "app", 2))
+		assertThat(ListJson.chunked(service(), "mock", SECRETS, "app", 2, StatusContext.none()))
 			.isEqualTo("[]".getBytes(StandardCharsets.UTF_8));
 	}
 
@@ -121,7 +123,7 @@ class ListJsonTest {
 		// The podsOnNode path: nothing to chunk, but it must produce the same bytes.
 		List<GenericKubernetesResource> objects = List.of(parse(secret("s1")), parse(secret("s2")));
 
-		assertThat(ListJson.of(objects)).isEqualTo(theOldWay(secret("s1"), secret("s2")));
+		assertThat(ListJson.of(objects, StatusContext.none())).isEqualTo(theOldWay(secret("s1"), secret("s2")));
 	}
 
 }

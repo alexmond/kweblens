@@ -6,6 +6,8 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.client.utils.Serialization;
 import org.junit.jupiter.api.Test;
 
+import org.alexmond.kweblens.health.StatusContext;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -26,7 +28,7 @@ class ListProjectionTest {
 	}
 
 	private String output(GenericKubernetesResource resource) {
-		return Serialization.asJson(ListProjection.forList(resource));
+		return Serialization.asJson(ListProjection.forList(resource, StatusContext.none()));
 	}
 
 	@Test
@@ -117,7 +119,7 @@ class ListProjectionTest {
 				kind: Secret
 				metadata: {name: b, namespace: app}
 				data: {k: dmFsdWVC}
-				""")));
+				""")), StatusContext.none());
 		String json = Serialization.asJson(projected);
 		assertThat(json).doesNotContain("dmFsdWVB").doesNotContain("dmFsdWVC");
 		assertThat(json).contains("\"a\"").contains("\"b\"");
@@ -155,18 +157,32 @@ class ListProjectionTest {
 				kind: Widget
 				metadata: {name: w1, namespace: app}
 				"""))).doesNotContain("kweblensState");
+	}
+
+	@Test
+	void addsNoStateToAContextCarryingKindWhenNoContextWasOpened() {
+		// A ConfigMap DOES have a state — "Referenced" or not — but only a
+		// StatusContext can reach it, and `output` here deliberately passes none.
+		// Falling through to a bare "OK" is the one thing that must not happen: it
+		// would make a row selectable on the strength of a scan nobody ran (GH#340).
 		assertThat(output(parse("""
 				apiVersion: v1
 				kind: ConfigMap
 				metadata: {name: settings, namespace: app}
 				data: {log-level: debug}
 				"""))).doesNotContain("kweblensState");
+		assertThat(output(parse("""
+				apiVersion: v1
+				kind: Service
+				metadata: {name: web, namespace: app}
+				spec: {type: ClusterIP}
+				"""))).doesNotContain("kweblensState");
 	}
 
 	@Test
 	void toleratesNullsAndObjectsWithNothingToStrip() {
-		assertThat(ListProjection.forList((GenericKubernetesResource) null)).isNull();
-		assertThat(ListProjection.forList((List<GenericKubernetesResource>) null)).isEmpty();
+		assertThat(ListProjection.forList((GenericKubernetesResource) null, StatusContext.none())).isNull();
+		assertThat(ListProjection.forList((List<GenericKubernetesResource>) null, StatusContext.none())).isEmpty();
 		assertThat(output(parse("""
 				apiVersion: v1
 				kind: Secret

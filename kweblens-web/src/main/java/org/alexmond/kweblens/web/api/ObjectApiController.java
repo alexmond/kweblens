@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import org.alexmond.kweblens.config.KweblensProperties;
+import org.alexmond.kweblens.health.StatusContext;
+import org.alexmond.kweblens.health.StatusContexts;
 import org.alexmond.kweblens.resource.CrdService;
 import org.alexmond.kweblens.resource.ListChunkExpiredException;
 import org.alexmond.kweblens.resource.PrinterColumn;
@@ -43,6 +45,8 @@ public class ObjectApiController {
 
 	private final KweblensProperties properties;
 
+	private final StatusContexts statusContexts;
+
 	/**
 	 * The CRD-declared printer columns for a kind (empty for built-in kinds). Lets the UI
 	 * render a custom resource's own columns instead of the generic projection.
@@ -60,7 +64,9 @@ public class ObjectApiController {
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/nodes/{node}/pods", produces = MediaType.APPLICATION_JSON_VALUE)
 	public byte[] podsOnNode(@PathVariable String clusterId, @PathVariable String node) {
-		return ListJson.of(resources.listPodsOnNode(clusterId, node));
+		// A Pod's verdict is a pure function of the Pod, so this list needs no context to
+		// carry the same state the Workloads card counted.
+		return ListJson.of(resources.listPodsOnNode(clusterId, node), StatusContext.none());
 	}
 
 	/**
@@ -75,6 +81,13 @@ public class ObjectApiController {
 	 * unchanged</b>: every object of the kind, same bytes. GH#263's refusal of a
 	 * client-visible {@code limit} stands — a substring filter over a truncated page
 	 * would report "no matches" for an object that exists.
+	 *
+	 * <p>
+	 * The {@link StatusContext} is opened <b>once, here</b>, and handed to every row:
+	 * four kinds have a verdict that needs a second collection (GH#340), and fetching it
+	 * per row is the one implementation of that which is not allowed. It is also opened
+	 * before the chunked walk rather than inside it, so a retry after an expired chunk
+	 * re-uses the same one instead of paying for it twice.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/objects",
 			produces = MediaType.APPLICATION_JSON_VALUE)
@@ -82,8 +95,9 @@ public class ObjectApiController {
 			@RequestParam(required = false) String namespace) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		int chunkSize = properties.getList().getChunkSize();
+		StatusContext context = statusContexts.open(clusterId, descriptor.kind(), namespace);
 		try {
-			return ListJson.chunked(resources, clusterId, descriptor, namespace, chunkSize);
+			return ListJson.chunked(resources, clusterId, descriptor, namespace, chunkSize, context);
 		}
 		catch (ListChunkExpiredException ex) {
 			// The snapshot was compacted away mid-scan, so every chunk already assembled
@@ -91,7 +105,7 @@ public class ObjectApiController {
 			// rather than return a list stitched from two — once; a second expiry is a
 			// cluster problem and surfaces as one.
 			log.info("Chunked list of '{}' expired mid-scan; restarting", resourceId);
-			return ListJson.chunked(resources, clusterId, descriptor, namespace, chunkSize);
+			return ListJson.chunked(resources, clusterId, descriptor, namespace, chunkSize, context);
 		}
 	}
 
@@ -132,6 +146,13 @@ public class ObjectApiController {
 	 * JSON, projected by {@link ListProjection} exactly as the initial list is. The two
 	 * are separate code paths feeding the same table, so a strip applied to only one of
 	 * them would be undone by the first watch event to arrive.
+	 *
+	 * <p>
+	 * That is also why the context is {@code refreshing} rather than a snapshot: a state
+	 * dropped from a watch event would silently remove the row from a {@code status:}
+	 * filter, and a state computed from Endpoints fetched when the page opened would
+	 * still be asserting them hours later. The stream is not watching those inputs — see
+	 * {@link StatusContexts} for the ceiling that puts on re-opening.
 	 */
 	@GetMapping(value = "/api/v1/clusters/{clusterId}/resources/{resourceId}/objects/watch",
 			produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -139,10 +160,11 @@ public class ObjectApiController {
 			@RequestParam(required = false) String namespace) {
 		ResourceDescriptor descriptor = descriptor(clusterId, resourceId);
 		SseEmitter emitter = new SseEmitter(0L);
+		StatusContext context = statusContexts.refreshing(clusterId, descriptor.kind(), namespace);
 		Watch watch;
 		try {
 			watch = resources.watchRaw(clusterId, descriptor, namespace,
-					(type, obj) -> send(emitter, type, ListProjection.forList(obj)));
+					(type, obj) -> send(emitter, type, ListProjection.forList(obj, context)));
 		}
 		catch (RuntimeException ex) {
 			emitter.completeWithError(ex);

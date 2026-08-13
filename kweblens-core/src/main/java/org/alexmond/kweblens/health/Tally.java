@@ -6,8 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.fabric8.kubernetes.api.model.HasMetadata;
-
 import org.alexmond.kweblens.health.KindHealth.UnhealthyItem;
 
 /**
@@ -55,6 +53,27 @@ final class Tally {
 		this.kind = kind;
 	}
 
+	/**
+	 * Count one object's verdict — the <b>only</b> way a check adds to a tally.
+	 *
+	 * <p>
+	 * Every overview check used to open this switch itself, which is how a state could be
+	 * counted under one tone on a card and shipped with another on the row. Reached
+	 * through {@link StatusVocabulary} on both sides now, so a verdict is turned into a
+	 * count in exactly one place and into an {@link ObjectState} in exactly one other.
+	 */
+	void record(WorkloadHealth.Verdict verdict, String namespace, String name) {
+		switch (verdict.state()) {
+			case ATTENTION -> attention(namespace, name, verdict.reason(), verdict.label(), verdict.tone());
+			case SUSPENDED -> suspended(verdict.label(), verdict.tone());
+			// OK and IDLE both mean "not needing attention"; IDLE keeps its own label and
+			// tone, which is what stops "everything is fine" being said about objects
+			// that
+			// are simply not doing anything.
+			default -> ok(verdict.label(), verdict.tone());
+		}
+	}
+
 	void ok(String label, String tone) {
 		this.total++;
 		this.ok++;
@@ -64,15 +83,6 @@ final class Tally {
 	void suspended(String label, String tone) {
 		this.total++;
 		this.suspended++;
-		count(label, tone);
-	}
-
-	/**
-	 * Not a fault and not healthy — counted as "not needing attention" for the tallies.
-	 */
-	void idle(String label, String tone) {
-		this.total++;
-		this.ok++;
 		count(label, tone);
 	}
 
@@ -86,32 +96,13 @@ final class Tally {
 	/**
 	 * Record an object needing attention. Only the first {@link #MAX_NAMED} are named.
 	 */
-	void attention(String namespace, String name, String reason) {
-		attention(namespace, name, reason, reason, StateCount.ERR);
-	}
-
-	void attention(String namespace, String name, String reason, String label, String tone) {
+	private void attention(String namespace, String name, String reason, String label, String tone) {
 		count(label, tone);
 		this.total++;
 		this.attention++;
 		if (this.named.size() < MAX_NAMED) {
 			this.named.add(new UnhealthyItem(this.kind, namespace, name, reason));
 		}
-	}
-
-	void attention(HasMetadata object, String reason) {
-		attention(object, reason, reason, StateCount.ERR);
-	}
-
-	void attention(HasMetadata object, String reason, String label, String tone) {
-		String namespace = (object.getMetadata() != null) ? object.getMetadata().getNamespace() : null;
-		String name = (object.getMetadata() != null) ? object.getMetadata().getName() : "";
-		attention(namespace, name, reason, label, tone);
-	}
-
-	/** Healthy, with the kind's own word for it. */
-	void ok(HasMetadata unusedObject, String label, String tone) {
-		ok(label, tone);
 	}
 
 	KindHealth toKindHealth() {

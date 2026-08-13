@@ -7,6 +7,7 @@ import java.util.Map;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
 import org.alexmond.kweblens.health.ObjectState;
+import org.alexmond.kweblens.health.StatusContext;
 import org.alexmond.kweblens.health.StatusVocabulary;
 
 /**
@@ -59,6 +60,13 @@ import org.alexmond.kweblens.health.StatusVocabulary;
  * "not examined" is not a state and must not be selectable as one.
  *
  * <p>
+ * <b>The context travels with the call, not with the object</b> (GH#340). Four kinds —
+ * Service, PersistentVolumeClaim, ConfigMap, Secret — have a verdict that needs a second
+ * collection, and this class must not go and fetch it: a projection runs once per row, so
+ * a fetch here would turn one list request into N. The caller opens a
+ * {@link StatusContext} once and passes the same one down every row.
+ *
+ * <p>
  * Here rather than in the two controllers because the {@code objects} list and the
  * {@code objects/watch} stream are separate code paths feeding one table: a field added
  * to only one of them would be erased by the first watch event to arrive, exactly as a
@@ -77,18 +85,18 @@ final class ListProjection {
 	 * Project every object in a list. Mutates and returns the same instances: they were
 	 * deserialised for this request by {@code listRaw} and are not shared or cached.
 	 */
-	static List<GenericKubernetesResource> forList(List<GenericKubernetesResource> resources) {
+	static List<GenericKubernetesResource> forList(List<GenericKubernetesResource> resources, StatusContext context) {
 		if (resources == null) {
 			return List.of();
 		}
-		resources.forEach(ListProjection::forList);
+		resources.forEach((resource) -> forList(resource, context));
 		return resources;
 	}
 
 	/**
 	 * Project one object — the watch stream's per-event equivalent of {@link #forList}.
 	 */
-	static GenericKubernetesResource forList(GenericKubernetesResource resource) {
+	static GenericKubernetesResource forList(GenericKubernetesResource resource, StatusContext context) {
 		if (resource == null) {
 			return null;
 		}
@@ -98,7 +106,7 @@ final class ListProjection {
 		if (BULKY_KINDS.contains(resource.getKind())) {
 			VALUE_FIELDS.forEach((field) -> keysOnly(resource, field));
 		}
-		ObjectState state = StatusVocabulary.state(resource.getKind(), resource);
+		ObjectState state = StatusVocabulary.state(resource.getKind(), resource, context);
 		if (state != null) {
 			resource.getAdditionalProperties().put(StatusVocabulary.FIELD, state);
 		}

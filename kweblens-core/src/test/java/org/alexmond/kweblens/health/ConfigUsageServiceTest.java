@@ -12,6 +12,7 @@ import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.resource.ResourceService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,7 +37,7 @@ class ConfigUsageServiceTest {
 	private ConfigUsageService service() {
 		ClusterRegistry registry = new ClusterRegistry();
 		registry.register("mock", "mock", this.client);
-		return new ConfigUsageService(registry);
+		return new ConfigUsageService(registry, new ResourceService(registry));
 	}
 
 	private void configMap(String name) {

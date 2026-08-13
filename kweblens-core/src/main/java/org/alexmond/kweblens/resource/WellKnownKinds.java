@@ -25,4 +25,20 @@ public final class WellKnownKinds {
 	public static final ResourceDescriptor EVENTS = ResourceDescriptor.coreNamespaced("events", "Events", "Event",
 			"events");
 
+	/** Services — {@code v1} core, namespaced. */
+	public static final ResourceDescriptor SERVICES = ResourceDescriptor.coreNamespaced("services", "Services",
+			"Service", "services");
+
+	/** PersistentVolumeClaims — {@code v1} core, namespaced. */
+	public static final ResourceDescriptor PERSISTENT_VOLUME_CLAIMS = ResourceDescriptor.coreNamespaced(
+			"persistentvolumeclaims", "Persistent Volume Claims", "PersistentVolumeClaim", "persistentvolumeclaims");
+
+	/** ConfigMaps — {@code v1} core, namespaced. */
+	public static final ResourceDescriptor CONFIG_MAPS = ResourceDescriptor.coreNamespaced("configmaps", "Config Maps",
+			"ConfigMap", "configmaps");
+
+	/** Secrets — {@code v1} core, namespaced. */
+	public static final ResourceDescriptor SECRETS = ResourceDescriptor.coreNamespaced("secrets", "Secrets", "Secret",
+			"secrets");
+
 }

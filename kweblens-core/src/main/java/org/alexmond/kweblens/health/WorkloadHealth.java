@@ -164,6 +164,20 @@ public final class WorkloadHealth {
 		return o.get((Object[]) path);
 	}
 
+	/**
+	 * The object's namespace, or null for a cluster-scoped one. Package-private for the
+	 * same reason as {@link #get}: every check names its offenders, and one reader is one
+	 * set of null rules.
+	 */
+	static String namespaceOf(GenericKubernetesResource o) {
+		return (o.getMetadata() != null) ? o.getMetadata().getNamespace() : null;
+	}
+
+	/** The object's name, or "" when it somehow has no metadata. */
+	static String nameOf(GenericKubernetesResource o) {
+		return (o.getMetadata() != null) ? o.getMetadata().getName() : "";
+	}
+
 	private static Object nested(Object v, String key) {
 		return (v instanceof Map<?, ?> map) ? map.get(key) : null;
 	}

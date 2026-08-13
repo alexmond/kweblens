@@ -49,6 +49,7 @@ and the reason is in its own header comment — read that before changing one.
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `resize-check.mjs` | You changed a multiline field. Proves the corner grabber exists AND that a pulled height survives typing. `--self-test` checks the instrument. |
 | `cluster-switch-check.mjs` | You touched per-cluster state. Switches cluster and fails if a value from the previous one is still on screen. |
+| `state-link-check.mjs` | You touched an overview card, a state vocabulary, or the `status:` filter. Clicks every state and fails unless the card's number, the list header's `N of M` and the rows drawn are all the same number. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
 | `dev-verify.sh` | Before every commit. Format + full reactor. Green here means green on the PR. |
 | `dev-test.sh` | A targeted `-Dtest` run while iterating. |
@@ -77,6 +78,9 @@ PREPARE='leaf:Pods;click:.n-data-table-tbody tr;hover:.btn' node scripts/contras
 # Hangs and slow loads
 node scripts/perf-sweep.mjs
 ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
+
+# Does clicking `15 No endpoints` open exactly those 15? (#336)
+CLUSTER_NS=monitoring node scripts/state-link-check.mjs network storage config
 ```
 
 `PREPARE` brings a surface on screen before it is sampled — `press:` `click:` `hover:<sel>`
@@ -148,6 +152,30 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-13 — **Nothing here could check the claim an entire epic is about: that a number you
+  click opens exactly the objects it counted.** #340 wired the Network, Storage and Config cards
+  to the `status:` filter, and every existing tool would have passed a card whose link opened the
+  wrong set — it is neither a layout, colour, geometry nor timing defect, and no screenshot shows
+  it. → `state-link-check.mjs`, which reads **three** numbers per state (the card's `.ov-state-n`,
+  the header's `N of M`, and the rows the table actually draws) and fails when any two disagree.
+  Two numbers would not have been enough: the header is the list agreeing with itself, so it keeps
+  agreeing with a filter that selected the wrong rows. Three traps met writing it, each now in the
+  script rather than a caveat: **(a)** the namespace filter is a naive `NSelect`, not a `<select>`,
+  so `selectOption('.bar-filter select')` reported "no namespace selector on the top bar" about a
+  control that is right there — **and its menu is a VIRTUAL list**, so an option below the fold is
+  not in the DOM at all and has to be scrolled to, not waited for; **(b)** the run must FAIL when a
+  category has no linked state, because a namespace with no Services measures nothing and looks
+  identical to a category whose links are broken; **(c)** rows are only compared when the filtered
+  count fits one page, or a correct long list fails for being long. The positive control is the
+  server side: unwiring the context in `ObjectApiController` turns 5 of 6 hermetic endpoint tests
+  red, and the live run's `1 of 3` readings become `0 of 3`.
+- 2026-08-13 — **A "known fixed" instrument bug reappeared, and the fix was simply not on this
+  branch.** A `perf-sweep` run for #340 reported the same 37/44 with `Persistent Volume\nClaims`
+  and six more at `-1ms OVER BUDGET` that the 2026-08-12 entry below records as fixed — because
+  that fix rode #341, which had not merged when this worktree was cut. → Nothing changed here.
+  **A Learnings entry describes the fix, not your checkout: confirm the fix is on your branch
+  before re-diagnosing, and never fix it a second time in a parallel branch — the merge conflict
+  costs more than the run.**
 - 2026-08-12 — **A pill was cut in half by its cell, and the only instrument that saw it was a
   300% crop of a screenshot.** #341 made the list's Status column render the server's state, so
   `CrashLoopBackOff` (a 119.38px `NTag`) landed in a 102.83px `.n-ellipsis` that hides its

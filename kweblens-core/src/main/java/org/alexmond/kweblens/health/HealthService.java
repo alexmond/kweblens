@@ -57,13 +57,8 @@ public class HealthService {
 				// call StatusVocabulary.state puts on the list row, which is what makes
 				// the card's number and the rows a status: term selects one set rather
 				// than two that agree today (GH#337).
-				WorkloadHealth.Verdict verdict = StatusVocabulary.verdict(kind, o);
-				switch (verdict.state()) {
-					case ATTENTION ->
-						tally.attention(namespaceOf(o), nameOf(o), verdict.reason(), verdict.label(), verdict.tone());
-					case SUSPENDED -> tally.suspended(verdict.label(), verdict.tone());
-					default -> tally.ok(verdict.label(), verdict.tone());
-				}
+				tally.record(StatusVocabulary.verdict(kind, o), WorkloadHealth.namespaceOf(o),
+						WorkloadHealth.nameOf(o));
 			}
 			return tally.toKindHealth();
 		}
@@ -71,14 +66,6 @@ public class HealthService {
 			log.debug("Health summary failed for '{}': {}", descriptor.id(), ex.getMessage());
 			return KindHealth.failed(descriptor.id(), descriptor.label(), kind, String.valueOf(ex.getMessage()));
 		}
-	}
-
-	private String namespaceOf(GenericKubernetesResource o) {
-		return (o.getMetadata() != null) ? o.getMetadata().getNamespace() : null;
-	}
-
-	private String nameOf(GenericKubernetesResource o) {
-		return (o.getMetadata() != null) ? o.getMetadata().getName() : "";
 	}
 
 }
