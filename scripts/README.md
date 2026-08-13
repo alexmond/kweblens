@@ -234,6 +234,28 @@ is three runs) and compares it with the content box, over every match rather tha
 `--self-test` pins it against a fixture whose answer is arithmetic, including the case where
 it must FIRE — a clean run against an already-fixed app proves only that a check is quiet.
 
+Not fitting the content box is the **question, not the answer** (#343). Judged on that alone
+the line failed a run on an ordinary page: `.nav-badge` is `min-width: 18px; padding: 0 6px`,
+so a badge on its floor has a **6px content box inside an 18px pill**, and two centred digits
+needing 11.45px spill 2.7px each side into 6px of padding. Measured across all 140 badges on
+that page, the worst case was 6.55px *inside* its own border box and none exceeded its pill —
+real by the check's definition, invisible to a reader, and 140 non-defects is how a check
+stops being read at all. So the population examined is unchanged and only the verdict moved:
+a run that misses its content box now has to show **observable damage**, of which there are
+two kinds. `broke` — it is painting on more than one line, counted from the run's own client
+rects, which is #257, #278, #318 and #326 verbatim, all four of which shredded a word.
+`spilled` — its advance exceeds the element's **padding box**, so it escapes the shape the
+element paints, where an ancestor can clip it or a neighbour collide with it. Padding box and
+not border box, because a border is a painted edge; and for the zero-padding majority
+(`.kv dd` has none) the padding box *is* the content box, so no earlier number moves. Both
+conditions are load-bearing: with `word-break: break-all` a 6px content box shreds a run the
+18px pill would have held, which a padding-box comparison on its own would wave through. The
+absorbed case is still **printed**, without failing — a check that silently drops a population
+it used to fail is indistinguishable from one that stopped looking. Three new controls, two of
+which must fire, and the rule was run against a rebuild of the pre-fix #326 stylesheet, where
+it still names `"ValidatingWebhookConfiguration" needs 203.09px in a 190px content box` and
+says the browser broke it mid-word.
+
 It reads **descendant** text, not only an element's own child text nodes (#326). The first
 version copied that restriction from the chars-per-line check, where it is load-bearing and
 here was a hole: the drawer Overview renders half of every `.kv dd` inside a `<button>` or an

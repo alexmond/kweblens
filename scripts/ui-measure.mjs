@@ -17,7 +17,8 @@
 //   box       x/y/width/height of the first match
 //   overflow  width vs the nearest scrollable/clipping ancestor, and vs the viewport
 //   measure   approximate characters per line, for text-bearing elements
-//   words     a word too wide for its own box — i.e. one the browser must break mid-word
+//   words     a word too wide for its own box AND visibly the worse for it — either the
+//             browser broke it mid-word, or it spilled past the element's own padding box
 //   chip      a pill (own background, rounded ends, short label) squeezed below its own
 //             label and wrapped, in a parent that had room for it — a legal wrap that reads
 //             as a rendering fault
@@ -151,18 +152,55 @@ function measureOne(els) {
   // `.mini-scroll` (it scrolls rather than shreds).
   //
   // Runs over EVERY match, not just the first — one bad header in four is the case.
+  //
+  // A run wider than its content box is the QUESTION, not the answer (#343). The first two
+  // versions failed the run on that comparison alone, and it reported 140 non-defects on an
+  // ordinary page: `.nav-badge` is `min-width: 18px; padding: 0 6px`, so a badge squeezed to
+  // its floor has a **6px content box inside an 18px pill**, and two centred digits needing
+  // 11.45px spill 2.7px each side into 6px of padding. Measured across all 140, the worst case
+  // was 6.55px INSIDE its own border box and not one badge's text exceeded its pill. Right by
+  // the check's own definition, invisible to a reader — and its message ("it must break
+  // mid-word") was wrong about the consequence, because digits have no break opportunity, so
+  // they overflow instead. 140 spurious failures is how a check stops being read at all, which
+  // is the thing this file's own comment says costs more than not having the check.
+  //
+  // So the POPULATION is unchanged — a run wider than the content box is still the only thing
+  // examined — and only the VERDICT moved: it now has to name observable damage, of which
+  // there are exactly two kinds.
+  //
+  //   broke   The run is painting on more than one line, so the browser was allowed to break
+  //           inside it (`overflow-wrap: anywhere`, Naive's `word-break: break-word`,
+  //           `break-all`) and did. This is #257, #278, #318 and #326 verbatim — all four
+  //           shredded a word — and it is measured from the run's OWN client rects rather than
+  //           inferred from a box, so it is the damage itself and not a proxy for it.
+  //   spilled The run's advance exceeds the element's PADDING box, i.e. it escapes the shape
+  //           the element paints, where an ancestor can clip it or a neighbour can collide with
+  //           it. Padding is inside that shape: text laid over an element's own padding is
+  //           legible, unclipped and does not move anything.
+  //
+  // The padding box, not the border box: a border is a painted edge, and text crossing it has
+  // left the element as the reader sees it. For the zero-padding majority (`.kv dd` has no
+  // padding at all) the padding box IS the content box, so nothing about #326's numbers moves.
+  //
+  // Why `broke` is not optional once the box widens: with `word-break: break-all` a 6px content
+  // box shreds a run that would have fitted the 18px pill perfectly well — a two-line badge the
+  // padding-box comparison alone would wave through. The two conditions close each other's hole.
+  //
+  // The absorbed case is still PRINTED, without failing, because a check that silently drops a
+  // population it used to fail is indistinguishable from one that stopped looking.
   const widestWord = () => {
+    const px = (v) => parseFloat(v) || 0;
     const probe = document.createElement('span');
     probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0';
     document.body.appendChild(probe);
+    const range = document.createRange();
     const owners = (e) => {
-      // [element whose font renders it, text] for every text node under `e` still bound by
+      // [element whose font renders it, text node] for every text node under `e` still bound by
       // `e`'s own wrapping.
       const out = [];
       const walk = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
       for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-        const text = (n.textContent || '').trim();
-        if (!text) continue;
+        if (!(n.textContent || '').trim()) continue;
         let escaped = false;
         for (let a = n.parentElement; a && a !== e; a = a.parentElement) {
           const acs = getComputedStyle(a);
@@ -171,20 +209,49 @@ function measureOne(els) {
             break;
           }
         }
-        if (!escaped) out.push([n.parentElement, text]);
+        if (!escaped) out.push([n.parentElement, n]);
       }
       return out;
     };
+    // Every unbreakable run in a text node, with its offsets, so the run can be measured where
+    // it actually sits rather than re-laid-out somewhere else. A browser may break after `-`
+    // and `/`, so `Pod/kw251-bad-a` is three runs and only the longest has to fit.
+    const runsOf = (raw) => {
+      const out = [];
+      for (const m of raw.matchAll(/\S+/g)) {
+        let at = m.index;
+        for (const part of m[0].split(/(?<=[-/–—])/)) {
+          if (part) out.push([at, at + part.length, part]);
+          at += part.length;
+        }
+      }
+      return out;
+    };
+    // How many lines the run itself is painted on. Within one text node the font is constant,
+    // so line boxes differ by the line height and 1px of tolerance is enough; a zero-height
+    // rect is a collapsed boundary, not a line.
+    const lineCount = (node, start, end) => {
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      const tops = [];
+      for (const q of range.getClientRects()) {
+        if (q.height <= 0) continue;
+        if (!tops.some((t) => Math.abs(t - q.top) <= 1)) tops.push(q.top);
+      }
+      return tops.length;
+    };
     let worst = null;
+    let absorbed = null;
     for (const e of els) {
       const ecs = getComputedStyle(e);
       if (/nowrap|pre$/.test(ecs.whiteSpace)) continue;
       const er = e.getBoundingClientRect();
-      const inner =
-        er.width - parseFloat(ecs.paddingLeft || 0) - parseFloat(ecs.paddingRight || 0) -
-        parseFloat(ecs.borderLeftWidth || 0) - parseFloat(ecs.borderRightWidth || 0);
-      if (inner <= 0) continue;
-      for (const [owner, text] of owners(e)) {
+      const pad = er.width - px(ecs.borderLeftWidth) - px(ecs.borderRightWidth);
+      const inner = pad - px(ecs.paddingLeft) - px(ecs.paddingRight);
+      // `inner <= 0` is no longer a reason to skip: a pill whose padding eats its whole content
+      // box is exactly the shape this check was over-reporting.
+      if (pad <= 0) continue;
+      for (const [owner, node] of owners(e)) {
         const ocs = getComputedStyle(owner);
         probe.style.fontFamily = ocs.fontFamily;
         probe.style.fontSize = ocs.fontSize;
@@ -192,18 +259,26 @@ function measureOne(els) {
         probe.style.fontStyle = ocs.fontStyle;
         probe.style.letterSpacing = ocs.letterSpacing;
         probe.style.textTransform = ocs.textTransform;
-        for (const run of text.split(/\s+/).flatMap((w) => w.split(/(?<=[-/–—])/))) {
-          if (!run) continue;
+        for (const [start, end, run] of runsOf(node.textContent)) {
           probe.textContent = run;
           const w = probe.getBoundingClientRect().width;
-          if (w > inner + 0.5 && (!worst || w - inner > worst.over)) {
-            worst = { run, w: Math.round(w), inner: Math.round(inner), over: w - inner };
+          if (w <= inner + 0.5) continue;
+          const spill = w - pad;
+          const broke = lineCount(node, start, end) > 1;
+          const hit = { run, w, inner, pad, broke, spill };
+          if (!broke && spill <= 0.5) {
+            if (!absorbed || w - inner > absorbed.w - absorbed.inner) absorbed = hit;
+            continue;
           }
+          // A shredded run outranks a spilled one however far the spill goes: the reader has
+          // lost the word, not just the margin.
+          const rank = (h) => (h.broke ? 1e6 + (h.w - h.inner) : h.spill);
+          if (!worst || rank(hit) > rank(worst)) worst = hit;
         }
       }
     }
     probe.remove();
-    return worst && { run: worst.run, w: worst.w, inner: worst.inner };
+    return { worst, absorbed };
   };
 
   // ---- What the ellipsis actually costs, measured sub-pixel (#318) ----
@@ -473,9 +548,11 @@ function measureOne(els) {
     return { kids: kids.length, lines: lines.length, inner: Math.round(inner), unused: Math.round(unused) };
   };
 
+  const words = widestWord();
   return {
     count: els.length,
-    word: widestWord(),
+    word: words.worst,
+    wordAbsorbed: words.absorbed,
     chip: wrappedChip(),
     clipped: clippedText(),
     twins: twinLabels(),
@@ -521,6 +598,25 @@ const SELF_TEST_FIXTURE = `
   #nested-ok { width: 400px; }
   #nested-nowrap > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
   #nested-scroll > span { display: block; overflow-x: auto; }
+  /* The padding controls (#343) — no backticks. A flex row with no room for the pill drives it
+     onto its own min-width, which is .nav-badge's exact shape: a 6px content box inside an
+     18px pill. #pad-absorbed's two digits overflow that content box, have no break opportunity
+     and stay well inside the pill — the 140 non-defects that made the check unreadable, and the
+     control that says it still SEES them (metric wordabs) rather than having stopped looking.
+     #pad-broke is the same pill with break-all, so the same overflow becomes two lines inside a
+     box the padding would otherwise have absorbed: the hole a padding-box comparison alone
+     would open, and it MUST fire. #pad-spill is wider than the pill itself and so escapes the
+     shape it is painted in, unbroken. */
+  .padrow { display: flex; width: 60px; padding: 0; }
+  .padrow > .lbl { flex: 0 0 50px; padding: 0; }
+  .spillrow { display: flex; width: 90px; padding: 0; }
+  .pad {
+    flex: 0 1 auto; box-sizing: border-box; min-width: 18px; padding: 0 6px;
+    background: #e5e7eb; border-radius: 9px; font-size: 10px; text-align: center;
+    word-break: normal; overflow-wrap: normal;
+  }
+  #pad-broke { word-break: break-all; }
+  #pad-spill { flex: 0 0 24px; }
   /* The clipped controls (#318) — no backticks in here, this fixture is a template literal.
      The hairline case has to be a FRACTION of a pixel short whatever font the box happens
      to have, so its width is derived from the text itself: the parent shrink-wraps to the
@@ -571,6 +667,9 @@ const SELF_TEST_FIXTURE = `
 <div id="nested-ok"><button>Reason</button></div>
 <div id="nested-nowrap"><button>Reason</button></div>
 <div id="nested-scroll"><span>Reason</span></div>
+<span class="padrow"><span class="lbl">Pods</span><span class="pad" id="pad-absorbed">60</span></span>
+<span class="padrow"><span class="lbl">Pods</span><span class="pad" id="pad-broke">60</span></span>
+<span class="spillrow"><span class="pad" id="pad-spill">Warning</span></span>
 <span class="pillbox"><span class="pill" id="pill-squeezed">Cluster scoped</span></span>
 <span class="pillbox"><span class="pill" id="pill-roomy">Cluster scoped</span></span>
 <span class="tightbox"><span class="pill" id="pill-tight">Cluster scoped</span></span>
@@ -600,6 +699,10 @@ const SELF_TEST_CASES = [
   ['#nested-ok', 'word', false, 'the same child text in a 400px box is fine'],
   ['#nested-nowrap', 'word', false, 'a nowrap child ellipsises; that is the clipped check, not this one'],
   ['#nested-scroll', 'word', false, 'a child with its own scroller scrolls rather than shreds'],
+  ['#pad-absorbed', 'word', false, 'digits over a 6px content box but inside an 18px pill — the 140 of #343'],
+  ['#pad-absorbed', 'wordabs', true, '...and the check SAW them: seen, classified, not failed'],
+  ['#pad-broke', 'word', true, 'the same pill with break-all shreds a run the padding would have held'],
+  ['#pad-spill', 'word', true, 'a run wider than the pill escapes the shape it is painted in'],
   ['#pill-squeezed', 'chip', true, 'a pill at 70% of its own label wraps — the shape of #331'],
   ['#pill-roomy', 'chip', false, 'the same pill at its full advance is one line'],
   ['#pill-tight', 'chip', false, 'wrapped, but its parent cannot hold the label — nothing to fix'],
@@ -641,7 +744,9 @@ if (argv.includes('--self-test')) {
               ? !!got?.clipped
               : metric === 'clip'
                 ? !!got?.clipped && got.clipped.over < 1
-                : !!got?.word;
+                : metric === 'wordabs'
+                  ? !!got?.wordAbsorbed
+                  : !!got?.word;
     const ok = fired === wantDefect;
     if (!ok) bad += 1;
     const detail =
@@ -661,9 +766,15 @@ if (argv.includes('--self-test')) {
           ? got?.clipped
             ? `${got.clipped.over.toFixed(2)}px cut of ${got.clipped.need.toFixed(2)}px`
             : 'nothing clipped'
-          : got?.word
-            ? `"${got.word.run}" ${got.word.w}px in ${got.word.inner}px`
-            : 'no word defect';
+          : metric === 'wordabs'
+            ? got?.wordAbsorbed
+              ? `"${got.wordAbsorbed.run}" ${got.wordAbsorbed.w.toFixed(1)}px in ` +
+                `${got.wordAbsorbed.inner.toFixed(1)}px, pill ${got.wordAbsorbed.pad.toFixed(1)}px`
+              : 'nothing over its content box'
+            : got?.word
+              ? `"${got.word.run}" ${got.word.w.toFixed(1)}px in ${got.word.inner.toFixed(1)}px` +
+                (got.word.broke ? ', BROKE' : `, +${got.word.spill.toFixed(1)}px past the pad box`)
+              : 'no word defect';
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${sel.padEnd(11)} ${metric.padEnd(8)} ${detail.padEnd(30)} ${why}`);
   }
   await b.close();
@@ -732,11 +843,25 @@ try {
       );
     }
     if (m.word) {
+      const px = (v) => v.toFixed(2).replace(/\.00$/, '');
       console.log(
-        `  words    "${m.word.run}" needs ${m.word.w}px in a ${m.word.inner}px box` +
-          `  <-- DEFECT: it must break mid-word`,
+        `  words    "${m.word.run}" needs ${px(m.word.w)}px in a ${px(m.word.inner)}px content box` +
+          (m.word.broke
+            ? `  <-- DEFECT: the browser broke it mid-word`
+            : `, ${px(m.word.spill)}px past its own ${px(m.word.pad)}px padding box` +
+              `  <-- DEFECT: it spills out of the shape it is painted in`),
       );
       failed = true;
+    } else if (m.wordAbsorbed) {
+      // Printed, never failed. This is the #343 population: over the content box, one line, and
+      // still inside the element's own padding. Saying so is what distinguishes a check that
+      // looked and found nothing from one that stopped looking.
+      const px = (v) => v.toFixed(2).replace(/\.00$/, '');
+      console.log(
+        `  words    "${m.wordAbsorbed.run}" needs ${px(m.wordAbsorbed.w)}px in a` +
+          ` ${px(m.wordAbsorbed.inner)}px content box — unbroken and inside its own` +
+          ` ${px(m.wordAbsorbed.pad)}px padding box, so not a defect`,
+      );
     }
     if (m.chip) {
       const px = (v) => v.toFixed(2).replace(/\.00$/, '');

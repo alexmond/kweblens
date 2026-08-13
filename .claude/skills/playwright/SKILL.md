@@ -44,7 +44,7 @@ and the reason is in its own header comment — read that before changing one.
 |---|---|
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
-| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, words too wide for their box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, a pill squeezed below its own label, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
+| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, a word the browser broke mid-word or that spills past its own padding box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, a pill squeezed below its own label, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `resize-check.mjs` | You changed a multiline field. Proves the corner grabber exists AND that a pulled height survives typing. `--self-test` checks the instrument. |
@@ -174,13 +174,27 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   narrows it. The reproduction is the 1024px viewport on its own. **Reproduce the numbers before
   adopting the report's explanation of them — a scene that reproduces a defect is not thereby the
   cause of it.**
-- 2026-08-12 — **`words` reports text that overflows its CONTENT box, which a padded pill absorbs
-  invisibly.** Sweeping after #331, `.nav-badge` failed the run — `"60" needs 11px in a 6px box`
-  — across 140 matches. Measured properly: the badge is 18px wide with `padding: 0 6px`, so the
-  digits spill 2.7px each side into 6px of padding and **no badge on the page exceeds its own
-  pill** (worst case 6.55px inside it). Real per the check's own definition, invisible to a
-  reader. Filed rather than fixed in passing: `words` is what four fixes rest on, and changing
-  its comparison box needs its own controls.
+- 2026-08-12 — **Not fitting a box is the QUESTION; the check has to name the damage.** #343:
+  `words` failed an ordinary run — `"60" needs 11px in a 6px box` — on a page with 140
+  `.nav-badge` matches. The badge is `min-width: 18px; padding: 0 6px`, so on its floor it is a
+  **6px content box inside an 18px pill**; the digits spill 2.7px each side into padding and
+  **no badge on the page exceeds its own pill** (worst case 6.55px inside it, 0 of 140 over the
+  pill, 0 broken). Real per the check's own definition, invisible to a reader — and its message
+  ("it must break mid-word") was wrong about the consequence, because digits have no break
+  opportunity, so they overflow instead. → The population examined is unchanged; only the
+  **verdict** moved. A run over its content box now has to be either **broke** (painting on more
+  than one line, counted from the run's OWN client rects — the damage itself, not a proxy) or
+  **spilled** (past the element's PADDING box, escaping the shape it paints in). Both are
+  load-bearing: `word-break: break-all` shreds a run inside a 6px content box that the 18px pill
+  would have held, so the padding box alone would open a hole. The absorbed case is still
+  **printed**, never failed, because a check that silently drops a population it used to fail is
+  indistinguishable from one that stopped looking. Three new controls, two must-fire; then run
+  against a rebuild of the PRE-fix #326 stylesheet, where it still names
+  `"ValidatingWebhookConfiguration" needs 203.09px in a 190px content box` and adds "the browser
+  broke it mid-word", and is silent on the fix (190px/42px tall → 203px/21px). Ordinary run:
+  140 matches, exit 1 → 140 matches, exit 0. **Loosening a check is only safe if the historical
+  defects are rebuilt and watched to fire; and the standing rule is that a check must fail on
+  damage a reader could see, not on a comparison that happens to be true.**
 
 - 2026-08-11 — **Three separate ways to be wrong about one question: "can the reader pull this
   field taller?"** (a) **The property is not on the element you would read it from.** naive-ui
