@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeQuery, FILTER_HELP, FILTER_HELP_NOTES, matchesFilter, parseFilter } from './objectFilter';
+import {
+  activeQuery,
+  FILTER_HELP,
+  FILTER_HELP_NOTES,
+  matchesFilter,
+  parseFilter,
+  statusQuery,
+  statusQueryable,
+} from './objectFilter';
 import type { KubeObject } from './types';
 
 // The list header's filter language. It is nearly all logic, so it lives in a .ts and is
@@ -263,6 +271,43 @@ describe('status: selects on the state the server computed', () => {
       selected += expected.length;
     }
     expect(selected).toBe(judged.length);
+  });
+});
+
+describe('statusQuery writes what statusMatcher reads', () => {
+  // The writer's half of `status:` (#338). A card's state line is a link only because a query
+  // can be BUILT from the label, and the card's number equals the rows it opens only while the
+  // writing and the reading agree — so every case here is a round trip, never a string
+  // compared with a string someone typed into the test.
+
+  it('round-trips every state in a fleet back to exactly its own objects', () => {
+    const judged = STATED.filter((o) => o.kweblensState !== undefined);
+    for (const label of new Set(judged.map((o) => o.kweblensState?.label ?? ''))) {
+      const expected = judged.filter((o) => o.kweblensState?.label === label).map((o) => o.metadata?.name ?? '');
+      expect(kept(statusQuery(label), STATED)).toEqual(expected);
+    }
+  });
+
+  it('leaves a bare state bare and quotes only what would otherwise split into two terms', () => {
+    expect(statusQuery('Running')).toBe('status:Running');
+    expect(statusQuery('CrashLoopBackOff')).toBe('status:CrashLoopBackOff');
+    expect(statusQuery('No endpoints')).toBe('status:"No endpoints"');
+  });
+
+  it('round-trips the stem pair, which a substring match would collapse', () => {
+    expect(kept(statusQuery('Complete'), STATED)).toEqual(['job-run']);
+    expect(kept(statusQuery('Completed'), STATED)).toEqual(['job-done']);
+  });
+
+  it('refuses a label the grammar cannot express rather than writing one that means something else', () => {
+    // There is no escape character, so a `"` inside a value ends the quote. The honest answer
+    // is that such a state has no query — the caller renders it as text — because the
+    // alternative is a link whose rows are not the ones that were counted.
+    expect(statusQueryable('Running')).toBe(true);
+    expect(statusQueryable('No endpoints')).toBe(true);
+    expect(statusQueryable('say "hi"')).toBe(false);
+    expect(statusQueryable('')).toBe(false);
+    expect(statusQueryable('   ')).toBe(false);
   });
 });
 

@@ -188,6 +188,26 @@ const SCENES = [
     selectors: ['.count', '.leaf.active .nav-badge', '.n-data-table-td .n-tag'],
   },
   {
+    // Every tone of an overview card's state list, HOVERED. Named per tone rather than as a
+    // bare `.ov-state-l`, because the sampler takes the first match and the first line of the
+    // first card is whichever state is most populous — so one selector watches one colour and
+    // silently stops watching the other three. The hover matters because #338 made each of
+    // these lines a <button>: a button does not inherit `color` (that is how `.ov-card.danger`
+    // shipped at 1.34:1), and a hover pad with no dark override is how `.btn` shipped at
+    // 1.16:1. The hover here is deliberately an underline and adds no colour — this scene is
+    // what keeps that true.
+    name: 'overview card states (hovered)',
+    prepare: 'close;leaf:Workloads/Overview;wait:900;?hover:.ov-state.tone-err .ov-state-line',
+    selectors: [
+      '.ov-state.tone-ok .ov-state-l',
+      '.ov-state.tone-warn .ov-state-l',
+      '.ov-state.tone-err .ov-state-l',
+      '.ov-state.tone-idle .ov-state-l',
+      '.ov-state.tone-err .ov-state-n',
+      '.ov-head-link .ov-kind',
+    ],
+  },
+  {
     // `.ns-note` is the "Cluster-scoped" pill, so it needs a cluster-scoped kind.
     name: 'cluster-scoped list',
     prepare: 'close;leaf:Namespaces;wait:800',

@@ -329,6 +329,35 @@ function statusMatcher(raw: string): TextMatcher {
   return (v) => v.toLowerCase() === wanted;
 }
 
+/**
+ * Can this state label be written as a `status:` term that selects exactly it?
+ *
+ * <p>The grammar has no escape character: a `"` inside a quoted value ends the quote, and there
+ * is no other way to protect one. A label carrying one is therefore not expressible, and the
+ * answer is to say so — a term built from it would parse as something else and select the wrong
+ * rows, which is the one failure mode this whole family of links exists to avoid (#336). The
+ * caller renders such a state as text rather than a link. No state in `StatusVocabulary` is
+ * shaped like that today; this is what keeps that from becoming a silent assumption.
+ */
+export function statusQueryable(label: string): boolean {
+  return label.trim().length > 0 && !label.includes('"');
+}
+
+/**
+ * The query that selects exactly the objects in this state — the writer's half of `status:`.
+ *
+ * <p>It lives beside {@link statusMatcher} on purpose. The card's number and the rows the link
+ * opens are the same set only while the way a state is WRITTEN and the way it is READ agree
+ * about quoting, and two files cannot be made to agree about that; one can.
+ *
+ * <p>Quoted only when the label contains whitespace, because whitespace is what ends a term.
+ * Everything else in the vocabulary — `CrashLoopBackOff`, `ImagePullBackOff` — is a bare word
+ * and reads better as one in the filter box the reader lands on.
+ */
+export function statusQuery(label: string): string {
+  return /\s/.test(label) ? `status:"${label}"` : `status:${label}`;
+}
+
 function labelKey(raw: string): string {
   const key = raw.startsWith('label:') ? raw.slice('label:'.length) : raw;
   if (!key) {
