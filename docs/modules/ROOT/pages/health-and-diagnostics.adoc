@@ -153,6 +153,49 @@ owns them) and Helm release records (`helm.sh/release.v1`), which look unused be
 mounts them and are the exact opposite of disposable. Secrets are listed for their *names* only —
 the values are never read.
 
+=== Every state on a card is a link, including the three that are not on the object
+
+Each line of a card's breakdown opens that kind's list filtered to exactly the objects it counted,
+by way of the xref:browsing-resources.adoc#status-term[`status:` term]. A state with nothing in it
+stays plain text, because opening an empty list to say "none" is a worse answer than the line.
+
+Three of these verdicts cannot be recomputed from a list row, which is the whole reason the state
+is computed on the server and travels *with* the object: a Service's needs the Endpoints
+collection, a claim's fullness needs the metrics backend, and a ConfigMap's needs a scan of the
+namespace. So a list request for one of those kinds opens a *status context* first —
+`StatusContexts` — which fetches that second collection **once per request**, before any row is
+looked at, and every row is then a lookup. It is the same fetch the card already makes, over the
+same scope:
+
+[cols="1,3"]
+|===
+| Kind | What the list request additionally fetches
+
+| `Service`
+| One Endpoints list. Small — an Endpoints object is a handful of addresses.
+
+| `PersistentVolumeClaim`
+| One `volumeUsage` call: backend discovery plus two instant queries through the API server's
+service proxy. Where there is no metrics backend it is the discovery alone, and neither half has a
+`Nearly full` state to disagree about.
+
+| `ConfigMap`, `Secret`
+| The reference scan — pods, service accounts and ingresses — of which the pod list is the
+expensive one, and it is cluster-wide when no namespace is selected. This is the one that costs
+something, and it is exactly what the Config overview already spends to draw the card.
+|===
+
+Fetching per row instead would turn one list request into N, which is the bound
+xref:performance.adoc[#293 and #302] were spent establishing. If the second collection cannot be
+fetched at all, the rows come back with **no** state rather than the list failing: nothing is
+claimed, and no `status:` term selects them.
+
+The live watch behind an open list re-opens its context at most once every 30 seconds. The inputs
+to these three verdicts are objects the list is *not* watching, so no event on the watched kind
+can report that they changed — a context opened once when the page loaded would still be asserting
+this morning's Endpoints tonight, and re-opening per event would turn a busy list into a second
+stream of list calls.
+
 === "Could not check" is not "nothing is wrong"
 
 Every check reports an `error` for a kind it could not list, instead of a zero. On a health screen

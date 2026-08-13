@@ -43,12 +43,27 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
  *
  * <h2>What is covered, and what an uncovered kind means</h2>
  *
- * Today: the workload kinds {@link WorkloadHealth} judges, and the cluster-scoped Node
- * and Namespace that {@link ClusterObjectHealth} does. What they have in common is that
- * the verdict is a pure function of the object itself, so it costs nothing on the list
- * path. The three context-carrying checks above are <b>not</b> covered yet: labelling a
- * Service row would mean joining the Endpoints collection inside the list request, which
- * is a per-kind provider rather than a call in a projection.
+ * Two families, and the difference is where the inputs live rather than how good the
+ * verdict is:
+ *
+ * <ul>
+ * <li><b>Pure-function kinds</b> — the workloads {@link WorkloadHealth} judges and the
+ * cluster-scoped Node and Namespace that {@link ClusterObjectHealth} does. The verdict is
+ * a function of the object alone, so it costs nothing on the list path and
+ * {@link #state(String, GenericKubernetesResource)} answers with no help.
+ * <li><b>Context-carrying kinds</b> — Service, PersistentVolumeClaim, ConfigMap and
+ * Secret (GH#340). Their verdicts are the three checks above, and none of them can be
+ * reached from the row: they need the Endpoints collection, the metrics backend, or a
+ * scan of the namespace. A {@link StatusContext} opens exactly that, <b>once per
+ * request</b>, and {@link #state(String, GenericKubernetesResource, StatusContext)} then
+ * costs a map lookup per row. {@link StatusContexts} is what opens one.
+ * </ul>
+ *
+ * <p>
+ * The two are asked about separately — {@link #covers} and {@link #needsContext} —
+ * because the callers differ: the Workloads and Cluster overviews summarise through
+ * {@link HealthService}, which can only judge the first family, while a list request has
+ * to know whether to open a context before it walks the rows.
  *
  * <p>
  * <b>Event is not covered, and that is a decision</b> (GH#339). An event's
@@ -77,27 +92,74 @@ public final class StatusVocabulary {
 	}
 
 	/**
-	 * Whether a state can be computed for this kind at all. The overview uses it to pick
-	 * the kinds it can honestly summarise, so "the card has a breakdown" and "the rows
-	 * carry a state" are the same set by construction.
+	 * Whether a state can be computed for this kind <b>from the object alone</b>. The
+	 * Workloads and Cluster overviews use it to pick the kinds they can honestly
+	 * summarise, so "the card has a breakdown" and "the rows carry a state" are the same
+	 * set by construction.
+	 *
+	 * <p>
+	 * Deliberately false for the context-carrying kinds: their cards are drawn by their
+	 * own check rather than by {@link HealthService}, and asking that service to judge
+	 * one would get a bare "OK" from {@link WorkloadHealth}'s default.
+	 * {@link #needsContext} is the question to ask about those.
 	 */
 	public static boolean covers(String kind) {
 		return WorkloadHealth.supports(kind) || ClusterObjectHealth.supports(kind);
 	}
 
 	/**
-	 * This object's state, or {@code null} when the kind is not covered.
+	 * Whether this kind's verdict needs a second collection — so a caller that wants a
+	 * state on the row must open a {@link StatusContext} first.
 	 *
 	 * <p>
-	 * Delegates to exactly the call {@link HealthService} tallies with — not a copy of
-	 * its rules, the same method — so a change to a verdict moves the card and the filter
-	 * together or moves neither.
+	 * Asked of the three checks rather than listed here, so adding a kind to one of them
+	 * adds it to the filter too and there is no second list to forget to update.
+	 */
+	public static boolean needsContext(String kind) {
+		return NetworkHealthService.supports(kind) || StorageHealthService.supports(kind)
+				|| ConfigUsageService.supports(kind);
+	}
+
+	/**
+	 * This object's state as far as the object alone can say — {@code null} for every
+	 * kind whose verdict needs a context, which is the honest answer when none was
+	 * supplied.
 	 */
 	public static ObjectState state(String kind, GenericKubernetesResource object) {
-		if (object == null || !covers(kind)) {
+		return state(kind, object, StatusContext.none());
+	}
+
+	/**
+	 * This object's state, or {@code null} when nothing here can judge it.
+	 *
+	 * <p>
+	 * For a pure-function kind this delegates to exactly the call {@link HealthService}
+	 * tallies with — not a copy of its rules, the same method — so a change to a verdict
+	 * moves the card and the filter together or moves neither. For a context-carrying
+	 * kind the context <b>is</b> the check that drew the card, holding the collection it
+	 * already fetched, so the same guarantee holds by the same means.
+	 *
+	 * <p>
+	 * A context-carrying kind asked without its context answers {@code null} rather than
+	 * falling through to a bare "OK": that is the one thing this class must never do,
+	 * because an object nobody examined would then be selectable as healthy.
+	 */
+	public static ObjectState state(String kind, GenericKubernetesResource object, StatusContext context) {
+		if (object == null) {
 			return null;
 		}
-		WorkloadHealth.Verdict verdict = verdict(kind, object);
+		if (needsContext(kind)) {
+			return (context != null) ? context.state(kind, object) : null;
+		}
+		return covers(kind) ? toState(verdict(kind, object)) : null;
+	}
+
+	/**
+	 * A verdict as the row carries it. The single place a {@link WorkloadHealth.Verdict}
+	 * becomes an {@link ObjectState}, so a card's label and a row's label cannot be
+	 * derived differently.
+	 */
+	static ObjectState toState(WorkloadHealth.Verdict verdict) {
 		return new ObjectState(label(verdict.label()), verdict.tone());
 	}
 

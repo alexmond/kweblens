@@ -3,8 +3,7 @@ package org.alexmond.kweblens.health;
 import java.util.ArrayList;
 import java.util.List;
 
-import io.fabric8.kubernetes.api.model.ConfigMap;
-import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.resource.ResourceDescriptor;
+import org.alexmond.kweblens.resource.ResourceService;
+import org.alexmond.kweblens.resource.WellKnownKinds;
 
 /**
  * The Config overview's check: <b>ConfigMaps and Secrets that nothing in the namespace
@@ -36,11 +38,22 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
  * service-account tokens (the cluster creates and owns them) and Helm release records,
  * which look unused because nothing mounts them and are the exact opposite of disposable
  * — they are a release's history.
+ *
+ * <p>
+ * <b>This is the verdict that costs the most to put on a list row</b> (GH#340). It is not
+ * a property of the ConfigMap at all — it is a property of everything else in the
+ * namespace — so {@link #contextFor} runs the same scan the card runs, <i>once</i> per
+ * list request, and every row is then a set lookup. What that costs is written on that
+ * method.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ConfigUsageService {
+
+	private static final String CONFIG_MAP = "ConfigMap";
+
+	private static final String SECRET = "Secret";
 
 	private static final String SERVICE_ACCOUNT_TOKEN = "kubernetes.io/service-account-token";
 
@@ -49,6 +62,13 @@ public class ConfigUsageService {
 	private static final String UNREFERENCED = "not referenced in this namespace";
 
 	private final ClusterRegistry clusters;
+
+	private final ResourceService resources;
+
+	/** The kinds this judges — the Config half of {@link StatusVocabulary#covers}. */
+	public static boolean supports(String kind) {
+		return CONFIG_MAP.equals(kind) || SECRET.equals(kind);
+	}
 
 	public List<KindHealth> summarise(String clusterId, String namespace) {
 		List<KindHealth> out = new ArrayList<>();
@@ -61,13 +81,54 @@ public class ConfigUsageService {
 			// here would be the dangerous direction: it reads as a clean result.
 			log.debug("Config reference scan failed: {}", ex.getMessage());
 			String message = String.valueOf(ex.getMessage());
-			out.add(KindHealth.failed("configmaps", "Config Maps", "ConfigMap", message));
-			out.add(KindHealth.failed("secrets", "Secrets", "Secret", message));
+			out.add(failed(WellKnownKinds.CONFIG_MAPS, message));
+			out.add(failed(WellKnownKinds.SECRETS, message));
 			return out;
 		}
-		out.add(configMaps(clusterId, namespace, references));
-		out.add(secrets(clusterId, namespace, references));
+		out.add(tally(clusterId, namespace, WellKnownKinds.CONFIG_MAPS, references));
+		out.add(tally(clusterId, namespace, WellKnownKinds.SECRETS, references));
 		return out;
+	}
+
+	/**
+	 * A context that judges ConfigMap and Secret rows, holding the namespace's reference
+	 * scan.
+	 *
+	 * <p>
+	 * <b>Cost: three extra list calls per ConfigMaps or Secrets list request</b> — pods,
+	 * service accounts and ingresses over the same scope — of which the pod list is the
+	 * expensive one, and it is cluster-wide when no namespace is selected. That is
+	 * precisely what the Config overview already spends to draw the card, spent again to
+	 * make the card's numbers clickable; it is <b>once per request</b>, never per row.
+	 * Should any of it fail, {@link StatusContexts} falls back to no context and the rows
+	 * carry no state — an unfiltered list, not a wrong one.
+	 */
+	public StatusContext contextFor(String clusterId, String namespace) {
+		ConfigReferences references = scan(clusterId, namespace);
+		return (kind, object) -> supports(kind) ? StatusVocabulary.toState(verdict(kind, object, references)) : null;
+	}
+
+	/**
+	 * Whether anything in the scanned scope names this object.
+	 *
+	 * <p>
+	 * Secrets the cluster creates and owns are neither referenced nor a finding: nothing
+	 * mounting a service-account token or a Helm release record says nothing about
+	 * whether it is needed, so they get their own state instead of being counted as
+	 * unused. Being unreferenced is advisory — amber, not red — because on a real cluster
+	 * it is routinely true of config that is entirely in use.
+	 */
+	WorkloadHealth.Verdict verdict(String kind, GenericKubernetesResource object, ConfigReferences references) {
+		String name = WorkloadHealth.nameOf(object);
+		if (SECRET.equals(kind)) {
+			if (managedByTheCluster(object)) {
+				return WorkloadHealth.Verdict.idle("Cluster-managed");
+			}
+			return references.referencesSecret(name) ? WorkloadHealth.Verdict.ok("Referenced")
+					: WorkloadHealth.Verdict.attentionSoft("Not referenced", UNREFERENCED);
+		}
+		return references.referencesConfigMap(name) ? WorkloadHealth.Verdict.ok("Referenced")
+				: WorkloadHealth.Verdict.attentionSoft("Not referenced", UNREFERENCED);
 	}
 
 	private ConfigReferences scan(String clusterId, String namespace) {
@@ -87,66 +148,36 @@ public class ConfigUsageService {
 		return references;
 	}
 
-	private KindHealth configMaps(String clusterId, String namespace, ConfigReferences references) {
+	/**
+	 * One kind's tally. Secrets are listed for their names only — the values are never
+	 * read here, and the generic list path is the same one the rows travel, so the two
+	 * sides count the same objects as well as judging them the same way.
+	 */
+	private KindHealth tally(String clusterId, String namespace, ResourceDescriptor descriptor,
+			ConfigReferences references) {
 		try {
-			var client = this.clusters.require(clusterId).configMaps();
-			List<ConfigMap> all = ((namespace != null) ? client.inNamespace(namespace) : client.inAnyNamespace()).list()
-				.getItems();
-			Tally tally = new Tally("configmaps", "Config Maps", "ConfigMap");
-			for (ConfigMap configMap : all) {
-				if (references.referencesConfigMap(name(configMap.getMetadata()))) {
-					tally.ok("Referenced", StateCount.OK);
-				}
-				else {
-					// Advisory, so amber rather than red — see OVERVIEW_CATEGORIES.
-					tally.attention(configMap, UNREFERENCED, "Not referenced", StateCount.WARN);
-				}
+			List<GenericKubernetesResource> all = this.resources.listRaw(clusterId, descriptor, namespace);
+			Tally tally = new Tally(descriptor.id(), descriptor.label(), descriptor.kind());
+			for (GenericKubernetesResource object : all) {
+				tally.record(verdict(descriptor.kind(), object, references), WorkloadHealth.namespaceOf(object),
+						WorkloadHealth.nameOf(object));
 			}
 			return tally.toKindHealth();
 		}
 		catch (RuntimeException ex) {
-			log.debug("ConfigMap usage failed: {}", ex.getMessage());
-			return KindHealth.failed("configmaps", "Config Maps", "ConfigMap", String.valueOf(ex.getMessage()));
+			log.debug("Config usage failed for '{}': {}", descriptor.id(), ex.getMessage());
+			return failed(descriptor, String.valueOf(ex.getMessage()));
 		}
 	}
 
-	/**
-	 * Secrets are listed for their names only — the values are never read and never leave
-	 * the server.
-	 */
-	private KindHealth secrets(String clusterId, String namespace, ConfigReferences references) {
-		try {
-			var client = this.clusters.require(clusterId).secrets();
-			List<Secret> all = ((namespace != null) ? client.inNamespace(namespace) : client.inAnyNamespace()).list()
-				.getItems();
-			Tally tally = new Tally("secrets", "Secrets", "Secret");
-			for (Secret secret : all) {
-				if (managedByTheCluster(secret)) {
-					tally.ok("Cluster-managed", StateCount.IDLE);
-				}
-				else if (references.referencesSecret(name(secret.getMetadata()))) {
-					tally.ok("Referenced", StateCount.OK);
-				}
-				else {
-					tally.attention(secret, UNREFERENCED, "Not referenced", StateCount.WARN);
-				}
-			}
-			return tally.toKindHealth();
-		}
-		catch (RuntimeException ex) {
-			log.debug("Secret usage failed: {}", ex.getMessage());
-			return KindHealth.failed("secrets", "Secrets", "Secret", String.valueOf(ex.getMessage()));
-		}
+	private KindHealth failed(ResourceDescriptor descriptor, String message) {
+		return KindHealth.failed(descriptor.id(), descriptor.label(), descriptor.kind(), message);
 	}
 
 	/** Secrets whose absence of mounts says nothing about whether they are needed. */
-	private boolean managedByTheCluster(Secret secret) {
-		String type = secret.getType();
+	private boolean managedByTheCluster(GenericKubernetesResource secret) {
+		Object type = WorkloadHealth.get(secret, "type");
 		return SERVICE_ACCOUNT_TOKEN.equals(type) || HELM_RELEASE.equals(type);
-	}
-
-	private String name(io.fabric8.kubernetes.api.model.ObjectMeta metadata) {
-		return (metadata != null) ? metadata.getName() : "";
 	}
 
 }

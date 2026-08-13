@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.client.utils.Serialization;
 
+import org.alexmond.kweblens.health.StatusContext;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
 
@@ -79,9 +80,9 @@ final class ListJson {
 	 * caller, see {@link ResourceService#listRawChunked} for why that matters.
 	 */
 	static byte[] chunked(ResourceService resources, String clusterId, ResourceDescriptor descriptor, String namespace,
-			int chunkSize) {
+			int chunkSize, StatusContext context) {
 		return write((mapper, gen) -> resources.listRawChunked(clusterId, descriptor, namespace, chunkSize,
-				(chunk) -> writeChunk(mapper, gen, chunk)));
+				(chunk) -> writeChunk(mapper, gen, chunk, context)));
 	}
 
 	/**
@@ -90,8 +91,8 @@ final class ListJson {
 	 * chunk. Kept on this path anyway so both list endpoints produce their JSON the same
 	 * way.
 	 */
-	static byte[] of(List<GenericKubernetesResource> objects) {
-		return write((mapper, gen) -> writeChunk(mapper, gen, objects));
+	static byte[] of(List<GenericKubernetesResource> objects, StatusContext context) {
+		return write((mapper, gen) -> writeChunk(mapper, gen, objects, context));
 	}
 
 	private static byte[] write(ArrayBody body) {
@@ -110,10 +111,11 @@ final class ListJson {
 		return out.toByteArray();
 	}
 
-	private static void writeChunk(ObjectMapper mapper, JsonGenerator gen, List<GenericKubernetesResource> chunk) {
+	private static void writeChunk(ObjectMapper mapper, JsonGenerator gen, List<GenericKubernetesResource> chunk,
+			StatusContext context) {
 		try {
 			for (GenericKubernetesResource resource : chunk) {
-				mapper.writeValue(gen, ListProjection.forList(resource));
+				mapper.writeValue(gen, ListProjection.forList(resource, context));
 			}
 		}
 		catch (IOException ex) {

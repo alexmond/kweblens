@@ -21,6 +21,7 @@ import org.alexmond.kweblens.health.HealthService;
 import org.alexmond.kweblens.health.KindHealth;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.health.StateCount;
+import org.alexmond.kweblens.health.StatusContext;
 import org.alexmond.kweblens.health.StatusVocabulary;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.ResourceService;
@@ -43,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The population covers one state per tone, because a colour is where a wrong verdict is
  * cheapest to notice and most expensive to have: {@code ok} Running, {@code idle}
  * Completed, {@code warn} Pending, {@code err} CrashLoopBackOff, plus Deployments in
- * their own vocabulary and a ConfigMap that no rule judges at all.
+ * their own vocabulary and a ServiceAccount that no rule judges at all.
  *
  * <p>
  * <b>Decoys, and proof the comparison can fail.</b> A map-equality assertion passes
@@ -133,13 +134,12 @@ class StatusVocabularyEqualityTest {
 		deployment("api", 3, 3);
 		deployment("worker", 2, 1);
 		deployment("archived", 0, 0);
-		this.client.configMaps()
+		this.client.serviceAccounts()
 			.inNamespace(NS)
-			.resource(new io.fabric8.kubernetes.api.model.ConfigMapBuilder().withNewMetadata()
-				.withName("settings")
+			.resource(new io.fabric8.kubernetes.api.model.ServiceAccountBuilder().withNewMetadata()
+				.withName("runner")
 				.withNamespace(NS)
 				.endMetadata()
-				.withData(Map.of("log-level", "debug"))
 				.build())
 			.create();
 	}
@@ -172,7 +172,9 @@ class StatusVocabularyEqualityTest {
 	}
 
 	private List<GenericKubernetesResource> rows(ResourceDescriptor descriptor) {
-		return ListProjection.forList(resources().listRaw("mock", descriptor, NS));
+		// No context: every kind here is judged from the object alone. The kinds that
+		// need one have their own equality test — ContextualStatusEqualityTest.
+		return ListProjection.forList(resources().listRaw("mock", descriptor, NS), StatusContext.none());
 	}
 
 	// --- the assertions ---
@@ -251,12 +253,13 @@ class StatusVocabularyEqualityTest {
 	void aKindNoRuleJudgesCarriesNoStateAtAll() {
 		// Not "ok", not an empty label — absent. A row nobody examined must not be
 		// selectable as healthy, and must not be counted into a card that does not have
-		// it.
+		// it. ServiceAccount rather than ConfigMap: a ConfigMap now HAS a state, it
+		// simply needs a context to reach it, which is a different claim (GH#340).
 		seedTheFleet();
-		ResourceDescriptor configMaps = ResourceDescriptor.coreNamespaced("configmaps", "Config Maps", "ConfigMap",
-				"configmaps");
+		ResourceDescriptor serviceAccounts = ResourceDescriptor.coreNamespaced("serviceaccounts", "Service Accounts",
+				"ServiceAccount", "serviceaccounts");
 
-		List<GenericKubernetesResource> projected = rows(configMaps);
+		List<GenericKubernetesResource> projected = rows(serviceAccounts);
 
 		assertThat(projected).isNotEmpty();
 		assertThat(projected)

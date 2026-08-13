@@ -138,8 +138,11 @@ That is the reason the state is computed on the server and shipped on the row ra
 in the browser. For several kinds the browser could not derive it at all: a Service is broken when
 nothing is behind it, which lives in the *Endpoints* object; a claim is "Nearly full" only
 according to the metrics backend; a ConfigMap is "Not referenced" only after scanning the
-namespace's pods, service accounts and ingresses. And a rule transcribed into two languages drifts
-without either side going quiet — both keep answering, just differently.
+namespace's pods, service accounts and ingresses. Those three are shipped too — the list request
+opens the same second collection the card used, once, before it walks the rows (see
+xref:health-and-diagnostics.adoc[Health and diagnostics] for what each costs). And a rule
+transcribed into two languages drifts without either side going quiet — both keep answering, just
+differently.
 
 Two consequences worth stating:
 
@@ -151,8 +154,11 @@ Two consequences worth stating:
 * **A kind kweblens has no verdict for carries no state, and no `status:` term selects it.** That
   is the absence of a claim rather than a claim of health. Today the states are computed for the
   workload kinds — Pods, Deployments, StatefulSets, ReplicaSets, DaemonSets, Jobs and CronJobs —
-  and for the cluster-scoped Nodes and Namespaces. Node states are kubectl's own spelling, so
-  `status:Ready` does *not* select a cordoned node: that one is counted as
+  for the cluster-scoped Nodes and Namespaces, and for the four kinds whose verdict needs a second
+  collection: Services (`Serving`, `No endpoints`, `Not ready`), PersistentVolumeClaims (`Bound`,
+  `Nearly full`, and the other binding phases), ConfigMaps and Secrets (`Referenced`,
+  `Not referenced`, and `Cluster-managed` for the ones the cluster owns). Node states are kubectl's
+  own spelling, so `status:Ready` does *not* select a cordoned node: that one is counted as
   `status:Ready,SchedulingDisabled`, on its own line of the card.
 
 **A query that does not parse is not applied**, and the header says why — an invalid regex, an

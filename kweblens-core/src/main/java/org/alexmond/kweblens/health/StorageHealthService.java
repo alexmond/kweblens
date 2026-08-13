@@ -3,16 +3,17 @@ package org.alexmond.kweblens.health;
 import java.util.List;
 import java.util.Map;
 
-import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.Quantity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.stereotype.Service;
 
-import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
 import org.alexmond.kweblens.metric.VolumeUsage;
+import org.alexmond.kweblens.resource.ResourceService;
+import org.alexmond.kweblens.resource.WellKnownKinds;
 
 /**
  * The Storage overview's check: <b>PersistentVolumeClaims that are not bound</b>.
@@ -34,6 +35,12 @@ import org.alexmond.kweblens.metric.VolumeUsage;
  * disk is reported as bound rather than flagged on a figure that is not about it. See
  * {@link org.alexmond.kweblens.metric.VolumeUsage} and
  * {@code docs/design/metrics-sources.md}.
+ *
+ * <p>
+ * <b>Binding is on the object; fullness is not</b> — which is why a claim's state reaches
+ * a list row through a {@link StatusContext} rather than through the pure-function half
+ * of {@link StatusVocabulary}. One rule ({@link #verdict}), read by the card and by the
+ * row.
  */
 @Slf4j
 @Service
@@ -48,6 +55,8 @@ public class StorageHealthService {
 	 */
 	private static final String PENDING = "Pending";
 
+	private static final String BOUND = "Bound";
+
 	/**
 	 * Fullness at which a bound claim starts needing attention. 90% is the conventional
 	 * point at which a volume stops being someone's future problem, and it leaves room to
@@ -55,43 +64,70 @@ public class StorageHealthService {
 	 */
 	private static final double FULL_THRESHOLD = 0.90;
 
-	private final ClusterRegistry clusters;
+	private final ResourceService resources;
 
 	private final PrometheusMetricService metrics;
 
+	/** The kind this judges — the Storage half of {@link StatusVocabulary#covers}. */
+	public static boolean supports(String kind) {
+		return KIND.equals(kind);
+	}
+
 	public List<KindHealth> summarise(String clusterId, String namespace) {
 		try {
-			var client = this.clusters.require(clusterId).persistentVolumeClaims();
-			List<PersistentVolumeClaim> claims = ((namespace != null) ? client.inNamespace(namespace)
-					: client.inAnyNamespace())
-				.list()
-				.getItems();
+			List<GenericKubernetesResource> claims = this.resources.listRaw(clusterId,
+					WellKnownKinds.PERSISTENT_VOLUME_CLAIMS, namespace);
 			// Empty when there is no metrics backend, which simply means no capacity
 			// checks
 			// — the binding checks below stand on their own.
 			Map<String, VolumeUsage> usage = this.metrics.volumeUsage(clusterId);
-			Tally tally = new Tally("persistentvolumeclaims", "Persistent Volume Claims", KIND);
-			for (PersistentVolumeClaim claim : claims) {
-				String phase = phase(claim);
-				if (!"Bound".equals(phase)) {
-					tally.attention(claim, reason(claim, phase), (phase != null) ? phase : "Unknown", StateCount.ERR);
-					continue;
-				}
-				String full = fullnessReason(claim, usage);
-				if (full != null) {
-					tally.attention(claim, full, "Nearly full", StateCount.WARN);
-				}
-				else {
-					tally.ok("Bound", StateCount.OK);
-				}
+			Tally tally = new Tally(WellKnownKinds.PERSISTENT_VOLUME_CLAIMS.id(),
+					WellKnownKinds.PERSISTENT_VOLUME_CLAIMS.label(), KIND);
+			for (GenericKubernetesResource claim : claims) {
+				tally.record(verdict(claim, usage), WorkloadHealth.namespaceOf(claim), WorkloadHealth.nameOf(claim));
 			}
 			return List.of(tally.toKindHealth());
 		}
 		catch (RuntimeException ex) {
 			log.debug("Storage summary failed: {}", ex.getMessage());
-			return List.of(KindHealth.failed("persistentvolumeclaims", "Persistent Volume Claims", KIND,
-					String.valueOf(ex.getMessage())));
+			return List.of(KindHealth.failed(WellKnownKinds.PERSISTENT_VOLUME_CLAIMS.id(),
+					WellKnownKinds.PERSISTENT_VOLUME_CLAIMS.label(), KIND, String.valueOf(ex.getMessage())));
 		}
+	}
+
+	/**
+	 * A context that judges PersistentVolumeClaim rows, holding the volume usage the
+	 * "Nearly full" verdict needs.
+	 *
+	 * <p>
+	 * <b>Cost: one {@code volumeUsage} call per claims list request</b> — backend
+	 * discovery plus two instant queries through the API server's service proxy, cluster
+	 * wide, exactly what the card costs. Where there is no metrics backend it is the
+	 * discovery alone and there is no "Nearly full" state on either side to disagree
+	 * about.
+	 */
+	public StatusContext contextFor(String clusterId, String namespace) {
+		Map<String, VolumeUsage> usage = this.metrics.volumeUsage(clusterId);
+		return (kind, object) -> supports(kind) ? StatusVocabulary.toState(verdict(object, usage)) : null;
+	}
+
+	/**
+	 * What state this claim is in: its binding phase, or — when it is bound — whether the
+	 * volume behind it is nearly full.
+	 *
+	 * <p>
+	 * Not bound is red and phase-named ({@code Pending}, {@code Lost}, {@code Released}),
+	 * because the pod that wants it is not running. Nearly full is amber: it is still
+	 * serving, and it is a deadline rather than an outage.
+	 */
+	WorkloadHealth.Verdict verdict(GenericKubernetesResource claim, Map<String, VolumeUsage> usage) {
+		String phase = str(WorkloadHealth.get(claim, "status", "phase"));
+		if (!BOUND.equals(phase)) {
+			return WorkloadHealth.Verdict.attention(phase.isEmpty() ? "Unknown" : phase, reason(claim, phase));
+		}
+		String full = fullnessReason(claim, usage);
+		return (full != null) ? WorkloadHealth.Verdict.attentionSoft("Nearly full", full)
+				: WorkloadHealth.Verdict.ok(BOUND);
 	}
 
 	/**
@@ -105,7 +141,7 @@ public class StorageHealthService {
 	 * claim the claim is simply reported as OK rather than flagged on a number that
 	 * describes a shared disk.
 	 */
-	private String fullnessReason(PersistentVolumeClaim claim, Map<String, VolumeUsage> usage) {
+	private String fullnessReason(GenericKubernetesResource claim, Map<String, VolumeUsage> usage) {
 		VolumeUsage volume = usage.get(key(claim));
 		if (volume == null || !volume.plausibleFor(requestedBytes(claim))) {
 			return null;
@@ -117,23 +153,18 @@ public class StorageHealthService {
 		return Math.round(fraction * 100) + "% full";
 	}
 
-	private String key(PersistentVolumeClaim claim) {
-		return (claim.getMetadata() != null) ? claim.getMetadata().getNamespace() + "/" + claim.getMetadata().getName()
-				: "";
+	private String key(GenericKubernetesResource claim) {
+		return WorkloadHealth.namespaceOf(claim) + "/" + WorkloadHealth.nameOf(claim);
 	}
 
 	/** The claim's requested storage in bytes, or 0 when it does not state one. */
-	private long requestedBytes(PersistentVolumeClaim claim) {
-		if (claim.getSpec() == null || claim.getSpec().getResources() == null) {
-			return 0;
-		}
-		var requests = claim.getSpec().getResources().getRequests();
-		Quantity requested = (requests != null) ? requests.get("storage") : null;
-		if (requested == null) {
+	private long requestedBytes(GenericKubernetesResource claim) {
+		String requested = str(WorkloadHealth.get(claim, "spec", "resources", "requests", "storage"));
+		if (requested.isEmpty()) {
 			return 0;
 		}
 		try {
-			return Quantity.getAmountInBytes(requested).longValue();
+			return Quantity.getAmountInBytes(Quantity.parse(requested)).longValue();
 		}
 		catch (RuntimeException ex) {
 			log.debug("Unparsable storage request on {}: {}", key(claim), ex.getMessage());
@@ -141,22 +172,22 @@ public class StorageHealthService {
 		}
 	}
 
-	private String phase(PersistentVolumeClaim claim) {
-		return (claim.getStatus() != null) ? claim.getStatus().getPhase() : null;
-	}
-
 	/**
 	 * The phase, plus the StorageClass when the claim is Pending — because a Pending
 	 * claim is nearly always a question about its class, and having the name in the row
 	 * saves opening the object to find it.
 	 */
-	private String reason(PersistentVolumeClaim claim, String phase) {
-		String state = (phase != null) ? phase : "unknown";
-		String storageClass = (claim.getSpec() != null) ? claim.getSpec().getStorageClassName() : null;
-		if (PENDING.equals(state) && storageClass != null && !storageClass.isBlank()) {
+	private String reason(GenericKubernetesResource claim, String phase) {
+		String state = phase.isEmpty() ? "unknown" : phase;
+		String storageClass = str(WorkloadHealth.get(claim, "spec", "storageClassName"));
+		if (PENDING.equals(state) && !storageClass.isBlank()) {
 			return state + " · " + storageClass;
 		}
 		return state;
+	}
+
+	private String str(Object value) {
+		return (value != null) ? String.valueOf(value) : "";
 	}
 
 }

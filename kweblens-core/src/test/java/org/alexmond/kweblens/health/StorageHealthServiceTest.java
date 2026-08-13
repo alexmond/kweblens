@@ -6,6 +6,7 @@ import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.resource.ResourceService;
 import org.alexmond.kweblens.metric.MetricsProperties;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
 import org.alexmond.kweblens.metric.VolumeUsage;
@@ -27,7 +28,8 @@ class StorageHealthServiceTest {
 		// Prometheus-like Service, so volumeUsage() is empty and only the binding checks
 		// run.
 		// That is exactly the no-metrics-backend deployment, and it must still work.
-		return new StorageHealthService(registry, new PrometheusMetricService(registry, new MetricsProperties()));
+		return new StorageHealthService(new ResourceService(registry),
+				new PrometheusMetricService(registry, new MetricsProperties()));
 	}
 
 	private void claim(String name, String phase, String storageClass) {
@@ -107,7 +109,7 @@ class StorageHealthServiceTest {
 				return java.util.Map.of("app/" + reading.claim(), reading);
 			}
 		};
-		return new StorageHealthService(registry, stub);
+		return new StorageHealthService(new ResourceService(registry), stub);
 	}
 
 	private void boundClaim(String name, String requested) {
