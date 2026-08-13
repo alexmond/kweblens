@@ -150,7 +150,10 @@ Two consequences worth stating:
   is the one you meant, and quote a state that contains a space: `status:"No endpoints"`.
 * **A kind kweblens has no verdict for carries no state, and no `status:` term selects it.** That
   is the absence of a claim rather than a claim of health. Today the states are computed for the
-  workload kinds — Pods, Deployments, StatefulSets, ReplicaSets, DaemonSets, Jobs and CronJobs.
+  workload kinds — Pods, Deployments, StatefulSets, ReplicaSets, DaemonSets, Jobs and CronJobs —
+  and for the cluster-scoped Nodes and Namespaces. Node states are kubectl's own spelling, so
+  `status:Ready` does *not* select a cordoned node: that one is counted as
+  `status:Ready,SchedulingDisabled`, on its own line of the card.
 
 **A query that does not parse is not applied**, and the header says why — an invalid regex, an
 unterminated quote, a missing label key. Every row stays on screen and the count goes back to the

@@ -23,8 +23,8 @@ to fetch the whole collection anyway to say which objects are unhealthy — whic
 the summary exists to avoid.
 
 `GET /api/v1/clusters/{clusterId}/overview/{category}` serves them, where `category` is one of
-`workloads`, `network`, `storage`, `config`. An unknown category is a 404, not an empty list: an
-empty list would render as a healthy, empty dashboard.
+`cluster`, `workloads`, `network`, `storage`, `config`. An unknown category is a 404, not an empty
+list: an empty list would render as a healthy, empty dashboard.
 
 === Workloads
 
@@ -64,6 +64,49 @@ surfaces as a failed Job, from the object that actually knows it.
 Four states rather than a boolean: `OK`, `ATTENTION`, `SUSPENDED` and `IDLE`. A suspended CronJob
 is an operator's choice, and colouring it red beside genuine failures is how a health signal earns
 its way into being ignored.
+
+=== Cluster
+
+`ClusterObjectHealth` judges the two *cluster-scoped* kinds on the cluster dashboard — Node and
+Namespace.
+
+[cols="1,3"]
+|===
+| Kind | Verdict
+
+| Node
+| The `Ready` condition, plus `,SchedulingDisabled` when `spec.unschedulable` is set — the exact
+strings `kubectl get nodes` prints, assembled the same way, so `Ready`,
+`Ready,SchedulingDisabled`, `NotReady` and `NotReady,SchedulingDisabled` are the vocabulary. A
+cordoned-but-healthy node is counted apart from the plain `Ready` ones, which is what someone
+draining a node is looking for; it is amber rather than red, because cordoning is an operator's
+own doing. `Ready=Unknown` — the kubelet stopped posting — reads as `NotReady` with the
+condition's reason (`NodeStatusUnknown`) carrying the distinction, and a node with no `Ready`
+condition at all is `Unknown` and amber.
+
+| Namespace
+| `Active` or `Terminating`; the API has no third phase. Terminating is amber: usually a delete in
+progress, occasionally a finalizer nothing will satisfy, which is the case the state exists to
+surface.
+|===
+
+What is deliberately *not* a state here: the pressure conditions (`MemoryPressure`,
+`DiskPressure`, `PIDPressure`) — a node under disk pressure is still `Ready`, kubectl says so, and
+the Nodes list already has a Conditions column; a `Cordoned` state of kweblens' own, which would
+hide whether the node is also ready; and any judgement about what a Namespace contains, which
+would be a claim invented here about objects that are not in the Namespace object at all.
+
+*Events are not in this category*, although they are the third kind in the Cluster nav section. An
+event's `Warning`/`Normal` is its `type` — a field on a report *about* another object, not a
+verdict on the event — so there is no state to count, and the dashboard's Warnings figure stays a
+plain count with the warnings table itself directly beneath it. The category is assembled by
+asking `StatusVocabulary.covers` which kinds have a verdict, so this falls out of the shared rule
+rather than being a special case.
+
+The namespace filter is *not* passed to this category. Both kinds are cluster-scoped, so narrowing
+them is not a filter that returns fewer — it is a question the API does not answer, and the
+dashboard says so beside the cards rather than showing filtered and unfiltered numbers side by
+side.
 
 === Network
 
