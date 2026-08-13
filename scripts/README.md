@@ -18,6 +18,7 @@ once — the reason is in the header comment of each script.
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
 | [`alloc-probe.sh`](alloc-probe.sh) | *Which code* spends that heap, by call site and thread. A class histogram cannot say. |
 | [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
+| [`backlog-snapshot.sh`](backlog-snapshot.sh) | Issues, open PRs, roadmap markers, live instances and stray worktrees — the facts a triage run needs. |
 | [`pr-watch.sh`](pr-watch.sh) | Wait for a PR's checks; optionally merge when they pass. |
 | [`deploy-k8s.sh`](deploy-k8s.sh) | Build/push the image and `helm upgrade --install`. |
 
