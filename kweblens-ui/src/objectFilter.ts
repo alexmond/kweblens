@@ -1,4 +1,4 @@
-import { objName, objNs } from './kube';
+import { objName, objNs, objStateLabel } from './kube';
 import type { KubeObject } from './types';
 
 /**
@@ -34,9 +34,28 @@ import type { KubeObject } from './types';
  * itself.
  * <li><b>{@code name:} {@code ns:} {@code kind:}</b> — the same text matching against one
  * field only; the value may itself be a `/regex/` or a `"quoted string"`.
+ * <li><b>{@code status:}</b> — the state the SERVER put the object in, matched
+ * <b>exactly</b> (case-insensitively). See below.
  * <li><b>label requirements</b> — `app=web`, `app==web`, `app!=db`, `env in (dev,stage)`,
  * `tier notin (frontend)`, and `label:app` / `-label:app` for presence and absence.
  * </ul>
+ *
+ * <h2>`status:` is exact, and that is deliberate</h2>
+ *
+ * The other fields are free text about which a substring is the useful question — half a
+ * pod name, part of a namespace. A state is not free text: it is drawn from a small closed
+ * vocabulary the server publishes on the row (`kweblensState`, from `StatusVocabulary`),
+ * and it is the same value an overview card counted. `status:` therefore compares the
+ * whole label, because the ONE property this term exists to have is that the card's number
+ * and the rows it selects are the same set — and a substring match breaks it silently the
+ * first time two states share a stem (`Complete` would take `Completed` with it, and every
+ * `…BackOff` would answer to `Backoff`). A `/regex/` value is still accepted for the
+ * genuinely fuzzy question — `status:/backoff/` is every backoff state — so nothing is
+ * lost except the way of getting a wrong count without noticing. A `"quoted"` value is
+ * exact too; quotes are how a state with a space in it is written.
+ *
+ * <p>A row whose kind kweblens has no verdict for carries no state at all, and matches no
+ * `status:` term. That is not a claim that it is healthy — it is the absence of a claim.
  *
  * <h2>Label semantics are Kubernetes', not ours</h2>
  *
@@ -57,8 +76,12 @@ import type { KubeObject } from './types';
  * thing that must not change.
  * <li>The numeric requirements `key>1` / `key<1` are not supported. A token shaped like one is
  * an error rather than a silent substring search for `key>1`.
- * <li>Field selectors (`--field-selector status.phase=Running`) are not implemented; `name:`,
- * `ns:` and `kind:` are the fields the client actually holds for every kind.
+ * <li>`kubectl`'s field selectors (`--field-selector status.phase=Running`) are not a general
+ * feature here: arbitrary JSON paths are not addressable. `status:` is the one field selector
+ * that is, and it selects on kweblens' own state vocabulary rather than on `status.phase` —
+ * which is the point, since the phase of a pod stuck on its image is `Pending` and its state
+ * is `ImagePullBackOff`, and the phase of a finished one is `Succeeded` while the card that
+ * counted it says `Completed`.
  * </ul>
  */
 
@@ -78,6 +101,15 @@ interface FieldAtom {
   match: TextMatcher;
 }
 /**
+ * A `status:` term. Separate from {@link FieldAtom} because it is a different question, not a
+ * fourth field: it reads the server's computed state rather than a property of the manifest,
+ * and it matches the whole label rather than a substring of it (see the header).
+ */
+interface StatusAtom {
+  type: 'status';
+  match: TextMatcher;
+}
+/**
  * One label requirement, normalised to the three operators apimachinery really has.
  *
  * <p>`=` and `==` collapse into `in` with a single value, `!=` into `notin` with a single
@@ -91,7 +123,7 @@ interface LabelAtom {
   op: 'in' | 'notin' | 'exists';
   values: string[];
 }
-type Atom = TextAtom | FieldAtom | LabelAtom;
+type Atom = TextAtom | FieldAtom | StatusAtom | LabelAtom;
 
 /** One parsed term: an atom, and whether a leading `-` inverted it. */
 interface FilterTerm {
@@ -236,32 +268,65 @@ function mergeSetOperators(tokens: string[]): string[] {
 
 // --- term parsing -------------------------------------------------------------------------
 
+/** The compiled matcher for a `/regex/` value, or null when the value is not one. */
+function regexMatcher(raw: string): TextMatcher | null {
+  if (!raw.startsWith('/') || !raw.endsWith('/') || raw.length < 2) {
+    return null;
+  }
+  const source = raw.slice(1, -1);
+  if (!source) {
+    throw new FilterError('Empty regex — // needs a pattern between the slashes');
+  }
+  let re: RegExp;
+  try {
+    re = new RegExp(source, 'i');
+  } catch (e) {
+    // V8 prefixes its reason with the pattern it was already handed — "Invalid regular
+    // expression: /vmstack(/i: Unterminated group" — so quoting it whole printed the
+    // pattern twice and leaked the `i` flag the operator never typed. Strip that prefix
+    // when it is there and keep whatever the engine actually said; other engines word it
+    // differently and are passed through unchanged.
+    const reason = (e as Error).message.replace(/^Invalid regular expression: \/.*\/[a-z]*: /, '');
+    throw new FilterError(`Invalid regex /${source}/ — ${reason}`);
+  }
+  return (v) => re.test(v);
+}
+
+/** `"quoted text"` unwrapped, or the value as typed. */
+function unquote(raw: string): string {
+  return raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2 ? raw.slice(1, -1) : raw;
+}
+
 /** A `/regex/`, a `"quoted string"`, or a bare substring — compiled once, here. */
 function textMatcher(raw: string): TextMatcher {
-  if (raw.startsWith('/') && raw.endsWith('/') && raw.length >= 2) {
-    const source = raw.slice(1, -1);
-    if (!source) {
-      throw new FilterError('Empty regex — // needs a pattern between the slashes');
-    }
-    let re: RegExp;
-    try {
-      re = new RegExp(source, 'i');
-    } catch (e) {
-      // V8 prefixes its reason with the pattern it was already handed — "Invalid regular
-      // expression: /vmstack(/i: Unterminated group" — so quoting it whole printed the
-      // pattern twice and leaked the `i` flag the operator never typed. Strip that prefix
-      // when it is there and keep whatever the engine actually said; other engines word it
-      // differently and are passed through unchanged.
-      const reason = (e as Error).message.replace(/^Invalid regular expression: \/.*\/[a-z]*: /, '');
-      throw new FilterError(`Invalid regex /${source}/ — ${reason}`);
-    }
-    return (v) => re.test(v);
+  const re = regexMatcher(raw);
+  if (re) {
+    return re;
   }
-  const needle = (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2 ? raw.slice(1, -1) : raw).toLowerCase();
+  const needle = unquote(raw).toLowerCase();
   if (!needle) {
     throw new FilterError('Empty search text — remove it, or quote the text you meant');
   }
   return (v) => v.toLowerCase().includes(needle);
+}
+
+/**
+ * A `status:` value: a `/regex/`, or the WHOLE state label, compared case-insensitively.
+ *
+ * <p>Exact rather than substring on purpose — see the header. The empty case gets its own
+ * sentence rather than "Empty search text", because `status:` with nothing after it is usually
+ * a half-typed query and the useful reply names a state.
+ */
+function statusMatcher(raw: string): TextMatcher {
+  const re = regexMatcher(raw);
+  if (re) {
+    return re;
+  }
+  const wanted = unquote(raw).toLowerCase();
+  if (!wanted) {
+    throw new FilterError('Missing state after “status:” — write it as status:Running');
+  }
+  return (v) => v.toLowerCase() === wanted;
 }
 
 function labelKey(raw: string): string {
@@ -287,6 +352,27 @@ function setAtom(m: RegExpExecArray): LabelAtom {
 }
 
 /**
+ * A `prefix:value` term's atom, or null when the prefix is `label:` — which is not a field but
+ * the opening of a label requirement, and so belongs to the branches after this one.
+ *
+ * <p>An unrecognised prefix throws. Left as a substring search it would look for a colon in a
+ * name that cannot contain one — zero rows, and no way to tell that from a genuinely empty
+ * result.
+ */
+function fieldAtom(prefix: string, value: string): Atom | null {
+  if (FIELDS[prefix]) {
+    return { type: 'field', field: FIELDS[prefix], match: textMatcher(value) };
+  }
+  if (prefix === 'status') {
+    return { type: 'status', match: statusMatcher(value) };
+  }
+  if (prefix !== 'label') {
+    throw new FilterError(`Unknown field “${prefix}:” — the fields are name:, ns:, kind:, status: and label:`);
+  }
+  return null;
+}
+
+/**
  * One term's atom. Order matters: a delimited run is settled before anything looks for an
  * operator inside it, or the `=` in `/a=b/` would be read as a label requirement.
  */
@@ -298,16 +384,9 @@ function parseAtom(atom: string): Atom {
     throw new FilterError(`Missing label key before “${atom.startsWith('!=') ? '!=' : '='}” — write it as key=value`);
   }
   const field = FIELD_TERM.exec(atom);
-  if (field) {
-    if (FIELDS[field[1]]) {
-      return { type: 'field', field: FIELDS[field[1]], match: textMatcher(field[2]) };
-    }
-    // Not a field we know, and not `label:` on its way to the requirement branches below.
-    // Left as a substring search it would look for a colon in a name that cannot contain one
-    // — zero rows, and no way to tell that from a genuinely empty result.
-    if (field[1] !== 'label') {
-      throw new FilterError(`Unknown field “${field[1]}:” — the fields are name:, ns:, kind: and label:`);
-    }
+  const named = field ? fieldAtom(field[1], field[2]) : null;
+  if (named) {
+    return named;
   }
   const set = SET_TERM.exec(atom);
   if (set) {
@@ -384,7 +463,17 @@ function atomMatches(o: KubeObject, atom: Atom): boolean {
   if (atom.type === 'text') {
     return atom.match(objName(o)) || atom.match(objNs(o) ?? '') || atom.match(o.kind ?? '');
   }
-  return atom.type === 'field' ? atom.match(fieldValue(o, atom.field)) : labelMatches(o.metadata?.labels ?? {}, atom);
+  if (atom.type === 'field') {
+    return atom.match(fieldValue(o, atom.field));
+  }
+  if (atom.type === 'status') {
+    // '' when the server computed no state for this kind. Guarded rather than passed to the
+    // matcher, so no pattern — not even /^$/ or a regex that matches everything — can select
+    // an object on the strength of a verdict nobody reached.
+    const state = objStateLabel(o);
+    return state !== '' && atom.match(state);
+  }
+  return labelMatches(o.metadata?.labels ?? {}, atom);
 }
 
 /**
@@ -433,6 +522,8 @@ export const FILTER_HELP: FilterHelpRow[] = [
   { example: '/^web-\\d+$/', meaning: 'regex over name, namespace and kind (case-insensitive)' },
   { example: 'ns:kube-system', meaning: 'one field only — also name: and kind:' },
   { example: 'name:/^web/', meaning: 'a field matched by regex' },
+  { example: 'status:Pending', meaning: 'the state an overview card counts — the whole word, not part of it' },
+  { example: 'status:/backoff/', meaning: 'states matched loosely — every kind of backoff' },
   { example: 'app=web', meaning: 'label equality — also app==web' },
   { example: 'app!=db', meaning: 'label differs, or the object has no app label (as in kubectl)' },
   { example: 'env in (dev,stage)', meaning: 'set membership — also notin' },
@@ -443,6 +534,8 @@ export const FILTER_HELP: FilterHelpRow[] = [
 export const FILTER_HELP_NOTES: string[] = [
   'Text matching is case-insensitive; label values compare exactly, like kubectl.',
   'Kubernetes writes label presence as “partition” and absence as “!partition”. Here they are label:partition and -label:partition, because a bare word stays a text search.',
-  'Numeric label requirements (key>1, key<1) and field selectors (status.phase=Running) are not supported.',
+  'status: is the state the server computed — the one the overview cards count, so a card’s number and the rows it selects are the same objects. The whole label has to match, or “Complete” would take “Completed” with it and those two numbers would stop agreeing.',
+  'A kind the server has no verdict for carries no state, and no status: term selects it — the absence of a claim, not a claim of health.',
+  'Numeric label requirements (key>1, key<1) are not supported, and neither are arbitrary field selectors (status.phase=Running) — status: is the one there is.',
   'The filter runs over every object the server sent — nothing is truncated, so a term that matches nothing really matches nothing.',
 ];

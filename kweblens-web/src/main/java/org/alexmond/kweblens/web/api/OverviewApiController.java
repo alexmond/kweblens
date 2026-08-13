@@ -16,8 +16,8 @@ import org.alexmond.kweblens.health.ConfigUsageService;
 import org.alexmond.kweblens.health.HealthService;
 import org.alexmond.kweblens.health.KindHealth;
 import org.alexmond.kweblens.health.NetworkHealthService;
+import org.alexmond.kweblens.health.StatusVocabulary;
 import org.alexmond.kweblens.health.StorageHealthService;
-import org.alexmond.kweblens.health.WorkloadHealth;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.web.nav.NavCatalog;
 
@@ -78,8 +78,10 @@ public class OverviewApiController {
 			.flatMap((c) -> c.items().stream())
 			// Only kinds the health rules actually understand. A kind with no rule would
 			// otherwise be reported as uniformly healthy, which is a claim rather than a
-			// measurement.
-			.filter((d) -> WorkloadHealth.supports(d.kind()))
+			// measurement. Asked of StatusVocabulary, which also decides whether a list
+			// row carries a state — so "the card has a breakdown" and "the rows are
+			// selectable by it" are one set, not two lists that can diverge.
+			.filter((d) -> StatusVocabulary.covers(d.kind()))
 			.toList();
 		return this.health.summarise(clusterId, kinds, namespace);
 	}

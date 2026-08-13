@@ -124,6 +124,46 @@ class ListProjectionTest {
 	}
 
 	@Test
+	void addsTheStateAnOverviewCardWouldCountThisObjectUnder() {
+		// The row half of GH#337: the browser filters on a value the server computed, so
+		// it has to be ON the row. And it is not status.phase — the phase here is
+		// "Pending", which names nothing to act on, while "ImagePullBackOff" names the
+		// fix.
+		String json = output(parse("""
+				apiVersion: v1
+				kind: Pod
+				metadata: {name: web, namespace: app}
+				status:
+				  phase: Pending
+				  containerStatuses:
+				  - name: c
+				    state:
+				      waiting: {reason: ImagePullBackOff}
+				"""));
+		assertThat(json).contains("\"kweblensState\"")
+			.contains("\"label\":\"ImagePullBackOff\"")
+			.contains("\"tone\":\"err\"");
+	}
+
+	@Test
+	void addsNoStateToAKindNoRuleJudges() {
+		// Absent, not "ok" and not an empty label: a row nobody examined must not be
+		// selectable as healthy. The equality this field exists for is only worth
+		// anything if silence stays silence.
+		assertThat(output(parse("""
+				apiVersion: example.com/v1
+				kind: Widget
+				metadata: {name: w1, namespace: app}
+				"""))).doesNotContain("kweblensState");
+		assertThat(output(parse("""
+				apiVersion: v1
+				kind: ConfigMap
+				metadata: {name: settings, namespace: app}
+				data: {log-level: debug}
+				"""))).doesNotContain("kweblensState");
+	}
+
+	@Test
 	void toleratesNullsAndObjectsWithNothingToStrip() {
 		assertThat(ListProjection.forList((GenericKubernetesResource) null)).isNull();
 		assertThat(ListProjection.forList((List<GenericKubernetesResource>) null)).isEmpty();
