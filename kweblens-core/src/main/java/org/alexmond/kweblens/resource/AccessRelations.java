@@ -2,13 +2,11 @@ package org.alexmond.kweblens.resource;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
-import io.fabric8.kubernetes.api.model.rbac.Subject;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,7 +14,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
 
 /**
- * Who a pod runs as, and what that identity has been granted.
+ * Who a pod runs as, and what that identity has been granted. The two joins themselves —
+ * which account a pod runs as, and whether a binding's subjects name it — live in
+ * {@link RbacSubjects}, because the security audit walks them in the other direction.
  *
  * <p>
  * RBAC is the one part of a cluster that is only readable backwards. A ServiceAccount
@@ -27,9 +27,6 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 @Slf4j
 @RequiredArgsConstructor
 class AccessRelations {
-
-	/** The account a pod runs as when it does not name one. */
-	private static final String DEFAULT_ACCOUNT = "default";
 
 	private final ClusterRegistry clusters;
 
@@ -47,7 +44,7 @@ class AccessRelations {
 	 * Cost: one GET.
 	 */
 	Relation serviceAccount(String clusterId, String namespace, GenericKubernetesResource pod) {
-		String name = accountName(pod);
+		String name = RbacSubjects.accountName(pod);
 		try {
 			ServiceAccount account = this.clusters.require(clusterId)
 				.serviceAccounts()
@@ -81,17 +78,16 @@ class AccessRelations {
 	Relation grantedBy(String clusterId, String namespace, String name) {
 		try {
 			KubernetesClient client = this.clusters.require(clusterId);
-			Set<String> identities = Set.of("system:serviceaccounts", "system:serviceaccounts:" + namespace);
 			List<Object> matches = new ArrayList<>();
 			List<RoleBinding> roleBindings = client.rbac().roleBindings().inNamespace(namespace).list().getItems();
 			for (RoleBinding binding : roleBindings) {
-				if (grants(binding.getSubjects(), namespace, name, identities)) {
+				if (RbacSubjects.grantsAccount(binding.getSubjects(), namespace, name)) {
 					matches.add(binding);
 				}
 			}
 			List<ClusterRoleBinding> clusterBindings = client.rbac().clusterRoleBindings().list().getItems();
 			for (ClusterRoleBinding binding : clusterBindings) {
-				if (grants(binding.getSubjects(), namespace, name, identities)) {
+				if (RbacSubjects.grantsAccount(binding.getSubjects(), namespace, name)) {
 					matches.add(binding);
 				}
 			}
@@ -101,40 +97,6 @@ class AccessRelations {
 			log.debug("RBAC binding scan failed for {}/{}: {}", namespace, name, ex.getMessage());
 			return Relation.from(ex);
 		}
-	}
-
-	private boolean grants(List<Subject> subjects, String namespace, String name, Set<String> identities) {
-		if (subjects == null) {
-			return false;
-		}
-		return subjects.stream().anyMatch((s) -> namesAccount(s, namespace, name) || namesGroup(s, identities));
-	}
-
-	private boolean namesAccount(Subject subject, String namespace, String name) {
-		if (!"ServiceAccount".equals(subject.getKind()) || !name.equals(subject.getName())) {
-			return false;
-		}
-		// A RoleBinding may omit the subject namespace, meaning its own; a
-		// ClusterRoleBinding always carries it.
-		return subject.getNamespace() == null || subject.getNamespace().isBlank()
-				|| namespace.equals(subject.getNamespace());
-	}
-
-	private boolean namesGroup(Subject subject, Set<String> identities) {
-		return "Group".equals(subject.getKind()) && identities.contains(subject.getName());
-	}
-
-	private String accountName(GenericKubernetesResource pod) {
-		Object named = pod.get("spec", "serviceAccountName");
-		if (named instanceof String name && !name.isBlank()) {
-			return name;
-		}
-		// The pre-1.9 spelling, still populated by the API server on every pod.
-		Object legacy = pod.get("spec", "serviceAccount");
-		if (legacy instanceof String name && !name.isBlank()) {
-			return name;
-		}
-		return DEFAULT_ACCOUNT;
 	}
 
 }

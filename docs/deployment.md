@@ -193,7 +193,7 @@ raising the root log level cannot silently switch the trail off — if you set
 ## MCP — exposing the cluster view to an AI agent
 
 The MCP server is **in the same jar**. There is nothing extra to deploy, no second port and no
-second credential: if the web app is reachable, so is the tool surface. It exposes **15 read-only
+second credential: if the web app is reachable, so is the tool surface. It exposes **16 read-only
 tools**; nothing on it writes.
 
 ### The two endpoints

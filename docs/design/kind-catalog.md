@@ -139,7 +139,7 @@ would have needed #142's work before a catalog changed anything it emitted.
 
 **As re-checked 2026-08-13, the agent half has fired and the TUI half has not.** GH#142
 closed 2026-08-03; the surface is now 15 `@Tool` methods across `ClusterTools` (4),
-`DiagnosticTools` (4) and `HealthTools` (7). GH#143 has still produced no module —
+`DiagnosticTools` (4) and `HealthTools` (8). GH#143 has still produced no module —
 `kweblens-tui` appears in no `pom.xml` in the reactor.
 
 **But what the agent surface consumes is not the catalog this document is about, and that

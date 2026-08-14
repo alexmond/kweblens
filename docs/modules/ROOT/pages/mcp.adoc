@@ -6,7 +6,7 @@ separate process to start, no second copy of your kubeconfig, and no extra crede
 assistant connected to it sees the cluster through exactly the connections the dashboard already
 holds.
 
-The surface is *15 read-only tools*. No tool mutates anything. Changing the cluster stays on the
+The surface is *16 read-only tools*. No tool mutates anything. Changing the cluster stays on the
 guarded suggest → preview → approve → apply path, which is deliberately not reachable from here —
 see xref:health-and-diagnostics.adoc[Health and diagnostics].
 
@@ -74,7 +74,7 @@ log" will reason as though it is complete. An empty result is reported as
 `{"available": false, "reason": …}` rather than as an empty log, for the same reason: a model
 handed `{"log": ""}` reads it as "the container ran and printed nothing".
 
-=== Verdicts — `HealthTools` (7)
+=== Verdicts — `HealthTools` (8)
 
 These are the same server-side checks the dashboard's overviews render, exposed rather than left
 for the assistant to reconstruct. They already do joins a model would otherwise perform by hand
@@ -103,6 +103,11 @@ bound claims where the metrics reading is genuinely about the claim.
 description says so at length, because this is not evidence an object is unused and an assistant
 must never recommend deleting on the strength of it.
 
+| `checkSecurity`
+| What the scope is configured to *permit*: containers claiming privilege in their own spec, RBAC
+bindings that grant `cluster-admin`, and — the part no single object states — which pods actually
+run as such an identity. Configuration, not failure: a clean cluster can have findings here.
+
 | `getPodUsage`
 | Current CPU and memory per pod, from metrics-server.
 
@@ -114,7 +119,7 @@ must never recommend deleting on the strength of it.
 |===
 
 Adding a tool means one `@Tool`-annotated method on a bean wired into `McpConfig`'s provider — and
-updating the count of 15 wherever it is stated, because that is the number people check.
+updating the count of 16 wherever it is stated, because that is the number people check.
 
 == Transport
 

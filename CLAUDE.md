@@ -310,9 +310,9 @@ broken. It is not; do not "fix" it.
 
 ## MCP server
 
-`kweblens-web` runs an in-jar MCP server exposing **15 read-only tools**, registered together by
+`kweblens-web` runs an in-jar MCP server exposing **16 read-only tools**, registered together by
 `McpConfig`'s `MethodToolCallbackProvider`: `ClusterTools` (orientation, 4), `DiagnosticTools`
-(evidence, 4), `HealthTools` (verdicts, 7). A new tool is one `@Tool` method on a bean wired into
+(evidence, 4), `HealthTools` (verdicts, 8). A new tool is one `@Tool` method on a bean wired into
 that provider — **keep the count correct here and in the README**, it is the number people check.
 
 **Transport: SSE over WebMVC.** `GET /sse` holds the stream open and emits `event:endpoint`;
