@@ -21,6 +21,7 @@ once — the reason is in the header comment of each script.
 | [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
 | [`backlog-snapshot.sh`](backlog-snapshot.sh) | Issues, open PRs, roadmap markers, live instances and stray worktrees — the facts a triage run needs. |
 | [`pr-watch.sh`](pr-watch.sh) | Wait for a PR's checks; optionally merge when they pass. |
+| [`security-trips.sh`](security-trips.sh) | How often the security hook **interrupts** vs finds something — the metric behind `.claude/skills/security-trip-review/`. |
 | [`deploy-k8s.sh`](deploy-k8s.sh) | Build/push the image and `helm upgrade --install`. |
 
 ## Before committing

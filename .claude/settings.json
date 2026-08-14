@@ -1,0 +1,5 @@
+{
+  "env": {
+    "ENABLE_STOP_REVIEW": "0"
+  }
+}
