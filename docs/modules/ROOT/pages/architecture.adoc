@@ -28,8 +28,10 @@ slice per surface.
 | AGPL-3.0
 
 | `kweblens-cli`
-| A dependency-light cluster inspector (picocli) over `kweblens-core`. The runnable fat jar is
-attached under the `exec` classifier, so the plain artifact stays a normal library jar.
+| A dependency-light cluster inspector (picocli). It resolves a kubeconfig and does not build a
+client, so it takes fabric8's `kubernetes-client-api` directly rather than `kweblens-core` — the
+access layer would be 25 unused jars in the fat jar. The runnable jar is attached under the
+`exec` classifier, so the plain artifact stays a normal library jar.
 | Apache-2.0
 
 | `kweblens-it`
@@ -90,8 +92,7 @@ port-forwards, and the cluster's own OpenAPI v3 schema.
 |===
 
 Nothing here imports Spring MVC. That is what makes the access layer testable against an in-JVM
-mock API server, and what lets `kweblens-cli` and `kweblens-it` reuse it without dragging a web
-server along.
+mock API server, and what lets `kweblens-it` reuse it without dragging a web server along.
 
 == `kweblens-web` — one slice per surface
 
