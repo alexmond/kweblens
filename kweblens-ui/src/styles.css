@@ -3628,11 +3628,22 @@ body.dragging {
 .ov-seg.tone-err {
   background: var(--danger-fg);
 }
+/* An idle state has OBJECTS in it — Completed pods, suspended CronJobs, the 109 of 164
+   Secrets the Config overview calls `Cluster-managed` — so it takes the same `--muted` its
+   own line in the list below wears, exactly as the three tones above take theirs. It shared
+   `--border` with `tone-empty` until #352, which is also the bar's own track colour: two
+   thirds of a full bar painted as the gap where nothing is, and in the light theme barely
+   off the card. Grey rather than a hue because idle is context, not news. */
+.ov-seg.tone-idle {
+  background: var(--muted);
+}
 /* `tone-empty` is a BAR TONE, not an empty state: it is the neutral fill an aria-hidden
    stacked bar wears when the kind has no objects to break down, and it belongs to the
    `tone-*` family beside it. A sweep for empty-state class names will match the name — it is
-   not one, and rendering an `EmptyState` here would put a paragraph inside a 6px bar. */
-.ov-seg.tone-idle,
+   not one, and rendering an `EmptyState` here would put a paragraph inside a 6px bar. It is
+   the track's own colour on purpose: an empty kind is a bar with nothing in it, and nothing
+   is what an unpainted track already looks like. That is only safe while no POPULATED tone
+   uses `--border` too — `barTones.test.ts` is what keeps it that way. */
 .ov-seg.tone-empty {
   background: var(--border);
 }
