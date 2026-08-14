@@ -65,6 +65,12 @@ working within it, that is a finding — say so.
   Flag any change that moves a credential into `application.yml` or any other packaged resource —
   see the next section.
 
+- **`page.$$eval(...)` in `scripts/*.mjs` is Playwright, not JavaScript `eval()`.** It runs a
+  function against the elements a selector matched, inside the browser page — there is no dynamic
+  code execution and no untrusted string being evaluated. It appears in the measurement scripts
+  (`ui-measure.mjs`, `contrast-check.mjs`, `state-link-check.mjs`), which drive a local browser
+  against a locally running instance. Do not report it as `eval` injection.
+
 - **Tests are hermetic**: `@EnableKubernetesMockClient(crud = true)` serves an in-JVM API server and
   `kweblens.load-kubeconfig=false` keeps the registry empty. Test code that constructs clients or
   seeds objects is not touching a real cluster.

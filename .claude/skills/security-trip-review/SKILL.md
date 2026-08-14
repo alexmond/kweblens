@@ -103,6 +103,21 @@ Format: `- YYYY-MM-DD — what tripped → verdict → what changed.`
   almost no work and being interrupted by the multi-agent topology it is documented as unsuited to.
   → `ENABLE_STOP_REVIEW=0` project-scoped, guidance file written, this loop created. **Baseline
   recorded above so "it got better" is checkable rather than felt.**
+- 2026-08-14 — **`page.$$eval(` in a Playwright script trips the `eval_injection` pattern rule.**
+  → **FALSE POSITIVE**, and the verdict came with a correction: the agent reporting it said
+  `page.evaluate` triggers it too, and that is impossible — the rule is
+  `(?<![a-zA-Z0-9_\.])eval\(`, whose lookbehind excludes `.` precisely so `model.eval()` and
+  `redis.eval()` do not match, and `evaluate(` is not `eval(` anyway. What actually matches is
+  `$$eval(`: `$` is **not** in the lookbehind's character class, so the guard that catches `.`
+  misses `$`. Five call sites, in `state-link-check.mjs`, `contrast-check.mjs` and
+  `ui-measure.mjs`. → **Changed nothing in the scripts, deliberately.** `locator(sel)
+  .evaluateAll(fn)` is an exact equivalent and would silence it, but these are the measurement
+  instruments this project has been burned by more than any other code, and rewriting four of
+  them to quiet a layer-1 *reminder* — which prints and costs no round trip — trades real risk
+  for cosmetics. Recorded in `.claude/claude-security-guidance.md` so the LLM layer (which, unlike
+  the regex layer, does read it) will not escalate it. **Layer 1 cannot be tuned per-pattern**:
+  the guidance file feeds only the LLM review, and the sole switch is `ENABLE_PATTERN_RULES=0`,
+  which is off the table. The `$`-in-lookbehind gap is worth reporting upstream.
 - 2026-08-13 — **The log's own format defeated my first two greps** — I searched for `finding` and
   `category` and got one hit, which reads exactly like "nothing ever fires". The shape that worked
   was normalising timestamps and quoted strings, then ranking distinct messages. → Suspect the

@@ -397,18 +397,23 @@ compare the **sets**, each with an explicit `theComparisonIsCapableOfFailing` ne
 `scripts/state-link-check.mjs` does the same against a running instance across three numbers — the
 card's `.ov-state-n`, the list header's count, and `tbody tr`.
 
-**Two pieces of residue, stated because they are checkable and nobody has filed them:**
+**Both pieces of residue were filed the day this was written; one is now closed.**
 
-1. **The Status *column* covers 7 of the 13 judged kinds.** `columns.ts`'s shared `serverState`
-   column is used on `pods`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`,
-   `cronjobs`. `nodes` still renders a locally computed `nodeReady`; `namespaces` and
-   `persistentvolumeclaims` still render `status.phase`; `services`, `configmaps` and `secrets`
-   have no Status column at all. For those six the server ships `kweblensState`, so the
-   `status:` filter and the chips work while the visible column disagrees or is absent — which is
-   a smaller instance of the exact disagreement the epic was opened to remove. `columns.test.ts`
-   currently pins this as intended, with a comment that is now stale for Node, Namespace and PVC.
-2. **A card-state click is not a route.** `App.vue` hands a `pendingQuery` to `navigateToKind`;
-   the filter never reaches the URL, so a state-filtered list cannot be reloaded or shared.
+1. **The Status *column* covered 7 of the 13 judged kinds — closed 2026-08-14 by GH#357 (#376).**
+   The six that disagreed or were absent (`nodes` on a locally computed `nodeReady`, `namespaces`
+   and `persistentvolumeclaims` on `status.phase`, `services`/`configmaps`/`secrets` with no
+   column at all) now render `kweblensState` through the shared `serverState`. Two kinds are
+   excluded **with the reason in the code**: `persistentvolumes`, because no producer judges a PV —
+   `StorageHealthService` judges the *claim*, so the column would read `—` on every row — and
+   `events`, refused on purpose by #339. `columns.test.ts` now pins the rule in both directions
+   with a decoy kind, and was shown to fail three ways before passing. Node's old renderer could
+   not express `Ready,SchedulingDisabled` at all, so a cordoned node read a plain `Ready`; that is
+   fixed, though **no reachable cluster has a cordoned or NotReady node, so the two suffixed
+   labels have never been rendered on screen** — the width is a clone measurement plus
+   `ClusterObjectHealthTest`, not a live sighting.
+2. **A card-state click is not a route — still open, GH#358.** `App.vue` hands a `pendingQuery` to
+   `navigateToKind`; the filter never reaches the URL, so a state-filtered list cannot be
+   reloaded, bookmarked or shared.
 
 One bug is already filed out of the epic: **GH#352** — an idle segment of an overview bar is the
 same colour as an empty one, so 109 of 164 Secrets read as nothing.
