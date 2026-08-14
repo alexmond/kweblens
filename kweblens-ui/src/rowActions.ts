@@ -2,7 +2,9 @@ import { api } from './api';
 import type { DialogApi } from './dialog';
 import type { LogScope } from './dock';
 import { containerNames, objectPorts } from './kube';
-import type { DockKind, KubeObject } from './types';
+import type { AccessVerb } from './permissions';
+import { controlAccess } from './permissions';
+import type { DockKind, KindAccess, KubeObject } from './types';
 
 // The declarative per-row action registry — shared by the RowMenu kebab (renders it) and the
 // shell (dispatches it). Adding a menu item = adding one entry here; nothing else changes.
@@ -81,6 +83,21 @@ export interface RowActionDef {
   id: RowAction;
   label: string;
   danger?: boolean;
+  /**
+   * The verb on THIS kind that the deployment's service account needs for the action to work,
+   * or absent when nothing the access report covers can answer it.
+   *
+   * Absent is the honest answer for more actions than it might look. `drain` deletes Pods and
+   * `trigger` creates a Job — a different resource each time, so a verdict about this kind
+   * says nothing about them. `edit` only opens the editor; the write is the Apply inside it,
+   * and that is where the verb is checked. Reads and exec (logs, shell, attach, forward) are
+   * either open or gated on a subresource that is not reviewed here.
+   *
+   * An absent verb resolves to `unknown`, which renders as ENABLED — the same fail-open rule
+   * that governs a review nobody could answer. Guessing a verb here would be worse than
+   * leaving it out: a wrong guess disables a control that works.
+   */
+  verb?: AccessVerb;
   // Renders as a per-container submenu on multi-container pods (Attach/Shell/Logs).
   containerScoped?: boolean;
   // Only Logs is readable without signing in; everything else prompts for auth first.
@@ -197,10 +214,18 @@ export const ROW_ACTIONS: RowActionDef[] = [
     applies: (c) => c.kind === 'Service',
     run: (c) => c.setForward({ kind: c.kind, namespace: c.ns, name: c.name, ports: objectPorts(c.kind, c.obj) }),
   },
-  { id: 'scale', label: 'Scale…', section: 'main', applies: (c) => SCALABLE.includes(c.kind), run: scaleAction },
+  {
+    id: 'scale',
+    label: 'Scale…',
+    verb: 'patch',
+    section: 'main',
+    applies: (c) => SCALABLE.includes(c.kind),
+    run: scaleAction,
+  },
   {
     id: 'restart',
     label: 'Restart',
+    verb: 'patch',
     section: 'main',
     applies: (c) => RESTARTABLE.includes(c.kind),
     run: (c) => c.confirmRun(() => api.restart(c.cluster, c.resourceId, c.ns, c.name), `Rolling-restart ${c.name}?`),
@@ -208,6 +233,7 @@ export const ROW_ACTIONS: RowActionDef[] = [
   {
     id: 'rollback',
     label: 'Rollback',
+    verb: 'patch',
     section: 'main',
     applies: (c) => ROLLBACKABLE.includes(c.kind),
     run: (c) =>
@@ -227,6 +253,7 @@ export const ROW_ACTIONS: RowActionDef[] = [
   {
     id: 'suspend',
     label: 'Suspend',
+    verb: 'patch',
     section: 'main',
     applies: (c) => (c.kind === 'CronJob' || c.kind === 'Job') && !c.suspended,
     run: (c) =>
@@ -235,6 +262,7 @@ export const ROW_ACTIONS: RowActionDef[] = [
   {
     id: 'resume',
     label: 'Resume',
+    verb: 'patch',
     section: 'main',
     applies: (c) => (c.kind === 'CronJob' || c.kind === 'Job') && c.suspended,
     run: (c) =>
@@ -243,6 +271,7 @@ export const ROW_ACTIONS: RowActionDef[] = [
   {
     id: 'cordon',
     label: 'Cordon',
+    verb: 'patch',
     section: 'main',
     applies: (c) => c.kind === 'Node',
     run: (c) => c.confirmRun(() => api.cordon(c.cluster, c.name), `Cordon ${c.name}?`),
@@ -250,6 +279,7 @@ export const ROW_ACTIONS: RowActionDef[] = [
   {
     id: 'uncordon',
     label: 'Uncordon',
+    verb: 'patch',
     section: 'main',
     applies: (c) => c.kind === 'Node',
     run: (c) => c.confirmRun(() => api.uncordon(c.cluster, c.name)),
@@ -274,6 +304,7 @@ export const ROW_ACTIONS: RowActionDef[] = [
     id: 'delete',
     label: 'Delete',
     danger: true,
+    verb: 'delete',
     section: 'lifecycle',
     applies: (c) => c.kind !== 'Node',
     run: (c) => confirmDelete(c, false),
@@ -282,6 +313,7 @@ export const ROW_ACTIONS: RowActionDef[] = [
     id: 'forceDelete',
     label: 'Force Delete',
     danger: true,
+    verb: 'delete',
     section: 'lifecycle',
     applies: (c) => c.kind !== 'Node',
     run: (c) => confirmDelete(c, true),
@@ -299,6 +331,13 @@ export interface RowActionOption {
   type?: 'divider';
   props?: { class: string };
   children?: { label: string; key: string }[];
+  /**
+   * Set only when the cluster has said, in so many words, that the deployment's service
+   * account cannot do this. Never set by a review that failed — see `permissions.ts`.
+   */
+  disabled?: boolean;
+  /** Why it is disabled, in a sentence naming the service account. Rendered, not hovered. */
+  deniedReason?: string;
 }
 
 /** Separator between the kind-specific actions and Edit/Delete. */
@@ -310,14 +349,25 @@ const DIVIDER: RowActionOption = { type: 'divider', key: 'divider' };
  * Lives here rather than in the table because the detail drawer offers the same menu (#233):
  * two copies of "which actions apply, and which of them need a per-container submenu" would
  * be two chances for the drawer and the list to disagree about what an object can do.
+ *
+ * @param access what the deployment's service account may do with this kind here, when it is
+ * known. It is optional and nullable on purpose: not loaded yet, failed, or never asked all
+ * mean the same thing — every action stays ENABLED. An action is disabled only where the
+ * cluster said no, and it then carries the sentence that says so.
  */
-export function rowActionOptions(obj: KubeObject): RowActionOption[] {
+export function rowActionOptions(obj: KubeObject, access?: KindAccess | null): RowActionOption[] {
   const ctx = { kind: obj.kind ?? '', suspended: Boolean((obj.spec as Record<string, unknown>)?.suspend) };
   const containers = containerNames(obj);
   const applicable = ROW_ACTIONS.filter((a) => a.applies(ctx));
   const toOption = (a: RowActionDef): RowActionOption => {
+    const gate = controlAccess(access, a.verb);
     if (!a.containerScoped || containers.length <= 1) {
-      return { label: a.label, key: a.id, props: { class: a.danger ? 'menu-danger' : '' } };
+      const option: RowActionOption = { label: a.label, key: a.id, props: { class: a.danger ? 'menu-danger' : '' } };
+      if (gate.disabled) {
+        option.disabled = true;
+        option.deniedReason = gate.reason ?? undefined;
+      }
+      return option;
     }
     // Logs can span containers, so it leads with "All containers"; a shell or attach can
     // only ever target one, so those stay a plain container list.

@@ -12,6 +12,7 @@ import { useClusterScope } from './composables/useClusterScope';
 import { useClusters } from './composables/useClusters';
 import { useDock } from './composables/useDock';
 import { useNavigation } from './composables/useNavigation';
+import { useAccess } from './composables/useAccess';
 import { useResourceData } from './composables/useResourceData';
 import { defaultHiddenCols } from './columns';
 import { useDialog } from './dialog';
@@ -222,6 +223,11 @@ const { objects, setObjects, loading, failed, live, cols, usage, nodeDisk } = us
   setError,
   reloadReads,
 );
+// What the deployment's SERVICE ACCOUNT may do with the selected kind here (#354). One
+// request per surface; `null` means "we could not tell", which every consumer renders as
+// enabled. It gates nothing — the server still refuses a write it should refuse.
+const access = useAccess(cluster, selected, namespace);
+
 const {
   sessions: dockSessions,
   active: activeSession,
@@ -297,6 +303,14 @@ const navigateToState = (kind: string, filterQuery: string) => {
 // What the drawer is showing: the row the table highlights, and the object a delete has to
 // close the drawer for (#233 put delete inside the drawer). One declaration, two consumers.
 const selectedKey = computed(() => (detail.value ? objKey(detail.value.obj) : null));
+
+// The drawer's verdicts — but only when the drawer is showing the kind they are ABOUT.
+// A drawer can be opened on a pod from a node's Pods tab or on a search hit, and those are
+// a different kind from the list behind them; handing over the list's answer would grey out
+// (or fail to grey out) a control on the strength of a verdict about something else.
+const detailAccess = computed(() =>
+  detail.value && selected.value && detail.value.resourceId === selected.value.id ? access.value : null,
+);
 
 const { signOut, fetchPods, handleRowAction, toggleFavorite, toggleCol, bulkDelete } = useAppActions({
   cluster,
@@ -598,6 +612,7 @@ const onForwardStarted = () => {
               :scope="helmRelease ? helmRelease.name : null"
               :namespace="selected.namespaced ? namespace : null"
               :fetch-children="fetchChildrenFn"
+              :access="access"
               @update:query="(v) => (query = v)"
               @toggle-col="toggleCol"
               @auto-hidden="(keys) => (autoHiddenCols = new Set(keys))"
@@ -629,6 +644,7 @@ const onForwardStarted = () => {
           :obj="detail.obj"
           :initial-edit="detail.edit ?? false"
           :authed="authUser !== null"
+          :access="detailAccess"
           @navigate="navigateToKind"
           @helm-release="navigateToHelmRelease"
           @auth-expired="signOut"

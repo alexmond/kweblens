@@ -17,7 +17,8 @@ import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
 import { failureNotice, isSessionExpiry } from '../apiFailure';
-import type { EditorDiagnostic } from '../types';
+import { controlAccess } from '../permissions';
+import type { EditorDiagnostic, KindAccess } from '../types';
 import { stripManagedFields } from '../kube';
 import { requestServerPreview, serverPreviewCaption, type ServerPreviewState } from '../serverPreview';
 import DiffView from './DiffView.vue';
@@ -32,6 +33,17 @@ const props = defineProps<{
   // Read-only viewer (opened when signed out): the Editor tab is read-only, and the
   // editing tabs (Form / Warnings / Review) + Apply are hidden — just a big YAML viewer.
   readonly?: boolean;
+  /**
+   * What the deployment's SERVICE ACCOUNT may do with this kind here (#354), or null when it is
+   * not known.
+   *
+   * Apply is a server-side apply, which is a PATCH — so `patch` is the verb it needs. A refusal
+   * disables the button and says so; anything else (including a review that never answered)
+   * leaves it enabled, because a control greyed out by a failed probe is a lie about the
+   * cluster. This is an affordance, not a gate: the apply is still refused server-side if it is
+   * sent, and the refusal is rendered as a RESULT with the cluster's own sentence in it.
+   */
+  access?: KindAccess | null;
 }>();
 const emit = defineEmits<{
   (e: 'applied', text: string): void;
@@ -86,6 +98,8 @@ const wouldBe = computed(() => (preview.value.status === 'ready' ? stripManagedF
 const previewCaption = computed(() => serverPreviewCaption(preview.value, wouldBe.value !== liveNormalised.value));
 
 const errorCount = computed(() => warnings.value.filter((w) => w.severity === 'error').length);
+
+const applyAccess = computed(() => controlAccess(props.access, 'patch'));
 
 // Size: a normal dialog, an expand-to-fill toggle, and drag-resize (CSS `resize` on the
 // card — see .yaml-editor-modal in styles.css). Vue only patches style keys that actually
@@ -206,8 +220,13 @@ const onShow = (v: boolean) => {
         <span v-if="errorCount" class="dialog-warn-hint"
           >{{ errorCount }} schema error(s) — review before applying</span
         >
+        <!-- Why Apply is dead, beside Apply. Its own line in the footer rather than a tooltip:
+             a disabled primary button with nothing next to it reads as a broken dialog. -->
+        <span v-if="!readonly && applyAccess.reason" class="dialog-denied-hint">{{ applyAccess.reason }}</span>
         <NButton :disabled="busy" @click="emit('close')">{{ readonly ? 'Close' : 'Cancel' }}</NButton>
-        <NButton v-if="!readonly" type="primary" :loading="busy" @click="apply">Apply</NButton>
+        <NButton v-if="!readonly" type="primary" :loading="busy" :disabled="applyAccess.disabled" @click="apply">
+          Apply
+        </NButton>
       </div>
     </template>
   </NModal>
@@ -224,5 +243,19 @@ const onShow = (v: boolean) => {
   margin-right: auto;
   color: var(--warn, #d98a00);
   font-size: 12px;
+}
+
+/* The refusal sentence next to a disabled Apply. `--text` rather than a muted or danger tone:
+   nothing has gone wrong and nothing is at risk — the cluster has simply said no — and this is
+   the only thing on screen explaining a dead primary button, so it is the last place to spend
+   contrast. `flex: 1` with `margin-right: auto` on its neighbour keeps it left of the buttons
+   and lets it wrap instead of pushing them off the footer. */
+.dialog-denied-hint {
+  flex: 1;
+  min-width: 0;
+  margin-right: auto;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

@@ -10,6 +10,7 @@ import { shallowRef, computed, ref, watch } from 'vue';
 import { api } from '../api';
 import { useAsyncData } from '../composables/useAsyncData';
 import { stripManagedFields } from '../kube';
+import type { KindAccess } from '../types';
 import ErrorNotice from './ErrorNotice.vue';
 import LoadingNotice from './LoadingNotice.vue';
 import YamlEditorModal from './YamlEditorModal.vue';
@@ -22,6 +23,11 @@ const props = defineProps<{
   ns: string;
   initialEdit: boolean;
   authed: boolean;
+  /**
+   * What the deployment's service account may do with this kind here (#354). Passed straight
+   * through to the editor, whose Apply is the only write on this tab; null leaves it enabled.
+   */
+  access?: KindAccess | null;
 }>();
 // `editing` tells the parent drawer the pop-out editor is open, so it can suppress its
 // close-on-outside-click / Escape (the drawer is non-modal and would otherwise close —
@@ -133,6 +139,7 @@ const copy = () => {
       :initial-text="draft"
       :schema="schema"
       :readonly="!authed"
+      :access="access"
       @applied="onApplied"
       @auth-expired="emit('auth-expired')"
       @close="closeEditor"

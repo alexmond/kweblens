@@ -2840,6 +2840,87 @@ body.row-resizing {
   color: var(--danger-fg);
 }
 
+/* ---- An action the deployment's service account cannot perform (#354) --------------------
+   Two lines inside one menu item: the action's name, and the sentence saying why it is dead.
+   The sentence is RENDERED, not a tooltip — nobody hovers a greyed-out item to find out why,
+   and "disabled with no explanation" is the defect this feature set out to remove.
+
+   Naive paints a disabled option at its own `--n-option-text-color-disabled`, which is the
+   library's grey on the library's popover surface and is well under AA in both themes. That is
+   tolerable for a label the reader can guess and NOT tolerable for the only sentence on screen
+   explaining the refusal, so both lines take the app's own text colour. `--text` for the label
+   and the reason alike, with size and weight carrying the hierarchy: this is the same
+   conclusion `.cols-note` and `.filter-help` reached about text inside a Naive popover, where
+   `--muted` measured 3.63:1.
+
+   The item still READS as disabled — Naive keeps the cursor, removes the hover highlight and
+   refuses the click; only the colour is ours. */
+/* Naive pins an option, its body and its label to a fixed 34px — `height: 34px` on all three,
+   with a 34px line-height — so a two-line item does not make the row taller, it OVERFLOWS and
+   the next option is painted across it. Measured before this rule: `.menu-denied` 83px tall in
+   a 34px option, and `elementFromPoint` at the middle of the reason returned the NEXT item's
+   label. The two-line item read as fine in a screenshot and was broken; a menu whose entries
+   overlap is worse than no explanation at all.
+
+   `:has()` rather than a class on the option, because the option element is Naive's and the
+   only hook we get is what we render inside its label. `min-height` keeps a refused item the
+   same height as its neighbours when the reason happens to be short.
+
+   `!important` on the height, and it is load-bearing rather than lazy: Naive injects its
+   component CSS into `<head>` at RUNTIME, so a rule of ours with equal-or-higher specificity
+   still loses to whatever it appends later. Measured — without it the `__label` grew to 69px
+   while `.n-dropdown-option-body` stayed pinned at 34px (the `min-height` here applied, the
+   `height` did not), and `Force Delete`'s label went on being painted across `Delete`'s
+   reason. There is one other `!important` in this file, for the same class of fight. */
+.n-dropdown-option:has(.menu-denied),
+.n-dropdown-option-body:has(.menu-denied),
+.n-dropdown-option-body__label:has(.menu-denied) {
+  height: auto !important;
+  min-height: 34px;
+  line-height: 1.45;
+}
+.n-dropdown-option-body:has(.menu-denied) {
+  align-items: flex-start;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.menu-denied {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 340px;
+  line-height: 1.45;
+  white-space: normal;
+}
+.n-dropdown-option-body--disabled .menu-denied,
+.menu-denied {
+  color: var(--text);
+}
+.menu-denied-label {
+  font-weight: 600;
+}
+.menu-denied-why {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* The same sentence beside a disabled bulk Delete. `--text` for the same reason: it is the
+   only explanation for a dead button, so it is the last place to economise on contrast.
+
+   `flex: 1 1 auto; min-width: 0` because this is a whole sentence in a flex row: a flex item's
+   automatic minimum is its MIN-CONTENT, so without the override the bar would refuse to shrink
+   and push itself past the content column rather than letting the sentence wrap (#331 is the
+   same rule, met from the other side). */
+.bulk-denied {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* per-container status squares (Pods · Freelens-style) */
 .csquares {
   display: inline-flex;
