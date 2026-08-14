@@ -12,6 +12,8 @@ import org.alexmond.kweblens.health.ConfigUsageService;
 import org.alexmond.kweblens.health.HealthService;
 import org.alexmond.kweblens.health.KindHealth;
 import org.alexmond.kweblens.health.NetworkHealthService;
+import org.alexmond.kweblens.health.SecurityAuditService;
+import org.alexmond.kweblens.health.SecurityFinding;
 import org.alexmond.kweblens.health.StorageHealthService;
 import org.alexmond.kweblens.health.WorkloadHealth;
 import org.alexmond.kweblens.metric.MetricService;
@@ -47,6 +49,8 @@ public class HealthTools {
 	private final StorageHealthService storage;
 
 	private final ConfigUsageService config;
+
+	private final SecurityAuditService security;
 
 	private final MetricService metrics;
 
@@ -90,6 +94,15 @@ public class HealthTools {
 	public List<KindHealth> checkConfigUsage(@ToolParam(description = "kweblens cluster id") String clusterId,
 			@ToolParam(required = false, description = "namespace, or omit for the whole cluster") String namespace) {
 		return this.config.summarise(clusterId, namespace);
+	}
+
+	@Tool(description = "Check what this scope is configured to PERMIT: containers claiming privilege from "
+			+ "their own spec, and RBAC bindings that make an identity cluster administrator — including "
+			+ "which pods actually run as such an identity, which no single object states. These describe "
+			+ "the cluster's configuration, not a failure and not who is asking; nothing here is broken.")
+	public List<SecurityFinding> checkSecurity(@ToolParam(description = "kweblens cluster id") String clusterId,
+			@ToolParam(required = false, description = "namespace, or omit for the whole cluster") String namespace) {
+		return this.security.audit(clusterId, namespace);
 	}
 
 	@Tool(description = "Current CPU and memory usage per pod, from metrics-server. Use for OOM questions: "

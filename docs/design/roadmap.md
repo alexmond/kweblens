@@ -68,7 +68,7 @@ Each row is checked against the code, not the tracker.
 | **T5** RBAC-awareness in its reduced form | **STILL TRUE — now GH#354** | Re-measured at `fb4e4fd`: **zero** hits for `SelfSubjectAccessReview` / `SelfSubjectRulesReview` / `canI` in any `.java`, `.ts` or `.vue` file. All 22 remaining hits are prose, 14 of them in one dated competitor snapshot. |
 | **D1** relations breadth | **SHIPPED** | `RelationService` is now a dispatcher over five resolvers (`NetworkRelations`, `ReferenceRelations`, `WorkloadRelations`, `StorageRelations`, `AccessRelations`) resolving **12** relation keys, up from 3 (#220). [`detail-sections-audit.md`](detail-sections-audit.md) §"Group B status" is the current record. Not resolved, deliberately: Ingress → TLS secret **expiry** (`Relation` carries objects, so a *missing* reference can only be dropped or fabricated), requests-vs-usage (a metrics path, not a relation), and a general reverse index. |
 | **D2** agent-attach story | **DONE** — see [R5](#r5--d2-the-agent-attach-page--done) | `docs/modules/ROOT/pages/attach-an-agent.adoc` + an MCP section in `docs/deployment.md` + an *Attach an agent* block in `README.md`. The transport was documented correctly; the *auth* was not — `mcp.adoc` claimed the tool endpoints were public in open-mode, and `POST /mcp/message` measures `401`. |
-| **D3** analyzer breadth / cross-manifest rules | **NOT STARTED, now cheaper — GH#353** | It was ranked below D1 because it depended on D1's joins. Those joins exist. `DiagnoseService` still runs exactly three deterministic validators — `checkPods` (phase, plus five `CRITICAL_WAIT_REASONS`), `checkRelational` (a Service with nothing behind it, a PVC needing attention) and `checkEvents` (capped at `MAX_EVENT_FINDINGS = 15`) — and reads **none** of `RelationService`'s twelve keys. |
+| **D3** analyzer breadth / cross-manifest rules | **DONE — GH#353** | `DiagnoseService` now runs a fourth validator: `kweblens-core`'s `SecurityAuditService`, which reports privileged and explicitly-root containers from the pod list the diagnosis already had, `cluster-admin` grants, and — the cross-manifest one — the ServiceAccounts those grants name joined to the pods that run as them. It shares the `grantedBy` subject predicate (`RbacSubjects`) with `AccessRelations` rather than re-implementing the join, and costs two list requests for the whole scope, nothing per pod. |
 | **D4** guarded MCP write tools | **UNBLOCKED, unscoped — GH#355** | 15 `@Tool` methods across three beans (`ClusterTools` 4, `DiagnosticTools` 4, `HealthTools` 7 — counted on `@Tool\(`, because a bare `@Tool` grep also matches `@ToolParam` and returns 49). None mutating. The T1 gate has lifted; what is left is Radar's scoping question (destructive-annotated, no delete, no shell), not a missing guardrail. |
 | **Chore I** docs currency | **DONE** | `README.md` and `CLAUDE.md` both say 15 read-only tools and SSE; the README frames identity per ADR-001 rather than as "the gap that matters". Only `competitor-analysis.md` still says 3, and it is a dated research snapshot. |
 
@@ -124,8 +124,8 @@ that reads short, it is because it is — see §4.
 
 **Status, 2026-08-13.** R1, R3, R4, R5, R6 and the T3 remainder are **done**; R2 is half done and
 its remaining half — cutting the release — is irreversible and belongs to a human, not to this
-list. What is genuinely left below is D3 (**GH#353**), T5 (**GH#354**) and D4 (**GH#355**), all
-P3, none blocking the others.
+list. D3 (**GH#353**) is done. What is genuinely left below is T5 (**GH#354**) and D4 (**GH#355**),
+both P3, neither blocking the other.
 
 Worth noting before picking the next item, because it has now happened repeatedly: **most of what
 this plan actually bought was found while doing something else.** R4's contract tests uncovered a
@@ -432,11 +432,12 @@ same colour as an empty one, so 109 of 164 Secrets read as nothing.
    stay a text search; that, and the two other subsets (`key>1`, field selectors), are named in
    the UI's help popover. Syntax:
    [`browsing-resources.adoc`](../modules/ROOT/pages/browsing-resources.adoc).
-7. **D3 — GH#353.** Security findings, and the first cross-manifest rule over the twelve relations
-   `RelationService` already resolves. The analyzer today derives every finding from one object's
-   own `status` or from the two joins `checkRelational` does by hand, and reads none of the twelve
-   keys `DetailEndpointsTest.ALL_RELATIONS` pins. The deliverable is one security check and one
-   rule that *cannot* be produced from a single object — not a rule engine.
+7. **D3 — GH#353. DONE.** Security findings, and the first cross-manifest rule. Shipped as
+   `SecurityAuditService` in `kweblens-core/health/`, read on the deterministic GET path and
+   exposed as the MCP `checkSecurity` tool. The cross-manifest finding names a ServiceAccount,
+   the binding that makes it cluster-admin and the pods that run as it — none of the three
+   objects states it alone. The join reuses `grantedBy`'s subject predicate; no thirteenth
+   relation was needed.
 8. **T5 — GH#354.** SSAR affordances: grey out what this deployment's service account cannot do.
    **Never an authorization gate.** ADR-001 rejects that explicitly, because it fails open — a
    failed or unavailable probe must leave the control **enabled**, since a control greyed out by a
@@ -563,7 +564,7 @@ is not used below: every row names a real issue number or a merge.
 | R5 — agent-attach page + MCP in deployment.md | merged as **#314** | done (was E/D2); found the MCP-auth docs error |
 | R6 — status-driven navigation: one vocabulary, clickable card states, a Status column | **GH#336** epic → GH#337–341, merged as #346/#348/#349/#350/#351 | **closed** 2026-08-13; left **GH#352** open |
 | 6 — list-header filter syntax: regex, negation, label selector | merged as **#322** | done (was C/T3, client-side) |
-| 7 — D3: security findings + the first cross-manifest rule | **GH#353** (open) | P3 |
+| 7 — D3: security findings + the first cross-manifest rule | **GH#353** | done |
 | 8 — T5: SSAR affordances, fail-open, never a gate | **GH#354** (open) | P3 |
 | 9 — D4: guarded MCP write tools, scope first | **GH#355** (open) | P3 |
 | — | **GH#148** (open), **GH#143** (open) | parked by decision — §7 |

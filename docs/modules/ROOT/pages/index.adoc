@@ -77,7 +77,7 @@ Built on the sibling https://github.com/alexmond/jhelm[jhelm] library, never the
 remediation actions that are always suggest → approve → apply, never autonomous.
 
 | xref:mcp.adoc[MCP]
-| An in-jar MCP server exposing 15 read-only tools to AI assistants, redacted at the boundary.
+| An in-jar MCP server exposing 16 read-only tools to AI assistants, redacted at the boundary.
 |===
 
 == How it is put together

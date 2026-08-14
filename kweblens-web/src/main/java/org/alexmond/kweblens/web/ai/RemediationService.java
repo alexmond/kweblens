@@ -236,6 +236,12 @@ public class RemediationService {
 		if (!scoped) {
 			return;
 		}
+		// Nothing below can be proposed for a finding that is neither restartable nor a
+		// template failure, and ownerOf is a cluster call — worth skipping now that a
+		// healthy pod can carry findings too (a privileged container has no remediation).
+		if (!restartable && !TEMPLATE_FAILURES.contains(finding.title())) {
+			return;
+		}
 		Optional<WorkloadRef> owner = workloads.ownerOf(clusterId, namespace, pod);
 		if (owner.isEmpty()) {
 			return;

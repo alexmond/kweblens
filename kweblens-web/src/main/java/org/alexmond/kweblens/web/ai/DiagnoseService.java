@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.alexmond.kweblens.event.EventService;
 import org.alexmond.kweblens.health.KindHealth;
 import org.alexmond.kweblens.health.NetworkHealthService;
+import org.alexmond.kweblens.health.SecurityAuditService;
 import org.alexmond.kweblens.health.StorageHealthService;
 import org.alexmond.kweblens.event.EventSummary;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
@@ -156,6 +157,8 @@ public class DiagnoseService {
 
 	private final StorageHealthService storage;
 
+	private final SecurityAuditService security;
+
 	private final ObjectProvider<ChatClient.Builder> chatClientBuilder;
 
 	private final KweblensAiProperties aiProperties;
@@ -204,12 +207,19 @@ public class DiagnoseService {
 	}
 
 	private List<Finding> findings(String clusterId, String namespace) {
+		// Listed ONCE and handed to both readers: the pod checks and the security audit
+		// ask different questions of the same objects, and a second list would be a
+		// second answer as well as a second request.
+		List<GenericKubernetesResource> pods = this.resources.listRaw(clusterId, PODS, namespace);
 		List<Finding> findings = new ArrayList<>();
-		findings.addAll(checkPods(clusterId, namespace));
+		findings.addAll(checkPods(pods));
 		findings.addAll(checkRelational(clusterId, namespace));
 		// Events last, and told what the checks above already explained, so they add
 		// evidence rather than repeat it.
 		findings.addAll(checkEvents(clusterId, namespace, findings));
+		// After the events, so a privileged container never suppresses the events that
+		// explain why its pod is broken — the two say different things about it.
+		findings.addAll(checkSecurity(clusterId, namespace, pods));
 		findings.sort(BY_SEVERITY);
 		return List.copyOf(findings);
 	}
@@ -238,12 +248,30 @@ public class DiagnoseService {
 		return this.aiProperties.isEnabled() ? this.chatClientBuilder.getIfAvailable() : null;
 	}
 
-	private List<Finding> checkPods(String clusterId, String namespace) {
+	private List<Finding> checkPods(List<GenericKubernetesResource> pods) {
 		List<Finding> findings = new ArrayList<>();
-		for (GenericKubernetesResource pod : resources.listRaw(clusterId, PODS, namespace)) {
+		for (GenericKubernetesResource pod : pods) {
 			findings.addAll(PodDiagnosis.forPod(pod));
 		}
 		return findings;
+	}
+
+	/**
+	 * What the scope is configured to permit, from {@code kweblens-core}'s audit — the
+	 * same implementation the security MCP tool serves, so a finding and a tool answer
+	 * cannot disagree.
+	 *
+	 * <p>
+	 * Deterministic like every other validator: it reads the pods already listed above
+	 * and two binding lists, and reaches no model. Its severities sit below the workload
+	 * failures on purpose — a privileged CNI agent is a choice somebody made, not a
+	 * cluster that is broken.
+	 */
+	private List<Finding> checkSecurity(String clusterId, String namespace, List<GenericKubernetesResource> pods) {
+		return this.security.audit(clusterId, namespace, pods)
+			.stream()
+			.map((f) -> new Finding(f.severity(), f.title(), f.object(), f.detail(), f.fix(), "validator"))
+			.toList();
 	}
 
 	/**
