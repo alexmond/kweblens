@@ -296,9 +296,9 @@ k9s's key map. If it lands, it lands behind kweblens's existing confirm discipli
 - **`:popeye`** — **gone.** *Observed*: `:popeye` produced `Ruroh? 'popeye' command not found` in an
   ASCII-cow error dialog. `grep -ri popeye internal/` returns nothing outside `change_logs/`. It was
   removed at 0.5.0, reinstated at 0.19.0, and has been removed again by 0.51.0. **Any plan or doc
-  that lists popeye as a k9s feature is out of date** — including the framing in this epic. The
-  nearest surviving thing is `ctrl-z` "toggle faults" and the pod `z` sanitize action, neither of
-  which is a linter.
+  that lists popeye as a k9s feature is out of date.** (GH#143's body does not — checked; it is a
+  common assumption about k9s rather than something this repo wrote down.) The nearest surviving
+  thing is `ctrl-z` "toggle faults" and the pod `z` sanitize action, neither of which is a linter.
 - **Benchmarking** — still present. `internal/perf/benchmark.go` wraps `rakyll/hey`; `b` on a
   port-forward starts/stops a run, and `:benchmarks` lists saved results from
   `~/.local/state/k9s/benchmarks`. Config in `benchmarks.yaml` (`concurrency`, `requests`).
