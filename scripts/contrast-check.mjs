@@ -78,6 +78,24 @@
 // second pass until it times out and takes the whole run with it:
 //   PREPARE='?click:.bar-btn:has-text("Sign in");?fill:.n-modal input[type=password]=admin;…'
 //
+// A SELECTOR THAT SAMPLES NOTHING IS A FAILED MEASUREMENT, AND IT HAS TO SAY WHICH KIND.
+//
+// Rows with no ratio are counted and printed, never passed — that rule is as old as the
+// scenes. What it could not say is *which* nothing: an instance with the file browser off and
+// a scene that walked to the wrong page printed the same `not present`. Two watchlist entries
+// lived in that gap for months (GH#389). Both were meant to watch a Naive tag; one named a
+// selector so broad it resolved to a table pill BEHIND the drawer it was supposed to be
+// measuring, and reported that pill's ratio under the drawer's name — a green line for a
+// surface never once on screen, which is the failure this file's own summary warns about, and
+// strictly worse than the red line it looked like an improvement on.
+//
+// So `WHY_ABSENT` (below) carries a reason per selector, appended to the empty row. It changes
+// no count and passes nothing: it only separates "not applicable in this instance" from "we
+// failed to look", which are the two things a reader has to act on differently. A selector
+// with no entry is one nobody has explained, and that is the signal. It is appended to
+// `not present` and to nothing else — an element that is on the page but off screen or under
+// another layer is a scene that failed, and must never be able to borrow an excuse.
+//
 // Exit code is 1 if anything falls under the AA floor, so it can gate a change.
 //
 // Needs the shared Playwright install (see the global setup notes), not a local one:
@@ -160,11 +178,9 @@ const SCENES = [
     prepare:
       'close;allow;full;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
       '?click:.n-collapse-item__header:has-text("Annotations");wait:400',
-    // `.n-tag` is the drawer's `<NTag type="info">Helm</NTag>`, which measured 3.36:1 in the
-    // light theme on Naive's own info palette (#269) — a component-library colour rather than
-    // one of ours, fixed in App.vue's `themeOverrides`. It is watched here because nothing
-    // else in the app renders a Naive tag on a bespoke surface.
-    selectors: ['.chip.subtle', '.acc-count', '.mini th', '.n-tag'],
+    // `.n-tag` used to sit here, meaning "the drawer's Helm marker", and never once measured
+    // it — see the `Helm-managed object` scene below, which measures it for real.
+    selectors: ['.chip.subtle', '.acc-count', '.mini th'],
   },
   {
     name: 'read-only YAML tab',
@@ -179,6 +195,45 @@ const SCENES = [
     selectors: ['.chip'],
   },
   {
+    // The drawer's `<NTag type="info">Helm</NTag>` — Naive's own info palette, which measured
+    // 3.36:1 in the light theme (#269). It is the one colour on this watchlist that comes from
+    // the component library rather than from `styles.css`: the fix is a `Tag.textColorInfo`
+    // override in `App.vue`, so a naive-ui bump can move it without touching a line of ours.
+    // That is precisely the kind of colour a run has to keep looking at.
+    //
+    // It was watched as a bare `.n-tag` in the drawer-chips scene above, and measured the tag
+    // in NEITHER environment (GH#389). Two independent reasons, and each hid the other:
+    //
+    //   * `.n-tag` is not a drawer selector. It matches every Naive tag on the page, and the
+    //     sampler takes the first match that carries text — which is a row's status pill in
+    //     the table BEHIND the drawer. On the simulator both watchlist rows therefore reported
+    //     the same element, `8.06:1` / `4.51:1`, twice: a green line for a surface that was
+    //     never on screen, which is worse than the red one it replaced.
+    //   * On a live cluster there was no tag to find in the first place. `Managed By` renders
+    //     off `meta.helm.sh/release-name`, and Helm writes that annotation on the objects a
+    //     chart declares — not on the Pods a Deployment then creates. Measured against this
+    //     box's cluster: 0 of 93 pods carry it, against 8 of 100 ConfigMaps and 29 of 66
+    //     Services. The scene was pointed at the one kind where the tag cannot exist.
+    //
+    // So: a kind Helm installs directly, narrowed by the app's own label filter to the objects
+    // that carry Helm's own `managed-by` label. On this cluster that is `8 of 100` ConfigMaps
+    // and the first of them opens a drawer with the tag at y=248; on the simulator every
+    // seeded object carries both the label and the annotation, so the filter is a no-op and
+    // the same row is reached. The selector is scoped to `.n-drawer .kv` so it can only ever
+    // resolve to the summary list's tag — a bare `.n-tag` is what made this unmeasured for
+    // months while reporting a number.
+    //
+    // `?click` rather than `click`: a cluster with no Helm-installed ConfigMap has no row to
+    // open, and that is a fact about the cluster, not a broken scene. It then reports the
+    // WHY note below rather than a bare `not present`.
+    name: 'Helm-managed object (drawer)',
+    prepare:
+      'close;leaf:Config Maps;wait:800;' +
+      'fill:.content-head input=app.kubernetes.io/managed-by=Helm;wait:900;' +
+      '?click:.n-data-table-tbody tr td:nth-child(2);wait:1400',
+    selectors: ['.n-drawer .kv .n-tag'],
+  },
+  {
     // A resource LIST. `.count`, the status pill and the ACTIVE leaf's count badge only exist
     // here — on the overview the base pass samples they are all `not present`, so leaving them
     // in `DEFAULT_SELECTORS` bought a permanently-unmeasured row rather than a check.
@@ -189,17 +244,42 @@ const SCENES = [
     // `not present` a healthy cluster legitimately produces. Its live form is watched as
     // `.n-tag` in the drawer scene.
     //
-    // The row-level STATUS pill is watched here as `.n-data-table-td .n-tag`. It was unwatched
-    // for exactly as long as the simulator was perfectly healthy: no seeded pod ever reached a
-    // state `StatusBadge` tones, so there was nothing to measure and a selector would have
-    // reported `not present` forever. The seeder now puts about one pod in six into
-    // CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled, Evicted or Completed, so the
-    // tinted pill is on screen in a cluster-free run. Note this samples the first pill with
-    // text, which on a name-sorted list is whichever tone happens to come first — it checks
-    // that the pill family is readable, not that every tone is.
+    // The row-level STATUS pill has a scene of its own below, because reaching it scrolls the
+    // list and `.count` is in the header that scrolls away with it.
     name: 'resource list',
     prepare: 'close;leaf:Pods;wait:800',
-    selectors: ['.count', '.leaf.active .nav-badge', '.n-data-table-td .n-tag'],
+    selectors: ['.count', '.leaf.active .nav-badge'],
+  },
+  {
+    // The row-level STATUS pill — `StatusBadge`'s `NTag`, tinted from the semantic tokens.
+    //
+    // It was unwatched for exactly as long as the simulator was perfectly healthy: no seeded
+    // pod reached a state `StatusBadge` tones, so there was nothing to measure. The seeder now
+    // puts about one pod in six into CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled,
+    // Evicted or Completed, so on a cluster-free run several pills sit in the first screenful.
+    //
+    // On a LIVE cluster they do not, and that is what left this reporting `outside the
+    // viewport` in both themes (GH#389). A tinted pill is drawn only for a row that is not
+    // healthy, a live list is sorted by name, and healthy is the common case: measured against
+    // this box's cluster there was exactly ONE pill in 93 pods, in the last row of the table,
+    // 17px below the fold. Nothing about the scene was wrong — it simply never looked down.
+    //
+    // Hence its OWN scene rather than a `scroll:` bolted onto the list scene above: bringing
+    // the pill on screen scrolls the page by ~390px, which takes `.count` and the whole
+    // `.content-head` off the top with it. Two samples that need different scroll positions
+    // are two scenes; sharing one is how a fix for either quietly unmeasures the other.
+    //
+    // `?scroll:` because a cluster whose visible pods are all healthy has no pill at all —
+    // reported as the WHY note below, not as a bare `not present`. And `scroll:` is
+    // `scrollIntoViewIfNeeded`, which CENTRES an element that is out of view rather than
+    // aligning it to the nearest edge (measured: y=895.6 before, y=506.6 after), so the sample
+    // cannot fail on a pill left flush against the bottom of the viewport.
+    //
+    // This samples the first pill with text, which on a name-sorted list is whichever tone
+    // comes first — it checks that the pill family is readable, not that every tone is.
+    name: 'row status pill',
+    prepare: 'close;leaf:Pods;wait:900;?scroll:.n-data-table-td .n-tag;wait:400',
+    selectors: ['.n-data-table-td .n-tag'],
   },
   {
     // Every tone of an overview card's state list, HOVERED. Named per tone rather than as a
@@ -397,6 +477,33 @@ const SCENES = [
     selectors: ['.action-notice-title', '.action-notice-message', '.action-notice-consequence'],
   },
 ];
+
+/**
+ * Why a selector may legitimately have nothing to sample HERE, keyed by selector.
+ *
+ * "Not present" is this file's own word for a failed measurement, and it is the right word —
+ * but it is the same word for two very different situations, and only one of them is a defect
+ * in the run. `.btn` is absent because the pod file browser is off in this instance; the row
+ * status pill can be absent because every visible pod is healthy. Neither is "we failed to
+ * look", and printing them identically to a scene that walked to the wrong page is how two
+ * watchlist entries measured nothing for months without anyone being able to tell (GH#389).
+ *
+ * So a note is printed beside the empty ratio. It does NOT make the sample count as measured —
+ * the unmeasured total is unchanged and still says these are not passes. It only says which
+ * kind of nothing this is, so a reader can act on the difference: turn a flag on, or fix a
+ * scene. A selector with no entry here is one nobody has explained, which is itself the
+ * signal.
+ */
+const WHY_ABSENT = {
+  '.ov-card.danger':
+    'needs a cluster with Warning events — StatCard only applies `danger` when there are some',
+  '.btn': 'needs the pod file browser: scripts/dev-run.sh --files',
+  '.diag-caps li.off .diag-name': 'needs a capability this instance reports as OFF',
+  '.chart-tip-t': 'needs a Prometheus/VictoriaMetrics backend — without one there is no chart to hover',
+  '.chart-tip-v': 'needs a Prometheus/VictoriaMetrics backend — without one there is no chart to hover',
+  '.n-drawer .kv .n-tag': 'needs a Helm-installed ConfigMap in this cluster (label app.kubernetes.io/managed-by=Helm)',
+  '.n-data-table-td .n-tag': 'needs a pod that is not healthy — a tinted pill is only drawn for one',
+};
 
 const args = process.argv.slice(2);
 const SELF_TEST = args.includes('--self-test');
@@ -949,16 +1056,28 @@ async function measure(page, theme, sels) {
   const rows = [];
   const disagreements = [];
   const found = [];
+  // A known reason for this selector to have nothing here, appended so "not applicable in this
+  // instance" and "the scene never reached the surface" stop reading identically (see
+  // WHY_ABSENT). Only ever decorates a row that already carries no ratio.
+  //
+  // ABSENCE ONLY. `outside the viewport` and `covered by another layer` mean the element IS
+  // there and the scene failed to put it where it could be read — a scene defect, which is the
+  // whole subject of GH#389. The first version of this appended the reason to those too, and
+  // the control run written to prove the scroll step load-bearing came back reading
+  // `outside the viewport … needs a pod that is not healthy`: a broken scene wearing a
+  // configuration excuse, i.e. the exact confusion this map exists to remove, added by the
+  // thing meant to remove it.
+  const why = (sel, note) => (WHY_ABSENT[sel] && note.startsWith('not present') ? `${note} — ${WHY_ABSENT[sel]}` : note);
   for (const sel of sels) {
     const samples = await sampleSelector(page, sel);
     if (!samples.length) {
-      rows.push({ theme, sel, what: '—', r: null, note: 'not present' });
+      rows.push({ theme, sel, what: '—', r: null, note: why(sel, 'not present') });
       continue;
     }
     // Present but painting no glyphs is still nothing measured, and must say so rather than
     // pass silently — the same rule as `not present`.
     if (!samples[0].parts.length) {
-      rows.push({ theme, sel, what: '—', r: null, note: 'present, but no text of its own' });
+      rows.push({ theme, sel, what: '—', r: null, note: why(sel, 'present, but no text of its own') });
       continue;
     }
     found.push({ sel, s: samples[0] });
@@ -979,7 +1098,7 @@ async function measure(page, theme, sels) {
       if (!fg) continue;
       // No pixel means nothing was measured. Say so; never fall back to the DOM walk.
       if (!pixel) {
-        rows.push({ theme, sel, what: p.what, r: null, note: p.skip || 'no pixel could be sampled' });
+        rows.push({ theme, sel, what: p.what, r: null, note: why(sel, p.skip || 'no pixel could be sampled') });
         continue;
       }
       const bg = pixel.rgb;

@@ -171,6 +171,14 @@ chart. Everything that matters is behind a click, so a watchlist alone could onl
 `not present` for it — and the summary's "N of M samples measured" line is the number to read,
 not the green verdict.
 
+A row with no ratio now carries **why**, when the reason is known: `not present — needs the pod
+file browser: scripts/dev-run.sh --files` is a fact about this instance, while a bare
+`not present` or an `outside the viewport` is a scene that failed to reach its surface. The two
+used to print identically, and two watchlist entries lived in that gap long enough to measure
+nothing at all — one of them by resolving to a table pill *behind* the drawer it named and
+reporting that pill's ratio as a pass (GH#389). The reason is appended to absence only; nothing
+can excuse an element that is on the page and off screen.
+
 Two limits worth knowing before trusting a green run. The metrics-chart scene needs a
 Prometheus / VictoriaMetrics backend; without one the chart is a placeholder and its two rows
 are counted as unmeasured. And **text painted into a `<canvas>` can never be measured here** —
