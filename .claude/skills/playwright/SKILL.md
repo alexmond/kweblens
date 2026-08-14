@@ -163,6 +163,50 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-14 — **A watchlist entry named a selector so broad it measured the element BEHIND the
+  one it was for, and reported that element's ratio under the wrong name.** GH#389: `.n-tag` was
+  on the list as "the drawer's `<NTag type="info">Helm</NTag>`", the component-library colour
+  #269 fixed. It matches every Naive tag on the page, and the sampler takes the first match that
+  carries text — a row's status pill in the table *behind* the open drawer. Against a live
+  cluster that pill was 17px below the fold, so the row said `outside the viewport` and looked
+  like a scene problem; **against the simulator it was on screen, so both watchlist rows reported
+  the same numbers (8.06:1 / 4.51:1) and both looked like passes.** The green reading is the
+  worse of the two: the tag the entry exists for had never once been on screen in either
+  environment. Two independent causes, each hiding the other — and the second is a fixture fact
+  no amount of scrolling would have fixed: `Managed By` renders off `meta.helm.sh/release-name`,
+  which Helm writes on the objects a chart declares and *not* on the Pods a Deployment then
+  creates, so on this box's cluster **0 of 93 pods carry it** against 8 of 100 ConfigMaps and 29
+  of 66 Services. The scene was pointed at the one kind where the tag cannot exist. → The tag is
+  measured as `.n-drawer .kv .n-tag` in a scene of its own, on Config Maps narrowed by the app's
+  own label filter to `app.kubernetes.io/managed-by=Helm` (`8 of 100` live, every object on the
+  simulator); the status pill gets its own scene too, because the `scroll:` that reaches it takes
+  `.content-head` and `.count` off the top with it — two samples needing different scroll
+  positions are two scenes. Both now read 5.42:1 dark / 7.68:1 light and 6.56/5.62 (live),
+  8.06/4.51 (sim). **A selector that resolves anywhere on the page is not a selector for the
+  surface a scene walked to; scope it to the surface, or it will silently measure whatever the
+  DOM happens to put first.**
+- 2026-08-14 — **Running `dev-verify.sh` broke both instances it was verifying, and `--list` went
+  on calling them running.** The build replaces the fat jar under a live JVM, which loads classes
+  lazily, so the simulator instance answered **HTTP 500 to every request** while keeping its
+  listener and the live one kept its *process* after losing its listener —
+  `NoClassDefFoundError: …$MatchComparator` / `…ThrowableProxy`. `dev-run.sh --list` matches on
+  the jar path and `comm`, both still true of a JVM whose classloader can no longer find
+  anything, so the instance list said `running` throughout. → Filed as **GH#394**; until it is
+  fixed, **run the gate before the measurements, or restart what you are measuring after it**,
+  and treat a 500 on `/` as "I just rebuilt under it" rather than a product bug. Same family as
+  the provenance entries below: *the app answered* is not *my app answered*, and this time the
+  build that broke it was mine.
+- 2026-08-14 — **The fix for that shipped a smaller version of the same defect, and the control
+  written to prove the fix is what caught it.** `contrast-check` gained `WHY_ABSENT`, a reason
+  per selector appended to an empty ratio so "not applicable in this instance" (`.btn` needs
+  `--files`) stops reading identically to "the scene never reached the surface". The first
+  version appended it to every note, and the control run — the same scene minus its `scroll:`
+  step — came back `outside the viewport … needs a pod that is not healthy`: a broken scene
+  wearing a configuration excuse, added by the thing built to remove exactly that confusion.
+  → The reason is appended to `not present` and nothing else; `outside the viewport` and
+  `covered by another layer` mean the element IS there and the scene failed, and may never
+  borrow an excuse. **Run the control against your own fix, not only against the bug — a
+  diagnostic message is code, and it can be wrong in the direction it was written to prevent.**
 - 2026-08-14 — **A stubbed response installed mid-walk was never fetched, so the scene measured
   the LIVE data under the stubbed scene's name.** Verifying #381, `partial` (a `page.route` on
   `GET …/diagnose`) went in and the very next step navigated to the page that reads it — and the
