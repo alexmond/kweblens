@@ -745,10 +745,12 @@ const DIAGNOSE_URL = '**/api/v1/clusters/*/diagnose*';
  *
  * Titles, details and suggested fixes are copied from the emitters — `PodDiagnosis`,
  * `PodSecurity` and `SecurityAuditService`, whose strings `SecurityAuditServiceTest` and
- * `DiagnoseSecurityFindingsTest` pin — so a rewording on the server breaks this scene instead
- * of leaving it measuring a payload the app no longer receives. The objects are invented, and
- * named the way the simulator names things: this file is committed, and a real cluster's
- * namespaces and pod names are not.
+ * `DiagnoseSecurityFindingsTest` pin — rather than invented, so what is on screen is what an
+ * operator would actually read. The WIRE SHAPE is the part this scene depends on: rename a
+ * field on `DiagnoseResult` or `Finding` and the panel renders nothing here, which fails the
+ * run. A reworded title would not, and should not — this measures colour, not text. The
+ * objects are invented, and named the way the simulator names things: this file is committed,
+ * and a real cluster's namespaces and pod names are not.
  */
 const PARTIAL_DIAGNOSIS = {
   findings: [
