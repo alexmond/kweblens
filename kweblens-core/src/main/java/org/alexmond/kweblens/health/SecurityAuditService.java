@@ -155,18 +155,22 @@ public class SecurityAuditService {
 
 	private void addSubjectFindings(List<SecurityFinding> findings, Grant grant, Subject subject, String namespace,
 			Map<String, List<String>> podsByAccount) {
-		if (RbacSubjects.isSystemSubject(subject, grant.namespace())) {
+		if (RbacSubjects.isControlPlaneSubject(subject, grant.namespace())) {
 			return;
 		}
 		boolean account = "ServiceAccount".equals(subject.getKind());
-		String subjectNamespace = account ? RbacSubjects.accountNamespace(subject, grant.namespace()) : null;
+		String subjectNamespace = subjectNamespace(subject, grant.namespace());
 		// A namespace-scoped diagnosis reports a cluster-scoped binding only when it
-		// grants something to an account in that namespace. A User or Group is not
-		// namespaced, so it belongs to the cluster-wide view.
+		// grants something to an identity in that namespace. A User, or a group that
+		// spans the cluster, is not namespaced, so it belongs to the cluster-wide view.
 		if (namespace != null && !namespace.equals(subjectNamespace)) {
 			return;
 		}
 		findings.add(bindingFinding(grant, subject, subjectNamespace));
+		// Only a named account gets the second, blast-radius finding. A
+		// workload-identity group has no list of pods worth naming — the answer is
+		// every pod in the scope, including ones created after this was read, which the
+		// binding finding says in one sentence instead of a hundred names.
 		if (!account) {
 			return;
 		}
@@ -176,8 +180,31 @@ public class SecurityAuditService {
 		}
 	}
 
+	/**
+	 * The namespace a subject belongs to, or null if it belongs to no single one.
+	 *
+	 * <p>
+	 * A ServiceAccount has one. So does {@code system:serviceaccounts:<ns>}, which is
+	 * what lets a namespaced audit of that namespace see a cluster-scoped binding aimed
+	 * at it — the accounts it hands cluster-admin to are exactly the ones in scope.
+	 * {@code system:serviceaccounts} spans the cluster and so stays in the cluster-wide
+	 * view, like a User.
+	 */
+	private String subjectNamespace(Subject subject, String bindingNamespace) {
+		if ("ServiceAccount".equals(subject.getKind())) {
+			return RbacSubjects.accountNamespace(subject, bindingNamespace);
+		}
+		if (RbacSubjects.isWorkloadIdentityGroup(subject)) {
+			return RbacSubjects.workloadIdentityGroupNamespace(subject);
+		}
+		return null;
+	}
+
 	/** What the binding itself says — readable from that one object. */
 	private SecurityFinding bindingFinding(Grant grant, Subject subject, String subjectNamespace) {
+		if (RbacSubjects.isWorkloadIdentityGroup(subject)) {
+			return workloadGroupFinding(grant, subject, subjectNamespace);
+		}
 		String who = describe(subject, subjectNamespace);
 		if (grant.clusterScoped()) {
 			return new SecurityFinding("critical", "ClusterRoleBinding grants cluster-admin", grant.ref(),
@@ -189,6 +216,56 @@ public class SecurityAuditService {
 				"roleRef ClusterRole/" + RbacSubjects.CLUSTER_ADMIN + ", subject " + who
 						+ " — full control of namespace '" + grant.namespace() + "'",
 				"Bind " + who + " to a Role with only the verbs it needs, or remove the binding.");
+	}
+
+	/**
+	 * A grant made to every workload identity at once — {@code system:serviceaccounts},
+	 * or one namespace's {@code system:serviceaccounts:<ns>} (#382).
+	 *
+	 * <p>
+	 * <b>Severity follows what the grant confers</b>, the same axis every other binding
+	 * finding uses: a ClusterRoleBinding to {@code cluster-admin} makes each of those
+	 * accounts administrator of the whole cluster, so compromising any pod running under
+	 * the group — including one deployed tomorrow, and including one that named no
+	 * account and got {@code default} — is a cluster takeover. That is {@code critical}
+	 * whether the group is the cluster's accounts or one namespace's. A RoleBinding
+	 * confines the grant to its own namespace and stays a {@code warning}, exactly as it
+	 * does for a single account.
+	 *
+	 * <p>
+	 * The two are still not equally bad, and the difference is in the title and the
+	 * detail rather than the severity: the cluster-wide group means <i>every</i> pod
+	 * anywhere, the namespaced one means every pod in one namespace. Demoting the
+	 * namespaced case to {@code warning} would file "every workload in this namespace can
+	 * delete anything in the cluster" alongside "this account owns one namespace", which
+	 * is the wrong claim; {@code info} is not a severity at all here — it is the bucket
+	 * for what could not be checked.
+	 */
+	private SecurityFinding workloadGroupFinding(Grant grant, Subject subject, String subjectNamespace) {
+		String who = (subjectNamespace != null) ? "every ServiceAccount in namespace '" + subjectNamespace + "'"
+				: "every ServiceAccount in the cluster";
+		String confers = grant.clusterScoped() ? "administrator of the whole cluster"
+				: "full control of namespace '" + grant.namespace() + "'";
+		return new SecurityFinding(grant.clusterScoped() ? "critical" : "warning", groupTitle(grant, subjectNamespace),
+				grant.ref(),
+				"roleRef ClusterRole/" + RbacSubjects.CLUSTER_ADMIN + ", subject Group " + subject.getName() + " — "
+						+ who + ", including 'default' and any account created later, is " + confers
+						+ ", so a compromise of any pod running as one of them is too",
+				"Remove the binding and grant only the individual ServiceAccounts that need it."
+						+ " Membership of this group is automatic, so the grant cannot be narrowed by editing accounts.");
+	}
+
+	/**
+	 * Static per case, because the title is what a reader groups findings by and the
+	 * order they sort in.
+	 */
+	private String groupTitle(Grant grant, String subjectNamespace) {
+		if (!grant.clusterScoped()) {
+			return "RoleBinding grants cluster-admin to a whole group of ServiceAccounts";
+		}
+		return (subjectNamespace != null)
+				? "ClusterRoleBinding grants cluster-admin to every ServiceAccount in a namespace"
+				: "ClusterRoleBinding grants cluster-admin to every ServiceAccount in the cluster";
 	}
 
 	/**
