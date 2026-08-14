@@ -35,6 +35,13 @@
                mvn -pl kweblens-it test -Dkweblens.it.excluded-groups= \
                    -Dspring.profiles.active=lab [-Dtest=SmokeTasks] -->
         <kweblens.it.excluded-groups>it</kweblens.it.excluded-groups>
+        <!-- This module is all test sources, and the PMD plugin runs with `includeTests=false`, so
+             it had nothing to look at and logged "No files to analyze" on every build. Silenced by
+             not running the check, so that warning keeps meaning something where it appears.
+             TWO things must remove this skip: a `src/main/java` appearing here, or `includeTests`
+             being turned on in the parent — the second would make this module's task tests the
+             largest body of code PMD has never seen. -->
+        <pmd.skip>true</pmd.skip>
     </properties>
 
     <dependencies>

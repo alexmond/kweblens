@@ -15,7 +15,13 @@
         <exclude name="LiteralsFirstInComparisons"/>
         <exclude name="UnusedAssignment"/>
         <exclude name="GuardLogStatement"/>
-        <exclude name="JUnitTestsShouldIncludeAssert"/>
+        <!-- `JUnitTestsShouldIncludeAssert` was excluded here and NEVER TOOK EFFECT: PMD 7 keeps
+             it only as `deprecated="true" ref="UnitTestShouldIncludeAssert"`, and exclude patterns
+             do not resolve deprecated aliases, so PMD warned on every module build. Deleted rather
+             than renamed, because the rule it aliases cannot fire either — the plugin runs with
+             `includeTests=false`, so no test source is ever analysed. Suppressing a rule that
+             cannot reach any file is policy-shaped noise. If test analysis is ever turned on,
+             decide then whether the rule is wanted. -->
     </rule>
 
     <!-- Code Style -->
@@ -36,7 +42,12 @@
         <exclude name="UselessParentheses"/>
         <exclude name="FieldDeclarationsShouldBeAtStartOfClass"/>
         <exclude name="FieldNamingConventions"/>
-        <exclude name="OneDeclarationPerLine"/>
+        <!-- `OneDeclarationPerLine` was excluded here and NEVER TOOK EFFECT: the rule lives in
+             `bestpractices`, not `codestyle`, so PMD warned that the pattern matched nothing while
+             the rule stayed ON through the bestpractices reference above. Deleted rather than moved
+             to the right block, because the code has satisfied it all along — moving it would
+             switch OFF a rule that has been passing, which is a loosening disguised as a warning
+             fix. Re-add it to the bestpractices block only if it starts costing something real. -->
         <exclude name="LinguisticNaming"/>
         <!-- Conflicts with Checkstyle's SpringLambda (which wants parenthesised lambda args) on
              idiomatic Spring Security DSL customizers like frame -> frame.sameOrigin(). -->
@@ -73,8 +84,13 @@
         <exclude name="CollapsibleIfStatements"/>
         <!-- Spring Boot @SpringBootApplication main class has only a static main() -->
         <exclude name="UseUtilityClass"/>
-        <!-- DTO holder classes group nested records behind a private constructor -->
-        <exclude name="MissingStaticMethodInNonInstantiatableClass"/>
+        <!-- `MissingStaticMethodInNonInstantiatableClass` was excluded here and NEVER TOOK EFFECT:
+             the rule lives in `errorprone`, not `design`, so PMD warned that the pattern matched
+             nothing while the rule stayed ON through the errorprone reference below. Its stated
+             reason — "DTO holder classes group nested records behind a private constructor" —
+             evidently never applied, since the build has been green with the rule active. Deleted
+             rather than moved, for the same reason as `OneDeclarationPerLine` above: moving it
+             would switch off a passing rule. -->
     </rule>
 
     <!-- Error Prone -->
