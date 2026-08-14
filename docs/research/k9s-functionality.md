@@ -529,16 +529,57 @@ anything beyond reading one path and stringifying it: ratios (5), array aggregat
 filter / join / find (15), counts of a top-level array (2), conditionals (5), formatting or joining
 (4).
 
-So **"71 render functions" is wrong in both directions**: there are 87 entries, not 71, and the
-number that matters — the ones carrying logic — is 31, not 71. The distribution is also lopsided:
-**Nodes alone is 16 of the 87**. Ten of the 28 kinds have exactly one column.
+**A whole-file grep gives 83, not 87, and both numbers are right** — they have different
+denominators, so this is worth pinning down before the next reader greps and thinks one of us is
+wrong. `grep -c 'render:'` over the whole file returns **83** (as do `key:` and `header:`, since
+every `ColumnDef` carries one of each). Those 83 decompose exactly:
 
-`kweblens-ui/src/components/relations.ts` is **not** "a second client-side mirror", and CLAUDE.md
-saying so should be corrected. It is 171 lines of *rendering* over a server-computed map; its own
-header says it "projects the detail endpoint's relations (GH#136)". All 12 relations are computed in
-`RelationService` in core. Its `PROJECTIONS` registry covers 3 of the 12 keys with rich row shapes;
-the other 9 fall through to a generic Name/Kind/Namespace table. A TUI reimplementing it would
-rewrite ~170 lines of table shaping and get all 12 joins for free.
+| | |
+|---|---|
+| inline `{ key: … }` literals inside `const COLUMNS` | 80 |
+| the shared `serverState` const, defined **once** above the block | 1 |
+| the `ColumnDef` **interface declaration** (`key: string;`) | 1 |
+| the **CRD printer-column mapper** (`key: c.jsonPath \|\| c.name`), one runtime factory | 1 |
+| | **83** |
+
+So 83 counts *definitions in the file*; 87 counts *column entries attached to the 28 kinds*. The gap
+is `serverState`, written once and used seven times, plus two occurrences that are not renderers at
+all. [`kind-catalog.md`](../design/kind-catalog.md) tracks the 83 figure as a dated time series
+across four commits, and that is the right metric for a trend table — its value is being comparable
+to its own earlier rows, not being an exact renderer count. **87 is the number that answers *this*
+doc's question**, which is how many cells a second client has to produce.
+
+Either way, **"71 render functions" is wrong**, and `kind-catalog.md` already carries a dated
+correction saying so: the 71 was measured just before #122 landed, and the catalog grew ~17% in the
+two days around the measurement. The number that actually matters for drift is neither 71 nor 83 nor
+87 — it is the **31** entries carrying logic. The distribution is also lopsided: **Nodes alone is 16
+of the 87**, and ten of the 28 kinds have exactly one column.
+
+**Relations: the joins are server-side, the display metadata is a partial mirror.** The distinction
+matters for the TUI, so both halves need stating precisely.
+
+All **12** relations are computed in `RelationService` in core, and that is what a TUI consumes — it
+gets every join for free and reimplements none of them.
+
+But `kweblens-ui/src/components/relations.ts` (171 lines) does hold a **partial client-side mirror of
+the display metadata** for those keys, and calling it "not a mirror" — as an earlier draft of this
+doc did — overstates the case. At `d050514` it carries three registries keyed on the server's
+relation keys: `TITLES` covers **3 of 12**, `PROJECTIONS` covers **3 of 12** (`endpoints`,
+`selectedPods`, `mountedBy`), and `relationSections` opens with a literal render order,
+`const order = ['endpoints', 'selectedPods', 'mountedBy']`. The server emits bare keys with no
+display metadata, so those three lists are maintained by hand against `RelationService.relationsFor`.
+
+What *has* changed is that the mirror is now **loud rather than silent**. GH#203 replaced the old
+`key === 'endpoints' ? endpointRows : podRows` binary with `PROJECTIONS[key] ?? genericRows` and
+`TITLES[key] ?? humanise(key)`, so a new server-side relation renders as a generic
+Name/Kind/Namespace table under a humanised heading — `ownedBy` → "Owned By" — instead of silently
+borrowing pod columns. [`kind-catalog.md`](../design/kind-catalog.md) is the authority here and its
+reading is the correct one: **mitigated, not closed.**
+
+For this epic the consequence is unchanged and is the load-bearing part: a TUI reimplements ~170
+lines of *table shaping*, not the joins. It should also not copy the three hard-coded lists — a
+second hand-maintained order and title map would be a genuine new mirror, and the `?? humanise(key)`
+fallback is the pattern to carry over instead.
 
 ### The slice the TUI needs
 
@@ -874,5 +915,21 @@ should not be lost:
   not be found"*. CI is green because `KweblensCommandTest` never boots a context; it calls
   `new CommandLine(new KweblensCommand()).execute("--help")` directly. The CLI is also the closest
   thing to a template for a TUI module's bootstrap, so this wants fixing before it is copied.
-- **CLAUDE.md's description of `components/relations.ts` as "a second client-side mirror" is wrong**,
-  as is the "71 render functions" figure repeated in GH#143 and GH#148. Both are corrected above.
+- **The "71 render functions" figure** repeated in the bodies of GH#143 and GH#148 is wrong; both
+  issue bodies have been corrected to the measured numbers, and `kind-catalog.md` already carried a
+  dated correction of its own.
+
+And one correction to an earlier draft of *this* doc, recorded rather than quietly edited out,
+because getting it wrong in the other direction would have been just as misleading. That draft said
+`components/relations.ts` is "not a second client-side mirror" and attributed the claim it was
+correcting to `CLAUDE.md`. Both halves were wrong:
+
+- **Wrong file.** `CLAUDE.md` contains neither the phrase nor the string `relations.ts` nor the 71
+  figure — grepped at `d050514`. The text being corrected lives in
+  [`docs/design/kind-catalog.md`](../design/kind-catalog.md). Publishing it as a CLAUDE.md defect
+  would have sent the next reader to a file that never said it.
+- **Wrong on substance.** `relations.ts` does hold a partial mirror — three hand-maintained
+  registries covering 3 of the 12 keys plus a literal render order. §9 now states the precise
+  version: the relations themselves are server-side, the display metadata is a partial mirror, and
+  since GH#203 that mirror is loud rather than silent. `kind-catalog.md`'s "mitigated, not closed" is
+  the correct reading and this doc defers to it.
