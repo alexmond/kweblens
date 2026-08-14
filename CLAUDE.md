@@ -280,9 +280,13 @@ broken. It is not; do not "fix" it.
 
 ## Release (Maven Central)
 
-- **Nothing has ever been released** — no tags, version still `0.1.0-SNAPSHOT`, artifacts 404 on
-  Central, and there is **no workflow that builds or publishes the container image**. Do not
-  describe any module as "published"; it is roadmap item **R2**.
+- **Nothing has ever been released** — no tags, no GitHub releases, version still
+  `0.1.0-SNAPSHOT`, both library artifacts 404 on Central. Do not describe any module as
+  "published"; it is roadmap item **R2**. The *machinery* is no longer the gap:
+  `.github/workflows/image.yml` (#311) builds `kweblens-web`, smoke-tests that the image reaches
+  a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch` where
+  `publish` is explicitly true (it defaults to **false**). That tag exists only because a human
+  ran `maven_release.yml`.
 - **Only the libraries publish**: `kweblens-core`, `kweblens-cli` (+ parent). `kweblens-web` is
   not in the top-level `<modules>` — it lives in an `activeByDefault` `default` profile, so
   `-Prelease` drops it and the `docker` profile re-adds it. **Any new `-P` profile that needs the
