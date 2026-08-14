@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   age,
   badgeTone,
+  columnKinds,
   columnsFor,
   defaultHiddenCols,
   eventTypeTone,
@@ -174,6 +175,9 @@ describe('node columns', () => {
     const hidden = defaultHiddenCols('nodes');
     expect(hidden.has('ext-ip')).toBe(true);
     expect(hidden.has('os-image')).toBe(true);
+    // Schedulable joined them in #357: the Status column's state already carries
+    // `,SchedulingDisabled`, so on by default it was the same fact in two columns.
+    expect(hidden.has('schedulable')).toBe(true);
     // the common set stays visible
     expect(hidden.has('taints')).toBe(false);
     expect(hidden.has('conditions')).toBe(false);
@@ -270,23 +274,67 @@ describe('toneFor', () => {
   });
 
   it('falls back to the keyword table for a row with no state', () => {
-    // Nodes, Namespaces, claims and a CRD's own printer column are not covered by the
-    // vocabulary, so they still render `status.phase` and still need classifying.
-    const node: KubeObject = { kind: 'Node', metadata: { name: 'n' } };
-    expect(toneFor('status', 'NotReady', node)).toBe('err');
-    expect(toneFor('status', 'Ready', node)).toBe('');
+    // A PersistentVolume's phase and a CRD's own printer column are Status cells nothing has
+    // judged, so they still need classifying — and so does any row whose context-carrying
+    // verdict could not be reached this request.
+    const pv: KubeObject = { kind: 'PersistentVolume', metadata: { name: 'pv' } };
+    expect(toneFor('status', 'Failed', pv)).toBe('err');
+    expect(toneFor('status', 'Bound', pv)).toBe('');
   });
 });
 
-describe('the Status column of a covered kind is the server’s state', () => {
-  // The wart #337 left and #341 settles: `status.phase` said Succeeded where the card and the
-  // filter both said Completed, and six of the seven covered kinds had no Status column at all.
-  const COVERED = ['pods', 'deployments', 'statefulsets', 'daemonsets', 'replicasets', 'jobs', 'cronjobs'];
+describe('the Status column of a judged kind is the server’s state', () => {
+  // THE RULE, and it is the whole of it: if the server judges the kind, its Status column renders
+  // `kweblensState` — never `status.phase`, never a local read of `status.conditions`.
+  //
+  // The version of this block that shipped with #341 pinned SEVEN kinds and called the other six
+  // "not covered by the vocabulary yet". That was true the day it was written. #339 then gave the
+  // server a verdict for Node and Namespace and #340 gave it one for Service, PVC, ConfigMap and
+  // Secret — and because this test pinned the split rather than the rule, the gate stayed green
+  // over six kinds showing a second opinion for two whole tickets (GH#357). So it is now written
+  // in both directions: what MUST read the state, and what must NOT — with a decoy in the second
+  // set, so converting the wrong kind fails just as loudly as failing to convert the right one.
+  //
+  // Kept in step with `StatusVocabulary.covers() || needsContext()` on the server. There is no way
+  // to derive it from here, so it is a list; what stops it going stale silently is that both
+  // directions are asserted and neither has a default.
+  const SERVER_JUDGES = [
+    // WorkloadHealth
+    'pods',
+    'deployments',
+    'statefulsets',
+    'daemonsets',
+    'replicasets',
+    'jobs',
+    'cronjobs',
+    // ClusterObjectHealth (#339)
+    'nodes',
+    'namespaces',
+    // the context-carrying kinds (#340)
+    'services',
+    'persistentvolumeclaims',
+    'configmaps',
+    'secrets',
+  ];
 
-  const finishedPod: KubeObject = {
+  // Kinds with a Status column the server does NOT judge, each for a stated reason — the decoy
+  // half of the control. A PersistentVolume has no producer at all (StorageHealthService judges
+  // the CLAIM), so `kweblensState` never ships for one and this column is the cluster's own phase.
+  // Wiring `serverState` in here would give every PV row a `—`, and this test says so.
+  const NOT_JUDGED_WITH_A_STATUS_COLUMN = ['persistentvolumes'];
+
+  // Carries a state AND a conflicting phase, so which one comes out is not ambiguous. This is the
+  // mutation detector: every kind is rendered against it, and a column that reads the object
+  // instead of the verdict returns the other word.
+  const conflicted: KubeObject = {
     kind: 'Pod',
     metadata: { name: 'p' },
-    status: { phase: 'Succeeded' },
+    status: {
+      phase: 'Succeeded',
+      // What the old hand-rolled Nodes column read. A cordoned-but-healthy node is the case it
+      // could not express: it said `Ready` where the server says `Ready,SchedulingDisabled`.
+      conditions: [{ type: 'Ready', status: 'True' }],
+    },
     kweblensState: { label: 'Completed', tone: 'idle' },
   };
 
@@ -295,27 +343,40 @@ describe('the Status column of a covered kind is the server’s state', () => {
       .find((c) => c.key === 'status')
       ?.render(o);
 
-  it('gives every covered kind one', () => {
-    for (const id of COVERED) {
-      expect(statusOf(id, finishedPod), id).toBe('Completed');
+  it('gives every judged kind a Status column that renders the state', () => {
+    for (const id of SERVER_JUDGES) {
+      expect(statusOf(id, conflicted), id).toBe('Completed');
     }
   });
 
-  it('renders the state, not the phase', () => {
-    expect(statusOf('pods', finishedPod)).toBe('Completed');
-    expect(statusOf('pods', finishedPod)).not.toBe('Succeeded');
+  it('renders the state, not the phase and not the conditions', () => {
+    expect(statusOf('pods', conflicted)).not.toBe('Succeeded');
+    expect(statusOf('nodes', conflicted)).not.toBe('Ready');
+    expect(statusOf('namespaces', conflicted)).not.toBe('Succeeded');
+    expect(statusOf('persistentvolumeclaims', conflicted)).not.toBe('Succeeded');
   });
 
-  it('renders — when the server reached no verdict, rather than guessing from the phase', () => {
+  it('renders — when the server reached no verdict, rather than guessing from the object', () => {
     // "We did not send it" and "it is fine" are different claims, and the second one would be
-    // invented here. Same rule as ListProjection's withheld values.
-    expect(statusOf('pods', { kind: 'Pod', status: { phase: 'Running' } })).toBe('—');
+    // invented here. Same rule as ListProjection's withheld values. This is also what a failed
+    // StatusContext looks like on a Service or a ConfigMap: unjudged, not judged well.
+    const unjudged: KubeObject = { kind: 'Pod', status: { phase: 'Running', conditions: [{ type: 'Ready' }] } };
+    for (const id of SERVER_JUDGES) {
+      expect(statusOf(id, unjudged), id).toBe('—');
+    }
   });
 
-  it('leaves the kinds the vocabulary does not cover on their own phase', () => {
-    // Nothing there to disagree with yet: no state ships for them, so no chip counts them.
-    const claim: KubeObject = { kind: 'PersistentVolumeClaim', status: { phase: 'Bound' } };
-    expect(statusOf('persistentvolumeclaims', claim)).toBe('Bound');
-    expect(statusOf('namespaces', { kind: 'Namespace', status: { phase: 'Active' } })).toBe('Active');
+  it('leaves a kind the server does not judge on the cluster’s own value', () => {
+    // The decoy. A PV's phase is not a second opinion about a verdict — there is no verdict.
+    for (const id of NOT_JUDGED_WITH_A_STATUS_COLUMN) {
+      expect(statusOf(id, conflicted), id).toBe('Succeeded');
+    }
+  });
+
+  it('accounts for every Status column in the app', () => {
+    // The one that catches a kind added later. A new Status column is either the server's state
+    // or an explicit exemption; there is no third bucket to quietly land in.
+    const withStatus = columnKinds().filter((id) => columnsFor(id).some((c) => c.key === 'status'));
+    expect([...withStatus].sort()).toEqual([...SERVER_JUDGES, ...NOT_JUDGED_WITH_A_STATUS_COLUMN].sort());
   });
 });

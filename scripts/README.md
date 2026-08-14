@@ -130,7 +130,7 @@ node scripts/perf-sweep.mjs                            # needs a cluster or --si
 # Does `3 Pending` open a list holding exactly those three? (#336) Three numbers, not one:
 # the card's, the header's "N of M", and the rows drawn — the header alone is the list
 # agreeing with itself.
-PORT=8094 CLUSTER_NS=monitoring node scripts/state-link-check.mjs network storage config
+PORT=8094 CLUSTER_NS=monitoring node scripts/state-link-check.mjs cluster network storage config
 
 # Does a cluster switch leave the PREVIOUS cluster's numbers on screen? (#323)
 # TO must be a cluster that cannot answer, or an equal value proves nothing — see the header.

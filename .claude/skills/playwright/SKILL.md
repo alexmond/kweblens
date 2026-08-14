@@ -80,7 +80,7 @@ node scripts/perf-sweep.mjs
 ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
 
 # Does clicking `15 No endpoints` open exactly those 15? (#336)
-CLUSTER_NS=monitoring node scripts/state-link-check.mjs network storage config
+CLUSTER_NS=monitoring node scripts/state-link-check.mjs cluster network storage config
 ```
 
 `PREPARE` brings a surface on screen before it is sampled — `press:` `click:` `hover:<sel>`
@@ -152,6 +152,29 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-13 — **`state-link-check`'s third number was the rendered WINDOW, not the list, and the
+  one category it could not open was the one under test.** Verifying #357, `50 Serving` failed
+  with `50 of 66, 19 rows` while `45 Referenced` passed with all 45 — because `ResourceTable`
+  turns virtual scrolling on at exactly 50 FILTERED rows, so whether the check's own oracle could
+  be trusted depended on how many rows fitted the viewport. The `filtered <= PAGE_SIZE` guard
+  written for that was worse than nothing: it let every long list through unchecked *and* still
+  failed at the boundary. → `drawnRows()` scrolls the virtual body and counts DISTINCT rows
+  (`109 rows drawn (19 in the window)`), and the skip is gone; `CATEGORY_LABEL` gained `cluster`,
+  whose Nodes and Namespaces cards have been clickable since #339 and were never once checked.
+  Its own first version was a silent no-op: an ordered guess-list named
+  `.n-data-table-base-table-body` before `.v-vl`, and that element EXISTS and does not scroll, so
+  assigning `scrollTop` did nothing, `more` came back false on iteration one, and a walk that
+  never moved reported "nothing further to scroll". **Find the element that overflows; a wrapper
+  that accepts `scrollTop` and ignores it fails exactly like a completed walk.**
+- 2026-08-13 — **`ui-measure` reported `OVERFLOWS by 1px` on a pill that overflows by nothing.**
+  The check compared a rounded box right (`Math.round(x) + Math.round(w)`) against a rounded
+  clipper right, and two independent roundings of ONE sub-pixel edge disagree by up to a pixel —
+  so every Status pill in a table, whose `.n-ellipsis` wrapper shrink-wraps it exactly, was a
+  candidate false positive. The probe written to chase it answered `wanted 99.69px, got 99.69px,
+  0 lost`. → `clipOver` is measured unrounded in the page and reported over a 0.5px threshold,
+  with a control pair (`.over-clip` genuinely 80px past its clipper, `.flush-clip` sitting on the
+  edge at 0.00px). Real loss is still `sliced` and `clipped`, which measure what is missing rather
+  than where an edge lands. **Round for printing, never for comparing.**
 - 2026-08-13 — **Nothing here could check the claim an entire epic is about: that a number you
   click opens exactly the objects it counted.** #340 wired the Network, Storage and Config cards
   to the `status:` filter, and every existing tool would have passed a card whose link opened the

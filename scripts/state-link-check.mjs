@@ -24,10 +24,10 @@
  *   A run that "found no links" therefore has to say so rather than pass — a category whose
  *   cards are all empty measures nothing, and looks identical to a category whose links are
  *   broken.
- * - **The list is paginated and virtualised**, so counting `tbody tr` counts the PAGE, not
- *   the collection. The comparison against (3) is therefore only made when the header says
- *   the filtered count is at most what one page holds; otherwise (3) is printed and skipped,
- *   with the reason, instead of failing a correct list for being long.
+ * - **The list is virtualised**, so counting `tbody tr` once counts the rendered WINDOW, not
+ *   the collection. (3) is therefore collected by scrolling the body to the end and counting
+ *   DISTINCT rows — see `drawnRows`. It used to be skipped for anything over a page instead,
+ *   which meant the number that catches a wrong set was only ever read on short lists.
  *
  * Usage:
  *   PORT=8094 CLUSTER_NS=kwfx-network node scripts/state-link-check.mjs network storage config
@@ -44,10 +44,11 @@ const { chromium } = require('playwright');
 const CATEGORIES = process.argv.slice(2).filter((a) => !a.startsWith('-'));
 const NAMESPACE = process.env.CLUSTER_NS ?? '';
 const THEMES = (process.env.THEMES ?? 'dark,light').split(',');
-/** Naive's data table draws one page; a filtered count above this is not compared to rows. */
-const PAGE_SIZE = Number(process.env.PAGE_SIZE ?? 50);
 
-const CATEGORY_LABEL = { network: 'Network', storage: 'Storage', config: 'Config' };
+// `cluster` was missing until #357 put Nodes and Namespaces into the Status column: the Cluster
+// overview's cards have been clickable since #339, so the one category this could not check was
+// the one whose two kinds still rendered a second opinion beside the chip.
+const CATEGORY_LABEL = { cluster: 'Cluster', network: 'Network', storage: 'Storage', config: 'Config' };
 
 async function openOverview(page, category) {
   // Through the SHARED openLeaf, qualified `Category/Overview`. Both halves matter: every
@@ -107,15 +108,66 @@ async function stateLinks(page) {
   );
 }
 
+/**
+ * How many DISTINCT rows the table draws, by scrolling its virtual body to the end and
+ * collecting each row's name+namespace.
+ *
+ * Counting `tbody tr` once counts the rendered WINDOW, not the list: naive's data table
+ * virtualises, so `50 of 66` drew 19 rows and the run reported the epic's own page as broken
+ * — while `45 of 100` drew all 45 and passed. Whether the third number could be trusted
+ * therefore depended on how many rows happened to fit the viewport, which is exactly the kind
+ * of instrument this file exists to not be. An earlier version papered over it with a
+ * `filtered <= PAGE_SIZE` skip, which both let a genuinely wrong long list through unchecked
+ * and still failed at the boundary.
+ */
+async function drawnRows(page) {
+  const seen = new Set();
+  const collect = async () =>
+    (
+      await page.$$eval('.n-data-table-tbody tr', (rows) =>
+        rows.map((tr) =>
+          [...tr.querySelectorAll('td')]
+            .slice(1, 3)
+            .map((td) => td.innerText.trim())
+            .join('/'),
+        ),
+      )
+    ).forEach((k) => seen.add(k));
+
+  await collect();
+  for (let i = 0; i < 400; i++) {
+    const more = await page.evaluate(() => {
+      // The element that OVERFLOWS, not the first plausible wrapper. Naive's virtual body is
+      // `.v-vl`; `.n-data-table-base-table-body` is present and does not scroll, so an
+      // ordered guess-list that named it first assigned scrollTop to a non-scroller, saw no
+      // movement, and reported "nothing more to scroll" on the first iteration — a silent
+      // no-op wearing the shape of a completed walk.
+      const el = [...document.querySelectorAll('.v-vl, .n-data-table-base-table-body')].find(
+        (e) => e.scrollHeight > e.clientHeight + 4,
+      );
+      if (!el) return false;
+      const before = el.scrollTop;
+      el.scrollTop = before + el.clientHeight * 0.8;
+      return el.scrollTop > before;
+    });
+    await page.waitForTimeout(90);
+    await collect();
+    if (!more) break;
+  }
+  seen.delete('/');
+  return seen.size;
+}
+
 /** What the list says about itself after the link opened it. */
 async function listReading(page) {
   await page.waitForSelector('.content-head .count', { timeout: 15000 });
   await page.waitForTimeout(600);
-  return page.evaluate(() => ({
+  const head = await page.evaluate(() => ({
     query: document.querySelector('.content-head input')?.value ?? '',
     count: document.querySelector('.content-head .count')?.textContent?.trim() ?? '',
-    rows: document.querySelectorAll('.n-data-table-tbody tr').length,
+    window: document.querySelectorAll('.n-data-table-tbody tr').length,
   }));
+  return { ...head, rows: await drawnRows(page) };
 }
 
 /** "12 of 66 items" -> 12; "66 items" -> 66. */
@@ -169,13 +221,12 @@ async function run() {
         await all[nth].click();
         const list = await listReading(page);
         const filtered = filteredFromLabel(list.count);
-        const rowsComparable = filtered <= PAGE_SIZE;
-        const agree = filtered === line.count && (!rowsComparable || list.rows === line.count);
+        const agree = filtered === line.count && list.rows === line.count;
         checked++;
         if (!agree) {
           failures++;
         }
-        const rowNote = rowsComparable ? `${list.rows} rows` : `${list.rows} rows (page only, not compared)`;
+        const rowNote = `${list.rows} rows drawn (${list.window} in the window)`;
         console.log(
           `   ${agree ? 'OK  ' : 'FAIL'} ${line.kind}: card ${line.count} ${line.label} -> ` +
             `header "${list.count}" (${filtered}), ${rowNote}, query ${JSON.stringify(list.query)}`,

@@ -21,6 +21,13 @@ import { buildResourceColumns } from './table';
 // here to make visible — the ticket's number stops being true, and the test says so rather
 // than the table quietly losing one more column to the width.
 //
+// Nodes is 1504 now, not 1514, and the two halves of that are both deliberate (GH#357). Its
+// Status column became the server's state at `NODE_STATE_WIDTH` (220px, for the 27-character
+// `NotReady,SchedulingDisabled`), which alone would have wanted 1624 and cost a usage bar even
+// at 1900px. Schedulable is `defaultHidden` in the same change — `spec.unschedulable` is the
+// exact predicate the `,SchedulingDisabled` suffix is built from, so it was the same fact in two
+// columns — and the 120px it gives back more than pays for the wider Status.
+//
 // A fit test written against made-up columns proves the arithmetic and nothing about the
 // tables it is for; these pin both. If a column is added to Pods or Nodes and these totals
 // move, that is the point — the numbers in the ticket stop being true and the test says so.
@@ -44,7 +51,7 @@ const kept = (cols: { key: string }[], hidden: ReadonlySet<string>) =>
 
 describe('what a table wants', () => {
   it('adds up to the widths measured off the running app', () => {
-    expect(tableWidth(NODES, NODES_CHROME)).toBe(1514);
+    expect(tableWidth(NODES, NODES_CHROME)).toBe(1504);
     expect(tableWidth(PODS, PODS_CHROME)).toBe(1354);
   });
 
@@ -74,8 +81,12 @@ describe('autoHiddenCols', () => {
   });
 
   it('drops from the right until Nodes fits the 863px of a 1200px screen', () => {
+    // Version goes here now, where it survived at the old 110px Status. That is the price of a
+    // Status column that can hold `NotReady,SchedulingDisabled` without square-cutting the pill,
+    // and it is a knife edge rather than a choice of number: the data columns have 439px at this
+    // width and the old set wanted exactly 420, so ANY widening at all spends Version.
     const hidden = autoHiddenCols(NODES, { available: 863, chrome: NODES_CHROME });
-    expect(kept(NODES, hidden)).toEqual(['status', 'roles', 'taints', 'version']);
+    expect(kept(NODES, hidden)).toEqual(['status', 'roles', 'taints']);
     expect(
       tableWidth(
         NODES.filter((c) => !hidden.has(c.key)),
