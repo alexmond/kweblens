@@ -13,7 +13,7 @@
 
     <artifactId>kweblens-cli</artifactId>
     <name>kweblens-cli</name>
-    <description>kweblens CLI — a dependency-light cluster inspector built on kweblens-core</description>
+    <description>kweblens CLI — a dependency-light cluster inspector</description>
 
     <!-- Published to Maven Central / runs in users' shells -> permissive (see root LICENSE). -->
     <licenses>
@@ -25,9 +25,15 @@
     </licenses>
 
     <dependencies>
+        <!-- This module resolves a kubeconfig and never builds a client, so it takes the
+             fabric8 API artifact (where io.fabric8.kubernetes.client.Config lives) rather
+             than kweblens-core. Dragging core in for a transitive Config pulled the whole
+             access layer — caching, the model, the HTTP backend — into a jar whose one job
+             is to print where the kubeconfig points (#363). Version comes from the
+             kubernetes-client BOM in the parent. -->
         <dependency>
-            <groupId>org.alexmond</groupId>
-            <artifactId>kweblens-core</artifactId>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-client-api</artifactId>
         </dependency>
 
         <dependency>
@@ -37,6 +43,14 @@
         <dependency>
             <groupId>info.picocli</groupId>
             <artifactId>picocli</artifactId>
+            <version>${picocli.version}</version>
+        </dependency>
+        <!-- Supplies the CommandLine.IFactory bean the application injects, so picocli
+             resolves commands from the Spring context. Same version property as picocli
+             itself — the starter is released in lockstep with it. -->
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli-spring-boot-starter</artifactId>
             <version>${picocli.version}</version>
         </dependency>
 
@@ -80,10 +94,9 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
-                            <!-- The Spring Boot entry point is not unit-tested by design. -->
-                            <excludes>
-                                <exclude>org/alexmond/kweblens/cli/KweblensCliApplication.class</exclude>
-                            </excludes>
+                            <!-- The entry point is deliberately NOT excluded: excluding it is how a
+                                 jar that could not start passed a 0.60 line gate (#363).
+                                 KweblensCliApplicationTest boots the context and covers it. -->
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>

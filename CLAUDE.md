@@ -110,6 +110,15 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   and the test seeds its own client. **The CRUD mock ignores `limit` and `dryRun`**, so assert on
   the **exact outgoing query string** (`ResourceChunkedListTest`, `ResourceCountTest`) — a test
   that seeds objects and counts them passes whether or not the flag was ever sent.
+- **Every runnable module has a test that boots its Spring context**, and **no application class
+  is excluded from a coverage check**. `kweblens-cli` shipped a fat jar that died on its first
+  line for as long as the module existed: its only test called `new CommandLine(new
+  KweblensCommand())` directly, so nothing ever instantiated the application class, an injected
+  bean that no dependency supplied was never noticed, and a 0.60 JaCoCo gate passed on a context
+  that had never started (#363). An `<exclude>` on an application class is the sentence "nothing
+  tests this" written into the build — `KweblensCliApplicationTest` replaces it. A unit test of
+  the command is fine; it just must not be the *only* test, or "the command parses arguments"
+  stands in for "the application starts".
 
 ## Architecture (modules)
 
@@ -125,8 +134,11 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   `files/`, `search/` (global search), `diag/`, `ai/`, `sim/`, `config/`.
   `/actuator/{health,info,metrics,prometheus}` — note `metrics` and `prometheus` are **not** in
   `SecurityConfig`'s permit list, so they are public in open-mode and authenticated in closed.
-- **`kweblens-cli`** — dependency-light inspector (picocli); runnable fat jar is the `exec`
-  classifier. **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
+- **`kweblens-cli`** — dependency-light inspector (picocli + `picocli-spring-boot-starter`, which
+  is what supplies the `CommandLine.IFactory` bean the app injects); runnable fat jar is the
+  `exec` classifier. It resolves a kubeconfig and never builds a client, so it depends on fabric8's
+  **`kubernetes-client-api`, not `kweblens-core`** — core dragged 25 unused jars into the fat jar.
+  A subcommand that does talk to a cluster must go back through `ClusterRegistry` (#372). **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
   build; what is excluded are its `it`-**tagged tests**, via surefire `excludedGroups`.
 
 Config is env-var driven (`kweblens-web/src/main/resources/application.yml`): `PORT`,
