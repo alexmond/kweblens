@@ -625,6 +625,13 @@ function measureOne(els) {
     clipper: clipper && clipper !== document.documentElement ? clipper.className || clipper.tagName.toLowerCase() : null,
     clipW: cr ? Math.round(cr.width) : null,
     clipRight: cr ? Math.round(cr.right) : null,
+    // The overflow measured HERE, unrounded. An earlier version derived it from the rounded
+    // box and the rounded clipper right, and two independent roundings of the same sub-pixel
+    // edge disagree by up to 1px: a Status pill sitting exactly inside its wrapper
+    // (997.50 vs 997.50) printed `OVERFLOWS by 1px`, and the probe written to chase it found
+    // `wanted 99.69px, got 99.69px, 0 lost`. A false positive on a shrink-wrapped element is
+    // the worst kind here, because that is the normal case for every pill in a table.
+    clipOver: cr ? Number((r.right - cr.right).toFixed(2)) : null,
     viewportW: window.innerWidth,
     measure: charsPerLine(),
     fontSize: cs.fontSize,
@@ -726,6 +733,16 @@ const SELF_TEST_FIXTURE = `
   #scroller-cell { overflow-x: auto; }
   #roomy-cell    { width: 300px; overflow: hidden; }
   #plain-cell    { overflow: hidden; }
+  /* The overClip pair. flush-clip is the ordinary case for a pill in a table cell: the
+     wrapper shrink-wraps it, so the two right edges are ONE edge — and a check that rounds
+     them separately reports a phantom 1px. over-clip is a real overrun of a narrow box. */
+  .clipbox { overflow: hidden; position: absolute; top: 900px; white-space: nowrap; padding: 0; }
+  #over-box { left: 10.5px; width: 120px; }
+  .over-clip { display: block; width: 200px; background: #eee; }
+  /* Same fractional width on box and child, so the two right edges are ONE edge and land on a
+     .5 boundary — the geometry that made the rounded comparison report a phantom 1px. */
+  #flush-box { left: 310.5px; width: 99.69px; }
+  .flush-clip { display: block; width: 99.69px; background: #eee; }
   .rowbox { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; width: 1000px; }
   .rowbox > i { height: 30px; background: #ccc; display: block; }
   #empty-row > i  { width: 100px; }
@@ -751,6 +768,8 @@ const SELF_TEST_FIXTURE = `
 <div class="cell" id="scroller-cell"><span class="tag scrolled-pill">CrashLoopBackOff</span></div>
 <div class="cell" id="roomy-cell"><span class="tag roomy-pill">CrashLoopBackOff</span></div>
 <div class="cell" id="plain-cell"><span class="notag plain-text">CrashLoopBackOff</span></div>
+<div class="clipbox" id="over-box"><span class="over-clip">CrashLoopBackOff</span></div>
+<div class="clipbox" id="flush-box"><span class="flush-clip">Not referenced</span></div>
 <div id="empty-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="full-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>
@@ -788,6 +807,8 @@ const SELF_TEST_CASES = [
   ['.scrolled-pill', 'sliced', false, 'the same pill in a scroller is reachable, so nothing is lost'],
   ['.roomy-pill', 'sliced', false, 'the same pill in a cell that fits it is not cut'],
   ['.plain-text', 'sliced', false, 'clipped TEXT is the clipped check; this one is only about shapes'],
+  ['.over-clip', 'overclip', true, 'a 200px box in a 120px hidden-overflow parent really is over its clipper'],
+  ['.flush-clip', 'overclip', false, 'a shrink-wrapped label sits ON its clipper edge; two roundings of it are not an overflow'],
   ['#empty-row', 'row', true, '3x100px + gaps = 320px of a 1000px row — the shape of #236'],
   ['#full-row', 'row', false, '3x320px + gaps = 1000px, so the row is used'],
   ['#wrapped', 'row', false, '4x320px wraps to a second line; a short LAST line is not waste'],
@@ -821,6 +842,8 @@ if (argv.includes('--self-test')) {
           ? (got?.twins ?? []).length > 0
           : metric === 'chip'
             ? !!got?.chip
+            : metric === 'overclip'
+            ? got?.clipOver != null && got.clipOver > 0.5
             : metric === 'sliced'
             ? !!got?.sliced
             : metric === 'clipseen'
@@ -845,6 +868,10 @@ if (argv.includes('--self-test')) {
         ? got?.chip
           ? `${got.chip.lines} lines, ${got.chip.w.toFixed(1)}px for ${got.chip.need.toFixed(1)}px`
           : 'no avoidable pill wrap'
+        : metric === 'overclip'
+        ? got?.clipOver == null
+          ? 'no clipper'
+          : `${got.clipOver.toFixed(2)}px past its clipper`
         : metric === 'sliced'
         ? got?.sliced
           ? `${got.sliced.cut.toFixed(1)}px of the pill cut off`
@@ -887,7 +914,10 @@ try {
       continue;
     }
 
-    const overClip = m.clipRight != null && Math.round(m.box.x + m.box.w) > m.clipRight;
+    // Half a pixel, not zero: below that the two edges are the same edge seen through
+    // different roundings, and nothing is hidden. Real loss is `sliced` and `clipped`, which
+    // measure what is missing rather than where an edge lands.
+    const overClip = m.clipOver != null && m.clipOver > 0.5;
     const overView = m.box.x + m.box.w > m.viewportW;
     const selfScroll = m.scrollW > m.box.w + 1;
 
@@ -897,7 +927,7 @@ try {
     if (m.clipper != null && m.clipW != null) {
       console.log(
         `  clipper  .${m.clipper} w=${m.clipW} right=${m.clipRight}` +
-          (overClip ? `  <-- OVERFLOWS by ${m.box.x + m.box.w - m.clipRight}px` : ''),
+          (overClip ? `  <-- OVERFLOWS by ${m.clipOver}px` : ''),
       );
     }
     // The sub-pixel line supersedes the integer one where it applies: both describe hidden

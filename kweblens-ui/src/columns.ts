@@ -223,11 +223,6 @@ function nodeRoles(o: KubeObject): string {
     .filter(Boolean);
   return dash(roles.join(', '));
 }
-function nodeReady(o: KubeObject): string {
-  const conds = (status(o).conditions as Any[]) ?? [];
-  const ready = conds.find((c) => (c as Any).type === 'Ready');
-  return ready ? ((ready as Any).status === 'True' ? 'Ready' : 'NotReady') : '—';
-}
 function nodeAddress(o: KubeObject, type: string): string {
   const addrs = (status(o).addresses as Any[]) ?? [];
   const hit = addrs.find((a) => (a as Any).type === type);
@@ -280,28 +275,73 @@ function involvedObject(o: KubeObject): string {
 }
 
 /**
+ * Width of a Status column, measured rather than chosen. The longest state most kinds reach is
+ * `CrashLoopBackOff`, which renders as a 119.38px pill; at the 110px `COL_WIDTH.data` default the
+ * cell hid 16.55px of it behind a straight edge reading `CrashLoopBackO` — the defect
+ * `ui-measure`'s `sliced` check was written for. This buys the states an operator scans a list
+ * FOR; a longer waiting reason still truncates, but inside its own shape and with the cell's
+ * tooltip (see `StatusBadge`).
+ */
+const STATE_WIDTH = 150;
+
+/**
+ * Nodes need more, because their vocabulary is kubectl's compound one: `ClusterObjectHealth`
+ * appends `,SchedulingDisabled` to a cordoned node, so the longest state is the 27-character
+ * `NotReady,SchedulingDisabled`. Laid out in the Status cell's own font on the live Nodes list it
+ * is **197.39px** (the same clone-at-`width:auto` measurement `ui-measure` uses, checked against
+ * a live `Ready` at 40.22px first), where `STATE_WIDTH` would have cut it. At 220 the cell's
+ * content box measures 212.63px, which holds it with 15.24px to spare. Widening every kind to fit
+ * would spend 70px on twelve other tables to pay for one; the number is per kind because the
+ * vocabulary is.
+ */
+const NODE_STATE_WIDTH = 220;
+
+/**
  * The Status column for every kind the server computes a state for — the SAME value the
- * overview card counts and the `status:` filter selects (GH#341, the wart #337 left).
+ * overview card counts and the `status:` filter selects (GH#341, the wart #337 left; extended to
+ * all thirteen by GH#357).
  *
- * <p>What it replaces was `status.phase` and, for four of these seven kinds, nothing at all.
- * Both were wrong in the same way: a finished Pod read `Succeeded` in the column while the card
- * beside it said `Completed` and `status:Completed` was what selected it, and a Deployment had
- * no column to disagree with. Three words for one fact, and the chip rail now sits directly
- * above the column, so the disagreement would be an inch apart on screen rather than a click.
+ * <p>What it replaces was `status.phase`, a hand-rolled reading of `status.conditions`, and for
+ * five kinds nothing at all. All three were wrong in the same way: a finished Pod read
+ * `Succeeded` in the column while the card beside it said `Completed` and `status:Completed` was
+ * what selected it, and a Deployment had no column to disagree with. Three words for one fact,
+ * and the chip rail sits directly above the column, so the disagreement is an inch apart on
+ * screen rather than a click.
  *
  * <p>`—` when the row carries no state, never a guess and never a blank: on a covered kind that
  * means the server did not say, which is a different claim from "it is fine" — the same reason
- * `ListProjection`'s withheld values render as `—` rather than as empty. Uncovered kinds keep
- * their own `status.phase` column and their keyword tone (`statusTone`); they are not covered by
- * the vocabulary yet, so there is nothing there to disagree with.
+ * `ListProjection`'s withheld values render as `—` rather than as empty. For the four
+ * context-carrying kinds (Service, PVC, ConfigMap, Secret) it is also what a failed
+ * `StatusContext` looks like: an unjudged list rather than a wrongly judged one, and the chip
+ * rail goes quiet with it.
  *
- * <p>The 150px is measured, not chosen. A state is now as long as `CrashLoopBackOff`, which
- * renders as a 119.38px pill, and at the 110px default the cell hid 16.55px of it behind a
- * straight edge reading `CrashLoopBackO` — the defect `ui-measure`'s `sliced` check was written
- * for. This buys the states an operator scans a list FOR; a longer waiting reason still
- * truncates, but inside its own shape and with the cell's tooltip (see `StatusBadge`).
+ * <p><b>Which kinds get one is not a list kept here.</b> It is `StatusVocabulary.covers() ||
+ * needsContext()` on the server, and the rule this side is simply "if the row carries a state,
+ * render it". Two kinds with a Status column deliberately do NOT use this one, and neither is
+ * "it has always been that way":
+ *
+ * <ul>
+ * <li><b>PersistentVolume</b> — no producer judges it. `WorkloadHealth`, `ClusterObjectHealth`
+ *   and all three context checks answer `false` for it (`StorageHealthService` judges the CLAIM,
+ *   which is where the metrics reading joins), so a PV row carries no state and this column
+ *   would render `—` on every row. Its `status.phase` is the cluster's own word and stays.
+ * <li><b>Event</b> — refused on purpose (GH#339): its `Warning`/`Normal` is a property of a
+ *   report ABOUT another object, not a verdict on the event, so a state there would be a
+ *   differently-shaped thing wearing the same word. Its Type column keeps `eventTypeTone`.
+ * </ul>
+ *
+ * Add a kind to a producer and it appears here by itself; the only thing to do on this side is
+ * put the column in that kind's array.
+ *
+ * <p>The widths are measured, not chosen — `scripts/ui-measure.mjs` against a live cluster, per
+ * kind, because the vocabularies differ in length. See `STATE_WIDTH` and `NODE_STATE_WIDTH`.
  */
-const serverState: ColumnDef = { key: 'status', header: 'Status', render: (o) => dash(objStateLabel(o)), width: 150 };
+const serverState = (width: number = STATE_WIDTH): ColumnDef => ({
+  key: 'status',
+  header: 'Status',
+  render: (o) => dash(objStateLabel(o)),
+  width,
+});
 
 // resourceId -> the kind-specific middle columns
 const COLUMNS: Record<string, ColumnDef[]> = {
@@ -309,7 +349,7 @@ const COLUMNS: Record<string, ColumnDef[]> = {
   // always had it — the value changes, the layout does not.
   pods: [
     { key: 'ready', header: 'Ready', render: podReady, width: 90 },
-    serverState,
+    serverState(),
     { key: 'restarts', header: 'Restarts', render: podRestarts, width: 100 },
     { key: 'node', header: 'Node', render: (o) => dash(str(spec(o).nodeName)) },
   ],
@@ -318,23 +358,23 @@ const COLUMNS: Record<string, ColumnDef[]> = {
   // middle columns — first after Name/Namespace, so the verdict reads before the arithmetic
   // behind it.
   deployments: [
-    serverState,
+    serverState(),
     { key: 'ready', header: 'Ready', render: (o) => `${num(status(o).readyReplicas)}/${num(spec(o).replicas)}` },
     { key: 'uptodate', header: 'Up-to-date', render: (o) => String(num(status(o).updatedReplicas)) },
     { key: 'available', header: 'Available', render: (o) => String(num(status(o).availableReplicas)) },
   ],
   statefulsets: [
-    serverState,
+    serverState(),
     { key: 'ready', header: 'Ready', render: (o) => `${num(status(o).readyReplicas)}/${num(spec(o).replicas)}` },
   ],
   daemonsets: [
-    serverState,
+    serverState(),
     { key: 'desired', header: 'Desired', render: (o) => String(num(status(o).desiredNumberScheduled)) },
     { key: 'current', header: 'Current', render: (o) => String(num(status(o).currentNumberScheduled)) },
     { key: 'ready', header: 'Ready', render: (o) => String(num(status(o).numberReady)) },
   ],
   replicasets: [
-    serverState,
+    serverState(),
     { key: 'desired', header: 'Desired', render: (o) => String(num(spec(o).replicas)) },
     { key: 'current', header: 'Current', render: (o) => String(num(status(o).replicas)) },
     { key: 'ready', header: 'Ready', render: (o) => String(num(status(o).readyReplicas)) },
@@ -343,7 +383,7 @@ const COLUMNS: Record<string, ColumnDef[]> = {
   // which is a third vocabulary again: the server calls those states Succeeded, Active and
   // Failed, and it is the only one of the three that notices a Job that failed.
   jobs: [
-    serverState,
+    serverState(),
     {
       key: 'completions',
       header: 'Completions',
@@ -351,7 +391,7 @@ const COLUMNS: Record<string, ColumnDef[]> = {
     },
   ],
   cronjobs: [
-    serverState,
+    serverState(),
     { key: 'schedule', header: 'Schedule', render: (o) => dash(str(spec(o).schedule)) },
     { key: 'suspend', header: 'Suspend', render: (o) => (spec(o).suspend ? 'Yes' : 'No') },
     { key: 'active', header: 'Active', render: (o) => String(((status(o).active as Any[]) ?? []).length) },
@@ -361,12 +401,22 @@ const COLUMNS: Record<string, ColumnDef[]> = {
   // rest is opt-in via the Columns ▾ picker (defaultHidden) — the CPU/Memory/Disk usage bars
   // are appended separately in table.ts from live metrics.
   nodes: [
-    { key: 'status', header: 'Status', render: nodeReady, width: 110 },
+    // Was a local read of the Ready condition. It agreed with the server on the two common
+    // words and disagreed on the two that matter: it could not say `Ready,SchedulingDisabled`,
+    // so a cordoned node read plain `Ready` in the column while the card and the chip counted
+    // it apart from the ready ones — the state someone draining a node is looking FOR.
+    serverState(NODE_STATE_WIDTH),
     { key: 'roles', header: 'Roles', render: nodeRoles },
     { key: 'taints', header: 'Taints', render: nodeTaints, width: 90 },
     { key: 'version', header: 'Version', render: (o) => dash(str((status(o).nodeInfo as Any)?.kubeletVersion)) },
     { key: 'ip', header: 'Internal IP', render: nodeInternalIp },
-    { key: 'schedulable', header: 'Schedulable', render: nodeSchedulable, width: 120 },
+    // Hidden by default now that Status is the server's state: `spec.unschedulable` is the
+    // EXACT predicate `ClusterObjectHealth` appends `,SchedulingDisabled` on, so an always-on
+    // Schedulable column is that one fact twice, two columns apart — the shape #336 exists to
+    // remove. Kept in the Columns ▾ picker rather than deleted, because `True`/`False` is the
+    // word someone scripting against `kubectl cordon` is looking for; and the 120px it gives
+    // back is what pays for `NODE_STATE_WIDTH` without the table losing a usage bar.
+    { key: 'schedulable', header: 'Schedulable', render: nodeSchedulable, width: 120, defaultHidden: true },
     { key: 'conditions', header: 'Conditions', render: nodeConditions },
     { key: 'ext-ip', header: 'External IP', render: nodeExternalIp, defaultHidden: true },
     {
@@ -407,7 +457,11 @@ const COLUMNS: Record<string, ColumnDef[]> = {
     },
     { key: 'arch', header: 'Architecture', render: (o) => nodeInfo(o, 'architecture'), defaultHidden: true },
   ],
+  // Service, ConfigMap, Secret and PVC are the context-carrying kinds (GH#340): their verdict
+  // needs a second collection — the Endpoints list, a namespace scan, the metrics backend — so
+  // nothing this side could have computed the state that now leads their columns.
   services: [
+    serverState(),
     { key: 'type', header: 'Type', render: (o) => dash(str(spec(o).type)) },
     { key: 'clusterip', header: 'Cluster IP', render: (o) => dash(str(spec(o).clusterIP)) },
     { key: 'ports', header: 'Ports', render: ports },
@@ -426,18 +480,29 @@ const COLUMNS: Record<string, ColumnDef[]> = {
         ),
     },
   ],
-  configmaps: [{ key: 'keys', header: 'Keys', render: keys }],
+  configmaps: [serverState(), { key: 'keys', header: 'Keys', render: keys }],
   secrets: [
+    serverState(),
     { key: 'type', header: 'Type', render: (o) => dash(str(o.type)) },
     { key: 'keys', header: 'Keys', render: keys },
   ],
-  namespaces: [{ key: 'status', header: 'Status', render: (o) => dash(str(status(o).phase)) }],
+  // `status.phase` was very nearly the same value here — `Active` / `Terminating` are the only
+  // two the API has — which is exactly why it had to go: "very nearly" is how a discrepancy hides.
+  // The server also answers `Unknown` for a namespace that reports no phase, where this column
+  // rendered `—` and claimed the field was missing rather than the phase.
+  namespaces: [serverState()],
+  // The claim's phase is only half its state: bound-and-nearly-full is a claim `status.phase`
+  // calls `Bound` and `StorageHealthService` calls `Nearly full`, from a metrics reading no row
+  // carries.
   persistentvolumeclaims: [
-    { key: 'status', header: 'Status', render: (o) => dash(str(status(o).phase)) },
+    serverState(),
     { key: 'volume', header: 'Volume', render: (o) => dash(str(spec(o).volumeName)) },
     { key: 'capacity', header: 'Capacity', render: (o) => dash(str((status(o).capacity as Any)?.storage)) },
     { key: 'sc', header: 'Storage Class', render: (o) => dash(str(spec(o).storageClassName)) },
   ],
+  // PersistentVolume keeps the cluster's own phase, and it is the one Status column here that is
+  // NOT the server's state — see `serverState`: no producer judges a PV, so `kweblensState` never
+  // ships for one and this column would be `—` on every row. `statusTone` still colours it.
   persistentvolumes: [
     { key: 'capacity', header: 'Capacity', render: (o) => dash(str((spec(o).capacity as Any)?.storage)) },
     { key: 'status', header: 'Status', render: (o) => dash(str(status(o).phase)) },
@@ -514,6 +579,15 @@ const COLUMNS: Record<string, ColumnDef[]> = {
 export function columnsFor(resourceId: string): ColumnDef[] {
   return COLUMNS[resourceId] ?? [];
 }
+
+/**
+ * Every kind this file defines columns for.
+ *
+ * <p>Exists so the Status-column rule can be asserted over ALL of them rather than over a list
+ * transcribed into the test — the transcription is what let six kinds drift out of the rule for
+ * two tickets (GH#357). A kind added below is in this set the moment it is added.
+ */
+export const columnKinds = (): string[] => Object.keys(COLUMNS);
 
 function getDotted(o: unknown, path: string): unknown {
   if (!path) {

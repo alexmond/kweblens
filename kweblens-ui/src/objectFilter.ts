@@ -43,9 +43,9 @@ import type { KubeObject } from './types';
  * <h2>`status:` is exact, and that is deliberate</h2>
  *
  * The other fields are free text about which a substring is the useful question — half a
- * pod name, part of a namespace. A state is not free text: it is drawn from a small closed
- * vocabulary the server publishes on the row (`kweblensState`, from `StatusVocabulary`),
- * and it is the same value an overview card counted. `status:` therefore compares the
+ * pod name, part of a namespace. A state is not free text: it is a whole value the server
+ * publishes on the row (`kweblensState`, from `StatusVocabulary`), and it is the same value
+ * an overview card counted. `status:` therefore compares the
  * whole label, because the ONE property this term exists to have is that the card's number
  * and the rows it selects are the same set — and a substring match breaks it silently the
  * first time two states share a stem (`Complete` would take `Completed` with it, and every
@@ -53,6 +53,13 @@ import type { KubeObject } from './types';
  * genuinely fuzzy question — `status:/backoff/` is every backoff state — so nothing is
  * lost except the way of getting a wrong count without noticing. A `"quoted"` value is
  * exact too; quotes are how a state with a space in it is written.
+ *
+ * <p><b>Exact is not the same as closed, and this file once said it was.</b> The vocabulary is
+ * OPEN: three producers pass a cluster value straight through — a pod's waiting reason, an
+ * unrecognised Namespace phase, a non-`Bound` PVC phase — so the set of labels in flight is not
+ * knowable here and no union type, enum or exhaustive switch may be written over it. Exactness is
+ * a property of the COMPARISON (whole label, not substring), which is what keeps the card's
+ * number and the selected rows the same set; it says nothing about how many labels exist.
  *
  * <p>A row whose kind kweblens has no verdict for carries no state at all, and matches no
  * `status:` term. That is not a claim that it is healthy — it is the absence of a claim.

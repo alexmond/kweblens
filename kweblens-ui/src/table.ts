@@ -43,9 +43,10 @@ function serverStateTone(o: KubeObject): StatusTone | null {
  * `row` is what lets the Status column be coloured by the verdict that produced its text
  * instead of by a keyword search over that text. Where the server computed a state, its tone
  * wins — a card showing `Completed` in muted grey beside a row inferring `ok` from the letters
- * "complete" is the same drift GH#336 removed from the counts. Rows without one (Nodes,
- * Namespaces, claims, a CRD's own printer column) still go through `statusTone`, which is why
- * that table stays.
+ * "complete" is the same drift GH#336 removed from the counts. Rows without one still go through
+ * `statusTone`, which is why that table stays: a PersistentVolume's phase (no producer judges a
+ * PV) and a CRD's own printer column are the Status cells nothing has judged, and any row whose
+ * context-carrying verdict could not be reached this request lands there too.
  */
 export function toneFor(key: string, text: string, row?: KubeObject): StatusTone {
   if (key === 'status') {
