@@ -259,6 +259,15 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   the agent that had used a worktree unprompted was the only one never at risk. → **Worktree
   isolation is now the default for every dispatched agent** (§4), and briefs say "stage only your
   own paths by name; never `-A`, `-a`, `stash`, `checkout .`, or `clean`".
+- 2026-08-14 — **That git rule was then carried into worktree briefs, where it is wrong**, and an
+  agent reported "breaking" it: a path-scoped `git stash push -- scripts/contrast-check.mjs`,
+  popped immediately, to test whether a syntax error pre-existed. In its **own** worktree there was
+  no other agent's work in the tree, so the hazard the rule was written for did not exist — and the
+  ban cost a legitimate bisection technique and a line of the report. → **Scope the rule to the
+  hazard.** In a shared checkout: never `-A`, `-a`, bare `stash`, `checkout .`, `clean`. In an
+  isolated worktree: the only rule is *stage what you meant to stage* — path-scoped stash and
+  checkout are fine. A rule that fires where its reason does not apply trains people to break
+  stated rules, which is worse than the thing it prevented.
 - 2026-08-14 — **I read a stale working copy and drew a conclusion from it.** I had deliberately
   not synced the shared checkout (an agent was in it), then grepped it for a doc another agent had
   just merged, and got the pre-merge text. → When the checkout is deliberately stale, read merged
