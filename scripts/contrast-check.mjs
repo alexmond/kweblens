@@ -55,6 +55,16 @@
 //                                categories have an `Overview`, and an ambiguous one throws
 //                                rather than silently opening the first (e.g. `leaf:Network/Overview`)
 //   drawer:<px>                  drag the open drawer to a width in its own 360..1400 range
+//   signin:<password> / signout  the admin login, idempotent
+//   deny / allow                 stub `GET …/access` with a refusal, and take it down
+//   partial / full               stub `GET …/diagnose` with a scope where the audit could not
+//                                see everything (an `info` truncation notice and an RBAC read
+//                                failure), and take it down
+//
+// The last two pairs are the only faked responses in this file, and each is faked because it
+// cannot be produced here: an admin kubeconfig is allowed everything, and no cluster on this
+// box refuses to list its own bindings. Without them those selectors are `not present`
+// forever, which this tool's own summary calls a failed measurement and a reader calls a pass.
 //
 // `scroll:` and `leaf:` exist because this tool measures a RENDERED PIXEL, so anything below
 // the fold or behind the nav could not be measured at all — it reported `outside the viewport`
@@ -148,7 +158,7 @@ const SCENES = [
     // second theme — without this, every scene in the second pass would be measuring a page
     // told that the service account can do nothing.
     prepare:
-      'close;allow;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
+      'close;allow;full;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
       '?click:.n-collapse-item__header:has-text("Annotations");wait:400',
     // `.n-tag` is the drawer's `<NTag type="info">Helm</NTag>`, which measured 3.36:1 in the
     // light theme on Naive's own info palette (#269) — a component-library colour rather than
@@ -223,6 +233,55 @@ const SCENES = [
     selectors: ['.diag-dim', '.diag-detail', '.diag-kv dt', '.diag-caps li.off .diag-name', '.diag-warn'],
   },
   {
+    // The diagnosis panel's severity badges — all three at once, INCLUDING the two findings
+    // that say the audit did not see everything (#381).
+    //
+    // Nothing here had ever measured `.dx-sev`, and the reason is the usual one: a badge is
+    // only on screen when a cluster has that severity of finding. `info` is the hardest of the
+    // three to produce on purpose, and its two most important emitters cannot be produced on
+    // this box at all — "RBAC grants could not be read" needs an identity that may not list
+    // bindings (an admin kubeconfig may), and "Further container privileges not listed" needs
+    // more than MAX_CONTAINER_FINDINGS root or privileged containers in one scope. Waiting for
+    // a cluster to supply them is how a selector stays `not present` forever, which this file
+    // already counts as a failed measurement rather than a pass.
+    //
+    // So `partial` stubs the ONE response the panel reads — `GET …/diagnose` — with four
+    // findings whose titles and details are copied from the emitters (`PodDiagnosis`,
+    // `PodSecurity`, `SecurityAuditService`) rather than invented. The objects are named the
+    // way the simulator names things, because a payload committed to this repo must not carry
+    // a real cluster's namespaces. Everything downstream is the real thing: the real panel,
+    // the real `diagnosis.ts` grouping, the real stylesheet.
+    // Two scenes rather than one because `scroll:` is `scrollIntoViewIfNeeded`, which does the
+    // MINIMAL scroll: the target lands against an edge, so everything after it stays off
+    // screen. Measured, the four stubbed cards are 115-154px each and the run that scrolled to
+    // the last one left the first 17px above the fold — the badge is at the top of a card, so
+    // that reported `outside the viewport`, which is a failed sample, not a pass. Scrolling to
+    // the SECOND card puts the first two fully on screen; scrolling to the last puts both info
+    // cards on screen. Between them every severity is sampled, and nothing is inferred.
+    //
+    // The `leaf:Pods` hop is load-bearing and cost a run to find: a route installed mid-walk
+    // only affects requests made AFTER it, and the panel had already fetched this scope on
+    // load. `useAsyncData` keeps a value whose deps have not changed, so navigating back to a
+    // page you are already on refetches nothing — the run measured the LIVE diagnosis while
+    // reporting the scene's name, and the two findings the scene exists for were never on
+    // screen. Leaving the page unmounts the panel, so returning to it is a real refetch.
+    name: 'diagnosis: critical and warning findings (stubbed)',
+    prepare: 'close;partial;leaf:Pods;wait:500;leaf:Cluster/Overview;wait:1500;scroll:.dx-item.dx-warning',
+    // The text selectors resolve to their FIRST match, which is the critical card — the one
+    // this scroll puts fully on screen.
+    selectors: ['.dx-sev-critical', '.dx-sev-warning', '.dx-item-title', '.dx-obj', '.dx-detail', '.dx-fix'],
+  },
+  {
+    // The two findings that say the audit did not see everything. They are the reason this
+    // pair of scenes exists at all: until #381 `info` had no rule in `styles.css`, so a
+    // truncation notice and an RBAC read failure rendered in the neutral base — the same
+    // treatment as a badge carrying no severity, on the two findings whose whole job is to
+    // tell the reader that the list in front of them is partial.
+    name: 'diagnosis: the audit did not see everything (stubbed)',
+    prepare: 'close;partial;leaf:Pods;wait:500;leaf:Cluster/Overview;wait:1500;scroll:.dx-item:last-child',
+    selectors: ['.dx-sev-info', '.dx-item.dx-info .dx-item-title', '.dx-item.dx-info .dx-detail'],
+  },
+  {
     // The editor dialog's Review Changes tab — the second diff (T1), which asks the cluster
     // what it WOULD store. Behind the admin login: its tabs are `v-if="!readonly"`, so a
     // signed-out run does not merely fail to measure them, it never renders them.
@@ -267,7 +326,9 @@ const SCENES = [
     // "Graphs need a …" placeholder, there is no canvas to hover, and these rows are counted
     // as unmeasured rather than passed.
     name: 'metrics chart tooltip',
-    prepare: 'close;leaf:Cluster/Overview;wait:2000;?hover:.metric-echart;wait:800',
+    // Leads with `full` because it returns to the page the diagnosis scenes stubbed, and this
+    // scene is about what the chart paints, not about a diagnosis anyone arranged.
+    prepare: 'close;full;leaf:Cluster/Overview;wait:2000;?hover:.metric-echart;wait:800',
     selectors: ['.chart-tip-t', '.chart-tip-v'],
   },
   {
@@ -674,6 +735,78 @@ const REFUSED_ACCESS = {
   },
 };
 
+/** The one request the diagnosis panel reads. `*` does not cross `/`, so the POST that runs an
+ *  analysis (`…/diagnose/summary`) is deliberately not matched. */
+const DIAGNOSE_URL = '**/api/v1/clusters/*/diagnose*';
+
+/**
+ * A diagnosis carrying every severity, including the two findings that say the audit itself
+ * did not see everything.
+ *
+ * Titles, details and suggested fixes are copied from the emitters — `PodDiagnosis`,
+ * `PodSecurity` and `SecurityAuditService`, whose strings `SecurityAuditServiceTest` and
+ * `DiagnoseSecurityFindingsTest` pin — rather than invented, so what is on screen is what an
+ * operator would actually read. The WIRE SHAPE is the part this scene depends on: rename a
+ * field on `DiagnoseResult` or `Finding` and the panel renders nothing here, which fails the
+ * run. A reworded title would not, and should not — this measures colour, not text. The
+ * objects are invented, and named the way the simulator names things: this file is committed,
+ * and a real cluster's namespaces and pod names are not.
+ */
+const PARTIAL_DIAGNOSIS = {
+  findings: [
+    {
+      severity: 'critical',
+      title: 'ImagePullBackOff',
+      object: 'Pod/sim-ns-2/sim-pod-11',
+      detail: 'Back-off pulling image "registry.example.test/sim/api:1.4.2"',
+      suggestedFix: 'Check the image name and tag, and whether this namespace has a pull secret for that registry.',
+      source: 'validator',
+    },
+    {
+      severity: 'warning',
+      title: 'Container runs privileged',
+      object: 'Pod/sim-ns-1/sim-pod-4 (agent)',
+      detail:
+        "securityContext.privileged=true on container 'agent'" +
+        ' — it holds every capability the kernel has, and can reconfigure the node',
+      suggestedFix:
+        'Drop privileged and add back only the capabilities the process needs,' +
+        ' or confirm this container is meant to manage the node.',
+      source: 'validator',
+    },
+    {
+      severity: 'info',
+      title: 'Further container privileges not listed',
+      object: 'Pods/7',
+      detail: '7 more container privilege findings in this scope are not listed, so the most severe stay readable',
+      suggestedFix: 'Narrow the diagnosis to one namespace to see the rest.',
+      source: 'validator',
+    },
+    {
+      severity: 'info',
+      title: 'RBAC grants could not be read',
+      object: 'ClusterRoleBindings',
+      detail: 'Failure executing: GET at: /apis/rbac.authorization.k8s.io/v1/clusterrolebindings. Message: Forbidden',
+      suggestedFix:
+        'The identity kweblens uses may not be permitted to list RoleBindings and ClusterRoleBindings.' +
+        ' Nothing about cluster-admin grants was checked.',
+      source: 'validator',
+    },
+  ],
+  summary: null,
+  aiEnriched: false,
+  analysedAt: null,
+  summaryOutdated: false,
+  aiAvailable: false,
+};
+
+async function stubPartialDiagnosis(page) {
+  await page.unroute(DIAGNOSE_URL).catch(() => {});
+  await page.route(DIAGNOSE_URL, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PARTIAL_DIAGNOSIS) }),
+  );
+}
+
 async function stubRefusedAccess(page) {
   await page.unroute(ACCESS_URL).catch(() => {});
   await page.route(ACCESS_URL, (route) =>
@@ -778,6 +911,14 @@ async function runPrepare(page, spec) {
     // `deny` unroutes first so it is idempotent; `allow` is a no-op when nothing is installed.
     else if (verb === 'deny') await stubRefusedAccess(page);
     else if (verb === 'allow') await page.unroute(ACCESS_URL).catch(() => {});
+    // `partial` / `full` — the same trick as `deny`, for the same reason, on the diagnosis:
+    // make the panel receive a scope where the audit could not see everything, and take that
+    // back. The `info` severity has four emitters and two of them are exactly that admission
+    // ("Further container privileges not listed", "RBAC grants could not be read"); neither
+    // can be produced from this box, so without the stub `.dx-sev-info` is `not present`
+    // forever — which reads as a pass and is how it shipped with no rule at all (#381).
+    else if (verb === 'partial') await stubPartialDiagnosis(page);
+    else if (verb === 'full') await page.unroute(DIAGNOSE_URL).catch(() => {});
     else if (verb === 'leaf') await openLeafHere(page, arg);
     // `drawer:<px>` drags the open drawer to a width inside its own 360..1400 resize range.
     // Shared with the other runner rather than copied — the rule this file's history keeps
