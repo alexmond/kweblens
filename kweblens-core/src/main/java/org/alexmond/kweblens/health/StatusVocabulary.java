@@ -60,6 +60,11 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
  * </ul>
  *
  * <p>
+ * Both families at once, over a whole list, is {@link ObjectStates} — the composition a
+ * consumer outside this package should reach for, because it is the one that opens the
+ * context once for the list instead of once per row.
+ *
+ * <p>
  * The two are asked about separately — {@link #covers} and {@link #needsContext} —
  * because the callers differ: the Workloads and Cluster overviews summarise through
  * {@link HealthService}, which can only judge the first family, while a list request has
