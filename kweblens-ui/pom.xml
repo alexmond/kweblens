@@ -22,6 +22,11 @@
         <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
         <!-- Pure front-end module: nothing for JaCoCo to measure. -->
         <jacoco.skip>true</jacoco.skip>
+        <!-- Nor for PMD: zero Java sources, so it logged "No files to analyze" on every build.
+             That warning is worth keeping meaningful elsewhere, so silence it by not running the
+             check rather than by ignoring the output. Remove this the moment this module gains a
+             `src/main/java`. The front end has its own gate: `npm run check`. -->
+        <pmd.skip>true</pmd.skip>
         <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
