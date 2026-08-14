@@ -1,12 +1,22 @@
 # Per-kind catalog in core — status after the detail endpoint (#148)
 
 Re-audit of GH#148 after GH#136 landed (PRs #150, #152). #148 exists "to record the
-analysis so it is not redone"; this is the second instalment, measured 2026-07-31.
+analysis so it is not redone"; this is the second instalment, measured 2026-07-31 and
+**re-checked against the code at `fb4e4fd` on 2026-08-13**. Where the two readings differ
+the later one is marked inline rather than overwriting the earlier — the point of this
+document is that the analysis is not redone, which requires knowing what moved.
 
 **Verdict: #136 did not absorb #148. A real remainder exists — and it is exactly the
-remainder #148 scoped. The trigger #148 named for starting it has not fired, so it stays
-parked.** Nothing here revises the original recommendation; it records what changed, and
-three things the first pass did not know.
+remainder #148 scoped. It stays parked.** Nothing here revises the original
+recommendation; it records what changed, and three things the first pass did not know.
+
+**Changed since the first instalment, and stated up front because one of them was wrong
+in this document's own words: the sequencing gate has half fired.** GH#142 (agent tool
+surface) **closed 2026-08-03** and the 15-tool MCP surface shipped, so the sentence below
+that said "Neither has started" was false from that date. What it bought #148 is narrower
+than the gate's wording suggests — see [Why no code landed](#why-no-code-landed-for-this),
+rewritten below. GH#143 (TUI) has not started and there is still no `kweblens-tui` module
+in the reactor.
 
 ## What #136 actually delivered
 
@@ -39,12 +49,21 @@ and only for CRDs.
 |---|---|---|
 | 2026-07-27 | 6e74264 (#98) | 72 |
 | 2026-07-29 | 374aa93 (#122) | 84 |
-| 2026-07-31 | HEAD | 84 |
+| 2026-07-31 | HEAD at the time | 84 |
+| 2026-08-13 | fb4e4fd | **83** |
 
 28 kinds, plus 6 more columns injected in `table.ts` (node usage bars, pod container
 squares, pod CPU/memory). #148's headline "71 render functions" was measured just before
-#122 landed; the catalog grew ~17% in the two days around the measurement. This is the
-cost side of the ledger, and it is not flat.
+#122 landed; the catalog grew ~17% in the two days around the measurement.
+
+**The 2026-08-13 row is the first time this number has gone down, and it went down for a
+reason that matters here.** GH#341/#350 deleted seven hand-rolled per-kind status
+renderers and replaced them with **one** shared `serverState` column reused seven times,
+reading a verdict the server now computes. That is #148's own remedy, applied to one
+column by a different epic — which is the strongest evidence so far that the remedy
+works, and also why "the drift is monotonic" is no longer a safe argument to lean on. The
+count is still 83 against a target of ~0, and the other 27 kinds are untouched, so the
+cost side of the ledger is real; it is simply not automatic.
 
 The simple-vs-computed split holds up, though the exact ratio depends on how you count:
 by a crude classifier, roughly 45–55 of the 84 are plain dotted-path reads and roughly
@@ -93,6 +112,16 @@ The server emits bare keys with no display metadata, so this is a manual mirror 
 is neither endpoints-shaped nor pod-shaped renders through `podRows` and produces wrong
 columns under an untitled heading** — silently, with no type error.
 
+**Re-checked 2026-08-13: that failure mode is fixed; the mirror is not.** GH#203 replaced
+the binary `key === 'endpoints' ? endpointRows : podRows` with a `PROJECTIONS` lookup
+falling through to a loud `genericRows`, and `TITLES[key] ?? humanise(key)`, so an unknown
+key now renders generically under a humanised heading instead of borrowing pod columns.
+What remains is exactly what this section is about: `PROJECTIONS` still carries 3 of the
+server's **12** relation keys and the render order is still the literal
+`['endpoints', 'selectedPods', 'mountedBy']`, so the mirror is intact and the drift is now
+*visible* rather than silent. Mitigated, not closed — which is why this stays the strongest
+candidate for the first real slice.
+
 This is #148's thesis reproduced on the newest surface, and unlike columns this metadata
 genuinely *is* data (titles, order, headers — no closures), so it serialises to Java
 cleanly. It is the strongest candidate for the first real slice. It was not built here
@@ -102,30 +131,64 @@ live API is the speculative move #148 exists to prevent.
 ## Why no code landed for this
 
 #148's sequencing gate: "when the TUI or the agent tool surface actually starts, extend
-that endpoint to serve columns." Neither has started — GH#143 (TUI) and GH#142 (agent tool
-surface) are both open, and there is no `kweblens-tui` module in the reactor. The MCP
-surface that *is* shipped (`ClusterTools`) has no per-kind branching at all; it returns
-`ResourceSummary` and would need #142's work before a catalog would change anything it
-emits.
+that endpoint to serve columns."
 
-So every available slice today is either the standalone SPA refactor #148 forbids, or a
-server field with no reader. Recording the analysis is the work that was available.
+**As measured 2026-07-31**, neither had started, and the shipped MCP surface
+(`ClusterTools`) had no per-kind branching at all — it returned `ResourceSummary` and
+would have needed #142's work before a catalog changed anything it emitted.
+
+**As re-checked 2026-08-13, the agent half has fired and the TUI half has not.** GH#142
+closed 2026-08-03; the surface is now 15 `@Tool` methods across `ClusterTools` (4),
+`DiagnosticTools` (4) and `HealthTools` (7). GH#143 has still produced no module —
+`kweblens-tui` appears in no `pom.xml` in the reactor.
+
+**But what the agent surface consumes is not the catalog this document is about, and that
+distinction is the whole reason the verdict does not move.** The tools carry no kind-name
+branching of their own — no `switch` and no `case "…"` anywhere in `web/mcp/*.java`, and
+the package's only per-kind branch is `ToolRedaction`'s `if ("Secret".equals(...))`. They
+do not need any, because a **server-side per-kind registry now exists** and they consume
+it: `HealthTools` filters with `.filter((d) -> WorkloadHealth.supports(d.kind()))`, and
+that `supports()` is one of five such predicates in `kweblens-core/health`
+(`WorkloadHealth`, `ClusterObjectHealth`, `NetworkHealthService`, `StorageHealthService`,
+`ConfigUsageService`) that the status vocabulary shipped in GH#336 dispatches over.
+
+That registry answers **"what state is this object in"** for 13 kinds. It does not carry
+headers, widths, ordering, default-hidden sets or tone hints, and it does not carry
+relation display metadata. So it is evidence *for* #148's thesis — core can hold per-kind
+knowledge and more than one client will read it — while leaving both of #148's own
+catalogs with no server-side consumer. The gate's wording ("the agent tool surface starts")
+has been met on its face; its intent ("something other than the SPA needs per-kind
+**columns or relations**") has not.
+
+So every available slice today is still either the standalone SPA refactor #148 forbids,
+or a server field with no reader. Recording the analysis remains the work that is
+available.
 
 ## Start conditions, and what to do first
 
-Start when GH#143 or GH#142 begins. Then, in order:
+The remaining trigger is a consumer for **columns or relations** specifically — GH#143
+beginning is the clear one; a tool or a second client that needs a rendered column set
+would also do it. GH#142 closing is not that trigger, for the reason above. Then, in
+order:
 
-1. **Relations metadata** (section 3) — smallest, genuinely data, fixes a live drift
-   hazard, and exercises the "core declares, clients render" contract on three keys
-   instead of eighty-four.
+1. **Relations metadata** (section 3) — smallest, genuinely data, closes a drift #203 only
+   made visible, and exercises the "core declares, clients render" contract on twelve keys
+   instead of eighty-three.
 2. **Columns for pods / deployments / nodes** — #148's named starter set, covering simple
    reads, ratios and metric-backed columns. Parity tests against today's TypeScript output.
 3. **The rest, kind by kind.** Rich cells stay client-rendered keyed by column key.
 
-## Loose end worth closing independently
+## Loose end worth closing independently — **CLOSED** (#312)
 
-The detail endpoint has **no server-side test**. `RelationService` is well covered (8 tests
-in `RelationServiceTest`), but the HTTP contract — the `{object, relations}` envelope,
-`Relation`'s null-omission that `types.ts` depends on, the 400 on a missing object, the
-unknown-`resourceId` path — is unverified. That is #136 hygiene rather than #148, but it is
-the thing a catalog would be built on top of.
+As measured 2026-07-31 the detail endpoint had **no server-side test**: `RelationService`
+was well covered (8 tests in `RelationServiceTest`), but the HTTP contract — the
+`{object, relations}` envelope, `Relation`'s null-omission that `types.ts` depends on, the
+400 on a missing object, the unknown-`resourceId` path — was unverified. That was #136
+hygiene rather than #148, but it was the thing a catalog would be built on top of.
+
+`DetailEndpointsTest` (#312) now pins all of it, including all **12** relation keys
+asserted **as a set** so a thirteenth without a test fails the build, each seeded with a
+decoy so an assertion cannot pass on "non-empty". It found a live bug on the way in
+(GH#313, fixed in #319). The foundation this document said a catalog would need is
+therefore in place — which removes a reason not to start, without supplying the consumer
+that is still the actual gate.
