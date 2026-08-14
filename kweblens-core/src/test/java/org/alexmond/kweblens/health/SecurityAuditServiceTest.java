@@ -23,9 +23,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * Each rule is pinned with a decoy, because a check that has never rejected anything pins
  * nothing. The decoys here are the ones a plausible-but-wrong join would return: the
- * {@code cluster-admin} binding every cluster ships with, a binding to a different
- * ClusterRole, an account with the same name in another namespace, and a grant that no
- * pod in the scope uses.
+ * {@code cluster-admin} binding every cluster ships with, the rest of the control-plane
+ * identities a correct cluster grants admin to, a binding to a different ClusterRole, an
+ * account with the same name in another namespace, and a grant that no pod in the scope
+ * uses.
+ *
+ * <p>
+ * <b>A decoy is only worth what the code path it reaches.</b> Two of them here would pass
+ * against a check that had been deleted if they were scoped to one namespace, because the
+ * scope filter rejects them first — both say so, and both are cluster-wide for that
+ * reason.
  *
  * <p>
  * Deliberately NOT static: a static mock client would share one API server across the
@@ -78,6 +85,11 @@ class SecurityAuditServiceTest {
 	}
 
 	private void roleBinding(String namespace, String name, String role, String account) {
+		roleBindingTo(namespace, name, role, "ServiceAccount", namespace, account);
+	}
+
+	private void roleBindingTo(String namespace, String name, String role, String subjectKind, String subjectNamespace,
+			String subjectName) {
 		this.client.rbac()
 			.roleBindings()
 			.inNamespace(namespace)
@@ -86,7 +98,7 @@ class SecurityAuditServiceTest {
 				.withNamespace(namespace)
 				.endMetadata()
 				.withNewRoleRef("rbac.authorization.k8s.io", "ClusterRole", role)
-				.addNewSubject(null, "ServiceAccount", account, namespace)
+				.addNewSubject(null, subjectKind, subjectName, subjectNamespace)
 				.build())
 			.create();
 	}
@@ -129,6 +141,97 @@ class SecurityAuditServiceTest {
 		seedBuiltIn();
 
 		assertThat(service().audit("mock", null, List.of())).isEmpty();
+	}
+
+	/**
+	 * The decoy that keeps this check from becoming "report everything" (#382).
+	 *
+	 * <p>
+	 * Every subject here is bound to {@code cluster-admin}, and every one is a
+	 * control-plane identity a real cluster ships or issues — read off a live k3s
+	 * cluster's ClusterRoleBindings. The audit must stay silent on all of them, or the
+	 * same rows appear on every cluster and the reader learns to skip the check.
+	 *
+	 * <p>
+	 * <b>Cluster-wide on purpose.</b> A Group belongs to no namespace, so a namespaced
+	 * audit would drop these at the scope filter before the exemption was consulted, and
+	 * this test would still pass with the exemption deleted — the vacuous-decoy trap this
+	 * class has already been bitten by once. Measured: with {@code isControlPlaneSubject}
+	 * returning false unconditionally, this fails with five findings.
+	 */
+	@Test
+	void doesNotReportTheControlPlaneIdentitiesACorrectClusterGrantsAdminTo() {
+		seedBuiltIn();
+		clusterBinding("nodes", "cluster-admin", "Group", null, "system:nodes");
+		clusterBinding("everyone", "cluster-admin", "Group", null, "system:authenticated");
+		clusterBinding("scheduler", "cluster-admin", "User", null, "system:kube-scheduler");
+		clusterBinding("kube-thing", "cluster-admin", "ServiceAccount", "kube-system", "controller");
+		pod("app", "web-1", "default");
+
+		assertThat(service().audit("mock", null, pods(null))).isEmpty();
+	}
+
+	/**
+	 * The group of every ServiceAccount in the cluster is spelled like a control-plane
+	 * identity and is not one: it is every workload an operator deploys, so this grant
+	 * makes each of them administrator of everything.
+	 */
+	@Test
+	void reportsAClusterAdminGrantToEveryServiceAccountInTheCluster() {
+		seedBuiltIn();
+		clusterBinding("everything", "cluster-admin", "Group", null, "system:serviceaccounts");
+		pod("app", "web-1", "default");
+
+		List<SecurityFinding> findings = service().audit("mock", null, pods(null));
+
+		// Exactly one: the binding names the blast radius itself, so there is no second
+		// finding listing pods — the answer would be "all of them, plus tomorrow's".
+		assertThat(findings).singleElement().satisfies((f) -> {
+			assertThat(f.title())
+				.isEqualTo("ClusterRoleBinding grants cluster-admin to every ServiceAccount in the cluster");
+			assertThat(f.object()).isEqualTo("ClusterRoleBinding/everything");
+			assertThat(f.severity()).isEqualTo("critical");
+			assertThat(f.detail()).contains("system:serviceaccounts").contains("every ServiceAccount in the cluster");
+		});
+	}
+
+	/** The same shape, one namespace at a time — and still the whole cluster granted. */
+	@Test
+	void reportsAClusterAdminGrantToEveryServiceAccountInOneNamespace() {
+		clusterBinding("app-everything", "cluster-admin", "Group", null, "system:serviceaccounts:app");
+		pod("app", "web-1", "default");
+
+		// The namespaced audit reaches this one: the group names its namespace, so the
+		// accounts it hands cluster-admin to are exactly the ones in scope. The 'other'
+		// scope below is the control that proves the filter still bites — without it,
+		// scoping alone would prove nothing.
+		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+			assertThat(f.title())
+				.isEqualTo("ClusterRoleBinding grants cluster-admin to every ServiceAccount in a namespace");
+			assertThat(f.object()).isEqualTo("ClusterRoleBinding/app-everything");
+			assertThat(f.severity()).isEqualTo("critical");
+			assertThat(f.detail()).contains("every ServiceAccount in namespace 'app'")
+				.contains("administrator of the whole cluster");
+		});
+		assertThat(service().audit("mock", "other", pods("other"))).isEmpty();
+		assertThat(service().audit("mock", null, pods(null))).extracting(SecurityFinding::object)
+			.containsExactly("ClusterRoleBinding/app-everything");
+	}
+
+	/**
+	 * A RoleBinding confines the grant to its own namespace, so it is the same warning a
+	 * single account's namespaced grant gets — the group makes it wider, not deeper.
+	 */
+	@Test
+	void reportsAGroupGrantConfinedToOneNamespaceAsTheNarrowerThingItIs() {
+		roleBindingTo("app", "ns-everything", "cluster-admin", "Group", null, "system:serviceaccounts:app");
+
+		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+			assertThat(f.severity()).isEqualTo("warning");
+			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin to a whole group of ServiceAccounts");
+			assertThat(f.object()).isEqualTo("RoleBinding/app/ns-everything");
+			assertThat(f.detail()).contains("full control of namespace 'app'");
+		});
 	}
 
 	@Test

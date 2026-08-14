@@ -40,6 +40,15 @@ public final class RbacSubjects {
 	/** The account a pod runs as when it does not name one. */
 	private static final String DEFAULT_ACCOUNT = "default";
 
+	/** The reserved prefix the cluster issues its own identities under. */
+	private static final String SYSTEM_PREFIX = "system:";
+
+	/** The group that contains every ServiceAccount in the cluster. */
+	private static final String ALL_ACCOUNTS_GROUP = "system:serviceaccounts";
+
+	/** Prefix of the group that contains every ServiceAccount in one namespace. */
+	private static final String ACCOUNTS_IN_NAMESPACE_GROUP = ALL_ACCOUNTS_GROUP + ":";
+
 	private RbacSubjects() {
 	}
 
@@ -71,7 +80,7 @@ public final class RbacSubjects {
 		if (subjects == null) {
 			return false;
 		}
-		Set<String> identities = Set.of("system:serviceaccounts", "system:serviceaccounts:" + namespace);
+		Set<String> identities = Set.of(ALL_ACCOUNTS_GROUP, ACCOUNTS_IN_NAMESPACE_GROUP + namespace);
 		return subjects.stream().anyMatch((s) -> namesAccount(s, namespace, name) || namesGroup(s, identities));
 	}
 
@@ -96,27 +105,83 @@ public final class RbacSubjects {
 	}
 
 	/**
-	 * Whether this subject is part of the cluster's own furniture rather than something
-	 * an operator created.
+	 * Whether this subject <b>is the control plane</b> — an identity the cluster issues
+	 * to itself, for which holding {@code cluster-admin} is the installed state rather
+	 * than a misconfiguration. This is the question, and the {@code system:} prefix is
+	 * only evidence for it; where the two disagree, the question wins.
 	 *
 	 * <p>
-	 * Every cluster ships a {@code cluster-admin} ClusterRoleBinding for the
-	 * {@code system:masters} group, so a check that reported it would fire on a correctly
-	 * installed cluster. The rule is deliberately about the subject and not the binding's
-	 * name: a binding called {@code system:something} may still name an ordinary account,
-	 * and that grant is real.
+	 * Deliberately exempt, and why:
+	 * <ul>
+	 * <li><b>ServiceAccounts in {@code kube-system}, {@code kube-public} and
+	 * {@code kube-node-lease}</b> — a grant to one of these is how a control-plane
+	 * component is installed.</li>
+	 * <li><b>{@code system:masters}</b> — every cluster ships a {@code cluster-admin}
+	 * ClusterRoleBinding for it, so reporting it would fire on a correctly installed
+	 * cluster and train the reader to skip the whole check.</li>
+	 * <li><b>The rest of the reserved {@code system:} namespace</b> —
+	 * {@code system:nodes}, {@code system:kube-scheduler},
+	 * {@code system:kube-controller-manager}, {@code system:authenticated} and friends:
+	 * identities the API server issues, not ones an operator created.</li>
+	 * </ul>
 	 *
 	 * <p>
-	 * <b>Known blind spot:</b> a grant to the group {@code system:serviceaccounts} —
-	 * every account in the cluster — is skipped by this rule too, because it is spelled
-	 * like the built-in one. That is a real misconfiguration this audit does not report.
+	 * <b>The carve-out, and the point of this method (#382):</b>
+	 * {@code system:serviceaccounts} and {@code system:serviceaccounts:<namespace>} are
+	 * spelled like control-plane identities and are not. They are the set of every
+	 * <i>workload</i> identity — the pods an operator deploys — so a
+	 * {@code cluster-admin} grant to one of them is a severe misconfiguration and must be
+	 * reported. No cluster ships such a grant: measured against a live k3s cluster, the
+	 * only default binding naming {@code system:serviceaccounts} is
+	 * {@code system:service-account-issuer-discovery}, whose roleRef is not
+	 * {@code cluster-admin}.
+	 *
+	 * <p>
+	 * The rule is about the subject and never the binding's name: a binding called
+	 * {@code system:something} may still name an ordinary account, and that grant is
+	 * real.
 	 */
-	public static boolean isSystemSubject(Subject subject, String bindingNamespace) {
-		String name = String.valueOf(subject.getName());
+	public static boolean isControlPlaneSubject(Subject subject, String bindingNamespace) {
 		if ("ServiceAccount".equals(subject.getKind())) {
 			return SYSTEM_NAMESPACES.contains(accountNamespace(subject, bindingNamespace));
 		}
-		return name.startsWith("system:");
+		if (isWorkloadIdentityGroup(subject)) {
+			return false;
+		}
+		return String.valueOf(subject.getName()).startsWith(SYSTEM_PREFIX);
+	}
+
+	/**
+	 * Whether this subject is a <b>set of workload identities</b>: the group of every
+	 * ServiceAccount in the cluster, or of every one in a single namespace.
+	 *
+	 * <p>
+	 * Membership is automatic and unrevokable — an account joins by existing, and a
+	 * namespace's group gains every account created in it afterwards — so a grant to one
+	 * of these cannot be narrowed by editing accounts, only by removing the binding.
+	 */
+	public static boolean isWorkloadIdentityGroup(Subject subject) {
+		if (!"Group".equals(subject.getKind())) {
+			return false;
+		}
+		String name = String.valueOf(subject.getName());
+		// A trailing colon with nothing after it names no namespace and so no account;
+		// it falls through to the reserved-prefix rule rather than being reported.
+		return ALL_ACCOUNTS_GROUP.equals(name) || (name.startsWith(ACCOUNTS_IN_NAMESPACE_GROUP)
+				&& name.length() > ACCOUNTS_IN_NAMESPACE_GROUP.length());
+	}
+
+	/**
+	 * The namespace a workload-identity group is confined to, or {@code null} for
+	 * {@code system:serviceaccounts}, which spans the cluster. Only meaningful for a
+	 * subject {@link #isWorkloadIdentityGroup(Subject)} accepts.
+	 */
+	public static String workloadIdentityGroupNamespace(Subject subject) {
+		String name = String.valueOf(subject.getName());
+		if (!name.startsWith(ACCOUNTS_IN_NAMESPACE_GROUP)) {
+			return null;
+		}
+		return name.substring(ACCOUNTS_IN_NAMESPACE_GROUP.length());
 	}
 
 	private static boolean namesGroup(Subject subject, Set<String> identities) {
