@@ -51,6 +51,17 @@
   --ok-fg: #15702e;
   --ok-tint: rgba(34, 163, 82, 0.13);
   --ok-line: rgba(26, 127, 55, 0.3);
+  /* Informational (light) — the fourth state, added in #381. It grades a finding that is not
+     a fault: a pod still starting, a container running as UID 0, and the two findings that
+     say the audit itself did not see everything ("Further container privileges not listed",
+     "RBAC grants could not be read"). Those had no colour of their own, so a truncation
+     notice and a read failure painted exactly like a badge carrying no severity.
+     Two roles, not the usual three: nothing fills with an info colour, so a `tint` would be
+     a token defined for no rule. Deliberately NOT `--accent` — the informational blue and the
+     interactive blue are different claims, and --accent measures 4.59:1 on the panel, which
+     is not a margin to put 10px text on. This measures 6.62:1 there. */
+  --info-fg: #1a56c4;
+  --info-line: rgba(26, 86, 196, 0.32);
 }
 
 /* The detail drawer is a NON-MODAL side panel (no mask): let clicks pass through its
@@ -143,6 +154,10 @@ html.kw-dark {
   --ok-fg: #7ee2a8;
   --ok-tint: rgba(126, 226, 168, 0.15);
   --ok-line: rgba(126, 226, 168, 0.32);
+  /* Designed against the dark panel like the rest of this block, not inverted from the light
+     one: 8.70:1 on --panel, against --accent's 5.18:1. */
+  --info-fg: #8fc6ff;
+  --info-line: rgba(143, 198, 255, 0.32);
 }
 html.kw-dark body {
   background: var(--bg);
@@ -4541,6 +4556,14 @@ body.dragging {
   border-left: 3px solid var(--warn-fg);
 }
 
+/* An info finding is a finding, and until #381 its card had no stripe and its badge had no
+   rule — so "RBAC grants could not be read" arrived looking like a note of no particular
+   grade. The reader's signal that a list is incomplete cannot itself be the absence of a
+   signal. */
+.dx-item.dx-info {
+  border-left: 3px solid var(--info-fg);
+}
+
 .dx-item-head {
   display: flex;
   gap: 8px;
@@ -4558,12 +4581,28 @@ body.dragging {
   color: var(--text);
 }
 
+/* The severity, painted as well as spelled. `severityOf` in `diagnosis.ts` normalises every
+   value the server can send to exactly these three, so this is the WHOLE vocabulary: a missing
+   rule is not a fallback to a sensible default, it is a third of the grades rendering as the
+   neutral base above — which is how `info` shipped looking like a badge with no severity on it.
+   Colour goes on the text and the border rather than into a fill: --warn-fg on --warn-tint
+   measures 4.53:1 over the light panel, and a 0.03 margin at 10px is not a floor to build on,
+   while fg-on-panel is the pairing these tokens were designed and measured for (5.18:1 light,
+   10.18:1 dark). `severityTones.test.ts` fails the build if two severities ever name one token,
+   or if a palette edit gives two of those tokens one literal in one theme. */
 .dx-sev-critical {
+  color: var(--danger-fg);
   border-color: var(--danger-line);
 }
 
 .dx-sev-warning {
+  color: var(--warn-fg);
   border-color: var(--warn-line);
+}
+
+.dx-sev-info {
+  color: var(--info-fg);
+  border-color: var(--info-line);
 }
 
 .dx-item-title {

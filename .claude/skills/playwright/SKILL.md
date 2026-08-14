@@ -91,15 +91,19 @@ an ambiguous label THROWS rather than opening the first match), semicolon-separa
 **Several verbs are runner-specific, and the wrong one throws `unknown PREPARE verb` rather
 than being skipped:** `goto:<path>` exists only in the shared runner (`ui-shot`,
 `ui-measure`); `close` (shut an open drawer/modal), `signin:<password>` / `signout` (the admin
-login, idempotent) and `deny` / `allow` exist only in `contrast-check`'s own copy. For a
+login, idempotent), `deny` / `allow` and `partial` / `full` exist only in `contrast-check`'s
+own copy. For a
 signed-in surface under `ui-shot`/`ui-measure`, spell the login out as `?click:` + `?fill:`
 steps.
 
 `deny` stubs `GET …/access` with a refusal, so the controls the deployment's service account
 is not allowed to use render greyed out with their reason (#354); `allow` takes the stub down.
-**It is the only faked response in this file, and it is faked because it cannot be produced
-here** — an admin kubeconfig is allowed everything and the simulator answers no review at all,
-so without it those selectors are `not present` forever, which reads as a pass.
+`partial` does the same to `GET …/diagnose`, with a scope in which the audit could not see
+everything — an `info` truncation notice and an RBAC read failure (#381); `full` takes it down.
+**Those two are the only faked responses in this file, and each is faked because it cannot be
+produced here** — an admin kubeconfig is allowed everything and lists its own bindings, and the
+simulator answers no review at all, so without them those selectors are `not present` forever,
+which reads as a pass.
 Prefix a step with `?` to skip it when its selector is absent; that matters because
 `PREPARE` runs once per theme and per viewport, and a step like signing in applies only
 the first time — without `?` the second pass waits for a modal that is already dealt with
@@ -158,6 +162,28 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-14 — **A stubbed response installed mid-walk was never fetched, so the scene measured
+  the LIVE data under the stubbed scene's name.** Verifying #381, `partial` (a `page.route` on
+  `GET …/diagnose`) went in and the very next step navigated to the page that reads it — and the
+  panel showed the cluster's real 41 findings, because `useAsyncData` keeps a value whose deps
+  have not changed: navigating to a page you are already on refetches nothing, and a route only
+  affects requests made after it. The readings looked *right* (the badge colours are the same
+  either way, and this cluster happens to emit all three severities), which is what made it
+  dangerous — the two findings the scene exists for, the ones that say the audit did not see
+  everything, were never on screen at all. → Both diagnosis scenes hop through another leaf
+  (`leaf:Pods`) before returning, which unmounts the panel and makes the return a real refetch.
+  **A stub is only in force for requests that happen after it; when a scene installs one, make
+  the component fetch again — and prove it by a detail of the payload that is on screen, not by
+  a colour the real data would have produced too.**
+- 2026-08-14 — **`scroll:` is `scrollIntoViewIfNeeded`, so it does the MINIMAL scroll and
+  measures one card at a time.** The same run pointed at a four-card diagnosis list: scrolling to
+  the list scrolled nothing (its top edge was already visible) and only the first card was
+  sampled; scrolling to the last card left the first 17px above the fold, and a badge sits at the
+  top of its card, so `.dx-sev-critical` reported `outside the viewport` — a failed sample that
+  looks like a scene problem. → Two scenes with two scroll targets, chosen from a geometry probe
+  rather than guessed. **When several selectors must be measured down one long surface, check
+  what the scroll actually left on screen; one `scroll:` verb aligns one element to one edge.**
 
 - 2026-08-14 — **`covered by another layer` was not a scene problem; it was the defect.** #354's
   refused menu item renders two lines (the action, then why the service account cannot use it),
