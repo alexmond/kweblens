@@ -10,7 +10,6 @@
 //   require-auth ()                                   — a pane needs the login (Files)
 //   close        ()                                   — close the drawer (X or Escape)
 import { NDrawer, NDrawerContent, NDropdown, NTabPane, NTabs } from 'naive-ui';
-import type { DropdownOption } from 'naive-ui';
 import { shallowRef, computed, ref, watch } from 'vue';
 
 import { api } from '../api';
@@ -18,9 +17,11 @@ import { failureNotice } from '../apiFailure';
 import { useEscapeKey } from '../composables/useEscapeKey';
 import { needsFullObject, objName, objNs } from '../kube';
 import { filesFeature } from '../podFiles';
-import type { RowAction } from '../rowActions';
+import { controlAccess } from '../permissions';
+import type { RowAction, RowActionDef } from '../rowActions';
 import { parseRowActionKey } from '../rowActions';
-import type { EventSummary, KubeObject } from '../types';
+import type { EventSummary, KindAccess, KubeObject } from '../types';
+import { naiveActionOptions } from './actionMenu';
 import { drawerActions, drawerBadges } from './drawerHeader';
 import EventsPane from './EventsPane.vue';
 import MetricChart from './MetricChart.vue';
@@ -35,6 +36,12 @@ const props = defineProps<{
   obj: KubeObject;
   initialEdit: boolean;
   authed: boolean;
+  /**
+   * What the deployment's service account may do with THIS kind here, or null when it is not
+   * known — which leaves every action enabled (#354). The shell only passes it when the drawer
+   * is showing the kind the verdicts are about.
+   */
+  access?: KindAccess | null;
 }>();
 const emit = defineEmits<{
   (e: 'navigate', kind: string, ns?: string): void;
@@ -88,8 +95,14 @@ const view = computed<KubeObject>(() => full.value ?? props.obj);
 // container query choose. The menu is the FULL action list at every width — the buttons are
 // a shortcut to three of them when there is room, never the only way to reach one.
 const badges = computed(() => drawerBadges(view.value));
-const actions = computed(() => drawerActions(view.value));
-const menuOptions = computed(() => actions.value.menu as unknown as DropdownOption[]);
+const actions = computed(() => drawerActions(view.value, props.access));
+const menuOptions = computed(() => naiveActionOptions(actions.value.menu));
+// A promoted button gets the same verdict its menu entry does — a Restart the cluster has
+// already said no to is a button that can only 403. The toolbar has no room for a sentence,
+// so the button carries the reason as its tooltip and the MENU beside it (which is present at
+// every width, and shows the same action) carries it in full. The explanation is never only a
+// tooltip: that is the point of the menu being the complete list.
+const buttonAccess = (a: RowActionDef) => controlAccess(props.access, a.verb);
 const onMenu = (key: string) => {
   const { action, container } = parseRowActionKey(key);
   emit('row-action', action, view.value, container);
@@ -208,6 +221,8 @@ watch(
               :key="a.id"
               type="button"
               class="drawer-action kw-when-wide"
+              :disabled="buttonAccess(a).disabled"
+              :title="buttonAccess(a).reason ?? undefined"
               @click="emit('row-action', a.id, view)"
             >
               {{ a.label }}
@@ -239,6 +254,7 @@ watch(
             :ns="ns"
             :initial-edit="initialEdit"
             :authed="authed"
+            :access="access"
             @auth-expired="emit('auth-expired')"
             @editing="(v) => (yamlEditing = v)"
           />

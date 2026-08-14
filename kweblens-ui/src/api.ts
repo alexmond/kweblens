@@ -14,6 +14,7 @@ import type {
   HelmMutationResult,
   HelmRelease,
   HelmResourceRef,
+  KindAccess,
   KubeObject,
   MetricSeries,
   NodeDiskUsage,
@@ -376,6 +377,19 @@ export const api = {
   info: () =>
     getJson<{ build?: { version?: string; time?: string; name?: string }; git?: { commit?: { id?: string } } }>(
       '/actuator/info',
+    ),
+  /**
+   * What the deployment's SERVICE ACCOUNT may do with a kind here — one request per surface,
+   * three `SelfSubjectAccessReview`s behind it, and never one per row (#354).
+   *
+   * <p>A read, and a read that authorizes nothing: the answer only decides which controls look
+   * available. A failure is not an error the caller should render — it means "we could not
+   * tell", and the caller leaves every control enabled. See `permissions.ts`.
+   */
+  access: (cluster: string, resourceId: string, namespace?: string) =>
+    getJson<KindAccess>(
+      `${clusterBase(cluster)}/access?resource=${encodeURIComponent(resourceId)}` +
+        (namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''),
     ),
   nav: (cluster: string) => getJson<NavCategory[]>(`${clusterBase(cluster)}/nav`),
   counts: (cluster: string, namespace?: string) =>

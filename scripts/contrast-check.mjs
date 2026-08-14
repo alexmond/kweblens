@@ -143,8 +143,12 @@ const SCENES = [
     // `.mini th`, plus a YAML document with LISTS in it — without which the next scene's
     // `.yk-dash` is `not present` and the run is quietly one selector short.
     name: 'drawer chips',
+    // Leads with `allow` so a run always starts with no stubbed response in place. The
+    // refused-actions scenes below install one, and PREPARE re-runs from scene 1 for the
+    // second theme — without this, every scene in the second pass would be measuring a page
+    // told that the service account can do nothing.
     prepare:
-      'close;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
+      'close;allow;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
       '?click:.n-collapse-item__header:has-text("Annotations");wait:400',
     // `.n-tag` is the drawer's `<NTag type="info">Helm</NTag>`, which measured 3.36:1 in the
     // light theme on Naive's own info palette (#269) — a component-library colour rather than
@@ -265,6 +269,45 @@ const SCENES = [
     name: 'metrics chart tooltip',
     prepare: 'close;leaf:Cluster/Overview;wait:2000;?hover:.metric-echart;wait:800',
     selectors: ['.chart-tip-t', '.chart-tip-v'],
+  },
+  {
+    // A control greyed out because the CLUSTER refused it (#354), and the reason printed
+    // beside it.
+    //
+    // This is the one surface in the app that no instance on this box can produce on its own:
+    // the verdict comes from a `SelfSubjectAccessReview`, and every cluster reachable from
+    // here answers "yes" to an admin kubeconfig, while the simulator's API server answers
+    // nothing at all — which the UI reads as `unknown` and renders as ENABLED, correctly. So
+    // there is no live scene in which `.menu-denied-why` exists, and adding the selectors to a
+    // watchlist would have bought a permanent `not present`: the "green line with half the run
+    // unmeasured" this file's summary warns about.
+    //
+    // `deny` therefore stubs the ONE response the surface reads — `GET …/access` — with the
+    // refusal the server sends when a cluster says no, byte for byte the shape
+    // `AccessEndpointsTest` pins. Everything downstream is the real thing: the real components,
+    // the real `permissions.ts`, the real stylesheet. What is faked is the cluster's answer,
+    // which is exactly the part this box cannot supply.
+    name: 'refused row actions (stubbed verdict)',
+    prepare:
+      'close;deny;leaf:Pods;wait:900;' +
+      '?click:.n-data-table-tbody tr:first-child .n-checkbox;wait:300;' +
+      '?click:.n-data-table-tbody tr:first-child td:last-child button;wait:500',
+    selectors: ['.bulk-denied', '.menu-denied-label', '.menu-denied-why'],
+  },
+  {
+    // The same refusal on the YAML editor's Apply. Behind the admin login, like the review
+    // scene above and for the same reason: the editor's footer is `v-if="!readonly"`, so a
+    // signed-out run does not fail to measure the hint, it never renders it.
+    //
+    // No `deny` of its own — the route installed by the scene above is still in place, and the
+    // reload-free `signin` leaves it there. `allow` on the first scene is what takes it down
+    // again for the next theme.
+    name: 'refused apply (stubbed verdict)',
+    prepare:
+      'close;signin:admin;leaf:Pods;wait:900;' +
+      'click:.n-data-table-tbody tr td:nth-child(2);wait:1200;' +
+      '?click:.n-tabs-tab:has-text("YAML");wait:1200;?click:button:has-text("Edit");wait:1800',
+    selectors: ['.dialog-denied-hint'],
   },
   {
     // `ActionNotice` — the failed-ACTION notice added for roadmap R3's error half. It is a
@@ -612,6 +655,32 @@ async function openLeafHere(page, label) {
   await page.waitForTimeout(500);
 }
 
+/** The one request the refusal affordance reads (#354). */
+const ACCESS_URL = '**/api/v1/clusters/*/access*';
+
+/**
+ * A refusal in the shape the server actually sends — `KindAccess`, three verbs, each a
+ * tri-state verdict with the cluster's own reason. Copied from what `AccessEndpointsTest`
+ * asserts on rather than invented, so a change to the wire shape breaks this scene too
+ * instead of leaving it quietly measuring a payload the app no longer receives.
+ */
+const REFUSED_ACCESS = {
+  kind: 'Pod',
+  namespace: 'default',
+  verbs: {
+    create: { verdict: 'denied', reason: 'RBAC: no rules authorize this' },
+    patch: { verdict: 'denied', reason: 'RBAC: no rules authorize this' },
+    delete: { verdict: 'denied', reason: 'RBAC: no rules authorize this' },
+  },
+};
+
+async function stubRefusedAccess(page) {
+  await page.unroute(ACCESS_URL).catch(() => {});
+  await page.route(ACCESS_URL, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(REFUSED_ACCESS) }),
+  );
+}
+
 async function runPrepare(page, spec) {
   for (const raw of (spec || '').split(';').map((s) => s.trim()).filter(Boolean)) {
     const optional = raw.startsWith('?');
@@ -695,7 +764,21 @@ async function runPrepare(page, spec) {
         await page.keyboard.press('Escape');
         await page.waitForTimeout(300);
       }
-    } else if (verb === 'leaf') await openLeafHere(page, arg);
+    }
+    // `deny` / `allow` — make the app believe the cluster has REFUSED this kind's writes,
+    // and take that back.
+    //
+    // The only faked thing is the cluster's verdict, and it has to be faked because it cannot
+    // be produced here: an admin kubeconfig is allowed everything and the simulator answers no
+    // review at all. Everything the run then measures — the disabled menu entry, the sentence
+    // under it, the hint beside a dead Apply — is the real component rendering the real
+    // server's wire shape, which is why the stub is a copy of what `AccessEndpointsTest` pins
+    // rather than a convenient invention.
+    //
+    // `deny` unroutes first so it is idempotent; `allow` is a no-op when nothing is installed.
+    else if (verb === 'deny') await stubRefusedAccess(page);
+    else if (verb === 'allow') await page.unroute(ACCESS_URL).catch(() => {});
+    else if (verb === 'leaf') await openLeafHere(page, arg);
     // `drawer:<px>` drags the open drawer to a width inside its own 360..1400 resize range.
     // Shared with the other runner rather than copied — the rule this file's history keeps
     // teaching is that two copies of a walker drift and then disagree silently (#278).

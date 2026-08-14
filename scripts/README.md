@@ -125,6 +125,12 @@ PORT=8085 node scripts/contrast-check.mjs
 PREPARE='press:Control+k;fill:.palette-input=pod' node scripts/contrast-check.mjs '.palette-row.active'
 node scripts/contrast-check.mjs --self-test             # positive controls; no running app
 
+# `deny` / `allow` stub `GET …/access` with a refusal, so the controls the deployment's
+# service account is not allowed to use render greyed out with their reason (#354). The one
+# faked response in the file, and it has to be: an admin kubeconfig is allowed everything and
+# the simulator answers no review at all, so those selectors are otherwise `not present`.
+PREPARE='deny;leaf:Pods;wait:900' node scripts/contrast-check.mjs '.menu-denied-why'
+
 node scripts/perf-sweep.mjs                            # needs a cluster or --sim
 
 # Does `3 Pending` open a list holding exactly those three? (#336) Three numbers, not one:

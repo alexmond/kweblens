@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NButton, NDataTable, NDropdown } from 'naive-ui';
-import type { DataTableColumns, DropdownOption } from 'naive-ui';
+import type { DataTableColumns } from 'naive-ui';
 import { shallowRef, computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { COL_WIDTH, autoHiddenCols, chromeWidth, tableWidth } from '../columnFit';
@@ -11,7 +11,8 @@ import type { RowAction } from '../rowActions';
 import { parseRowActionKey, rowActionOptions } from '../rowActions';
 import type { CellSpec, TableColumn } from '../table';
 import { toneFor } from '../table';
-import type { KubeObject } from '../types';
+import type { KindAccess, KubeObject } from '../types';
+import { naiveActionOptions } from './actionMenu';
 import ContainerSquares from './ContainerSquares.vue';
 import EmptyState from './EmptyState.vue';
 import StatusBadge from './StatusBadge.vue';
@@ -37,6 +38,12 @@ const props = defineProps<{
    * a search box and a Helm scope it knows nothing about.
    */
   emptyCopy?: EmptyStateCopy | null;
+  /**
+   * What the deployment's service account may do with this kind here, or null when nothing is
+   * known. Null leaves every action enabled — see `permissions.ts` for why that is the rule
+   * and not a fallback.
+   */
+  access?: KindAccess | null;
 }>();
 const emit = defineEmits<{
   (e: 'update:selection', keys: string[]): void;
@@ -61,11 +68,13 @@ const renderCell = (spec: CellSpec, row: KubeObject) => {
 };
 
 // Which actions an object offers is decided once, in rowActions.ts, because the detail
-// drawer renders the same menu (#233).
-// Cast at the boundary: rowActions.ts stays framework-agnostic (so the projection is
-// testable without a DOM), which means it describes the shape rather than importing
-// Naive's `DropdownOption` union.
-const menuOptions = (row: KubeObject) => rowActionOptions(row) as unknown as DropdownOption[];
+// drawer renders the same menu (#233). `actionMenu.ts` is the boundary: rowActions.ts stays
+// framework-agnostic (so the projection is testable without a DOM) and describes the shape
+// rather than importing Naive's `DropdownOption` union.
+//
+// A refused action is disabled AND says why, in the menu itself (#354) — `actionMenu.ts`
+// draws that; `permissions.ts` decides it.
+const menuOptions = (row: KubeObject) => naiveActionOptions(rowActionOptions(row, props.access));
 const onMenu = (key: string, row: KubeObject) => {
   const { action, container } = parseRowActionKey(key);
   emit('row-action', action, row, container);

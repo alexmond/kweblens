@@ -5,10 +5,11 @@ import { computed } from 'vue';
 import { resourceListEmpty } from '../emptyState';
 import { activeQuery, FILTER_HELP, FILTER_HELP_NOTES, parseFilter } from '../objectFilter';
 import type { RowAction } from '../rowActions';
+import { controlAccess } from '../permissions';
 import { listCountLabel } from '../shell';
 import { statusChips } from '../statusChips';
 import type { TableColumn } from '../table';
-import type { KubeObject, NavItem } from '../types';
+import type { KindAccess, KubeObject, NavItem } from '../types';
 import ResourceTable from './ResourceTable.vue';
 
 // The resource-list surface: header (search, create, columns), bulk bar, and the table.
@@ -45,6 +46,11 @@ const props = defineProps<{
   selectedKey: string | null;
   loading: boolean;
   fetchChildren?: (obj: KubeObject) => Promise<KubeObject[]>;
+  /**
+   * What the deployment's SERVICE ACCOUNT may do with this kind here (#354), or null when it
+   * is not known. Null is not a refusal: every control stays enabled. See `permissions.ts`.
+   */
+  access?: KindAccess | null;
 }>();
 const emit = defineEmits<{
   (e: 'update:query', v: string): void;
@@ -75,6 +81,11 @@ const countLabel = computed(() =>
 // the derivation and the promise its number makes). Recomputed when the rows or the query
 // change — one pass over rows already in memory, no request and no watch of its own.
 const chips = computed(() => statusChips(props.statusRows, props.query));
+
+// Bulk delete asks the same question the row menu's Delete does, and answers it the same way:
+// disabled ONLY on a real refusal, with the sentence that names the service account. A review
+// that never answered leaves it enabled and lets the cluster be the one to say no.
+const bulkDeleteAccess = computed(() => controlAccess(props.access, 'delete'));
 
 // Why the table is empty, worked out here and rendered there — three unrelated situations
 // used to share naive-ui's default "No Data".
@@ -189,8 +200,13 @@ const emptyCopy = computed(() =>
     </div>
     <div v-if="selection.size > 0" class="bulk-bar">
       <span>{{ selection.size }} selected</span>
-      <NButton size="small" type="error" @click="emit('bulk-delete')">Delete</NButton>
+      <NButton size="small" type="error" :disabled="bulkDeleteAccess.disabled" @click="emit('bulk-delete')">
+        Delete
+      </NButton>
       <NButton size="small" @click="emit('clear-selection')">Clear</NButton>
+      <!-- Why the button is dead, next to the button. Rendered rather than hovered: a
+           disabled control with no sentence beside it is indistinguishable from a bug. -->
+      <span v-if="bulkDeleteAccess.reason" class="bulk-denied">{{ bulkDeleteAccess.reason }}</span>
     </div>
     <ResourceTable
       class="list-table"
@@ -203,6 +219,7 @@ const emptyCopy = computed(() =>
       :fetch-children="fetchChildren"
       :kept-cols="keptCols"
       :empty-copy="emptyCopy"
+      :access="access"
       @auto-hidden="(k) => emit('auto-hidden', k)"
       @update:selection="(k) => emit('update:selection', k)"
       @open="(o) => emit('open', o)"

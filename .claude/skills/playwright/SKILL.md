@@ -88,11 +88,18 @@ CLUSTER_NS=monitoring node scripts/state-link-check.mjs cluster network storage 
 `drawer:<px>` (drag the open detail drawer inside its own 360..1400 resize range),
 `leaf:<nav label>` (or `leaf:<Category>/<label>` — `Overview` is a leaf in every category, and
 an ambiguous label THROWS rather than opening the first match), semicolon-separated.
-**Three verbs are runner-specific, and the wrong one throws `unknown PREPARE verb` rather
+**Several verbs are runner-specific, and the wrong one throws `unknown PREPARE verb` rather
 than being skipped:** `goto:<path>` exists only in the shared runner (`ui-shot`,
-`ui-measure`); `close` (shut an open drawer/modal) and `signin:<password>` (the admin login,
-idempotent) exist only in `contrast-check`'s own copy. For a signed-in surface under
-`ui-shot`/`ui-measure`, spell the login out as `?click:` + `?fill:` steps.
+`ui-measure`); `close` (shut an open drawer/modal), `signin:<password>` / `signout` (the admin
+login, idempotent) and `deny` / `allow` exist only in `contrast-check`'s own copy. For a
+signed-in surface under `ui-shot`/`ui-measure`, spell the login out as `?click:` + `?fill:`
+steps.
+
+`deny` stubs `GET …/access` with a refusal, so the controls the deployment's service account
+is not allowed to use render greyed out with their reason (#354); `allow` takes the stub down.
+**It is the only faked response in this file, and it is faked because it cannot be produced
+here** — an admin kubeconfig is allowed everything and the simulator answers no review at all,
+so without it those selectors are `not present` forever, which reads as a pass.
 Prefix a step with `?` to skip it when its selector is absent; that matters because
 `PREPARE` runs once per theme and per viewport, and a step like signing in applies only
 the first time — without `?` the second pass waits for a modal that is already dealt with
@@ -151,6 +158,22 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-14 — **`covered by another layer` was not a scene problem; it was the defect.** #354's
+  refused menu item renders two lines (the action, then why the service account cannot use it),
+  and `contrast-check` measured the first line at 7.09:1 and refused to measure the second.
+  The instinct was to blame the scene — it is what every previous unmeasurable row here has been
+  — but a probe said `elementFromPoint` at the middle of the reason returned **the NEXT option's
+  label**: Naive pins `.n-dropdown-option`, `.n-dropdown-option-body` and `…__label` to a fixed
+  `height: 34px` with a 34px line-height, so a two-line item does not grow the row, it overflows
+  and the following item is painted across it. A screenshot of that reads as slightly tight
+  spacing, not as two menu entries occupying the same pixels. Two things fell out of fixing it:
+  the override needs `height: auto !important`, because Naive injects its component CSS into
+  `<head>` at RUNTIME and beats an equal-specificity rule of ours whatever its selector (measured
+  — `min-height` applied and `height` did not); and the scene needed a way to produce a verdict no
+  cluster on this box will give. → `deny` / `allow` PREPARE verbs in `contrast-check`, stubbing
+  `GET …/access` with the refusal shape `AccessEndpointsTest` pins. **`covered by another layer`
+  means something IS on top — ask what, before assuming you pointed the tool at the wrong scene.**
 
 - 2026-08-13 — **`state-link-check`'s third number was the rendered WINDOW, not the list, and the
   one category it could not open was the one under test.** Verifying #357, `50 Serving` failed

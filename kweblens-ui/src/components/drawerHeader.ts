@@ -16,7 +16,7 @@
 import { containerNames, objNs } from '../kube';
 import type { RowAction, RowActionDef, RowActionOption } from '../rowActions';
 import { ROW_ACTIONS, rowActionOptions } from '../rowActions';
-import type { KubeObject } from '../types';
+import type { KindAccess, KubeObject } from '../types';
 
 /** One identity chip under the drawer title. `tone` only distinguishes it visually. */
 export interface DrawerBadge {
@@ -71,7 +71,10 @@ export const DRAWER_BUTTON_LIMIT = 3;
  * written to avoid. It also means the promotion decision needs no width — only the CSS
  * hides the buttons when there is no room for them.
  */
-export function drawerActions(obj: KubeObject): { buttons: RowActionDef[]; menu: RowActionOption[] } {
+export function drawerActions(
+  obj: KubeObject,
+  access?: KindAccess | null,
+): { buttons: RowActionDef[]; menu: RowActionOption[] } {
   const ctx = { kind: obj.kind ?? '', suspended: Boolean((obj.spec as Record<string, unknown>)?.suspend) };
   const applies = new Map(ROW_ACTIONS.filter((a) => a.applies(ctx)).map((a) => [a.id, a]));
   // A container-scoped action on a multi-container pod needs a submenu to say WHICH
@@ -80,5 +83,5 @@ export function drawerActions(obj: KubeObject): { buttons: RowActionDef[]; menu:
   const buttons = PROMOTED.map((id) => applies.get(id)).filter(
     (a): a is RowActionDef => !!a && !a.danger && !(a.containerScoped && multiContainer),
   );
-  return { buttons: buttons.slice(0, DRAWER_BUTTON_LIMIT), menu: rowActionOptions(obj) };
+  return { buttons: buttons.slice(0, DRAWER_BUTTON_LIMIT), menu: rowActionOptions(obj, access) };
 }

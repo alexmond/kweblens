@@ -221,11 +221,24 @@ broken. It is not; do not "fix" it.
   that context when a sign-in request carries credentials; a request carrying none is untouched,
   because that is the reloaded tab restoring its session. **Never decide "are these credentials
   good" from a response a cookie could have produced.**
-- **One shared identity is the accepted design, not a TODO.** No OIDC, no RBAC-awareness, so the
-  UI can offer actions that then 403 and audit entries name an action but no person. Per ADR-001
-  that is **decided** — do not open work to "fix" it or describe it as a gap, but do keep saying
-  it plainly in user-facing text. SSAR is sanctioned only as a UI affordance, never as an
-  authorization gate: it fails open.
+- **One shared identity is the accepted design, not a TODO.** No OIDC, so audit entries name an
+  action but no person. Per ADR-001 that is **decided** — do not open work to "fix" it or
+  describe it as a gap, but do keep saying it plainly in user-facing text.
+- **The access affordance is a tri-state that FAILS OPEN, and it is never a gate.**
+  `AccessReviewService` (core `access/`) batches `SelfSubjectAccessReview` for `create`/`patch`/
+  `delete`; `web/access` serves one `GET …/access` per surface, so a list of 200 rows costs
+  **three** reviews, not 200. The result is `allowed` / `denied` / `unknown` — **two states
+  would collapse "we could not tell" into one of the real answers**, which is the whole defect.
+  `unknown` renders as **enabled**: a control greyed out by a failed *probe* is a lie about the
+  cluster. Only `denied` disables anything, and it must say why in words that name the **service
+  account**, never "you" — there is no user to name. A cluster-wide `denied` about a *namespaced*
+  kind is weakened to `unknown` (`AccessPageService.narrow`): "not in every namespace" is not
+  "not here". `AccessResultIsNotAGateTest` fails the build if a verdict is referenced outside the
+  presentation slice; `permissions.ts` is the single client-side decision. Server-side
+  authorization (`SecurityConfig` + the cluster's RBAC) is unchanged and is the only real gate.
+  **A new action either names a verb this report covers or names none** — a guessed verb disables
+  a control that works. Contrast for the refused state is measured with `contrast-check.mjs`'s
+  `deny` PREPARE verb, which stubs the one response no cluster on this box will produce.
 - **"Suggest → preview → confirm → apply" — know which link is real, per surface.**
   - **Helm** — a genuine jhelm `dryRun` on **install / upgrade / rollback**, and the Apply
     button stays disabled until it returns. **`uninstall` has none** — `HelmService.uninstall`

@@ -401,3 +401,32 @@ export interface KindHealth {
   /** Absent on success. Set when the kind could not be listed — never conflate with "zero". */
   error?: string | null;
 }
+
+/**
+ * One verb's verdict from a `SelfSubjectAccessReview`, as the server sends it.
+ *
+ * THREE values, and `'unknown'` is the load-bearing one: it is what a review that errored,
+ * timed out or was itself forbidden returns, and the UI renders it as ENABLED. A boolean here
+ * would have to fold that case into one of the two real answers. See `permissions.ts`.
+ */
+export type Verdict = 'allowed' | 'denied' | 'unknown';
+
+interface VerbAccess {
+  verdict: Verdict;
+  /** The cluster's own reason, or why the answer is unknown. Genuinely absent for an allow. */
+  reason: string | null;
+}
+
+/**
+ * What the deployment's service account may do with one kind in one scope.
+ *
+ * `verbs` is PARTIAL on purpose: a verb the server did not ask about is absent, and absent
+ * reads as unknown — which renders as enabled. `namespace` is null when the question was
+ * cluster-wide, and it is carried rather than assumed so a verdict about one namespace cannot
+ * be shown against another.
+ */
+export interface KindAccess {
+  kind: string;
+  namespace: string | null;
+  verbs: Partial<Record<string, VerbAccess>>;
+}
