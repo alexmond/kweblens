@@ -1337,29 +1337,14 @@ body {
   margin-left: 0;
 }
 
-/* Detail drawer */
-.drawer {
-  position: fixed;
-  top: 44px;
-  right: 0;
-  bottom: 0;
-  width: 500px;
-  max-width: 92vw;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
-  box-shadow: -6px 0 18px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  z-index: 50;
-}
+/* Detail drawer.
 
-.drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
+   `.drawer`, `.drawer-head` and `.drawer-close` used to stand here, from the hand-rolled panel
+   that `NDrawer` replaced. No template had carried any of them for a long time, and they were
+   not harmless: #379 was reported against `.drawer-head` as "the header's flex container with
+   justify-content: space-between", and the header it describes is Naive's
+   `.n-drawer-header > .n-drawer-header__main > .drawer-head-pane > .drawer-title`. A dead rule
+   that still reads like the live one sends the next reader to the wrong element. */
 
 /* Naive's header main is a flex child of .n-drawer-header and ships min-width:auto, so it
    refuses to shrink below its content. A long object name therefore widened it past the
@@ -1371,15 +1356,46 @@ body {
   min-width: 0;
 }
 
-/* The right padding reserves the corner for Naive's absolutely-positioned close, so the
-   expand toggle cannot come to rest underneath it. */
+/* ---- The header's two controls are one row, laid out (#379) -------------------------------
+   The close is NOT absolutely positioned, whatever the `n-base-close--absolute` class on it
+   says: Naive's own `.n-drawer-header__close` puts it back to `position: relative`, and
+   measured in the running app it computes to `relative` and is a flex CHILD of
+   `.n-drawer-header`, sized 18px with a 6px margin inside the header's 24px padding.
+
+   So the 28px `padding-right` that stood on `.drawer-title` "to reserve the corner for the
+   absolutely-positioned close" reserved a corner that was never contested. It is gone. All it
+   did was hold the expand toggle 34px clear of the control it is meant to sit beside — the two
+   are adjacent flex siblings now, with Naive's 6px between them, and the title got its 28px
+   back for the name.
+
+   What the reserve was hiding is the CROSS-axis. `.n-drawer-header` centres its children, and
+   at >=900px the title grows a second row for the identity badges — so the close was centred
+   on a 47px-tall header while the expand stayed on the title's first row. Measured in the
+   expanded drawer at 1400px and at 1900px: expand top=60, close top=74.34. A 14.34px step down
+   the right edge, with the tab row's `⋮` 52px below that again: three controls, three vertical
+   positions, which is what #379 was reported as.
+
+   `flex-start` puts the close on the title's FIRST row, where the expand toggle is. Both
+   controls are then pinned to one height in one declaration, so "the same top" is also "the
+   same box" rather than two boxes that happen to start together — an 18px icon and a 21px
+   button sharing a top still read as a half-step. */
+.n-drawer-header {
+  align-items: flex-start;
+}
+
+.n-drawer-header > .n-drawer-header__close,
+.drawer-title > .drawer-expand {
+  align-self: flex-start;
+  height: 21px;
+  box-sizing: border-box;
+}
+
 .drawer-title {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
   max-width: 100%;
-  padding-right: 28px;
   box-sizing: border-box;
 }
 
@@ -1569,20 +1585,6 @@ body {
     grid-column: 1 / -1;
     grid-row: 2;
   }
-}
-
-.drawer-close {
-  border: 0;
-  background: transparent;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--muted);
-  cursor: pointer;
-  padding: 0 4px;
-}
-
-.drawer-close:hover {
-  color: var(--text);
 }
 
 .tabs {

@@ -1,8 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { parseRowActionKey, rowActionOptions } from '../rowActions';
 import type { KubeObject } from '../types';
 import { DRAWER_BUTTON_LIMIT, drawerActions, drawerBadges } from './drawerHeader';
+
+// The stylesheet as TEXT, same reading as responsive.test.ts: comments stripped first, because
+// the comments here talk ABOUT the padding reserve that was removed and a rule that exists only
+// in prose is not a rule.
+const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 const pod = (over: Partial<KubeObject> = {}): KubeObject => ({
   kind: 'Pod',
@@ -82,6 +90,45 @@ describe('drawerActions', () => {
 
   it('offers the same actions the resource list does — one registry, two surfaces', () => {
     expect(drawerActions(deployment).menu).toEqual(rowActionOptions(deployment));
+  });
+});
+
+describe('the drawer header lays its controls out as one row (#379)', () => {
+  it('puts the close on the title first row rather than the middle of the header', () => {
+    // Naive's close is a laid-out flex CHILD of `.n-drawer-header` (measured: it computes to
+    // `position: relative`, whatever the `n-base-close--absolute` class says), and the header
+    // centres its children. At >=900px the title grows a second row for the identity badges,
+    // so a centred close dropped half that row's height below the expand toggle — measured
+    // expand top=60 against close top=74.34 in the expanded drawer, at 1400px and at 1900px.
+    expect(css).toMatch(/\.n-drawer-header\s*\{[^}]*align-items:\s*flex-start/);
+  });
+
+  it('sizes both header controls in ONE declaration, so they cannot drift apart', () => {
+    // Same top is not the same line when an 18px icon sits beside a 21px button. Written as one
+    // rule listing both selectors: two separate heights are two numbers to keep in step.
+    expect(css).toMatch(
+      /\.n-drawer-header\s*>\s*\.n-drawer-header__close,\s*\.drawer-title\s*>\s*\.drawer-expand\s*\{[^}]*height:/,
+    );
+  });
+
+  it('reserves no corner for the close, because the close is not overlapping anything', () => {
+    // `.drawer-title { padding-right: 28px }` stood here "to reserve the corner for Naive's
+    // absolutely-positioned close". The close is in flow, the header's own padding already
+    // holds that corner, and all the reserve did was hold the expand toggle 34px clear of the
+    // control it is meant to sit beside. A spacing hack whose reason has gone comes out.
+    const titleRules = [...css.matchAll(/\.drawer-title\s*\{([^}]*)\}/g)].map((m) => m[1]);
+    expect(titleRules.length).toBeGreaterThan(0);
+    for (const body of titleRules) {
+      expect(body).not.toContain('padding-right');
+    }
+  });
+
+  it('has no dead `.drawer-head` rule left to send the next reader to the wrong element', () => {
+    // #379 was reported against `.drawer-head`, a leftover from the hand-rolled panel that
+    // `NDrawer` replaced. No template has carried it for a long time; the live header is
+    // `.n-drawer-header > .n-drawer-header__main > .drawer-head-pane > .drawer-title`.
+    expect(css).not.toMatch(/\.drawer-head\s*[,{]/);
+    expect(css).not.toMatch(/\.drawer-close\s*[,{:]/);
   });
 });
 
