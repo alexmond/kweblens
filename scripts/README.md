@@ -29,6 +29,7 @@ once — the reason is in the header comment of each script.
 ```bash
 scripts/dev-verify.sh                  # the gate — mirrors CI exactly
 scripts/dev-verify.sh -pl kweblens-web -am    # extra args pass through to Maven
+scripts/dev-verify.sh --force          # build even though a running instance reads that jar
 scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
 ```
 
@@ -44,7 +45,7 @@ scripts/dev-run.sh --files=ro      # pod file browser ON, browse-and-download on
 scripts/dev-run.sh --files-roots /tmp   # ...and confined to those paths (implies --files)
 scripts/dev-run.sh --port 8085     # a second instance alongside the first
 scripts/dev-run.sh --stop          # stop whatever is on the port
-scripts/dev-run.sh --list          # every instance: pid, port, RSS, age, staleness
+scripts/dev-run.sh --list          # every instance: pid, port, RSS, age, HEALTH, staleness
 scripts/dev-run.sh --stop-stale    # stop only those whose source tree has moved on
 scripts/dev-run.sh --stop-all      # stop all of them
 scripts/dev-run.sh --self-check    # prove the instance detection still works
@@ -79,6 +80,27 @@ server and `--stop-all` stopped nothing, which looks exactly like a clean machin
 both failure modes are silent, `scripts/dev-run.sh --self-check` exists as a positive
 control: it asserts the jar IS found and that the calling shell is NOT. Run it after
 touching the detection.
+
+**`--list` asks each instance whether it serves; it never infers that from the process table.**
+A Spring Boot fat jar is read lazily, so a build that replaces the jar under a running JVM
+leaves it alive and listening but unable to load another class (#394) — and every
+process-shaped check calls that healthy. `/actuator/health` does not settle it either: on every
+wedged instance produced for #394 it kept answering `200` / `"status":"UP"` while the app served
+nothing, because its classes all load during startup. So `/` is asked too, and only `serving`
+means serving; anything else is named (`WEDGED (health UP, / no response)`, `NOT LISTENING`).
+A separate `JAR REPLACED` note fires *before* any symptom, which is the case that matters: such
+an instance answers correctly right up until it needs a class it has not loaded yet.
+`STALE (source is newer)` is unchanged and still means the source tree has moved on under it.
+
+**Instances run from their own copy of the jar** (`kweblens-run-<port>.jar`), because the build
+does not append to `kweblens.jar` — maven-jar-plugin **truncates the live inode** and writes the
+600 KB thin jar into it before repackage renames it aside, which is what actually destroys a
+running instance. The copy is `cp --reflink=auto`, so on btrfs/XFS it costs no extra disk;
+orphans are reaped on every start. The trade is that the running jar is no longer literally the
+file the build writes, so "am I running what I just built" is answered by `--list`'s STALE and
+JAR REPLACED columns rather than by that file. `dev-verify.sh` refuses to build (exit 3) while an
+instance is still reading the file it is about to replace, naming the pids and ports;
+`--force` builds anyway and says which instances it is about to ruin.
 
 **Always start it this way rather than `java -jar`.** With no admin password set,
 `SecurityConfig` generates one per run and only writes it to the log — so `admin`/`admin`
