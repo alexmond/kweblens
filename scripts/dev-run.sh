@@ -18,8 +18,9 @@
 #   scripts/dev-run.sh --files-roots /tmp   # ...and confine it to those roots
 #   scripts/dev-run.sh --stop          # stop whatever is on the port
 #   scripts/dev-run.sh --list          # every kweblens on this box: port, pid, age, HEALTH
-#   scripts/dev-run.sh --stop-stale    # stop the ones built from a jar that is no longer HEAD
-#   scripts/dev-run.sh --stop-all      # stop every one of them
+#   scripts/dev-run.sh --stop-stale    # stop THIS checkout's instances whose source moved on
+#   scripts/dev-run.sh --stop-all      # stop every instance of THIS checkout
+#   scripts/dev-run.sh --stop-all --any-checkout   # ...and other checkouts' too (read below)
 #   scripts/dev-run.sh --self-check    # prove the instance detection still works (see below)
 #
 # --list ASKS each instance whether it serves; it does not infer it from the process
@@ -28,6 +29,15 @@
 # process is still there and the port is still bound, so every process-shaped check calls
 # it healthy. See `health_of` for what is actually asked and why /actuator/health alone is
 # not enough. Probe timeout: KWEBLENS_PROBE_TIMEOUT seconds, default 4.
+#
+# --list is BOX-WIDE and stays that way — several agents share this machine and seeing all
+# of it is the point. The two DESTRUCTIVE flags are not: --stop-all and --stop-stale act
+# only on instances belonging to THIS checkout, resolved per pid from /proc/<pid>/cwd (see
+# `checkout_of`), and an instance whose checkout cannot be resolved is never stopped. Before
+# #401, --stop-stale asked "has MY source tree changed since YOUR process started" of every
+# JVM on the box, which for another agent's worktree is not a question about anything and
+# whose usual answer is yes — so it stopped their instance. --any-checkout restores the
+# box-wide blast radius deliberately, and you are stopping other people's work with it.
 #
 # An instance is started from its OWN COPY of the jar (kweblens-run-<port>.jar) so that a
 # later build cannot reach into it. See the RUN_JAR comment for the trade that makes.
@@ -60,6 +70,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# The checkout this invocation speaks for. Physical path, because `checkout_of` resolves a
+# pid's checkout through readlink and the two are compared as strings.
+THIS_CHECKOUT=$(pwd -P)
+
 PORT=8080
 BUILD=false
 SIM=false
@@ -68,6 +82,7 @@ LIST=false
 SELF_CHECK=false
 STOP_ALL=false
 STOP_STALE=false
+ANY_CHECKOUT=false
 AI=false
 FILES=off
 FILES_ROOTS=
@@ -87,8 +102,9 @@ while [[ $# -gt 0 ]]; do
 		--self-check) SELF_CHECK=true; shift ;;
 		--stop-all) STOP_ALL=true; shift ;;
 		--stop-stale) STOP_STALE=true; shift ;;
+		--any-checkout) ANY_CHECKOUT=true; shift ;;
 		--port) PORT="$2"; shift 2 ;;
-		-h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,53p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
@@ -235,7 +251,127 @@ self_check() {
 	fi
 	echo "self-check OK: jar found, this shell (pid $$) correctly excluded"
 	health_check_control || return 1
+	ownership_control || return 1
 	return 0
+}
+
+# The positive control for ownership and staleness, and like the health one it has to run in
+# BOTH directions: a predicate that calls everything stale and a predicate that calls nothing
+# stale are the same defect wearing different faces, and #401 was the first of those.
+#
+# It builds two checkout-shaped trees in a temp dir and a process for each, then asks the real
+# `staleness_of` about them. The two processes are identical except for which tree they were
+# started from, and NEITHER tree is this checkout — so if the answers differ, the predicate is
+# following the owner and not the caller. That is the whole claim.
+#
+# The timestamps are deliberately clear of the resolution boundary, which is #394's lesson
+# about `ps -o lstart=`: it has ONE-SECOND resolution, so a control whose file mtime lands
+# within a second of the fork is a coin flip and would flake. FRESH's sources are backdated an
+# hour; STALE's are touched two seconds after its process is already running.
+ownership_control() {
+	# Local, so `--self-check --any-checkout` cannot quietly turn the interesting assertion
+	# off: bash's dynamic scope means stop_stale_verdict sees this value.
+	local ANY_CHECKOUT=false
+	local tmp stale_pid fresh_pid unknown_pid rc=0 owner verdict
+
+	if ! command -v python3 >/dev/null 2>&1; then
+		echo "!!  ownership control SKIPPED: no python3, so --stop-stale's blast radius was NOT tested" >&2
+		echo "!!  that is an unmeasured half, not a pass" >&2
+		return 0
+	fi
+
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/kweblens-owner-ctl-XXXXXX")
+	local t
+	for t in STALE FRESH; do
+		mkdir -p "${tmp}/${t}/kweblens-web/src" "${tmp}/${t}/kweblens-web/target"
+		: > "${tmp}/${t}/pom.xml"
+		: > "${tmp}/${t}/kweblens-web/pom.xml"
+		: > "${tmp}/${t}/kweblens-web/src/Marker.java"
+	done
+	# A tree that is checkout-SHAPED but is not a checkout: no pom.xml at the root. This is the
+	# "cannot tell" case, and the one that must never be stopped.
+	mkdir -p "${tmp}/UNKNOWN/kweblens-web/target"
+	touch -d '1 hour ago' "${tmp}/FRESH/pom.xml" "${tmp}/FRESH/kweblens-web/pom.xml" \
+		"${tmp}/FRESH/kweblens-web/src/Marker.java" "${tmp}/FRESH/kweblens-web/src"
+
+	# Stand-ins for a JVM: what the predicates read is /proc/<pid>/cwd and the argv after
+	# `-jar`, and these have both. python3 ignores the trailing arguments. STALE is started
+	# with a RELATIVE jar path from its own cwd — the way every real instance on this box
+	# looks — so cwd resolution is exercised; FRESH uses an absolute one.
+	( cd "${tmp}/STALE" && exec python3 -c 'import time; time.sleep(120)' \
+		-jar kweblens-web/target/kweblens-run-1.jar ) >/dev/null 2>&1 &
+	stale_pid=$!
+	python3 -c 'import time; time.sleep(120)' \
+		-jar "${tmp}/FRESH/kweblens-web/target/kweblens-run-2.jar" >/dev/null 2>&1 &
+	fresh_pid=$!
+	python3 -c 'import time; time.sleep(120)' \
+		-jar "${tmp}/UNKNOWN/kweblens-web/target/kweblens-run-3.jar" >/dev/null 2>&1 &
+	unknown_pid=$!
+
+	sleep 2
+	touch "${tmp}/STALE/kweblens-web/src/Marker.java"
+
+	owner=$(checkout_of "$stale_pid" 2>/dev/null || true)
+	if [[ "$owner" != "$(readlink -f "${tmp}/STALE")" ]]; then
+		echo "FAIL: checkout_of resolved '${owner}' for a process whose cwd is ${tmp}/STALE" >&2
+		rc=1
+	fi
+	verdict=$(staleness_of "$stale_pid")
+	if [[ "$verdict" != stale ]]; then
+		echo "FAIL: a foreign checkout edited after its instance started read as '${verdict}'" >&2
+		rc=1
+	fi
+	verdict=$(staleness_of "$fresh_pid")
+	if [[ "$verdict" != fresh ]]; then
+		echo "FAIL: a foreign checkout with older sources read as '${verdict}', not fresh" >&2
+		rc=1
+	fi
+	if [[ $rc -eq 0 ]]; then
+		echo "self-check OK: staleness follows the OWNING checkout — two identical processes," \
+			"one edited tree, verdicts 'stale' and 'fresh', neither tree this one"
+	fi
+
+	verdict=$(staleness_of "$unknown_pid")
+	if [[ "$verdict" != unknown ]]; then
+		echo "FAIL: a jar outside any checkout read as '${verdict}', not unknown" >&2
+		rc=1
+	else
+		echo "self-check OK: a jar whose checkout cannot be resolved reads as 'unknown'"
+	fi
+
+	kill "$stale_pid" "$fresh_pid" "$unknown_pid" 2>/dev/null || true
+	wait "$stale_pid" "$fresh_pid" "$unknown_pid" 2>/dev/null || true
+	rm -rf "$tmp"
+
+	# The decision itself, over every combination — the negative first, because it is the one
+	# #401 got wrong: STALE and NOT MINE must still be a skip.
+	verdict=$(stop_stale_verdict "/somewhere/else" stale)
+	if [[ "$verdict" == stop ]]; then
+		echo "FAIL: --stop-stale would stop a stale instance from another checkout" >&2
+		rc=1
+	else
+		echo "self-check OK: stale + other checkout => ${verdict}"
+	fi
+	verdict=$(stop_stale_verdict "" unknown)
+	if [[ "$verdict" == stop ]]; then
+		echo "FAIL: --stop-stale would stop an instance whose checkout it cannot resolve" >&2
+		rc=1
+	fi
+	verdict=$(stop_stale_verdict "$THIS_CHECKOUT" fresh)
+	if [[ "$verdict" == stop ]]; then
+		echo "FAIL: --stop-stale would stop a NON-stale instance of this checkout" >&2
+		rc=1
+	fi
+	# ...and the positive: narrowing it to nothing at all would pass every check above.
+	verdict=$(stop_stale_verdict "$THIS_CHECKOUT" stale)
+	if [[ "$verdict" != stop ]]; then
+		echo "FAIL: --stop-stale would NOT stop this checkout's own stale instance ('${verdict}')" >&2
+		rc=1
+	else
+		echo "self-check OK: stale + this checkout => stop (the case --stop-stale exists for)"
+	fi
+
+	return $rc
 }
 
 # The positive control for health_of, and it has to be a control in BOTH directions.
@@ -338,6 +474,71 @@ jar_of() {
 	arg=$(tr '\0' '\n' < "/proc/${pid}/cmdline" 2>/dev/null | awk 'prev == "-jar" { print; exit } { prev = $0 }')
 	[[ -n "$arg" ]] || return 1
 	if [[ "$arg" == /* ]]; then echo "$arg"; else echo "${cwd%/}/${arg}"; fi
+}
+
+# The CHECKOUT an instance belongs to — the source tree its jar was built from.
+#
+# Every question of the form "is this instance out of date" is a question about that tree and
+# no other. Asking it of the tree that happens to be running this script is how #401 came
+# about: several agents share this box, each in its own worktree, and "my sources changed two
+# minutes ago" was being answered on behalf of every JVM on the machine.
+#
+# Derived from the jar rather than from the cwd directly, because the jar is what was built:
+# it always lives at <checkout>/kweblens-web/target/, and `jar_of` already resolves a relative
+# argv path through /proc/<pid>/cwd (which is how both instances on this box look today).
+#
+# FAILS (returns 1) rather than guessing, and every caller must treat that as "leave it
+# alone": a jar outside a checkout-shaped path, a checkout that has since been deleted, or a
+# tree with no sources to compare against. The last one matters — a root with no
+# kweblens-*/src would make `find` return nothing, and "nothing is newer" is indistinguishable
+# from "up to date" unless the directories are known to exist.
+checkout_of() {
+	local pid="$1" jar root
+	jar=$(jar_of "$pid" 2>/dev/null) || return 1
+	case "$jar" in
+		*/kweblens-web/target/*) root="${jar%/kweblens-web/target/*}" ;;
+		*) return 1 ;;
+	esac
+	root=$(readlink -f "$root" 2>/dev/null) || return 1
+	[[ -n "$root" && -f "$root/pom.xml" && -d "$root/kweblens-web/src" ]] || return 1
+	echo "$root"
+}
+
+# Is this instance serving code its OWN checkout has moved on from? stale | fresh | unknown.
+#
+# Three answers, not two, for the same reason the access affordance has three: collapsing "we
+# could not tell" into either real answer is the defect. `unknown` is what a pid whose checkout
+# cannot be resolved reports, and no destructive path acts on it.
+staleness_of() {
+	local pid="$1" root started
+	root=$(checkout_of "$pid") || { echo unknown; return 0; }
+	started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
+	[[ -n "$started" ]] || { echo unknown; return 0; }
+	if [[ -n "$(find "$root/pom.xml" "$root"/kweblens-*/pom.xml "$root"/kweblens-*/src \
+		-newermt "$started" -print -quit 2>/dev/null)" ]]; then
+		echo stale
+	else
+		echo fresh
+	fi
+}
+
+# May --stop-stale stop an instance with this owner and this staleness? `stop`, or `skip: why`.
+#
+# Takes the two facts rather than looking them up, so --self-check can drive every combination
+# — including the ones no instance on the box happens to be in — against known answers.
+stop_stale_verdict() {
+	local owner="$1" staleness="$2"
+	if [[ -z "$owner" || "$staleness" == unknown ]]; then
+		# Unknown means leave it alone. It cannot mean "assume mine": the one time that
+		# assumption is wrong it stops somebody else's server.
+		echo "skip: owning checkout unknown"
+	elif [[ "$owner" != "$THIS_CHECKOUT" && "$ANY_CHECKOUT" != true ]]; then
+		echo "skip: other checkout (${owner})"
+	elif [[ "$staleness" != stale ]]; then
+		echo "skip: not stale"
+	else
+		echo stop
+	fi
 }
 
 # Has the file this JVM is reading been replaced since it started?
@@ -458,7 +659,7 @@ reap_run_jars() {
 }
 
 list_instances() {
-	local pid port started rss found=0 health notes
+	local pid port started rss found=0 health notes owner
 	printf "%-8s %-7s %-8s %-25s %-34s %s\n" PID PORT RSS STARTED HEALTH NOTES
 	for pid in $(instances); do
 		found=1
@@ -473,10 +674,21 @@ list_instances() {
 		if jar_replaced "$pid"; then
 			notes="JAR REPLACED — a build swapped the file under it; restart before measuring"
 		fi
-		# Started before the newest source file => serving code that no longer exists here.
-		# The literal string is load-bearing: other scripts and several agents look for it.
-		if [[ -n "$started" && -n "$(find pom.xml kweblens-*/pom.xml kweblens-*/src -newermt "$started" -print -quit 2>/dev/null)" ]]; then
-			notes="${notes:+${notes} · }STALE (source is newer)"
+		# Started before the newest source file IN ITS OWN CHECKOUT => serving code that no
+		# longer exists there. The literal string is load-bearing: other scripts and several
+		# agents look for it. What changed in #401 is only which tree it is computed from —
+		# this column used to describe whoever ran the command, which for another agent's
+		# instance meant every row said STALE the moment anybody edited anything.
+		case "$(staleness_of "$pid")" in
+			stale) notes="${notes:+${notes} · }STALE (source is newer)" ;;
+			unknown) notes="${notes:+${notes} · }STALENESS UNKNOWN (owning checkout not resolved)" ;;
+		esac
+		# Whose it is. Printed as the checkout's directory name, which on this box is either
+		# `kweblens` or an `agent-*` worktree — enough to know at a glance that --stop-stale
+		# and --stop-all will not touch this row.
+		owner=$(checkout_of "$pid" 2>/dev/null || true)
+		if [[ -n "$owner" && "$owner" != "$THIS_CHECKOUT" ]]; then
+			notes="${notes:+${notes} · }other checkout: $(basename "$owner")"
 		fi
 		printf "%-8s %-7s %-8s %-25s %-34s %s\n" "$pid" "$port" "$rss" "$started" "$health" "$notes"
 	done
@@ -501,28 +713,47 @@ if [[ "$LIST" == true ]]; then
 fi
 
 if [[ "$STOP_ALL" == true ]]; then
+	# "All" means all of THIS checkout's. The list it walks is box-wide by design, so without
+	# this gate --stop-all is #401 without the staleness predicate: same list, same kills, one
+	# fewer excuse. An instance whose checkout cannot be resolved is left alone for the same
+	# reason --stop-stale leaves it alone — unknown is not "mine".
+	#
 	# Keep going when one refuses to die, but remember it: stopping three of four and
 	# exiting 0 is the same lie `terminate` was written to stop telling.
 	failed=0
-	for pid in $(instances); do stop_pid "$pid" "$(port_of "$pid")" || failed=1; done
+	for pid in $(instances); do
+		owner=$(checkout_of "$pid" 2>/dev/null || true)
+		if [[ "$ANY_CHECKOUT" != true && "$owner" != "$THIS_CHECKOUT" ]]; then
+			echo "==> leaving :$(port_of "$pid") (pid $pid) alone — ${owner:-owning checkout unknown}"
+			continue
+		fi
+		stop_pid "$pid" "$(port_of "$pid")" || failed=1
+	done
 	reap_run_jars
 	list_instances
 	exit $failed
 fi
 
 if [[ "$STOP_STALE" == true ]]; then
-	# Only the ones whose source tree has moved on under them. A deliberately-kept instance
-	# on current code survives, which is why this is not just --stop-all with extra steps.
+	# Only this checkout's instances, and only the ones whose OWN source tree has moved on
+	# under them. A deliberately-kept instance on current code survives, which is why this is
+	# not just --stop-all with extra steps; another checkout's instance survives whatever its
+	# state, because this checkout has no standing to judge it.
+	#
+	# Every skip is printed. A destructive command that silently does less than its name says
+	# is how somebody ends up running it again with a bigger hammer.
 	stopped=0
 	failed=0
 	for pid in $(instances); do
-		started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
-		if [[ -n "$(find pom.xml kweblens-*/pom.xml kweblens-*/src -newermt "$started" -print -quit 2>/dev/null)" ]]; then
-			if stop_pid "$pid" "$(port_of "$pid")"; then
-				stopped=$((stopped + 1))
-			else
-				failed=1
-			fi
+		verdict=$(stop_stale_verdict "$(checkout_of "$pid" 2>/dev/null || true)" "$(staleness_of "$pid")")
+		if [[ "$verdict" != stop ]]; then
+			echo "==> leaving :$(port_of "$pid") (pid $pid) alone — ${verdict#skip: }"
+			continue
+		fi
+		if stop_pid "$pid" "$(port_of "$pid")"; then
+			stopped=$((stopped + 1))
+		else
+			failed=1
 		fi
 	done
 	echo "==> stopped $stopped stale instance(s)"
@@ -600,7 +831,7 @@ stop_port
 # predating the fixes for the leaks they were demonstrating. Age is the tell, so it is
 # printed: a few minutes is a colleague, a few days is litter.
 warn_other_instances() {
-	local pid port started
+	local pid port started owner
 	# Match on the jar path, not on "kweblens": a looser pattern also matches this script's
 	# own argv and any editor or grep that happens to mention it.
 	for pid in $(instances); do
@@ -609,6 +840,14 @@ warn_other_instances() {
 		[[ -z "$port" || "$port" == "$PORT" ]] && continue
 		started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
 		echo "!!  another kweblens is on :${port} (pid ${pid}, since ${started})" >&2
+		# Whose it is, because the remedy below is port-targeted and therefore crosses
+		# checkouts — the one stop path that still does. Somebody else's forgotten instance
+		# and your own forgotten instance want different decisions.
+		owner=$(checkout_of "$pid" 2>/dev/null || true)
+		if [[ -n "$owner" && "$owner" != "$THIS_CHECKOUT" ]]; then
+			echo "!!    it belongs to another checkout (${owner}) — it is somebody else's to stop" >&2
+			continue
+		fi
 		echo "!!    it holds cluster watches and log streams; stop it with: $0 --port ${port} --stop" >&2
 	done
 }

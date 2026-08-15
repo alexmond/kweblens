@@ -163,6 +163,15 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-15 — **`--stop-stale` judged every JVM on the box against the tree that ran it, so it
+  stopped other agents' servers.** `instances()` is box-wide on purpose; the staleness predicate
+  used RELATIVE paths, i.e. "has *my* source changed since *your* process started". Measured: a
+  brand-new worktree's `pom.xml` mtime is the checkout time, which is newer than every running
+  instance, so **creating a worktree was enough to condemn all of them** — the user's :8080
+  included. → Ownership per pid from `/proc/<pid>/cwd` (`checkout_of`), staleness against **that**
+  tree, three-valued (`stale`/`fresh`/`unknown`), and unknown is never stopped. `--stop-all` got
+  the same gate. `--list` stays box-wide. **Ask a question about a process against the tree that
+  process came from — and when a check goes from reporting to acting, re-derive its scope.**
 - 2026-08-15 — **A colour delivered INLINE carries no name in the DOM, so `contrast-check` measured
   whichever tone the row order put first and reported it as "the status pill".** GH#393:
   `StatusBadge` hands its tint to `NTag`'s `:color`, so no tone class existed to match — the

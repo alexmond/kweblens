@@ -46,10 +46,18 @@ scripts/dev-run.sh --files-roots /tmp   # ...and confined to those paths (implie
 scripts/dev-run.sh --port 8085     # a second instance alongside the first
 scripts/dev-run.sh --stop          # stop whatever is on the port
 scripts/dev-run.sh --list          # every instance: pid, port, RSS, age, HEALTH, staleness
-scripts/dev-run.sh --stop-stale    # stop only those whose source tree has moved on
-scripts/dev-run.sh --stop-all      # stop all of them
+scripts/dev-run.sh --stop-stale    # stop THIS checkout's, whose own source tree has moved on
+scripts/dev-run.sh --stop-all      # stop every instance of THIS checkout
+scripts/dev-run.sh --stop-all --any-checkout   # ...and other checkouts' too
 scripts/dev-run.sh --self-check    # prove the instance detection still works
 ```
+
+`--list` is box-wide; the two **destructive** flags are not. Each pid's owning checkout is
+resolved from `/proc/<pid>/cwd`, staleness is judged against **that** tree, and an instance
+whose checkout cannot be resolved is never stopped — it reports `STALENESS UNKNOWN`. Before
+#401 `--stop-stale` asked "has *my* source tree changed since *your* process started" of every
+JVM on the box, so an agent who had edited a file two minutes ago stopped everyone else's
+server. `--any-checkout` opts back into the box-wide blast radius, deliberately.
 
 Starting an instance warns about kweblens instances on **other** ports, with their age and
 the command to stop each. A second instance is supported — that is what `--port` is for — so
