@@ -158,17 +158,108 @@ class SecurityAuditServiceTest {
 	 * this test would still pass with the exemption deleted — the vacuous-decoy trap this
 	 * class has already been bitten by once. Measured: with {@code isControlPlaneSubject}
 	 * returning false unconditionally, this fails with five findings.
+	 *
+	 * <p>
+	 * The fifth subject used to be {@code system:authenticated}, which #387 established
+	 * is <i>not</i> a control-plane identity. That assertion moved rather than went away
+	 * — it is now {@code reportsAClusterAdminGrantToEveryAuthenticatedIdentity},
+	 * asserting the opposite — and {@code system:monitoring} took its place here so this
+	 * decoy still pins five subjects and still holds a Group that carries no namespace.
+	 * Both are read off the same live k3s cluster's ClusterRoleBindings.
 	 */
 	@Test
 	void doesNotReportTheControlPlaneIdentitiesACorrectClusterGrantsAdminTo() {
 		seedBuiltIn();
 		clusterBinding("nodes", "cluster-admin", "Group", null, "system:nodes");
-		clusterBinding("everyone", "cluster-admin", "Group", null, "system:authenticated");
+		clusterBinding("monitoring", "cluster-admin", "Group", null, "system:monitoring");
 		clusterBinding("scheduler", "cluster-admin", "User", null, "system:kube-scheduler");
 		clusterBinding("kube-thing", "cluster-admin", "ServiceAccount", "kube-system", "controller");
 		pod("app", "web-1", "default");
 
 		assertThat(service().audit("mock", null, pods(null))).isEmpty();
+	}
+
+	/**
+	 * {@code system:authenticated} is spelled like the control plane and is the opposite
+	 * of a component: it is every user and every ServiceAccount that holds any credential
+	 * the cluster accepts, so this grant makes all of them administrators (#387).
+	 *
+	 * <p>
+	 * <b>Cluster-wide on purpose</b>, for the same reason as the decoy above: the subject
+	 * carries no namespace, so a namespaced audit drops it at the scope filter and would
+	 * pass against a check that never ran.
+	 */
+	@Test
+	void reportsAClusterAdminGrantToEveryAuthenticatedIdentity() {
+		seedBuiltIn();
+		clusterBinding("everyone", "cluster-admin", "Group", null, "system:authenticated");
+		pod("app", "web-1", "default");
+
+		// Exactly one: the subject names its own blast radius, so there is no second
+		// pod-listing finding — the answer is every pod, and every person, in the
+		// cluster.
+		assertThat(service().audit("mock", null, pods(null))).singleElement().satisfies((f) -> {
+			assertThat(f.title()).isEqualTo("ClusterRoleBinding grants cluster-admin to every authenticated identity");
+			assertThat(f.object()).isEqualTo("ClusterRoleBinding/everyone");
+			assertThat(f.severity()).isEqualTo("critical");
+			assertThat(f.detail()).contains("Group system:authenticated")
+				.contains("every user and every ServiceAccount whose credential the cluster accepts")
+				.contains("administrator of the whole cluster");
+		});
+	}
+
+	/**
+	 * The two spellings of "nobody in particular". {@code system:unauthenticated} is the
+	 * group a request that failed to authenticate lands in; {@code system:anonymous} is
+	 * the username it is given. Either one bound to {@code cluster-admin} hands the
+	 * cluster to whoever can open a connection to the API server.
+	 */
+	@Test
+	void reportsAClusterAdminGrantThatNeedsNoCredentialAtAll() {
+		seedBuiltIn();
+		clusterBinding("open-door", "cluster-admin", "Group", null, "system:unauthenticated");
+		clusterBinding("nobody", "cluster-admin", "User", null, "system:anonymous");
+		// The decoy: 'system:anonymous' is a User, so a binding that names it as a Group
+		// grants nothing at all. Reporting it would be a finding about a grant that does
+		// not exist, so it falls back to the reserved-prefix rule and stays silent — the
+		// same treatment 'system:serviceaccounts:' with no namespace after it gets.
+		clusterBinding("mis-kinded", "cluster-admin", "Group", null, "system:anonymous");
+		pod("app", "web-1", "default");
+
+		List<SecurityFinding> findings = service().audit("mock", null, pods(null));
+
+		assertThat(findings).extracting(SecurityFinding::object)
+			.containsExactly("ClusterRoleBinding/nobody", "ClusterRoleBinding/open-door");
+		assertThat(findings).allSatisfy((f) -> {
+			assertThat(f.severity()).isEqualTo("critical");
+			assertThat(f.title()).isEqualTo("ClusterRoleBinding grants cluster-admin to unauthenticated callers");
+			assertThat(f.detail()).contains("presenting no credential at all")
+				.contains("administrator of the whole cluster");
+		});
+	}
+
+	/**
+	 * A RoleBinding confines the grant to its own namespace, so it is the same warning
+	 * any other namespaced cluster-admin grant gets — the population makes it wider, not
+	 * deeper, and severity here has always meant what the binding confers.
+	 *
+	 * <p>
+	 * It is read in the CLUSTER-WIDE audit because the subject belongs to no namespace,
+	 * the long-standing rule a RoleBinding naming a User also follows. The namespaced
+	 * assertion below is the control that says so out loud rather than leaving it to be
+	 * discovered.
+	 */
+	@Test
+	void reportsANamespacedGrantToAnAuthenticationPopulationAsTheNarrowerThingItIs() {
+		roleBindingTo("app", "ns-everyone", "cluster-admin", "Group", null, "system:authenticated");
+
+		assertThat(service().audit("mock", null, pods(null))).singleElement().satisfies((f) -> {
+			assertThat(f.severity()).isEqualTo("warning");
+			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin to every authenticated identity");
+			assertThat(f.object()).isEqualTo("RoleBinding/app/ns-everyone");
+			assertThat(f.detail()).contains("full control of namespace 'app'");
+		});
+		assertThat(service().audit("mock", "app", pods("app"))).isEmpty();
 	}
 
 	/**
