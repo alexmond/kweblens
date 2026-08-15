@@ -4,7 +4,11 @@ target/
 .idea/
 build/
 .DS_Store
-data/
+# Anchored, and it must stay anchored: this is the runtime data directory a local run writes at
+# the repo root. Unanchored, `data/` matches a directory of that name ANYWHERE, which silently
+# excluded a whole Java package (`org.alexmond.kweblens.tui.data`) from `git add` — the files
+# compiled locally and would simply not have been in the commit.
+/data/
 *.log
 
 # kweblens-ui (Vite/React): build output + toolchain downloaded by frontend-maven-plugin

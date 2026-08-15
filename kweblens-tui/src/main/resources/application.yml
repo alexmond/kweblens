@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: kweblens-tui
+  main:
+    # Belt and braces with KweblensTuiApplication's explicit WebApplicationType.NONE: a TUI
+    # is never a server, and nothing about that should depend on classpath detection.
+    web-application-type: none
+    # The banner is 6 lines of ASCII art on the same stream as the output.
+    banner-mode: off
+
+logging:
+  level:
+    # A terminal app's stdout IS its output. Boot's INFO startup lines would interleave with
+    # it, and once #364 draws a screen they would interleave with the SCREEN — which is
+    # exactly the failure the GH#361 spike hit and first mistook for a rendering bug in the
+    # library. WARN keeps the stream clean for v1's plain listing; #364 must go further and
+    # take logging off the terminal's stream entirely, because a diff-drawing TUI cannot
+    # share stdout with anything at all.
+    root: warn
+
+kweblens:
+  tui:
+    # Register a cluster per kubeconfig context. Tests set this false so the registry starts
+    # empty and cannot reach a real cluster.
+    load-kubeconfig: true
+    # Objects per list request. Lists are always paged — see TuiProperties.
+    chunk-size: 500

@@ -88,22 +88,31 @@
 
         <picocli.version>4.7.7</picocli.version>
 
-        <!-- SonarQube analysis scope. The CLI is a console app whose stdout IS its output
-             (S106); test sources aren't a quality gate. Host URL + token passed at scan time. -->
+        <!-- Terminal UI (kweblens-tui). TamboUI is the widget layer; JLine is the substrate
+             underneath it and supplies org.jline.builtins.ScreenTerminal, the VT emulator the
+             exec pane renders a remote byte stream with. Library choice settled by the GH#361
+             spike; see docs/research/k9s-functionality.md §11. -->
+        <tamboui.version>0.4.0</tamboui.version>
+        <jline.version>3.30.16</jline.version>
+
+        <!-- SonarQube analysis scope. The CLI and the TUI are console apps whose stdout IS their
+             output (S106); test sources aren't a quality gate. Host URL + token passed at scan time. -->
         <sonar.projectKey>kweblens</sonar.projectKey>
         <sonar.projectName>kweblens</sonar.projectName>
-        <sonar.issue.ignore.multicriteria>cliStdout,testSources</sonar.issue.ignore.multicriteria>
+        <sonar.issue.ignore.multicriteria>cliStdout,tuiStdout,testSources</sonar.issue.ignore.multicriteria>
         <sonar.issue.ignore.multicriteria.cliStdout.ruleKey>java:S106</sonar.issue.ignore.multicriteria.cliStdout.ruleKey>
         <sonar.issue.ignore.multicriteria.cliStdout.resourceKey>**/kweblens-cli/**</sonar.issue.ignore.multicriteria.cliStdout.resourceKey>
+        <sonar.issue.ignore.multicriteria.tuiStdout.ruleKey>java:S106</sonar.issue.ignore.multicriteria.tuiStdout.ruleKey>
+        <sonar.issue.ignore.multicriteria.tuiStdout.resourceKey>**/kweblens-tui/**</sonar.issue.ignore.multicriteria.tuiStdout.resourceKey>
         <sonar.issue.ignore.multicriteria.testSources.ruleKey>*</sonar.issue.ignore.multicriteria.testSources.ruleKey>
         <sonar.issue.ignore.multicriteria.testSources.resourceKey>**/src/test/**</sonar.issue.ignore.multicriteria.testSources.resourceKey>
     </properties>
 
     <!--
         Only the publishable libraries live here, so `mvn -Prelease deploy` (which deactivates the
-        activeByDefault 'default' profile) publishes just these to Maven Central. The runnable app
-        (kweblens-web) is an application, not a library — it's added by the 'default' and 'docker'
-        profiles below and is never published.
+        activeByDefault 'default' profile) publishes just these to Maven Central. The runnable apps
+        (kweblens-web, kweblens-tui) are applications, not libraries — they're added by the
+        'default' profile below (and kweblens-web also by 'docker') and are never published.
     -->
     <modules>
         <module>kweblens-core</module>
@@ -151,6 +160,46 @@
                 <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- TamboUI BOM — aligns the widget layer with its JLine 3 backend. -->
+            <dependency>
+                <groupId>dev.tamboui</groupId>
+                <artifactId>tamboui-bom</artifactId>
+                <version>${tamboui.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!--
+                JLine, pinned on the UBER artifact — and that is the whole point.
+
+                tamboui-jline3-backend:0.4.0 depends on `org.jline:jline` (the uber jar), which
+                bundles org/jline/terminal/**, org/jline/reader/** and org/jline/builtins/**
+                under exactly the package names the SPLIT artifacts (jline-terminal,
+                jline-reader, jline-builtins) also use. So managing the split artifacts forward
+                — which docs/research/k9s-functionality.md §11 originally instructed — does not
+                override anything: it puts a SECOND copy of every class on the classpath beside
+                the uber, and jar order decides the winner. Probed on that classpath by the
+                GH#361 spike, org.jline.builtins.ScreenTerminal — the exec pane's entire VT
+                emulator — still loaded from the stale 3.25.1 uber jar, silently, because
+                duplicate classes are not an error.
+
+                Managing the uber instead replaces the one artifact TamboUI actually asks for,
+                so the resolved classpath carries exactly one jline jar and one copy of every
+                class. dependencyManagement governs EVERY path that ever pulls the uber, so a
+                future transitive (a TamboUI bump, picocli-shell-jline3) is pinned too rather
+                than reintroducing the duplicate. Deliberately do NOT also manage the split
+                artifacts here: naming them is what made the original instruction look correct.
+
+                JLineSingleProviderTest asserts the outcome rather than the intent — one
+                classpath URL per class, all three from the same jar — because "it works today"
+                is exactly what a duplicated classpath looks like.
+            -->
+            <dependency>
+                <groupId>org.jline</groupId>
+                <artifactId>jline</artifactId>
+                <version>${jline.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -399,6 +448,19 @@
                 <module>kweblens-ui</module>
                 <module>kweblens-web</module>
                 <module>kweblens-it</module>
+                <!--
+                    kweblens-tui is here and NOT in the top-level <modules>, i.e. it is built and
+                    gated by every ordinary `verify` (and by CI) but is never published to Maven
+                    Central, and `-Prelease` / `-Pdocker` drop it. That is deliberate (GH#362): it
+                    is an application whose public surface is a screen, not an API anyone compiles
+                    against, and the two modules that DO publish are the two that owe callers a
+                    stable API. The repo has already paid for the other choice once — kweblens-cli
+                    is on the publishing path and shipped a fat jar that died on its first line
+                    (#363) — and seven queued tickets (#364-#370) will rewrite this module's
+                    internals, which is the worst possible thing to have under a published
+                    coordinate. Publishing it later is a one-line move; unpublishing is not.
+                -->
+                <module>kweblens-tui</module>
             </modules>
         </profile>
 
