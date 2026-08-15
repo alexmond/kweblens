@@ -3,7 +3,7 @@ package org.alexmond.kweblens.tui.filter;
 import java.util.List;
 
 /**
- * The syntax, as the operator reads it — the same 13 rows and 6 notes the browser's help
+ * The syntax, as the operator reads it — the same 13 rows and 7 notes the browser's help
  * popover renders.
  *
  * <p>
@@ -43,6 +43,9 @@ public final class FilterHelp {
 	 */
 	public static final List<String> NOTES = List.of(
 			"Text matching is case-insensitive; label values compare exactly, like kubectl.",
+			"A /regex/ belongs to the engine that runs it, and kweblens has two of them (the browser’s and "
+					+ "the terminal’s). Unicode property classes like \\p{L} work in both; a pattern an engine "
+					+ "cannot read is refused in a sentence rather than quietly read as something else.",
 			"Kubernetes writes label presence as “partition” and absence as “!partition”. Here they are "
 					+ "label:partition and -label:partition, because a bare word stays a text search.",
 			"status: is the state the server computed — the one the overview cards count, so a card’s number "

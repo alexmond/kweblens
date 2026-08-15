@@ -29,9 +29,9 @@ import type { KubeObject } from './types';
  * <li><b>bare word</b> — case-insensitive substring over name, namespace and kind. This is
  * exactly what the box did before and is the common case; nothing about it changed.
  * <li><b>{@code "two words"}</b> — the same, for text with a space in it.
- * <li><b>{@code /regex/}</b> — a JavaScript regex over the same three fields, case-insensitive.
- * Opt-in via the slashes, because a bare `.` or `*` in a substring search has to keep meaning
- * itself.
+ * <li><b>{@code /regex/}</b> — a JavaScript regex over the same three fields, case-insensitive
+ * and <b>in Unicode mode</b> (see below). Opt-in via the slashes, because a bare `.` or `*` in a
+ * substring search has to keep meaning itself.
  * <li><b>{@code name:} {@code ns:} {@code kind:}</b> — the same text matching against one
  * field only; the value may itself be a `/regex/` or a `"quoted string"`.
  * <li><b>{@code status:}</b> — the state the SERVER put the object in, matched
@@ -63,6 +63,25 @@ import type { KubeObject } from './types';
  *
  * <p>A row whose kind kweblens has no verdict for carries no state at all, and matches no
  * `status:` term. That is not a claim that it is healthy — it is the absence of a claim.
+ *
+ * <h2>A regex is compiled in Unicode mode, and some old patterns are now refused</h2>
+ *
+ * The flags are `iu`, and the `u` is load-bearing — see {@link REGEX_FLAGS} for why, and for why
+ * not its superset `v`. It costs backward compatibility on purpose: Unicode mode has no
+ * web-compatibility fallback, so a pattern that leant on one is an error now rather than a
+ * different pattern. Measured against V8, the whole of what changed is
+ * <ul>
+ * <li>`\p{…}` and `\P{…}` are Unicode property classes — the bug this was done for.
+ * <li>an escape JavaScript does not define is refused instead of being the character: outside a
+ * class `\-` must be written `-` (inside one, `[a\-b]`, it stays legal), and `\A` / `\z` / `\Q…\E`
+ * stop pretending to be `java.util.regex`'s.
+ * <li>a lone `{` or `}`, an open-ended `x{,3}`, and a class range with a class escape in it
+ * (`[\d-a]`) are refused rather than read as text.
+ * <li>`.`, a quantifier and case folding work on code points: `/^.$/` is one emoji, and `i` folds
+ * the whole of Unicode as the terminal's `CASE_INSENSITIVE | UNICODE_CASE` always did.
+ * </ul>
+ * Each of those is a REFUSAL — a sentence, and a list that stays whole — never a quiet change of
+ * meaning. `[]` and `[^]` are unaffected: V8 accepts both in either mode.
  *
  * <h2>Label semantics are Kubernetes', not ours</h2>
  *
@@ -275,6 +294,57 @@ function mergeSetOperators(tokens: string[]): string[] {
 
 // --- term parsing -------------------------------------------------------------------------
 
+/**
+ * The flags every `/regex/` is compiled with.
+ *
+ * <p><b>`u` is not decoration — without it a pattern can mean something other than what it says,
+ * silently</b> (#410). Outside Unicode mode JavaScript keeps Annex B's web-compatibility rule
+ * that an *unrecognised* escape is the character itself, so `\p` is a literal `p` and `/\p{L}/`
+ * searches for the text `p{L}`: zero rows, no error, and no way for the reader to tell that from
+ * a cluster with nothing in it. The same rule quietly re-reads `\A`, `\z`, `\h`, `\R` and
+ * `\Q…\E` — every escape `java.util.regex` has and JavaScript does not — as plain letters, so
+ * the `kweblens-tui` port and this file were answering different questions with the same word.
+ *
+ * <p><b>Not `v`</b>, its ES2024 superset: `build.target` is Vite 5's default `modules`, whose
+ * floor is `safari14`, and Safari only learned `v` in 17. An unsupported flag is a `SyntaxError`
+ * from the constructor, so on that browser EVERY pattern would be refused — the one failure mode
+ * worse than the bug. `u` is ES2015 and below the floor everywhere. `v` also buys nothing here:
+ * it is set arithmetic (`[\p{L}--[a-z]]`), which the Java side has no spelling for either.
+ */
+const REGEX_FLAGS = 'iu';
+
+/** Does this pattern compile at all in the dialect that is no longer used? */
+function legacyOnly(source: string): boolean {
+  try {
+    // The value is thrown away on purpose: whether it COMPILES is the whole question.
+    new RegExp(source, 'i');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refuse a pattern in a sentence, never in an empty table.
+ *
+ * <p>V8 prefixes its reason with the pattern it was already handed — "Invalid regular expression:
+ * /vmstack(/iu: Unterminated group" — so quoting it whole printed the pattern twice and leaked
+ * flags the operator never typed. Strip that prefix when it is there and keep whatever the engine
+ * actually said; other engines word it differently and are passed through unchanged.
+ *
+ * <p>A pattern the old dialect would have taken gets one more clause, because the engine's reason
+ * on its own is a riddle: "Invalid escape" about `/kube\-system/` looks like an accusation against
+ * a pattern that reads perfectly well, and the operator cannot see the flag that changed its mind.
+ * A pattern that is broken in every dialect does NOT get it — a false lead is worse than terse.
+ */
+function refuse(source: string, e: unknown): never {
+  const reason = (e as Error).message.replace(/^Invalid regular expression: \/.*\/[a-z]*: /, '');
+  const mode = legacyOnly(source)
+    ? ' (only legal outside Unicode mode, which is what makes \\p{L} a letter class)'
+    : '';
+  throw new FilterError(`Invalid regex /${source}/ — ${reason}${mode}`);
+}
+
 /** The compiled matcher for a `/regex/` value, or null when the value is not one. */
 function regexMatcher(raw: string): TextMatcher | null {
   if (!raw.startsWith('/') || !raw.endsWith('/') || raw.length < 2) {
@@ -286,15 +356,9 @@ function regexMatcher(raw: string): TextMatcher | null {
   }
   let re: RegExp;
   try {
-    re = new RegExp(source, 'i');
+    re = new RegExp(source, REGEX_FLAGS);
   } catch (e) {
-    // V8 prefixes its reason with the pattern it was already handed — "Invalid regular
-    // expression: /vmstack(/i: Unterminated group" — so quoting it whole printed the
-    // pattern twice and leaked the `i` flag the operator never typed. Strip that prefix
-    // when it is there and keep whatever the engine actually said; other engines word it
-    // differently and are passed through unchanged.
-    const reason = (e as Error).message.replace(/^Invalid regular expression: \/.*\/[a-z]*: /, '');
-    throw new FilterError(`Invalid regex /${source}/ — ${reason}`);
+    refuse(source, e);
   }
   return (v) => re.test(v);
 }
@@ -613,6 +677,7 @@ export const FILTER_HELP: FilterHelpRow[] = [
 /** Where this is knowingly narrower than `kubectl -l`, said out loud rather than left to be discovered. */
 export const FILTER_HELP_NOTES: string[] = [
   'Text matching is case-insensitive; label values compare exactly, like kubectl.',
+  'A /regex/ belongs to the engine that runs it, and kweblens has two of them (the browser’s and the terminal’s). Unicode property classes like \\p{L} work in both; a pattern an engine cannot read is refused in a sentence rather than quietly read as something else.',
   'Kubernetes writes label presence as “partition” and absence as “!partition”. Here they are label:partition and -label:partition, because a bare word stays a text search.',
   'status: is the state the server computed — the one the overview cards count, so a card’s number and the rows it selects are the same objects. The whole label has to match, or “Complete” would take “Completed” with it and those two numbers would stop agreeing.',
   'A kind the server has no verdict for carries no state, and no status: term selects it — the absence of a claim, not a claim of health.',
