@@ -188,7 +188,11 @@ public class SecurityAuditService {
 	 * what lets a namespaced audit of that namespace see a cluster-scoped binding aimed
 	 * at it — the accounts it hands cluster-admin to are exactly the ones in scope.
 	 * {@code system:serviceaccounts} spans the cluster and so stays in the cluster-wide
-	 * view, like a User.
+	 * view, like a User — and so do the authentication populations (#387), which are
+	 * everyone in the cluster and everyone outside it. A grant to one of those appears in
+	 * the cluster-wide diagnosis only, including when the binding that makes it is a
+	 * namespaced RoleBinding: the subject belongs to no namespace, which is the same rule
+	 * a RoleBinding naming a User has always followed.
 	 */
 	private String subjectNamespace(Subject subject, String bindingNamespace) {
 		if ("ServiceAccount".equals(subject.getKind())) {
@@ -204,6 +208,9 @@ public class SecurityAuditService {
 	private SecurityFinding bindingFinding(Grant grant, Subject subject, String subjectNamespace) {
 		if (RbacSubjects.isWorkloadIdentityGroup(subject)) {
 			return workloadGroupFinding(grant, subject, subjectNamespace);
+		}
+		if (RbacSubjects.isAuthenticationPopulation(subject)) {
+			return authenticationPopulationFinding(grant, subject);
 		}
 		String who = describe(subject, subjectNamespace);
 		if (grant.clusterScoped()) {
@@ -266,6 +273,54 @@ public class SecurityAuditService {
 		return (subjectNamespace != null)
 				? "ClusterRoleBinding grants cluster-admin to every ServiceAccount in a namespace"
 				: "ClusterRoleBinding grants cluster-admin to every ServiceAccount in the cluster";
+	}
+
+	/**
+	 * A grant made to an authentication outcome — {@code system:authenticated}, or the
+	 * {@code system:unauthenticated} group and {@code system:anonymous} user (#387).
+	 *
+	 * <p>
+	 * <b>Severity is the scope of what the binding confers</b>, the same axis every other
+	 * finding here uses: a ClusterRoleBinding to {@code cluster-admin} is
+	 * {@code critical} and a RoleBinding, which cannot reach past its own namespace, is a
+	 * {@code warning}.
+	 *
+	 * <p>
+	 * <b>Who holds it is not in the severity, and could not be.</b> These two cases are
+	 * not equally bad — one needs a credential the cluster accepts and the other needs
+	 * nothing but a route to the API server — but there is no severity above
+	 * {@code critical} to put the second in, and demoting the first would file "every
+	 * user and every workload in this cluster is an administrator" below a single
+	 * account's namespaced grant. {@code info} is not an option: it is the bucket for
+	 * what could not be checked. So the distinction is carried where it can be read — a
+	 * separate static title per case, and a detail that names the population in words.
+	 */
+	private SecurityFinding authenticationPopulationFinding(Grant grant, Subject subject) {
+		boolean open = RbacSubjects.isUnauthenticatedPopulation(subject);
+		String who = open ? "any caller that can reach the API server, presenting no credential at all"
+				: "every user and every ServiceAccount whose credential the cluster accepts";
+		String confers = grant.clusterScoped() ? "administrator of the whole cluster"
+				: "full control of namespace '" + grant.namespace() + "'";
+		return new SecurityFinding(grant.clusterScoped() ? "critical" : "warning", populationTitle(grant, open),
+				grant.ref(),
+				"roleRef ClusterRole/" + RbacSubjects.CLUSTER_ADMIN + ", subject " + subject.getKind() + " "
+						+ subject.getName() + " — " + who + " is " + confers,
+				"Remove the binding, and grant only the identities that need it."
+						+ " Membership of this subject is decided by the API server for every request,"
+						+ " so the grant cannot be narrowed by editing users or accounts.");
+	}
+
+	/**
+	 * Static per case, because the title is what a reader groups findings by and the
+	 * order they sort in.
+	 */
+	private String populationTitle(Grant grant, boolean open) {
+		if (!grant.clusterScoped()) {
+			return open ? "RoleBinding grants cluster-admin to unauthenticated callers"
+					: "RoleBinding grants cluster-admin to every authenticated identity";
+		}
+		return open ? "ClusterRoleBinding grants cluster-admin to unauthenticated callers"
+				: "ClusterRoleBinding grants cluster-admin to every authenticated identity";
 	}
 
 	/**

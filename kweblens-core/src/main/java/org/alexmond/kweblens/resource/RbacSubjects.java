@@ -49,6 +49,23 @@ public final class RbacSubjects {
 	/** Prefix of the group that contains every ServiceAccount in one namespace. */
 	private static final String ACCOUNTS_IN_NAMESPACE_GROUP = ALL_ACCOUNTS_GROUP + ":";
 
+	/**
+	 * The group of every principal — user or ServiceAccount — whose credential the API
+	 * server accepted.
+	 */
+	private static final String AUTHENTICATED_GROUP = "system:authenticated";
+
+	/**
+	 * The group of every caller that presented no credential, or one that was rejected.
+	 */
+	private static final String UNAUTHENTICATED_GROUP = "system:unauthenticated";
+
+	/**
+	 * The username the API server gives a request it could not authenticate. It is a
+	 * <i>User</i>, not a group — the matching group is {@link #UNAUTHENTICATED_GROUP}.
+	 */
+	private static final String ANONYMOUS_USER = "system:anonymous";
+
 	private RbacSubjects() {
 	}
 
@@ -72,6 +89,16 @@ public final class RbacSubjects {
 	/**
 	 * Whether these subjects grant something to the named ServiceAccount — directly, or
 	 * through one of the {@code system:serviceaccounts} groups that contains it.
+	 *
+	 * <p>
+	 * <b>An authentication population is deliberately not a match</b>, and that is a
+	 * decision rather than an oversight (#387). Every ServiceAccount is in
+	 * {@code system:authenticated}, so a binding to it is true of this account and of
+	 * every other one — as an answer to "what has <i>this</i> account been granted" it
+	 * says nothing while burying the grants that do. The security audit asks the opposite
+	 * question — "what is this cluster configured to permit" — and there the same binding
+	 * is the whole finding, which is why {@link #isControlPlaneSubject} treats it as a
+	 * population and this method does not treat it as an identity.
 	 * @param subjects a binding's subject list, possibly null
 	 * @param namespace the account's namespace
 	 * @param name the account's name
@@ -120,21 +147,33 @@ public final class RbacSubjects {
 	 * ClusterRoleBinding for it, so reporting it would fire on a correctly installed
 	 * cluster and train the reader to skip the whole check.</li>
 	 * <li><b>The rest of the reserved {@code system:} namespace</b> —
-	 * {@code system:nodes}, {@code system:kube-scheduler},
-	 * {@code system:kube-controller-manager}, {@code system:authenticated} and friends:
-	 * identities the API server issues, not ones an operator created.</li>
+	 * {@code system:nodes}, {@code system:monitoring}, {@code system:kube-scheduler},
+	 * {@code system:kube-controller-manager} and friends: identities the API server
+	 * issues to a component, not ones an operator created.</li>
 	 * </ul>
 	 *
 	 * <p>
-	 * <b>The carve-out, and the point of this method (#382):</b>
-	 * {@code system:serviceaccounts} and {@code system:serviceaccounts:<namespace>} are
-	 * spelled like control-plane identities and are not. They are the set of every
-	 * <i>workload</i> identity — the pods an operator deploys — so a
-	 * {@code cluster-admin} grant to one of them is a severe misconfiguration and must be
-	 * reported. No cluster ships such a grant: measured against a live k3s cluster, the
-	 * only default binding naming {@code system:serviceaccounts} is
-	 * {@code system:service-account-issuer-discovery}, whose roleRef is not
-	 * {@code cluster-admin}.
+	 * <b>The carve-out, and the point of this method:</b> the reserved namespace holds
+	 * two different sorts of thing, and only one of them is a component. The other is an
+	 * <b>open population</b> — a subject defined by a <i>property of the caller</i>
+	 * rather than by which component it is, whose membership is automatic and
+	 * unrevokable, so the grant cannot be narrowed by editing any account. A population
+	 * is never the control plane, however it is spelled. Two families, so far:
+	 * <ul>
+	 * <li><b>Workload identities (#382)</b> — {@code system:serviceaccounts} and
+	 * {@code system:serviceaccounts:<namespace>}: every pod an operator deploys,
+	 * including ones deployed tomorrow. No cluster ships such a {@code cluster-admin}
+	 * grant: measured against a live k3s cluster, the only default binding naming
+	 * {@code system:serviceaccounts} is {@code system:service-account-issuer-discovery},
+	 * whose roleRef is not {@code cluster-admin}.</li>
+	 * <li><b>Authentication outcomes (#387)</b> — {@code system:authenticated},
+	 * {@code system:unauthenticated} and the {@code system:anonymous} user: everyone who
+	 * did, or did not, present a credential the API server accepted. Also not shipped
+	 * with admin: on the same live cluster {@code system:authenticated} appears only on
+	 * {@code system:basic-user}, {@code system:discovery} and
+	 * {@code system:public-info-viewer}, and {@code system:unauthenticated} only on the
+	 * last of those.</li>
+	 * </ul>
 	 *
 	 * <p>
 	 * The rule is about the subject and never the binding's name: a binding called
@@ -145,10 +184,53 @@ public final class RbacSubjects {
 		if ("ServiceAccount".equals(subject.getKind())) {
 			return SYSTEM_NAMESPACES.contains(accountNamespace(subject, bindingNamespace));
 		}
-		if (isWorkloadIdentityGroup(subject)) {
+		if (isOpenPopulation(subject)) {
 			return false;
 		}
 		return String.valueOf(subject.getName()).startsWith(SYSTEM_PREFIX);
+	}
+
+	/**
+	 * Whether this subject names a <b>population</b> rather than a component: a set every
+	 * caller with the right property is in, whether or not anyone intended it.
+	 *
+	 * <p>
+	 * This is the one exception to the reserved-prefix rule, and it is deliberately a
+	 * union of named families rather than a widening filter — a new family has to be
+	 * argued for in its own predicate, so the exception cannot grow by accident.
+	 */
+	private static boolean isOpenPopulation(Subject subject) {
+		return isWorkloadIdentityGroup(subject) || isAuthenticationPopulation(subject);
+	}
+
+	/**
+	 * Whether this subject is <b>an authentication outcome</b> — the set of callers the
+	 * API server decided did, or did not, present an acceptable credential (#387).
+	 *
+	 * <p>
+	 * Matched on the exact kind the API server actually issues, because the other
+	 * spelling grants nothing: {@code system:authenticated} and
+	 * {@code system:unauthenticated} are Groups, while {@code system:anonymous} is the
+	 * <i>username</i> an unauthenticated request is given. A binding that names
+	 * {@code system:anonymous} as a Group confers no access at all, so it falls back to
+	 * the reserved-prefix rule and stays unreported — the same treatment
+	 * {@code system:serviceaccounts:} with no namespace after it gets.
+	 */
+	public static boolean isAuthenticationPopulation(Subject subject) {
+		String name = String.valueOf(subject.getName());
+		if ("Group".equals(subject.getKind())) {
+			return AUTHENTICATED_GROUP.equals(name) || UNAUTHENTICATED_GROUP.equals(name);
+		}
+		return "User".equals(subject.getKind()) && ANONYMOUS_USER.equals(name);
+	}
+
+	/**
+	 * Whether membership of this authentication population needs <b>no credential at
+	 * all</b> — anyone who can open a connection to the API server is in it. Only
+	 * meaningful for a subject {@link #isAuthenticationPopulation(Subject)} accepts.
+	 */
+	public static boolean isUnauthenticatedPopulation(Subject subject) {
+		return UNAUTHENTICATED_GROUP.equals(subject.getName()) || ANONYMOUS_USER.equals(subject.getName());
 	}
 
 	/**
