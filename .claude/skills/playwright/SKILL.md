@@ -163,6 +163,33 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-15 — **A colour delivered INLINE carries no name in the DOM, so `contrast-check` measured
+  whichever tone the row order put first and reported it as "the status pill".** GH#393:
+  `StatusBadge` hands its tint to `NTag`'s `:color`, so no tone class existed to match — the
+  finest available selector was `.n-tag`, and it sampled the danger tone on this box's cluster
+  (5.62/6.56) and the warn tone on the simulator (4.51/8.06). Every tone that got covered was
+  covered because the two environments disagreed, and the warn tone's **0.01 of margin** in light
+  had been sitting under someone else's name. The `ok` tone had never been measured anywhere, and
+  the reason turned out not to be the scene at all: `badgeTone` maps `ok` to no pill (#240), so an
+  ok STATUS PILL cannot be rendered in any environment — an entry in the tone map that nothing
+  could ask for, i.e. a permanently unmeasurable surface reading as a pass. → Three changes, and a
+  trap found by the control. (a) `StatusBadge` carries `tone-*` **beside** the inline colour — a
+  LABEL, styled by nothing, so the colour still has exactly one source; scenes now name each tone
+  and the `ok` pair is measured where it is actually painted, on the list header's status chips
+  (6.92 light / 8.52 dark, its first ratio ever). (b) A tone that is missing must FAIL, not print
+  a note, but only where absence is really a defect: `REQUIRED_WHEN` names an ORACLE already on
+  the page — the list's own status chip, drawn only for a state some row carries — so a warn chip
+  with no measurable warn pill exits 1, while an all-healthy cluster requires nothing. (c) AA is a
+  legal minimum, not a margin: `FLOOR_OVERRIDE` holds the tone family to **5.5** (floor + 1.0, the
+  headroom the danger tone already had). The trap: the Status column is **not** the only one
+  rendering this component — Ready badges `1/2` warn and `0/1` err from the same tokens and comes
+  FIRST in DOM order, so the scene measured a Ready pill under the status pill's name and the
+  `status:` filter it had just installed had no bearing on the sample. Same shape as GH#389's
+  `.n-tag`, one level finer. Selectors are `[data-col-key=status] .status-badge.tone-*` now, and
+  the fixture control keeps a tone-err **Ready** pill on the page that the status control must not
+  find. **A selector that resolves anywhere on the row is not a selector for the column the scene
+  narrowed — and the way to know is a scene where the two answers differ.**
+
 - 2026-08-14 — **`row` counts flex LINES, so it reported the drawer header as fine before AND
   after #379 — a green line over a 14.34px step.** The expand toggle sat at `top=60` and Naive's
   close at `top=74.34`, on one flex line the whole time because `.n-drawer-header` is `nowrap`.

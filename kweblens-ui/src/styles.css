@@ -159,6 +159,26 @@ html.kw-dark {
   --info-fg: #8fc6ff;
   --info-line: rgba(143, 198, 255, 0.32);
 }
+/* TEXT ON A STATE'S OWN TINT — the derived half of the semantic palette.
+   A state's `fg` was designed to read on the PANEL. On its own `tint` it is a different
+   measurement, and this project has got that wrong on four surfaces now: the nav, the command
+   palette, the drawer's Naive tag (3.80 / 3.02 / 3.36:1) and the status pill, whose warn tone
+   measured 4.51:1 in light against a 4.5 floor — a pass by one hundredth, which any nudge to
+   the tint alpha or to the panel behind it would have taken under (GH#393).
+   So the foreground for a tinted surface is derived rather than re-picked: the state's own `fg`
+   mixed 65% toward the theme's `--text`, which moves it toward black in light and toward white
+   in dark — the direction that gains contrast in BOTH. The mix keeps the hue plainly readable
+   as green / amber / red; a literal per tone per theme is how `.chip` shipped at 1.75:1 (#260).
+   Declared ONCE, not per theme: `--warn-fg` and `--text` are both redefined on this same
+   element by `html.kw-dark`, so the mix resolves against whichever palette is in force. A dark
+   override here would be a second copy of the construction, which is the defect this token
+   exists to remove — the status pill and the list header's status chips now paint from one. */
+:root {
+  --ok-on-tint: color-mix(in srgb, var(--ok-fg) 65%, var(--text));
+  --warn-on-tint: color-mix(in srgb, var(--warn-fg) 65%, var(--text));
+  --danger-on-tint: color-mix(in srgb, var(--danger-fg) 65%, var(--text));
+}
+
 html.kw-dark body {
   background: var(--bg);
 }
