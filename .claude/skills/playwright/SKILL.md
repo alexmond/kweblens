@@ -219,7 +219,14 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   any symptom**, which is the case that matters — such an instance answers correctly until it
   needs a class it has not loaded, so it is *latently* dead and looks perfect. `--self-check`
   gained the two-directional control: a socket that accepts and never answers must not read as
-  `serving` (a TCP-connect check would have passed it), and a real instance must.
+  `serving` (a TCP-connect check would have passed it), and a real instance must. And **(d) the
+  first `JAR REPLACED` accused a healthy instance**, caught only because that control was run
+  against the fix rather than the bug: it asked "is the jar newer than the process", while
+  `dev-run.sh` writes the per-port copy **7 ms** before forking the JVM and `ps -o lstart=` has
+  one-second resolution — so on a perfectly good launch that comparison is a coin flip. It is now
+  identity-based (the inode the JVM holds vs the inode at the path), with the mtime kept only as a
+  30 s-grace fallback for an in-place overwrite. **A comparison between two events milliseconds
+  apart, read through a one-second clock, is not a check.**
   **A wedge has no single presentation — hang, connection reset, non-200, and health-UP-but-
   nothing-else all appeared from the same cause — so probe the surface you measure, not the
   process.**

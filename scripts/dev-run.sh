@@ -345,35 +345,46 @@ jar_of() {
 # This is the check that catches a sabotaged instance BEFORE it has any symptom — the case
 # that matters most, because such an instance answers every request correctly until it
 # happens to need a class it has not loaded, which may be minutes later and in the middle of
-# a measurement. Two independent signals, either of which is conclusive:
+# a measurement. Three signals, in order of how much they can be trusted:
 #
 #   (a) the open fd no longer resolves to the path it was started from. A rename leaves
 #       `<jar> (deleted)`; a Maven build leaves `<jar>.original`, because maven-jar-plugin
-#       truncates the live inode and repackage then renames it aside. Both measured in #394.
-#   (b) the file at that path is NEWER than the process. Whatever the JVM is holding, it is
-#       not what is on disk now. This catches an in-place overwrite that keeps the inode,
-#       which (a) cannot see.
+#       truncates the live inode and repackage then renames it aside. Both measured in #394,
+#       and (a) is what actually catches the Maven case.
+#   (b) the INODE the JVM holds is no longer the inode at that path. Exact, involves no
+#       clock, and catches any replace-by-rename that (a)'s path spelling might miss.
+#   (c) same inode, but the file has been written since the process started — an in-place
+#       overwrite, which neither (a) nor (b) can see.
 #
-# Both are conservative: `ps -o lstart=` has one-second resolution and the comparison is
-# strictly-newer, so a build that finishes in the same second as the launch reads as clean
-# rather than raising a false alarm on a perfectly good instance.
+# (c) needs a grace period, and the first version without one FALSELY accused a healthy
+# instance. `dev-run.sh` writes the per-port copy immediately before forking the JVM —
+# measured at **7 ms** before it — while `ps -o lstart=` has only one-second resolution, so
+# "is the jar newer than the process" is a coin flip on a perfectly good launch. The grace
+# has to be longer than a launch copy (milliseconds reflinked, a few seconds for a real
+# 110 MB copy) and shorter than any build that could sabotage anything; 30 s is comfortably
+# between, and nothing is lost by it because a Maven build is caught by (a) regardless.
 jar_replaced() {
-	local pid="$1" jar target fd started jar_epoch start_epoch
+	local pid="$1" jar target fd started jar_epoch start_epoch held_inode path_inode
+	local grace=30
 	jar=$(jar_of "$pid") || return 1
 	for fd in "/proc/${pid}"/fd/*; do
 		target=$(readlink "$fd" 2>/dev/null) || continue
 		case "$target" in
-			"$jar") ;;
+			"$jar") held_inode=$(stat -Lc %i "$fd" 2>/dev/null) ;;
 			"$jar (deleted)") return 0 ;;
 			"$jar".original*) return 0 ;;
 		esac
 	done
 	[[ -f "$jar" ]] || return 0
+	path_inode=$(stat -c %i "$jar" 2>/dev/null) || return 1
+	if [[ -n "${held_inode:-}" && "$held_inode" != "$path_inode" ]]; then
+		return 0
+	fi
 	started=$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')
 	[[ -n "$started" ]] || return 1
 	start_epoch=$(date -d "$started" +%s 2>/dev/null) || return 1
 	jar_epoch=$(stat -c %Y "$jar" 2>/dev/null) || return 1
-	[[ "$jar_epoch" -gt "$start_epoch" ]]
+	[[ "$jar_epoch" -gt $((start_epoch + grace)) ]]
 }
 
 # Does this instance SERVE? Asked, not inferred.
@@ -421,6 +432,29 @@ health_of() {
 		return 0
 	fi
 	echo "serving"
+}
+
+# Delete per-port copies no live instance is holding. Without this every port ever used leaves
+# a jar behind, and on a filesystem without reflink that is ~110 MB each.
+#
+# Defined up here, above the flag handling, because the STOP paths call it too: reaping only on
+# start would leave the last instance's copy behind for as long as nobody starts another — the
+# exact case where someone has finished for the day. `readlink -f` failing yields an empty
+# pattern, which matches and so SKIPS the delete: a jar whose identity cannot be established
+# is left alone rather than removed on a guess.
+reap_run_jars() {
+	local f held pid
+	held=""
+	for pid in $(instances); do
+		held="${held} $(jar_of "$pid" 2>/dev/null)"
+	done
+	for f in kweblens-web/target/kweblens-run-*.jar; do
+		[[ -e "$f" ]] || continue
+		case "$held" in
+			*"$(readlink -f "$f")"*) continue ;;
+		esac
+		rm -f "$f"
+	done
 }
 
 list_instances() {
@@ -471,6 +505,7 @@ if [[ "$STOP_ALL" == true ]]; then
 	# exiting 0 is the same lie `terminate` was written to stop telling.
 	failed=0
 	for pid in $(instances); do stop_pid "$pid" "$(port_of "$pid")" || failed=1; done
+	reap_run_jars
 	list_instances
 	exit $failed
 fi
@@ -491,12 +526,14 @@ if [[ "$STOP_STALE" == true ]]; then
 		fi
 	done
 	echo "==> stopped $stopped stale instance(s)"
+	reap_run_jars
 	list_instances
 	exit "${failed:-0}"
 fi
 
 if [[ "$STOP" == true ]]; then
 	stop_port || exit 1
+	reap_run_jars
 	exit 0
 fi
 
@@ -629,23 +666,6 @@ fi
 prepare_run_jar() {
 	cp --reflink=auto "$JAR" "${RUN_JAR}.tmp"
 	mv -f "${RUN_JAR}.tmp" "$RUN_JAR"
-}
-
-# Delete per-port copies no live instance is holding. Without this every port ever used
-# leaves a jar behind, and on a filesystem without reflink that is ~110 MB each.
-reap_run_jars() {
-	local f held pid
-	held=""
-	for pid in $(instances); do
-		held="${held} $(jar_of "$pid" 2>/dev/null)"
-	done
-	for f in kweblens-web/target/kweblens-run-*.jar; do
-		[[ -e "$f" ]] || continue
-		case "$held" in
-			*"$(readlink -f "$f")"*) continue ;;
-		esac
-		rm -f "$f"
-	done
 }
 
 reap_run_jars
