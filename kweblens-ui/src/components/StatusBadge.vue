@@ -4,8 +4,9 @@ import { computed } from 'vue';
 
 import type { StatusTone } from '../columns';
 import { badgeTone, statusTone } from '../columns';
+import { TONE_VARS } from '../statusTones';
 
-// A value coloured green/amber/red by health; plain text when there is no tone.
+// A value coloured amber/red by health; plain text when there is no tone.
 //
 // `tone` comes from the caller that already classified the cell. It used to be re-derived here
 // from the TEXT, which silently dropped every classification that is not keyword-based:
@@ -16,23 +17,31 @@ import { badgeTone, statusTone } from '../columns';
 // Colours come from the semantic tokens rather than from Naive's `type`. Naive's light-theme
 // warning tag measured 1.9:1 for its own text on its own background — the tone that matters
 // most on an events list was the least readable one. The tokens are the palette the rest of
-// the app uses and are defined per theme, so this is both readable and consistent.
+// the app uses and are defined per theme, so this is both readable and consistent. What each
+// tone paints lives in `statusTones.ts`, where it can be asserted on without a DOM.
 const props = defineProps<{ text: string; tone?: StatusTone }>();
-
-const TONE_VARS: Record<string, { color: string; textColor: string }> = {
-  ok: { color: 'var(--ok-tint)', textColor: 'var(--ok-fg)' },
-  warn: { color: 'var(--warn-tint)', textColor: 'var(--warn-fg)' },
-  err: { color: 'var(--danger-tint)', textColor: 'var(--danger-fg)' },
-};
 
 // Callers that pass a `tone` have already applied badgeTone; the text fallback applies it here
 // so the callers that pass only a string (Helm release/history status, the node's pod list)
 // follow the same one convention — a pill is an exception, an ordinary value is plain text.
-const colour = computed(() => TONE_VARS[props.tone ?? badgeTone(statusTone(props.text))] ?? null);
+const tone = computed(() => props.tone ?? badgeTone(statusTone(props.text)));
+const colour = computed(() => TONE_VARS[tone.value] ?? null);
 </script>
 
 <template>
-  <NTag v-if="colour" :color="colour" size="small" :bordered="false" round>{{ text }}</NTag>
+  <!-- `:color` is what PAINTS: it becomes an inline style, so the pill's colour has exactly one
+       source and no rule in any stylesheet can drift from it. `tone-*` is a LABEL and nothing
+       else — no rule anywhere styles it, and adding one would be the second source of truth
+       this component was built to avoid.
+       It exists because a colour delivered inline carries no name in the DOM, and a checker can
+       only address what has a name: `contrast-check.mjs` could match `.n-tag` and nothing
+       finer, so it sampled whichever tone the row order happened to put first — the danger tone
+       against this box's cluster, the warn tone against the simulator. Every tone that got
+       measured was measured by luck, and the warn tone's 4.51:1 in light (a pass by one
+       hundredth) had been sitting under the name of whatever else sorted ahead of it (GH#393). -->
+  <NTag v-if="colour" :class="['status-badge', `tone-${tone}`]" :color="colour" size="small" :bordered="false" round>{{
+    text
+  }}</NTag>
   <template v-else>{{ text }}</template>
 </template>
 

@@ -282,18 +282,24 @@ const emptyCopy = computed(() =>
    toward white in dark, which is the direction that gains contrast in both. 65% keeps the hue
    plainly readable as green / amber / red; measured after it, ok/warn/err/idle read
    6.92 / 6.19 / 7.54 / 12.93:1 in light and 8.52 / 8.57 / 7.71 / 9.98:1 in dark, and an ACTIVE
-   chip (the one whose border is on) 7.54:1 light / 7.71:1 dark. */
+   chip (the one whose border is on) 7.54:1 light / 7.71:1 dark.
+
+   That mix is now the `--*-on-tint` tokens in `styles.css` rather than three copies of the
+   construction written out here: the row status pill needed exactly the same thing and had
+   been carrying the raw `fg` at 4.51:1 in light (GH#393), and two surfaces deriving the same
+   colour two ways is how one of them gets fixed and the other does not. The computed value is
+   unchanged — the ratios above still hold, measured again after the swap. */
 .status-chip.tone-ok {
   background: var(--ok-tint);
-  color: color-mix(in srgb, var(--ok-fg) 65%, var(--text));
+  color: var(--ok-on-tint);
 }
 .status-chip.tone-warn {
   background: var(--warn-tint);
-  color: color-mix(in srgb, var(--warn-fg) 65%, var(--text));
+  color: var(--warn-on-tint);
 }
 .status-chip.tone-err {
   background: var(--danger-tint);
-  color: color-mix(in srgb, var(--danger-fg) 65%, var(--text));
+  color: var(--danger-on-tint);
 }
 
 /* On. `currentColor` rather than the accent: the border belongs to the state the chip names,

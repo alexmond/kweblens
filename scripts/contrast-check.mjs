@@ -89,6 +89,25 @@
 // surface never once on screen, which is the failure this file's own summary warns about, and
 // strictly worse than the red line it looked like an improvement on.
 //
+// A TONE IS COVERED BY NAME OR IT IS COVERED BY LUCK.
+//
+// The row status pill is one component painting three colours, and the colour arrives INLINE
+// (`NTag`'s `:color`), so until GH#393 no stylesheet named it and the finest selector available
+// was `.n-tag`. This tool samples the first match carrying text, so the tone it measured was
+// whichever the row order put first: the danger tone on this box's cluster (5.62 / 6.56), the
+// warn tone on the simulator (4.51 / 8.06). Both looked like passes, every tone was covered
+// only because the two environments disagreed, and the warn tone's 0.01 of margin sat under
+// whichever name happened to sort ahead of it. `StatusBadge` now carries a `tone-*` class
+// beside the inline colour — a LABEL, not a second source of the colour — so each tone is
+// addressed and reported under its own name.
+//
+// Naming a tone is only half of it: a tone that is not on screen must not read as a pass. That
+// is `REQUIRED_WHEN` (below), which is the answer to "absent, or absent because this cluster is
+// healthy?" — each entry names an ORACLE already on the page that says the tone exists here. For
+// the pills that oracle is the list header's own status chip: a chip is drawn only for a state
+// some row carries, so a chip with no measurable pill of the same tone is a scene that failed,
+// not a cluster that is well. Those rows are counted as FAILURES and exit 1.
+//
 // So `WHY_ABSENT` (below) carries a reason per selector, appended to the empty row. It changes
 // no count and passes nothing: it only separates "not applicable in this instance" from "we
 // failed to look", which are the two things a reader has to act on differently. A selector
@@ -96,7 +115,9 @@
 // `not present` and to nothing else — an element that is on the page but off screen or under
 // another layer is a scene that failed, and must never be able to borrow an excuse.
 //
-// Exit code is 1 if anything falls under the AA floor, so it can gate a change.
+// Exit code is 1 if anything falls under its floor — AA, or the higher one a selector carries
+// in FLOOR_OVERRIDE — or if a REQUIRED_WHEN selector produced nothing while its oracle was on
+// the page. So it can gate a change.
 //
 // Needs the shared Playwright install (see the global setup notes), not a local one:
 //   NODE_PATH=$HOME/.local/lib/playwright/node_modules node scripts/contrast-check.mjs
@@ -251,7 +272,32 @@ const SCENES = [
     selectors: ['.count', '.leaf.active .nav-badge'],
   },
   {
-    // The row-level STATUS pill — `StatusBadge`'s `NTag`, tinted from the semantic tokens.
+    // The list header's status chips — every tone the rows carry, each one named.
+    //
+    // These are the SAME token pairs the row pill paints (a state's tint, with the derived
+    // `--*-on-tint` foreground), on the one surface where all of them are on screen at once and
+    // above the fold, and they had never been measured at all. They are also the only place the
+    // `ok` tone can be measured: `badgeTone` maps `ok` to no pill by the #240 convention (a pill
+    // marks an exception; a healthy value is plain text), so an `ok` STATUS PILL does not exist
+    // in any environment and cannot be brought on screen in one — which is why a run pointed at
+    // pills alone could never cover the third tone, on this box's cluster or the simulator.
+    //
+    // A chip is drawn only for a state some row carries, so a tone with no rows has no chip;
+    // that is a fact about the cluster, and it is what the pill scenes below take as their
+    // oracle for whether a pill of that tone must exist.
+    name: 'list status chips (every tone, by name)',
+    prepare: 'close;leaf:Pods;wait:900;?fill:.content-head input=;wait:400',
+    selectors: [
+      '.status-chip.tone-ok',
+      '.status-chip.tone-warn',
+      '.status-chip.tone-err',
+      '.status-chip.tone-idle',
+    ],
+  },
+  {
+    // The row-level STATUS pill — `StatusBadge`'s `NTag`, tinted from the semantic tokens —
+    // ONE SCENE PER TONE, because the tone is the thing under test and a scene that samples
+    // "the first pill" samples whatever sorted first (GH#393).
     //
     // It was unwatched for exactly as long as the simulator was perfectly healthy: no seeded
     // pod reached a state `StatusBadge` tones, so there was nothing to measure. The seeder now
@@ -262,24 +308,39 @@ const SCENES = [
     // viewport` in both themes (GH#389). A tinted pill is drawn only for a row that is not
     // healthy, a live list is sorted by name, and healthy is the common case: measured against
     // this box's cluster there was exactly ONE pill in 93 pods, in the last row of the table,
-    // 17px below the fold. Nothing about the scene was wrong — it simply never looked down.
+    // 17px below the fold.
     //
-    // Hence its OWN scene rather than a `scroll:` bolted onto the list scene above: bringing
-    // the pill on screen scrolls the page by ~390px, which takes `.count` and the whole
-    // `.content-head` off the top with it. Two samples that need different scroll positions
-    // are two scenes; sharing one is how a fix for either quietly unmeasures the other.
+    // `?scroll:` was the answer then and is not enough now, for a reason the tone split makes
+    // unavoidable: two tones are two rows, in general at two scroll positions, and the list
+    // VIRTUALISES past 50 filtered rows — a pill in a state that exists but is 400 rows down is
+    // not in the DOM to be scrolled to. So the scene uses the app's own affordance instead and
+    // clicks the tone's status chip, which installs `status:<Label>` and lifts a row in that
+    // state to the top of the table. Deterministic, on screen, no scrolling, and it works the
+    // same on 93 pods as on 3 000.
     //
-    // `?scroll:` because a cluster whose visible pods are all healthy has no pill at all —
-    // reported as the WHY note below, not as a bare `not present`. And `scroll:` is
-    // `scrollIntoViewIfNeeded`, which CENTRES an element that is out of view rather than
-    // aligning it to the nearest edge (measured: y=895.6 before, y=506.6 after), so the sample
-    // cannot fail on a pill left flush against the bottom of the viewport.
+    // `[data-col-key=status]`, because the STATUS column is not the only one that renders this
+    // component: the Ready column badges `1/2` warn and `0/1` err from the same tokens. Without
+    // the column scope this scene sampled a READY pill — the first match in DOM order, since
+    // Ready comes first — under the name "row status pill", and the chip filter it just
+    // installed had no bearing on what was measured. Same shape as GH#389's `.n-tag`: a
+    // selector that resolves anywhere on the row is not a selector for the column the scene
+    // narrowed. (The colours are the same either way, which is exactly what makes it hard to
+    // notice, and what makes the CONTROL the only way to know: filtering to `status:Running`
+    // leaves the Ready pills on screen, so an unscoped selector never fails.)
     //
-    // This samples the first pill with text, which on a name-sorted list is whichever tone
-    // comes first — it checks that the pill family is readable, not that every tone is.
-    name: 'row status pill',
-    prepare: 'close;leaf:Pods;wait:900;?scroll:.n-data-table-td .n-tag;wait:400',
-    selectors: ['.n-data-table-td .n-tag'],
+    // The leading `fill:…input=` clears the query first: a chip whose state is already selected
+    // CLEARS the filter when clicked (that is what makes it a toggle), and PREPARE re-runs for
+    // the second theme from wherever the first left the page.
+    name: 'row status pill: warn, by name',
+    prepare: 'close;leaf:Pods;wait:900;?fill:.content-head input=;wait:400;?click:.status-chip.tone-warn;wait:800',
+    selectors: ['[data-col-key=status] .status-badge.tone-warn'],
+  },
+  {
+    // The same, for the danger tone. A second scene rather than a second selector: each one
+    // filters the list to its own tone, so they cannot share a page.
+    name: 'row status pill: err, by name',
+    prepare: 'close;leaf:Pods;wait:900;?fill:.content-head input=;wait:400;?click:.status-chip.tone-err;wait:800',
+    selectors: ['[data-col-key=status] .status-badge.tone-err'],
   },
   {
     // Every tone of an overview card's state list, HOVERED. Named per tone rather than as a
@@ -502,7 +563,65 @@ const WHY_ABSENT = {
   '.chart-tip-t': 'needs a Prometheus/VictoriaMetrics backend — without one there is no chart to hover',
   '.chart-tip-v': 'needs a Prometheus/VictoriaMetrics backend — without one there is no chart to hover',
   '.n-drawer .kv .n-tag': 'needs a Helm-installed ConfigMap in this cluster (label app.kubernetes.io/managed-by=Helm)',
-  '.n-data-table-td .n-tag': 'needs a pod that is not healthy — a tinted pill is only drawn for one',
+  // A chip exists only for a state some row carries, so an absent one is a claim about the
+  // cluster. `ok` is the one that is always there in practice (every list has healthy rows);
+  // `idle` needs a finished or scaled-to-zero object.
+  '.status-chip.tone-ok': 'needs a row in a healthy state — a chip is drawn only for a state the rows carry',
+  '.status-chip.tone-warn': 'needs a row in a warn state — a chip is drawn only for a state the rows carry',
+  '.status-chip.tone-err': 'needs a row in a failing state — a chip is drawn only for a state the rows carry',
+  '.status-chip.tone-idle':
+    'needs a finished or scaled-to-zero row — `idle` is neither healthy nor broken and is drawn muted',
+  // No mention of chips in these two: whether one is on the page is what REQUIRED_WHEN below
+  // decides, and a reason that guessed at it would contradict the verdict printed beside it.
+  '[data-col-key=status] .status-badge.tone-warn': 'needs a pod in a warn state — a tinted pill is drawn only for one',
+  '[data-col-key=status] .status-badge.tone-err': 'needs a pod in a failing state — a tinted pill is drawn only for one',
+};
+
+/**
+ * Selectors that MUST produce a ratio when their oracle is on the page, keyed by selector.
+ *
+ * `WHY_ABSENT` above separates "not applicable in this instance" from "we failed to look", and
+ * it does that in PROSE — a reader decides. This decides, for the cases where the page itself
+ * already answers the question. The row status pill is one: the list header draws a status chip
+ * for each state its rows carry, so a `warn` chip on screen is the app saying "some row is in a
+ * warn state". If the pill of that tone then cannot be measured, the tone was not covered, and
+ * the run must say so in the one way that cannot be read as a pass — a FAILURE and exit 1.
+ *
+ * Without this, per-tone selectors would still have been an improvement on `.n-tag` and would
+ * still have let a tone go quietly unmeasured: a scene that stops reaching the warn pill prints
+ * `not present`, which this file counts but does not fail on, deliberately (a healthy cluster
+ * genuinely has no failing pod, and a checker that cries wolf gets switched off). The oracle is
+ * what makes the difference decidable instead of a judgement call — nothing is required on a
+ * cluster whose rows do not carry the state.
+ */
+const REQUIRED_WHEN = {
+  '[data-col-key=status] .status-badge.tone-warn': {
+    when: '.status-chip.tone-warn',
+    why: 'the list offers a warn state chip, so a row in this list carries that state',
+  },
+  '[data-col-key=status] .status-badge.tone-err': {
+    when: '.status-chip.tone-err',
+    why: 'the list offers a failing state chip, so a row in this list carries that state',
+  },
+};
+
+/**
+ * Floors above AA, for surfaces where AA alone is not evidence of anything, keyed by selector.
+ *
+ * The warn status pill measured 4.51:1 in the light theme against the 4.5 floor (GH#393). It
+ * passed, and a pass by one hundredth is not a property anything is holding: the tint is
+ * translucent, so the ratio moves with whatever panel the row is on, and every previous edit to
+ * this palette's tints and panels has moved a ratio by a few tenths. One full point of headroom
+ * is what the danger tone already had on the same surface and what the derived `--*-on-tint`
+ * foreground now gives all of them, so it is a margin the design meets rather than a target
+ * invented for the check. Asserted rather than stated, because a stated margin is a comment.
+ */
+const FLOOR_OVERRIDE = {
+  '.status-chip.tone-ok': 5.5,
+  '.status-chip.tone-warn': 5.5,
+  '.status-chip.tone-err': 5.5,
+  '[data-col-key=status] .status-badge.tone-warn': 5.5,
+  '[data-col-key=status] .status-badge.tone-err': 5.5,
 };
 
 const args = process.argv.slice(2);
@@ -1087,10 +1206,11 @@ async function measure(page, theme, sels) {
 
   let i = 0;
   for (const { sel, s } of found) {
-    // WCAG's large-text allowance: >=18.66px bold, or >=24px.
+    // WCAG's large-text allowance: >=18.66px bold, or >=24px. A selector with a floor of its
+    // own overrides both: AA is the legal minimum, not a design margin (see FLOOR_OVERRIDE).
     const px = parseFloat(s.font);
     const bold = Number(s.weight) >= 700;
-    const floor = px >= 24 || (bold && px >= 18.66) ? AA_LARGE : AA_NORMAL;
+    const floor = FLOOR_OVERRIDE[sel] ?? (px >= 24 || (bold && px >= 18.66) ? AA_LARGE : AA_NORMAL);
     for (const p of s.parts) {
       const pixel = pixels[i];
       i += 1;
@@ -1131,6 +1251,32 @@ async function measure(page, theme, sels) {
 }
 
 /**
+ * Mark the rows that produced no ratio where the page itself says one was owed.
+ *
+ * Runs against the page the rows were just measured on, so the oracle is read in the same state
+ * the sample failed in — asking afterwards, from a page a later scene has navigated, would be
+ * asking a different question. Only ever touches a row that already carries no ratio: this
+ * cannot turn a measured colour into a failure, only an unmeasured one into an admitted one.
+ */
+async function flagRequired(page, rows) {
+  for (const r of rows) {
+    if (r.r !== null) continue;
+    const req = REQUIRED_WHEN[r.sel];
+    if (!req) continue;
+    if (!(await page.$(req.when))) continue;
+    r.required = true;
+    r.note = `${r.note} — REQUIRED here: ${req.why} (${req.when} is on the page)`;
+  }
+}
+
+/** Measure, then let the page say which of the empty rows were owed a ratio. */
+async function measureHere(page, theme, sels) {
+  const out = await measure(page, theme, sels);
+  await flagRequired(page, out.rows);
+  return out;
+}
+
+/**
  * Positive controls — cases whose answers are known before the tool is run.
  *
  * "Beware the oracle": every wrong conclusion in this project came from a broken instrument,
@@ -1165,6 +1311,10 @@ const FIXTURE = `
     .ghost { position: relative; width: 200px; height: 24px; background: rgb(27,42,51); }
     .ghost .layer { position: absolute; inset: 0; background: rgb(255,255,255); color: rgb(0,0,0);
                     pointer-events: none; }
+    /* Per-tone addressing, and the tone that is NOT here (GH#393). Both pills would be one
+       .n-tag match, which is how one tone's ratio got reported under another's name. */
+    .status-chip { background: rgb(255,255,255); color: rgb(51,54,57); padding: 2px 8px; }
+    .status-badge { background: rgb(255,255,255); color: rgb(51,54,57); padding: 2px 8px; }
   </style>
   <div class="bar">
     <div id="opaque">Opaque</div>
@@ -1175,6 +1325,19 @@ const FIXTURE = `
     <div class="cover"><div class="under">hidden under</div><div class="over"></div></div>
     <div id="offscreen">parked off-screen</div>
     <div class="ghost"><div class="layer">pointer-events none</div></div>
+    <!-- The list header says both tones are in these rows... -->
+    <div class="status-rail">
+      <span class="status-chip tone-warn">Pending</span>
+      <span class="status-chip tone-err">CrashLoopBackOff</span>
+    </div>
+    <!-- ...and only one of them has a pill. The missing one is the control that must FIRE:
+         before GH#393 an .n-tag selector would have measured the warn pill, reported it as
+         "the status pill", and passed the run with the danger tone never sampled. -->
+    <div class="n-data-table-td" data-col-key="status"><span class="status-badge tone-warn">Pending</span></div>
+    <div class="n-data-table-td" data-col-key="status"></div>
+    <!-- The Ready column renders the same component, and an unscoped selector reaches it: this
+         one is a tone-err pill on the page that the tone-err STATUS control must NOT find. -->
+    <div class="n-data-table-td" data-col-key="ready"><span class="status-badge tone-err">0/1</span></div>
   </div>
 `;
 
@@ -1198,12 +1361,28 @@ const CONTROLS = [
   // tooltip sample reported "covered by another layer" until the hit test forced the property
   // back on — a whole surface reading as unmeasurable while visibly failing at 1.28:1.
   { sel: '.ghost .layer', want: WHITE, why: 'pointer-events:none but painted — must be measured' },
+  // Per-tone addressing (GH#393), both halves. The tone that is on the page must be measured
+  // UNDER ITS OWN NAME; the tone that is not must fail, because the page's own status chip says
+  // a row carries that state. These use the real scene selectors and the real REQUIRED_WHEN
+  // entries, so a change to either is a change to this control.
+  {
+    sel: '[data-col-key=status] .status-badge.tone-warn',
+    want: WHITE,
+    why: 'the tone that IS in the scene, measured under its own name',
+  },
+  {
+    sel: '[data-col-key=status] .status-badge.tone-err',
+    wantNote: 'not present',
+    wantRequired: true,
+    why: 'tone missing while its chip says a row has that state — must FAIL, not pass',
+  },
 ];
 
 async function selfTest(page) {
   await page.setContent(FIXTURE);
   await page.waitForTimeout(200);
-  const { rows, disagreements } = await measure(page, 'control', CONTROLS.map((c) => c.sel));
+  // measureHere, not measure: the required-when flagging is part of what the controls check.
+  const { rows, disagreements } = await measureHere(page, 'control', CONTROLS.map((c) => c.sel));
   let bad = 0;
   // Expected values are computed by compositing each layer and rounding, which is not
   // bit-identical to what the compositor does — the verified three-layer case in this
@@ -1212,13 +1391,21 @@ async function selfTest(page) {
   // wide enough to hide a real defect would be several channels, not two.
   console.log('positive controls (expected values are arithmetic, not observations)\n');
   for (const c of CONTROLS) {
-    const row = rows.find((r) => r.sel === c.sel && r.what === '(self)');
+    // `'—'` as well as `(self)`: a selector that matched NOTHING has no part to name, and the
+    // control that must fire is exactly that one — looking only for `(self)` reported it as
+    // "got nothing", which is the control failing for the wrong reason.
+    const row = rows.find((r) => r.sel === c.sel && (r.what === '(self)' || r.what === '—'));
     const dis = disagreements.find((d) => d.sel === c.sel && d.what === '(self)');
     if (c.wantNote) {
-      const ok = row?.r === null && String(row?.note || '').startsWith(c.wantNote);
+      // `wantRequired` is the difference between a note and a verdict: an absent selector the
+      // page said was owed must come back flagged, because that flag is what makes it exit 1.
+      const ok =
+        row?.r === null &&
+        String(row?.note || '').startsWith(c.wantNote) &&
+        Boolean(row?.required) === Boolean(c.wantRequired);
       if (!ok) bad += 1;
       console.log(
-        `${ok ? 'ok  ' : 'FAIL'}  ${c.sel.padEnd(14)} want note "${c.wantNote}"` +
+        `${ok ? 'ok  ' : 'FAIL'}  ${c.sel.padEnd(46)} want ${c.wantRequired ? 'REQUIRED ' : ''}note "${c.wantNote}"` +
           ` got ${row ? (row.r === null ? `"${row.note}"` : `${row.r.toFixed(2)}:1`) : 'nothing'}  ${c.why}`,
       );
       continue;
@@ -1228,7 +1415,7 @@ async function selfTest(page) {
     if (!ok) bad += 1;
     const delta = got ? Math.max(...got.map((v, i) => Math.abs(v - c.want[i]))) : '—';
     console.log(
-      `${ok ? 'ok  ' : 'FAIL'}  ${c.sel.padEnd(14)} want ${rgbText(c.want).padEnd(18)}` +
+      `${ok ? 'ok  ' : 'FAIL'}  ${c.sel.padEnd(46)} want ${rgbText(c.want).padEnd(18)}` +
         ` got ${String(got ? rgbText(got) : 'none').padEnd(18)} d=${delta}  ${c.why}` +
         (dis ? `   [dom walk said ${dis.dom}]` : ''),
     );
@@ -1299,7 +1486,7 @@ for (let pass = 0; pass < 2; pass++) {
   // different pages, which is worse than measuring neither.
   if (scenes.length) await runPrepare(page, 'close;leaf:Cluster/Overview;wait:800');
 
-  const out = await measure(page, theme, selectors);
+  const out = await measureHere(page, theme, selectors);
   rows.push(...out.rows);
   disagreements.push(...out.disagreements);
   for (const r of out.rows) if (r.r !== null && r.r < worst.r) worst = r;
@@ -1314,7 +1501,7 @@ for (let pass = 0; pass < 2; pass++) {
     } catch (e) {
       console.error(`scene "${scene.name}" could not be reached: ${e.message.split('\n')[0]}`);
     }
-    const s = await measure(page, theme, scene.selectors);
+    const s = await measureHere(page, theme, scene.selectors);
     rows.push(...s.rows);
     disagreements.push(...s.disagreements);
     for (const r of s.rows) if (r.r !== null && r.r < worst.r) worst = r;
@@ -1322,20 +1509,28 @@ for (let pass = 0; pass < 2; pass++) {
 }
 
 const pad = (s, n) => String(s).padEnd(n);
-console.log(pad('theme', 6) + pad('selector', 26) + pad('part', 18) + pad('ratio', 9) + 'verdict');
+console.log(pad('theme', 6) + pad('selector', 46) + pad('part', 18) + pad('ratio', 9) + 'verdict');
 let failures = 0;
 let unmeasured = 0;
+let missing = 0;
 for (const r of rows) {
   if (r.r === null) {
     unmeasured += 1;
-    console.log(pad(r.theme, 6) + pad(r.sel, 26) + pad(r.what, 18) + pad('—', 9) + r.note);
+    // An absent selector the page said was owed is a failure, not a note: see REQUIRED_WHEN.
+    if (r.required) {
+      failures += 1;
+      missing += 1;
+    }
+    console.log(
+      pad(r.theme, 6) + pad(r.sel, 46) + pad(r.what, 18) + pad('—', 9) + (r.required ? `MISSING  ${r.note}` : r.note),
+    );
     continue;
   }
   const ok = r.r >= r.floor;
   if (!ok) failures += 1;
   console.log(
     pad(r.theme, 6) +
-      pad(r.sel, 26) +
+      pad(r.sel, 46) +
       pad(String(r.what).slice(0, 17), 18) +
       pad(r.r.toFixed(2) + ':1', 9) +
       (ok ? `pass (>=${r.floor})` : `FAIL (<${r.floor})  on ${r.bg}`),
@@ -1362,11 +1557,20 @@ if (disagreements.length) {
 // something you have to notice by scrolling. Deliberately not an automatic exit 1: a
 // healthy cluster genuinely never renders `.ov-card.danger`, and a checker that cries wolf
 // on that gets switched off.
-console.log(
-  failures
-    ? `\n${failures} below the floor. Worst: ${worst.sel} ${worst.what} at ${worst.r.toFixed(2)}:1 (${worst.theme}).`
-    : `\nAll measured text clears its floor in both themes (${rows.length - unmeasured} of ${rows.length} samples measured).`,
-);
+const belowFloor = failures - missing;
+if (belowFloor) {
+  console.log(`\n${belowFloor} below the floor. Worst: ${worst.sel} ${worst.what} at ${worst.r.toFixed(2)}:1 (${worst.theme}).`);
+} else if (!failures) {
+  console.log(
+    `\nAll measured text clears its floor in both themes (${rows.length - unmeasured} of ${rows.length} samples measured).`,
+  );
+}
+if (missing) {
+  console.log(
+    `\n${missing} sample(s) MISSING: the page's own oracle said the surface was there and nothing was measured. ` +
+      'That is a failed measurement counted as a failure, not a caveat — fix the scene, or the tone is uncovered.',
+  );
+}
 if (unmeasured) {
   console.log(
     `${unmeasured} sample(s) produced no ratio — NOT passes. If that is most of the run, ` +

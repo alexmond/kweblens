@@ -66,6 +66,11 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
 - **Colour and size are measured, not eyeballed.** Run `contrast-check.mjs` against any
   `styles.css` change. A selector that is not on screen reports `not present` / `absent` — that
   is a **failed measurement, not a pass**; bring it on screen with `PREPARE` and measure again.
+  **A component that paints several colours needs a per-tone hook, or coverage is luck**: the
+  status pill's tint arrives inline, so until #393 the check could only match `.n-tag` and
+  measured whichever tone sorted first. The hook is a `tone-*` class **styled by nothing** — the
+  inline `:color` stays the one source of the colour — and a tone the page says is there and the
+  run could not sample is a **failure** (`REQUIRED_WHEN`), not a note.
 - **Per-cluster state is emptied by how it is DECLARED, not by a list of resets.** `clusterScoped`
   (`kweblens-ui/src/composables/clusterScoped.ts`) is the shell's mechanism; `useAsyncData`'s
   `deps` are the **identity** of what is loaded, so changing them discards the value while
