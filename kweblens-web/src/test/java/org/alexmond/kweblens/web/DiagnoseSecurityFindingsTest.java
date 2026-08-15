@@ -89,6 +89,53 @@ class DiagnoseSecurityFindingsTest {
 		pod("web-1", "default", false);
 	}
 
+	/**
+	 * The coverage signal is a claim about the LIST, so it rides beside the findings
+	 * rather than inside them (#388).
+	 *
+	 * <p>
+	 * <b>The control comes first.</b> This scope has three findings and was fully
+	 * checked, so {@code incomplete} must be empty — a notice that appears on every
+	 * diagnosis stops meaning anything, and the panel builds its "not fully checked" line
+	 * from exactly this field.
+	 */
+	@Test
+	void saysNothingAboutCoverageWhenTheAuditSawEverything() throws Exception {
+		this.mvc.perform(get("/api/v1/clusters/test/diagnose").param("namespace", "web"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.findings.length()").value(3))
+			.andExpect(jsonPath("$.incomplete").isEmpty());
+	}
+
+	/**
+	 * And the container cap, on the wire, from the code that capped.
+	 *
+	 * <p>
+	 * The 21 pods are seeded past {@code MAX_CONTAINER_FINDINGS} on purpose; that
+	 * threshold is a readability judgement nobody has measured against a real cluster,
+	 * and this asserts only what happens once it bites.
+	 */
+	@Test
+	void reportsTheContainerCapAsCoverageAndStillCostsEightRequests() throws Exception {
+		for (int i = 0; i < 21; i++) {
+			pod("agent-" + i, "default", true);
+		}
+
+		int before = this.server.getRequestCount();
+		this.mvc.perform(get("/api/v1/clusters/test/diagnose").param("namespace", "web"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.incomplete.length()").value(1))
+			.andExpect(jsonPath("$.incomplete[0].dimension").value("container privileges"))
+			.andExpect(jsonPath("$.incomplete[0].reason").value(containsString("not listed")))
+			// The finding stays where it was: the summary is what was missing, not the
+			// detail.
+			.andExpect(jsonPath("$.findings[?(@.title=='Further container privileges not listed')]").exists());
+
+		// The signal is computed inside checks that were already running, so it buys no
+		// round trip — same eight as the namespaced diagnosis has always cost.
+		assertThat(this.server.getRequestCount() - before).isEqualTo(8);
+	}
+
 	private void pod(String name, String account, boolean privileged) {
 		this.client.pods()
 			.inNamespace("web")

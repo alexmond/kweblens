@@ -3,6 +3,8 @@ package org.alexmond.kweblens.web.ai;
 import java.time.Instant;
 import java.util.List;
 
+import org.alexmond.kweblens.health.CoverageGap;
+
 /**
  * The result of a diagnosis run: the deterministic findings, plus whatever is known about
  * the optional LLM summary.
@@ -25,7 +27,15 @@ import java.util.List;
  * changed since, so the old summary is deliberately withheld rather than shown as current
  * @param aiAvailable whether triggering an analysis could do anything here — AI is
  * enabled and a chat client is wired. False means the trigger should not be offered
+ * @param incomplete the checks that did not fully run over this scope, each emitted by
+ * the code that gave up. <b>This is not a severity</b> (#388): {@code findings} grades
+ * how bad things are, and this says how much of the list in front of the reader was
+ * actually looked at. Empty on a scope that was fully checked — a notice that always
+ * appears stops meaning anything — and it takes no extra request, because every gap is
+ * produced inside a check that was running anyway. It is not part of the summary cache
+ * key: the findings are unchanged by it, so a gap cannot invalidate an analysis somebody
+ * paid for
  */
 public record DiagnoseResult(List<Finding> findings, String summary, boolean aiEnriched, Instant analysedAt,
-		boolean summaryOutdated, boolean aiAvailable) {
+		boolean summaryOutdated, boolean aiAvailable, List<CoverageGap> incomplete) {
 }

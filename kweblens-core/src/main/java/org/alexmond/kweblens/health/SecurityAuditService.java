@@ -65,6 +65,13 @@ public class SecurityAuditService {
 	/** Pods named per over-privileged account before the rest become "(+N more)". */
 	private static final int MAX_PODS_NAMED = 5;
 
+	/**
+	 * The two halves of this audit, named so a coverage gap says which one fell short.
+	 */
+	private static final String CONTAINERS = "container privileges";
+
+	private static final String GRANTS = "RBAC grants";
+
 	private static final Comparator<SecurityFinding> ORDER = Comparator.comparingInt(SecurityFinding::rank)
 		.thenComparing(SecurityFinding::title)
 		.thenComparing(SecurityFinding::object);
@@ -77,7 +84,7 @@ public class SecurityAuditService {
 	 * Audit a scope, listing the pods here. Callers that already hold the pod list — the
 	 * diagnosis does — should pass it instead, so this dimension adds no pod request.
 	 */
-	public List<SecurityFinding> audit(String clusterId, String namespace) {
+	public SecurityAudit audit(String clusterId, String namespace) {
 		return audit(clusterId, namespace, this.resources.listRaw(clusterId, WellKnownKinds.PODS, namespace));
 	}
 
@@ -89,16 +96,26 @@ public class SecurityAuditService {
 	 * cluster produce the same list in the same order — the diagnosis fingerprints its
 	 * findings, and an order that depended on the API server's listing order would make
 	 * that key change without the cluster changing.
+	 *
+	 * <p>
+	 * <b>The coverage gaps are collected here, from the two places that give up</b>, and
+	 * they are appended in the order those two run rather than gathered afterwards — a
+	 * consumer that had to work out "was this list complete" by matching a finding's
+	 * title would be keeping a second copy of a rule that lives in this file (#388). The
+	 * list is empty on an audit that saw everything, which is what makes it worth reading
+	 * when it is not.
 	 */
-	public List<SecurityFinding> audit(String clusterId, String namespace, List<GenericKubernetesResource> pods) {
-		List<SecurityFinding> findings = new ArrayList<>(containerFindings(pods));
-		findings.addAll(grantFindings(clusterId, namespace, pods));
+	public SecurityAudit audit(String clusterId, String namespace, List<GenericKubernetesResource> pods) {
+		List<CoverageGap> incomplete = new ArrayList<>();
+		List<SecurityFinding> findings = new ArrayList<>(containerFindings(pods, incomplete));
+		findings.addAll(grantFindings(clusterId, namespace, pods, incomplete));
 		findings.sort(ORDER);
-		return List.copyOf(findings);
+		return new SecurityAudit(List.copyOf(findings), List.copyOf(incomplete));
 	}
 
 	/** The pod-spec half: no cluster request, capped, and honest when the cap bites. */
-	private List<SecurityFinding> containerFindings(List<GenericKubernetesResource> pods) {
+	private List<SecurityFinding> containerFindings(List<GenericKubernetesResource> pods,
+			List<CoverageGap> incomplete) {
 		List<SecurityFinding> all = new ArrayList<>();
 		for (GenericKubernetesResource pod : pods) {
 			all.addAll(PodSecurity.forPod(pod));
@@ -107,12 +124,19 @@ public class SecurityAuditService {
 			return all;
 		}
 		all.sort(ORDER);
+		int dropped = all.size() - MAX_CONTAINER_FINDINGS;
 		List<SecurityFinding> kept = new ArrayList<>(all.subList(0, MAX_CONTAINER_FINDINGS));
-		kept.add(new SecurityFinding("info", "Further container privileges not listed",
-				"Pods/" + (all.size() - MAX_CONTAINER_FINDINGS),
-				(all.size() - MAX_CONTAINER_FINDINGS) + " more container privilege findings in this scope"
+		kept.add(new SecurityFinding("info", "Further container privileges not listed", "Pods/" + dropped,
+				dropped + " more container privilege findings in this scope"
 						+ " are not listed, so the most severe stay readable",
 				"Narrow the diagnosis to one namespace to see the rest."));
+		// The finding above says it beside the objects; this says it about the list.
+		// Both, on purpose: the reader of the header and the reader of the export are
+		// not the same person. And this one is shorter, also on purpose — the advice
+		// stays on the card, because a header line long enough to carry it stops being
+		// read at all (measured at 200 characters per line before it was cut back).
+		incomplete.add(new CoverageGap(CONTAINERS,
+				dropped + " further container privilege findings are not listed, so the most severe stay readable."));
 		return kept;
 	}
 
@@ -125,7 +149,7 @@ public class SecurityAuditService {
 	 * know and which is what decides how urgent the first one is.
 	 */
 	private List<SecurityFinding> grantFindings(String clusterId, String namespace,
-			List<GenericKubernetesResource> pods) {
+			List<GenericKubernetesResource> pods, List<CoverageGap> incomplete) {
 		List<Grant> grants;
 		try {
 			grants = grants(clusterId, namespace);
@@ -135,6 +159,14 @@ public class SecurityAuditService {
 			// the dangerous direction: kweblens may simply not be allowed to list
 			// bindings.
 			log.debug("RBAC grant scan failed: {}", ex.getMessage());
+			// The gap's reason is fixed text while the finding carries the exception's
+			// message. Deliberate: the gap rides in a response asserted byte-identical
+			// across two reads of an unchanged cluster, and a message that varies between
+			// two failures of the same kind would break that. The message is still in the
+			// finding, which is where a reader goes for the evidence.
+			incomplete.add(new CoverageGap(GRANTS,
+					"RoleBindings and ClusterRoleBindings could not be listed, so no cluster-admin grant"
+							+ " was checked."));
 			return List.of(new SecurityFinding("info", "RBAC grants could not be read", "ClusterRoleBindings",
 					String.valueOf(ex.getMessage()),
 					"The identity kweblens uses may not be permitted to list RoleBindings and ClusterRoleBindings."

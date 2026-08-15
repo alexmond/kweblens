@@ -34,8 +34,33 @@ export interface Finding {
   source?: string | null;
 }
 
+/**
+ * How much of a check ran, as the server reported it — never as the client inferred it.
+ *
+ * <p>This is not a severity. `critical`/`warning`/`info` grade how bad a finding is; this
+ * says how much of the list in front of the reader was actually looked at, which is a claim
+ * about the list and belongs beside its count (#388).
+ *
+ * <p>It exists as a field precisely so the SPA never has to recognise "Further container
+ * privileges not listed" or "RBAC grants could not be read" by their titles. That would be a
+ * second copy of a server rule — the same defect a hard-coded kind list would be against
+ * `ListProjection`'s — and it would go stale silently the first time somebody reworded a
+ * finding. Nothing in this file may branch on a finding's title.
+ *
+ * <p>Not exported: it is reachable as `DiagnoseResult['incomplete']`, and an exported name
+ * nothing imports is what `knip` fails the build over.
+ */
+interface CoverageGap {
+  /** Which part of the check fell short, e.g. `container privileges`. */
+  dimension: string;
+  /** Why, as a sentence the reader can act on. */
+  reason: string;
+}
+
 export interface DiagnoseResult {
   findings: Finding[];
+  /** The checks that did not fully run over this scope. Absent or empty means all of them did. */
+  incomplete?: CoverageGap[] | null;
   /** Present only when an analysis was run AND still describes these exact findings. */
   summary?: string | null;
   aiEnriched?: boolean;
@@ -282,6 +307,30 @@ export function groupFindings(findings: Finding[]): FindingGroup[] {
 export function sortFindings(findings: Finding[]): Finding[] {
   const rank: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
   return [...findings].sort((a, b) => rank[severityOf(a)] - rank[severityOf(b)]);
+}
+
+/**
+ * The sentence that goes beside the count line when the list is partial, or null.
+ *
+ * <p>`countLine` counts findings by severity and therefore says nothing about coverage: on a
+ * scope with forty findings, "the audit did not see everything" was a card somewhere in the
+ * scroll. This is the same claim put where a claim about the whole list belongs.
+ *
+ * <p>Built ONLY from `result.incomplete` — never from a finding's title. A gap with neither
+ * a dimension nor a reason is dropped rather than rendered as an empty clause, but a gap
+ * carrying only one of the two still says what it can: half a claim beats none.
+ *
+ * <p>Returns null when nothing is missing, which is the normal case. A notice that always
+ * appeared would stop meaning anything, so the empty case must stay empty.
+ */
+export function coverageNotice(result: DiagnoseResult | null | undefined): string | null {
+  const clauses = (result?.incomplete ?? [])
+    .map((gap) => [gap?.dimension?.trim(), gap?.reason?.trim()].filter(Boolean).join(' — '))
+    .filter((clause) => clause.length > 0);
+  if (!clauses.length) {
+    return null;
+  }
+  return `This scope was not fully checked. ${clauses.join(' ')}`;
 }
 
 /**

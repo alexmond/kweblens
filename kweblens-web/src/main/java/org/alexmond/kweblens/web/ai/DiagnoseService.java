@@ -18,8 +18,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import org.alexmond.kweblens.event.EventService;
+import org.alexmond.kweblens.health.CoverageGap;
 import org.alexmond.kweblens.health.KindHealth;
 import org.alexmond.kweblens.health.NetworkHealthService;
+import org.alexmond.kweblens.health.SecurityAudit;
 import org.alexmond.kweblens.health.SecurityAuditService;
 import org.alexmond.kweblens.health.StorageHealthService;
 import org.alexmond.kweblens.event.EventSummary;
@@ -173,8 +175,8 @@ public class DiagnoseService {
 	 * {@link #analyse} and is served only when the findings still fingerprint the same.
 	 */
 	public DiagnoseResult diagnose(String clusterId, String namespace) {
-		List<Finding> findings = findings(clusterId, namespace);
-		return served(clusterId, namespace, findings, DiagnosisSummaryCache.fingerprint(findings));
+		Checks checks = checks(clusterId, namespace);
+		return served(clusterId, namespace, checks, DiagnosisSummaryCache.fingerprint(checks.findings()));
 	}
 
 	/**
@@ -192,7 +194,8 @@ public class DiagnoseService {
 			throw new AiUnavailableException(
 					"AI analysis is not configured on this server (kweblens.ai.enabled and an API key are required).");
 		}
-		List<Finding> findings = findings(clusterId, namespace);
+		Checks checks = checks(clusterId, namespace);
+		List<Finding> findings = checks.findings();
 		String fingerprint = DiagnosisSummaryCache.fingerprint(findings);
 		if (!findings.isEmpty()) {
 			String summary = summarize(builder, findings);
@@ -203,10 +206,20 @@ public class DiagnoseService {
 			// Nothing is cached, so the trigger stays live rather than pinning a
 			// failure until the findings happen to change.
 		}
-		return served(clusterId, namespace, findings, fingerprint);
+		return served(clusterId, namespace, checks, fingerprint);
 	}
 
-	private List<Finding> findings(String clusterId, String namespace) {
+	/**
+	 * Run every validator over the scope: what is wrong, and how much of the checking
+	 * actually happened.
+	 *
+	 * <p>
+	 * The coverage gaps come back from the checks themselves rather than being inferred
+	 * from the findings afterwards — see
+	 * {@link org.alexmond.kweblens.health.CoverageGap}. They cost no request: each one is
+	 * produced inside a check that was already running.
+	 */
+	private Checks checks(String clusterId, String namespace) {
 		// Listed ONCE and handed to both readers: the pod checks and the security audit
 		// ask different questions of the same objects, and a second list would be a
 		// second answer as well as a second request.
@@ -219,9 +232,10 @@ public class DiagnoseService {
 		findings.addAll(checkEvents(clusterId, namespace, findings));
 		// After the events, so a privileged container never suppresses the events that
 		// explain why its pod is broken — the two say different things about it.
-		findings.addAll(checkSecurity(clusterId, namespace, pods));
+		SecurityAudit audit = this.security.audit(clusterId, namespace, pods);
+		findings.addAll(checkSecurity(audit));
 		findings.sort(BY_SEVERITY);
-		return List.copyOf(findings);
+		return new Checks(List.copyOf(findings), audit.incomplete());
 	}
 
 	/**
@@ -229,16 +243,19 @@ public class DiagnoseService {
 	 * stored summary is still allowed to be seen, so the read and the trigger cannot
 	 * drift apart on the question.
 	 */
-	private DiagnoseResult served(String clusterId, String namespace, List<Finding> findings, String fingerprint) {
+	private DiagnoseResult served(String clusterId, String namespace, Checks checks, String fingerprint) {
 		boolean available = availableClient() != null;
+		List<Finding> findings = checks.findings();
+		List<CoverageGap> incomplete = checks.incomplete();
 		DiagnosisSummaryCache.CachedSummary cached = this.summaries.find(clusterId, namespace, fingerprint);
 		if (cached != null) {
-			return new DiagnoseResult(findings, cached.summary(), true, cached.producedAt(), false, available);
+			return new DiagnoseResult(findings, cached.summary(), true, cached.producedAt(), false, available,
+					incomplete);
 		}
 		// No usable summary. If this scope WAS analysed, say when — an unexplained
 		// "never analysed" after the reader has seen one reads as the panel losing it.
 		Instant superseded = this.summaries.supersededAt(clusterId, namespace, fingerprint);
-		return new DiagnoseResult(findings, null, false, superseded, superseded != null, available);
+		return new DiagnoseResult(findings, null, false, superseded, superseded != null, available, incomplete);
 	}
 
 	/**
@@ -267,8 +284,8 @@ public class DiagnoseService {
 	 * failures on purpose — a privileged CNI agent is a choice somebody made, not a
 	 * cluster that is broken.
 	 */
-	private List<Finding> checkSecurity(String clusterId, String namespace, List<GenericKubernetesResource> pods) {
-		return this.security.audit(clusterId, namespace, pods)
+	private List<Finding> checkSecurity(SecurityAudit audit) {
+		return audit.findings()
 			.stream()
 			.map((f) -> new Finding(f.severity(), f.title(), f.object(), f.detail(), f.fix(), "validator"))
 			.toList();
@@ -554,6 +571,17 @@ public class DiagnoseService {
 	 * @param truncationNote null when everything was sent
 	 */
 	record PromptInput(String evidence, String truncationNote) {
+	}
+
+	/**
+	 * One run of the validators: what they found, and where they knowingly stopped short.
+	 *
+	 * <p>
+	 * The two travel together from here to {@link #served}, because only the checks can
+	 * say the second and a caller handed the findings alone would have to guess it from
+	 * their titles.
+	 */
+	private record Checks(List<Finding> findings, List<CoverageGap> incomplete) {
 	}
 
 }

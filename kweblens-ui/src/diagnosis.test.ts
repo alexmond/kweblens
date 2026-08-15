@@ -5,6 +5,7 @@ import {
   analysisNote,
   analysisState,
   countLine,
+  coverageNotice,
   type DiagnoseResult,
   type Finding,
   groupFindings,
@@ -158,6 +159,67 @@ describe('countLine', () => {
   it('counts each severity present and omits the ones that are not', () => {
     expect(countLine([f('critical'), f('critical'), f('warning')])).toBe('2 critical, 1 warning');
     expect(countLine([f('info')])).toBe('1 info');
+  });
+});
+
+// The coverage signal (#388). Every case here exists to prove ONE thing: the notice is
+// built from what the server said about the list, and never from what a finding is called.
+describe('coverageNotice', () => {
+  const gapped = (incomplete: DiagnoseResult['incomplete'], findings: Finding[] = []): DiagnoseResult => ({
+    findings,
+    incomplete,
+  });
+
+  it('says nothing when the audit saw everything', () => {
+    // The control. A notice on every diagnosis is worse than none, because it stops
+    // meaning anything — so a scope with plenty of findings and no gaps stays silent.
+    expect(coverageNotice(gapped([], [f('critical'), f('warning'), f('info')]))).toBeNull();
+    expect(coverageNotice(gapped(undefined, [f('critical')]))).toBeNull();
+    expect(coverageNotice(null)).toBeNull();
+  });
+
+  it('names each dimension that fell short, and what it was', () => {
+    const notice = coverageNotice(
+      gapped([
+        { dimension: 'container privileges', reason: '5 further findings are not listed.' },
+        { dimension: 'RBAC grants', reason: 'They could not be listed.' },
+      ]),
+    );
+    expect(notice).toContain('not fully checked');
+    expect(notice).toContain('container privileges — 5 further findings are not listed.');
+    expect(notice).toContain('RBAC grants — They could not be listed.');
+  });
+
+  // THE POINT OF THE FIELD. Rename every finding on the server and the notice is unchanged,
+  // because nothing here reads a title. A client that recognised "Further container
+  // privileges not listed" would be keeping a second copy of a server rule, and it would go
+  // stale the first time somebody reworded the finding — silently, which is the worst way.
+  it('is unmoved by what the findings are called', () => {
+    const gaps = [{ dimension: 'container privileges', reason: 'The cap bit.' }];
+    const withOldTitles = coverageNotice(
+      gapped(gaps, [f('info', 'Further container privileges not listed'), f('info', 'RBAC grants could not be read')]),
+    );
+    const withRenamed = coverageNotice(gapped(gaps, [f('info', 'Some entirely different wording, shipped tomorrow')]));
+    const withNoFindingsAtAll = coverageNotice(gapped(gaps));
+
+    expect(withRenamed).toBe(withOldTitles);
+    expect(withNoFindingsAtAll).toBe(withOldTitles);
+    expect(withOldTitles).toContain('The cap bit.');
+  });
+
+  // The other direction, which is the half a title match would pass: those exact two titles
+  // are present and the server made no claim about coverage, so neither does the panel.
+  it('does not invent a gap from a finding that happens to be titled like one', () => {
+    expect(
+      coverageNotice(
+        gapped([], [f('info', 'Further container privileges not listed'), f('info', 'RBAC grants could not be read')]),
+      ),
+    ).toBeNull();
+  });
+
+  it('drops a gap carrying nothing to say rather than rendering an empty clause', () => {
+    expect(coverageNotice(gapped([{ dimension: '', reason: '  ' }]))).toBeNull();
+    expect(coverageNotice(gapped([{ dimension: 'RBAC grants', reason: '' }]))).toContain('RBAC grants');
   });
 });
 
