@@ -778,7 +778,8 @@ highlighted selection, at 120×40, in about fifteen lines. `Table` + `TableState
 layout via a cassowary solver. *[ran]* mouse emitted both 1003h and SGR 1006h, and `bracketedPaste`
 emitted 2004h — the only candidate here measured doing bracketed paste. It also ships
 `export/{html,svg,text}`, which would give a TUI screenshot harness comparable to the Playwright
-scripts. It pins JLine 3.25.1, which wants force-managing forward.
+scripts. It pins JLine 3.25.1, which wants force-managing forward — **and the artifact it pins is
+the uber jar, which is why the pin below was wrong; see the correction after the recommendation.**
 
 ### The exec pane is a solved problem, and not where you think
 
@@ -796,8 +797,25 @@ and *[ran]* it behaves identically on the 3.x line (as `org.jline.builtins.Scree
 ### Recommendation
 
 **Primary: TamboUI 0.4.0 for the widget layer, on the JLine 3.30.16 line, with
-`org.jline.builtins.ScreenTerminal` for the exec pane.** Pin `jline-terminal` and `jline-builtins` to
-3.30.16 in `dependencyManagement`, overriding TamboUI's stale 3.25.1.
+`org.jline.builtins.ScreenTerminal` for the exec pane.**
+
+> **CORRECTION (GH#361 spike, 2026-08-15).** This paragraph originally said to pin
+> `jline-terminal` and `jline-builtins` to 3.30.16 in `dependencyManagement`, "overriding TamboUI's
+> stale 3.25.1". **Measured: that pin overrides nothing.** `tamboui-jline3-backend` depends on the
+> **uber** artifact `org.jline:jline`, which bundles `org/jline/terminal/**`, `org/jline/reader/**`
+> and `org/jline/builtins/**` under the same package names as the split artifacts. Managing the
+> split artifacts forward therefore *adds a second copy* rather than replacing one: the resolved
+> classpath carries `jline-3.25.1.jar` **and** `jline-terminal-3.30.16.jar`, and which class wins is
+> decided by jar order. Probed at runtime, `org.jline.terminal.Terminal`,
+> `org.jline.reader.LineReader` **and `org.jline.builtins.ScreenTerminal` all load from the stale
+> 3.25.1 uber jar** — the exact opposite of the pin's intent, silently.
+>
+> **What actually works** (both measured, one copy of every class):
+> - manage `org.jline:jline` — the uber artifact — to `3.30.16`; or
+> - **exclude `org.jline:jline` from `tamboui-jline3-backend`** and depend on the split
+>   `jline-terminal` / `jline-reader` / `jline-builtins` at 3.30.16. The spike ran on this one.
+>
+> Either way the line is **3.x**, and `3.30.16` is the version to name in `dependencyManagement`.
 
 The reason is narrow and it is the right reason: **a k9s-like tool is a stateful, selectable,
 scrollable table**, and TamboUI is the only candidate whose primary widget is exactly that, with
@@ -845,6 +863,19 @@ The library choice covers the screen, the keyboard and the terminal. It does **n
 5. **A contrast gate.** There is no `contrast-check.mjs` equivalent for a terminal. TamboUI's
    `export/{html,svg}` is the lever if one is wanted.
 6. **A stability guarantee.** 0.4.0 means breaking changes between minors.
+7. **A resize your code can see.** *[GH#361 spike]* `TuiRunner.run(handler, renderer)` consumes
+   `ResizeEvent` itself (`if (event instanceof ResizeEvent) { safeRender(...); continue; }`) and
+   never passes it to the `EventHandler` — measured: the handler's resize branch fired **0 times**
+   across three real `SIGWINCH`es while the layout redrew correctly each time. Re-layout is free;
+   *observing* a resize is not. Read `Frame.area()` in the renderer (or drive the loop yourself with
+   `pollEvent()`). It matters because propagating the new size to a pod is an application-level API
+   call, item 2 above.
+8. **The two halves of `ScreenTerminal` that are easy to miss.** *[GH#361 spike]* A bridge that only
+   calls `write()` drops the emulator's *answers*: a shell emits `ESC[6n` and nothing replies, so
+   anything using readline waits. `read()` returns those replies and they must be written back to
+   the container's stdin. Symmetrically, keystrokes should go out through `pipe()`, which encodes
+   arrows for whichever cursor-key mode the remote program has set — hand-rolled encoding is the bug
+   you find later, in `vi`.
 
 ### Coexisting with picocli
 
@@ -894,11 +925,20 @@ WINCH handler, truecolor output, mouse support and `ScreenTerminal`'s VT parsing
 4.x lines; Lanterna's alternate screen, truecolor, mouse capture and resize event; Spring Shell 4's
 `TerminalUI` running without a Spring context and drawing a list, menubar, statusbar and modal;
 TamboUI's table with selection, its 1003h/1006h mouse and its 2004h bracketed paste. **Unverified**
-there: TamboUI's live resize event and its 24-bit colour output (the config surface was measured, not
-those two); Lanterna's behaviour against a real emulator beyond a CPR-answering harness; Casciian at
+there: Lanterna's behaviour against a real emulator beyond a CPR-answering harness; Casciian at
 runtime (resolved and its Java 21 bytecode confirmed, but not executed); and whether Spring Shell's
 TUI classes carry an `@Experimental` *annotation* — the documentation banner is confirmed, the
 annotation is not.
+
+Two items that were listed as unverified here have since been **measured by the GH#361 spike**, and
+one of them came back split rather than yes/no:
+
+- **TamboUI's live resize** — the *re-layout* works (three real `SIGWINCH`es at 132×44 → 100×30 →
+  170×50, border and recomputed column widths correct at each). The *event* does not reach the
+  application on the documented `run()` path; see item 7 above.
+- **TamboUI's 24-bit colour output** — yes. `Color.rgb(10, 200, 90)` emits `38;2;10;200;90`, and a
+  buffer styled with an rgb foreground plus a `#123456` background renders
+  `ESC[0;38;2;10;200;90;48;2;18;52;86;1m`.
 
 One instrument note worth recording, since this repo has a rule about it: the first Lanterna run
 reported 80×24 and was nearly written up as a defect. It was the harness not answering
