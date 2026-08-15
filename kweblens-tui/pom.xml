@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.alexmond</groupId>
+        <artifactId>kweblens-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>kweblens-tui</artifactId>
+    <name>kweblens-tui</name>
+    <description>kweblens TUI — a terminal cluster browser over kweblens-core</description>
+
+    <!-- Same permissive licence as kweblens-core/kweblens-cli (see root LICENSE). Not published:
+         the module lives in the root pom's 'default' profile, never in the top-level <modules>. -->
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <dependencies>
+        <!--
+            The ONLY kweblens module this depends on. The TUI talks to a cluster directly through
+            core's access services (ClusterRegistry, ResourceService, LogService, ExecService), not
+            to a running kweblens server: core has no Spring-MVC contamination and its streaming
+            APIs already hand back the primitives a terminal wants, so going via the server would
+            frame them into SSE/WebSocket only for the TUI to unframe them again. Depending on
+            kweblens-web would also drag a servlet container into a console app.
+            TuiModuleDependencyTest fails the build if kweblens-web ever appears here.
+        -->
+        <dependency>
+            <groupId>org.alexmond</groupId>
+            <artifactId>kweblens-core</artifactId>
+        </dependency>
+
+        <!-- Argument parsing only (context, namespace, kind flags). picocli parses argv and
+             exits; the screen is owned by TamboUI after that. The starter is what supplies the
+             CommandLine.IFactory bean the application injects — the bean whose absence shipped a
+             CLI jar that could not start (#363). -->
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+            <version>${picocli.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli-spring-boot-starter</artifactId>
+            <version>${picocli.version}</version>
+        </dependency>
+
+        <!--
+            The terminal stack, settled by the GH#361 spike: TamboUI 0.4.0 for the widget layer on
+            the JLine 3.30.16 line, with org.jline.builtins.ScreenTerminal for the exec pane.
+            Declared here in #362 so the module's classpath is the one the spike measured and the
+            JLine pin is proved by a test that runs from day one (JLineSingleProviderTest) rather
+            than discovered later. The screen itself is #364-#370; nothing in this module draws
+            with them yet.
+
+            Versions come from tamboui-bom (root pom). jline comes in transitively through
+            tamboui-jline3-backend and is pinned there too — see the long comment on the root
+            pom's dependencyManagement for why pinning the UBER artifact is the part that matters.
+        -->
+        <dependency>
+            <groupId>dev.tamboui</groupId>
+            <artifactId>tamboui-tui</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.tamboui</groupId>
+            <artifactId>tamboui-jline3-backend</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- In-JVM Kubernetes API server double — the adapter is exercised without a cluster,
+             exactly as kweblens-core's own tests are. -->
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-server-mock</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>kweblens-tui</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>org.alexmond.kweblens.tui.KweblensTuiApplication</mainClass>
+                    <!-- Runnable artifact is kweblens-tui-exec.jar; the plain jar stays usable
+                         on a classpath. Same split as kweblens-cli. -->
+                    <classifier>exec</classifier>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>coverage-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <!--
+                                0.70, the same gate as kweblens-core rather than kweblens-cli's
+                                0.60, because this module is in the same position core is: every
+                                line of it is exercisable against the in-JVM fabric8 mock server
+                                with no cluster and no terminal. The application class is
+                                deliberately NOT excluded — an <exclude> on an entry point is the
+                                sentence "nothing tests this" written into the build, which is
+                                how a CLI jar that could not start passed a 0.60 gate (#363).
+                                Raise this as the screen lands; do not lower it to accommodate
+                                code that is simply untested.
+                            -->
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.70</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

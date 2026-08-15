@@ -84,6 +84,7 @@ See [the roadmap](docs/design/roadmap.md) for what is next.
 | `kweblens-cli`  | Dependency-light cluster inspector (picocli) | Maven Central |
 | `kweblens-ui`   | The Vue SPA (bundled into `kweblens-web`) | — |
 | `kweblens-web`  | The runnable app (REST API + SPA + MCP) | container image |
+| `kweblens-tui`  | Terminal cluster browser over `kweblens-core` (read-only; no server needed) | — |
 | `kweblens-it`   | On-demand operational/connectivity tasks (tag `it`) | — |
 
 > **No release has been cut yet.** Nothing is on Maven Central and no image is published, so
@@ -196,6 +197,21 @@ java -jar kweblens-cli/target/kweblens-cli-exec.jar            # show current ku
 java -jar kweblens-cli/target/kweblens-cli-exec.jar -c staging # select a context
 ```
 
+## Terminal UI
+
+`kweblens-tui` browses a cluster from a terminal. It talks to the **cluster** through
+`kweblens-core`, not to a running kweblens server — so it needs no server, no admin credential and
+no `kubectl`, and it is bounded by your own kubeconfig and RBAC. **It is read-only**, which the
+header states as `[R]` rather than leaving you to assume it.
+
+```bash
+./mvnw -pl kweblens-tui -am package
+java -jar kweblens-tui/target/kweblens-tui-exec.jar --contexts             # what can be opened
+java -jar kweblens-tui/target/kweblens-tui-exec.jar -c staging -k pods -n kube-system
+```
+
+The interactive screen (table, command line, filters, logs, exec) is in progress — see #364-#370.
+
 ## Container image
 
 ```bash
@@ -281,5 +297,5 @@ front, and scope the RBAC role tightly.
 
 ## License
 
-Libraries (`kweblens-core`, `kweblens-cli`) are Apache-2.0; the server (`kweblens-web`) is
+`kweblens-core`, `kweblens-cli` and `kweblens-tui` are Apache-2.0; the server (`kweblens-web`) is
 AGPL-3.0. See `LICENSE-APACHE-2.0.txt` / `LICENSE-AGPL-3.0.txt`.

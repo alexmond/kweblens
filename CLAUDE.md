@@ -143,7 +143,19 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   is what supplies the `CommandLine.IFactory` bean the app injects); runnable fat jar is the
   `exec` classifier. It resolves a kubeconfig and never builds a client, so it depends on fabric8's
   **`kubernetes-client-api`, not `kweblens-core`** — core dragged 25 unused jars into the fat jar.
-  A subcommand that does talk to a cluster must go back through `ClusterRegistry` (#372). **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
+  A subcommand that does talk to a cluster must go back through `ClusterRegistry` (#372).
+- **`kweblens-tui`** — a terminal cluster browser (#362) that talks to the cluster **directly
+  through `kweblens-core`, never to a running kweblens server**, on the operator's own kubeconfig
+  and therefore their own RBAC. Boots `WebApplicationType.NONE`; `TuiDependencyTest` fails the
+  build if `kweblens-web` or any servlet class reaches the classpath. All cluster access goes
+  through **one `ClusterDataSource` port** (list / watch / get / logs / exec) with **exactly one
+  adapter**, `CoreClusterDataSource` — the port exists so an HTTP adapter is possible later, and
+  a second implementation is a deliberate decision, not a side effect. **v1 is read-only and the
+  header says so** (`TuiPosture`, k9s's `[R]`/`[RW]`); the port has no write method at all, which
+  is the enforcement. Lists go through `listRawChunked`, verdicts through `ObjectStates.forList`
+  — **one status context per page, never per row**. Terminal stack settled by the #361 spike:
+  TamboUI 0.4.0 + JLine 3.30.16. The module is in the `default` profile, **not** published.
+- **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
   build; what is excluded are its `it`-**tagged tests**, via surefire `excludedGroups`.
 
 Config is env-var driven (`kweblens-web/src/main/resources/application.yml`): `PORT`,
@@ -296,6 +308,17 @@ broken. It is not; do not "fix" it.
   truncated-without-the-field falls back to a full list.
 - **fabric8 is BOM-pinned.** `kubernetes-client-bom` aligns client + model + mock-server; bump the
   one property, never individual fabric8 artifacts.
+- **JLine is pinned on the UBER artifact, and pinning the split ones overrides nothing.**
+  `tamboui-jline3-backend` depends on `org.jline:jline` — the uber jar — which bundles
+  `org/jline/terminal/**`, `org/jline/reader/**` and `org/jline/builtins/**` under the same
+  package names as `jline-terminal` / `jline-reader` / `jline-builtins`. Managing the *split*
+  artifacts forward therefore puts a **second copy** of every class beside the stale uber and jar
+  order picks the winner: measured, `org.jline.builtins.ScreenTerminal` — the exec pane's whole VT
+  emulator — still loaded from 3.25.1, silently, because duplicate classes are not an error.
+  Manage `org.jline:jline` to `${jline.version}` and **do not name the split artifacts**.
+  `JLineSingleProviderTest` asserts the outcome (one classpath URL per class, all from one jar, at
+  the pinned version) rather than the intent — "it works today" is what a duplicated classpath
+  looks like right up until it does not.
 - **kubeconfigs are secrets.** `.gitignore` blocks `*.kubeconfig`, `kubeconfig`, `.kube/` — never
   commit one; mount it or point `KUBECONFIG` at it.
 
@@ -317,10 +340,13 @@ broken. It is not; do not "fix" it.
   a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch` where
   `publish` is explicitly true (it defaults to **false**). That tag exists only because a human
   ran `maven_release.yml`.
-- **Only the libraries publish**: `kweblens-core`, `kweblens-cli` (+ parent). `kweblens-web` is
-  not in the top-level `<modules>` — it lives in an `activeByDefault` `default` profile, so
-  `-Prelease` drops it and the `docker` profile re-adds it. **Any new `-P` profile that needs the
-  app must also list `<module>kweblens-web</module>`.**
+- **Only the libraries publish**: `kweblens-core`, `kweblens-cli` (+ parent). `kweblens-web` and
+  `kweblens-tui` are not in the top-level `<modules>` — they live in an `activeByDefault`
+  `default` profile, so `-Prelease` drops them and the `docker` profile re-adds only the web app.
+  **Any new `-P` profile that needs the app must also list `<module>kweblens-web</module>`.**
+  The applications stay off the publishing path on purpose: their public surface is a screen, not
+  an API anyone compiles against, and a published coordinate owes callers a jar that starts —
+  which `kweblens-cli`, the one application that does publish, failed for its entire life (#363).
 - **Cut a release** via the `Maven release` workflow (`versions:set` → `verify` → tag → `deploy
   -Prelease` → next SNAPSHOT). Publishing is **irreversible — never trigger without explicit
   go-ahead.** Versions are numeric `MAJOR.MINOR.PATCH`; `-SNAPSHOT` only on dev.
