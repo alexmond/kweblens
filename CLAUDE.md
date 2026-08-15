@@ -175,6 +175,20 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     measured 0 deliveries across three real SIGWINCHes while the layout redrew correctly.
     `ScreenLoopTest` asserts that count stays **zero**, because a handler that never fires looks
     identical to one that works if the layout is right either way.
+  - **A live table must be able to say it has stopped being live.** `ClusterDataSource.watch`
+    takes an `onEnd` and has **no overload without one** (#413) — fabric8 reconnects by itself,
+    so the callback fires only where it has given up (410, reconnect limit, a bad event), and a
+    dropped signal leaves the terminal drawing a photograph with a row count that reads as
+    current. `WatchSupervisor` puts `NOT LIVE …` at the **front** of the header (everything after
+    it is a claim about a moment that has passed), tells a clean end from a failure **in words
+    only** — the posture and the response are the same, because nothing arrives either way — and
+    reconnects with re-subscribe + **re-list**, since the TUI tracks no `resourceVersion`. The
+    reconnect runs on its own thread and hands **rows** back for the render thread to
+    `replaceAll`: the model is single-threaded by design, and a re-list has to be a *replacement*
+    or the row deleted while the screen was blind never leaves. **A close the TUI asked for must
+    never be reported** — fabric8 routes it through the same no-arg `onClose()`, so `CoreWatch`
+    suppresses it; without that, every reconnect reads its own close of the old handle as a fresh
+    failure and reconnects forever.
   - **Nothing but the renderer may write to stdout**, and it takes two halves:
     `kweblens-tui/src/main/resources/logback.xml` (file appender, **no** console appender, and
     plain `logback.xml` not `logback-spring.xml` so it is in force before Spring exists — Boot 4

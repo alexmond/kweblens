@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -18,6 +19,7 @@ import org.alexmond.kweblens.tui.data.LogStream;
 import org.alexmond.kweblens.tui.data.PodTarget;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
+import org.alexmond.kweblens.tui.data.WatchEnd;
 
 /**
  * A cluster the test drives by hand: a fixed list, and a watch it can fire into on
@@ -34,7 +36,20 @@ public class FakeCluster implements ClusterDataSource {
 
 	private final AtomicBoolean watchClosed = new AtomicBoolean();
 
+	private final AtomicInteger opened = new AtomicInteger();
+
+	private final AtomicInteger closed = new AtomicInteger();
+
+	private final AtomicInteger lists = new AtomicInteger();
+
 	private volatile BiConsumer<String, GenericKubernetesResource> subscriber;
+
+	private volatile Consumer<WatchEnd> ender;
+
+	/**
+	 * When set, {@link #watch} throws it instead of subscribing — a cluster that refuses.
+	 */
+	private volatile RuntimeException refuseWatch;
 
 	/** A Pod-shaped object with the given name in namespace {@code ns}. */
 	public static GenericKubernetesResource object(String name) {
@@ -56,6 +71,13 @@ public class FakeCluster implements ClusterDataSource {
 		return this;
 	}
 
+	/** Replace what the next list returns, so a re-list can differ from the first one. */
+	public FakeCluster setObjects(List<GenericKubernetesResource> objects) {
+		this.initial.clear();
+		this.initial.addAll(objects);
+		return this;
+	}
+
 	/** Deliver one watch event to whoever subscribed. */
 	public void fire(String action, GenericKubernetesResource object) {
 		BiConsumer<String, GenericKubernetesResource> target = this.subscriber;
@@ -64,9 +86,48 @@ public class FakeCluster implements ClusterDataSource {
 		}
 	}
 
+	/**
+	 * Kill the watch the way the API server does: report the ending and stop delivering.
+	 * @param clean a stream that ended, rather than one that broke
+	 */
+	public void killWatch(boolean clean) {
+		Consumer<WatchEnd> target = this.ender;
+		this.subscriber = null;
+		if (target != null) {
+			this.ender = null;
+			target.accept((clean) ? WatchEnd.completed()
+					: WatchEnd.failed(new IllegalStateException("410: too old resource version")));
+		}
+	}
+
+	/**
+	 * Make the next {@code watch} calls throw, as a cluster that is not answering would.
+	 */
+	public FakeCluster refuseWatch(RuntimeException failure) {
+		this.refuseWatch = failure;
+		return this;
+	}
+
 	/** Whether the subscription was released — a watch left open leaks a connection. */
 	public boolean watchClosed() {
 		return this.watchClosed.get();
+	}
+
+	/** How many watches have ever been opened. One per subscribe, one per reconnect. */
+	public int watchesOpened() {
+		return this.opened.get();
+	}
+
+	/**
+	 * How many of them were closed. The gap is how many are still holding a connection.
+	 */
+	public int watchesClosed() {
+		return this.closed.get();
+	}
+
+	/** How many times the kind was listed. */
+	public int lists() {
+		return this.lists.get();
 	}
 
 	@Override
@@ -76,9 +137,11 @@ public class FakeCluster implements ClusterDataSource {
 
 	@Override
 	public void list(ResourceQuery query, int chunkSize, Consumer<List<GenericKubernetesResource>> onPage) {
-		int size = (chunkSize > 0) ? chunkSize : this.initial.size();
-		for (int from = 0; from < this.initial.size(); from += size) {
-			onPage.accept(List.copyOf(this.initial.subList(from, Math.min(from + size, this.initial.size()))));
+		this.lists.incrementAndGet();
+		List<GenericKubernetesResource> snapshot = List.copyOf(this.initial);
+		int size = (chunkSize > 0) ? chunkSize : Math.max(1, snapshot.size());
+		for (int from = 0; from < snapshot.size(); from += size) {
+			onPage.accept(List.copyOf(snapshot.subList(from, Math.min(from + size, snapshot.size()))));
 		}
 	}
 
@@ -93,9 +156,19 @@ public class FakeCluster implements ClusterDataSource {
 	}
 
 	@Override
-	public Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent) {
+	public Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent,
+			Consumer<WatchEnd> onEnd) {
+		RuntimeException refusal = this.refuseWatch;
+		if (refusal != null) {
+			throw refusal;
+		}
+		this.opened.incrementAndGet();
 		this.subscriber = onEvent;
-		return () -> this.watchClosed.set(true);
+		this.ender = onEnd;
+		return () -> {
+			this.closed.incrementAndGet();
+			this.watchClosed.set(true);
+		};
 	}
 
 	@Override

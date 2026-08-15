@@ -51,6 +51,24 @@ public class ResourceService {
 	 */
 	private static final int HTTP_GONE = 410;
 
+	/**
+	 * The listener the four-argument {@code watchRaw} installs: it says, in one named
+	 * place, that this caller has decided it does not need the signal. The alternative —
+	 * an empty {@code onClose} body inside the watcher — is what GH#413 was, and it read
+	 * as an oversight because it looked like one.
+	 */
+	private static final WatchEndListener END_IGNORED = new WatchEndListener() {
+		@Override
+		public void completed() {
+			// The caller closed it, or learns it is gone some other way.
+		}
+
+		@Override
+		public void failed(WatcherException cause) {
+			log.debug("Watch ended and nobody asked to be told", cause);
+		}
+	};
+
 	private final ClusterRegistry clusters;
 
 	/**
@@ -243,9 +261,36 @@ public class ResourceService {
 	 * Watch a kind and deliver each change as (action, raw object) — the full
 	 * {@link GenericKubernetesResource}, so the web layer can project kind-specific
 	 * columns. The returned {@link Watch} must be closed to stop watching.
+	 *
+	 * <p>
+	 * <b>This flavour drops the end of the stream.</b> That is deliberate and it is only
+	 * safe for a caller that learns about the disconnect some other way: the web layer's
+	 * {@code SseKeepAlive} fails a write to a departed subscriber, completes the emitter
+	 * and closes the watch through its own hook, so a callback here would be a second
+	 * copy of a decision it already makes. A caller with no such hook — the TUI — must
+	 * use
+	 * {@link #watchRaw(String, ResourceDescriptor, String, BiConsumer, WatchEndListener)},
+	 * or a dead watch leaves it drawing a stale list that looks live (GH#413).
 	 */
 	public Watch watchRaw(String clusterId, ResourceDescriptor descriptor, String namespace,
 			BiConsumer<String, GenericKubernetesResource> onEvent) {
+		return watchRaw(clusterId, descriptor, namespace, onEvent, END_IGNORED);
+	}
+
+	/**
+	 * The same watch, with the end of the stream reported to {@code onEnd}.
+	 *
+	 * <p>
+	 * fabric8 reconnects by itself, so {@code onEnd} fires only once it has given up —
+	 * see {@link WatchEndListener} for which ending is which and why they are two
+	 * methods. Neither callback closes anything: the returned {@link Watch} is still the
+	 * caller's to release, because a watch that failed and a watch that was never opened
+	 * are different states and only the caller knows which of its own handles it is
+	 * holding.
+	 * @param onEnd told once, when nothing further will arrive
+	 */
+	public Watch watchRaw(String clusterId, ResourceDescriptor descriptor, String namespace,
+			BiConsumer<String, GenericKubernetesResource> onEvent, WatchEndListener onEnd) {
 		var op = clusters.require(clusterId).genericKubernetesResources(contextFor(descriptor));
 		Watcher<GenericKubernetesResource> watcher = new Watcher<>() {
 			@Override
@@ -254,8 +299,13 @@ public class ResourceService {
 			}
 
 			@Override
+			public void onClose() {
+				onEnd.completed();
+			}
+
+			@Override
 			public void onClose(WatcherException cause) {
-				// The web layer completes the SSE emitter via its own close hooks.
+				onEnd.failed(cause);
 			}
 		};
 		if (!descriptor.namespaced()) {

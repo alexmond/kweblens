@@ -163,6 +163,58 @@ class ResourceServiceTest {
 		watch.close();
 	}
 
+	/**
+	 * The signal GH#413 was filed for: a caller can now be told the stream stopped.
+	 *
+	 * <p>
+	 * Which ending fires matters as much as that one does. Measured against fabric8
+	 * 7.3.1, {@code Watch.close()} runs {@code closeEvent()}, which calls the watcher's
+	 * no-argument {@code onClose()} — so a locally requested close arrives as
+	 * {@code completed()}, never as {@code failed()}. A caller that treated the two the
+	 * same would report its own shutdown as a lost watch.
+	 */
+	@Test
+	void watchRawReportsTheEndOfTheStreamToAListenerThatAsksForIt() throws InterruptedException {
+		ResourceService service = serviceFor("mock");
+		java.util.concurrent.CountDownLatch delivered = new java.util.concurrent.CountDownLatch(1);
+		java.util.List<String> endings = new java.util.concurrent.CopyOnWriteArrayList<>();
+		java.util.concurrent.CountDownLatch ended = new java.util.concurrent.CountDownLatch(1);
+		io.fabric8.kubernetes.client.Watch watch = service.watchRaw("mock", CONFIG_MAPS, "default",
+				(type, obj) -> delivered.countDown(), new WatchEndListener() {
+					@Override
+					public void completed() {
+						endings.add("completed");
+						ended.countDown();
+					}
+
+					@Override
+					public void failed(io.fabric8.kubernetes.client.WatcherException cause) {
+						endings.add("failed");
+						ended.countDown();
+					}
+				});
+
+		client.configMaps()
+			.resource(new ConfigMapBuilder().withNewMetadata()
+				.withName("end-reported")
+				.withNamespace("default")
+				.endMetadata()
+				.build())
+			.create();
+
+		// The positive control: the watch was demonstrably open and delivering before it
+		// was closed, so what follows is about the ending and not about a watch that
+		// never
+		// started.
+		assertThat(delivered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+		assertThat(endings).isEmpty();
+
+		watch.close();
+
+		assertThat(ended.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+		assertThat(endings).containsExactly("completed");
+	}
+
 	@Test
 	void deleteRemovesTheResource() {
 		client.configMaps()
