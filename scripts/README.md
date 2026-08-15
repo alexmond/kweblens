@@ -9,7 +9,7 @@ once — the reason is in the header comment of each script.
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
 | [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
-| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, two labels truncating alike, a pill squeezed below its own label or cut off by its container, unused row width. |
+| [`ui-measure.mjs`](ui-measure.mjs) | Geometry: box, overflow vs container, characters per line, sub-pixel clipping, two labels truncating alike, a pill squeezed below its own label or cut off by its container, unused row width, **controls on one line that disagree where they sit on the cross axis**. |
 | [`contrast-check.mjs`](contrast-check.mjs) | Measure WCAG contrast of rendered UI in **both** themes. |
 | [`perf-sweep.mjs`](perf-sweep.mjs) | Walk every nav leaf, fail on slow loads or main-thread hangs. |
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
@@ -152,6 +152,18 @@ node scripts/ui-shot.mjs                               # 3 widths x 2 themes of 
 node scripts/ui-shot.mjs --leaf Pods --view wide
 node scripts/ui-measure.mjs --view wide '.n-drawer' '.drawer-title'
 node scripts/ui-measure.mjs --self-test                # positive controls; no running app
+
+# Are the controls that share a line ON that line? (#392) The `line` report compares the
+# BOXES of the controls under a selector — top, centre and bottom, unrounded, over a stated
+# 2px tolerance — where `row` only ever counted flex LINES and so passed #379 both before and
+# after the fix. Point it at a container, not at a control; a whole page works.
+node scripts/ui-measure.mjs --view wide --leaf Pods '.app'
+
+# ...and `--style` rebuilds a fixed defect so a check can be watched to FIRE. This is #379's
+# 14.34px step, re-injected, which the run above is silent on:
+PREPARE='click:td:nth-child(2);drawer:1200' node scripts/ui-measure.mjs --view wide --leaf Pods \
+  --style '.n-drawer-header{align-items:center} .n-drawer-header > .n-drawer-header__close, .drawer-title > .drawer-expand {align-self:auto;height:auto}' \
+  '.n-drawer-header'
 
 # Below the fold, or behind the nav — neither could be measured for colour before #257
 PREPARE='scroll:.warn-table' node scripts/contrast-check.mjs '.warn-table .n-data-table-td'
