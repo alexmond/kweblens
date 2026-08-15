@@ -71,6 +71,25 @@ class SecurityAuditServiceTest {
 			.create();
 	}
 
+	private void privilegedPod(String namespace, String name) {
+		this.client.pods()
+			.inNamespace(namespace)
+			.resource(new PodBuilder().withNewMetadata()
+				.withName(name)
+				.withNamespace(namespace)
+				.endMetadata()
+				.withNewSpec()
+				.addNewContainer()
+				.withName("agent")
+				.withNewSecurityContext()
+				.withPrivileged(true)
+				.endSecurityContext()
+				.endContainer()
+				.endSpec()
+				.build())
+			.create();
+	}
+
 	private void clusterBinding(String name, String role, String subjectKind, String subjectNamespace,
 			String subjectName) {
 		this.client.rbac()
@@ -120,7 +139,7 @@ class SecurityAuditServiceTest {
 		// in it at all (measured: it did).
 		pod("other", "impostor", "ci");
 
-		List<SecurityFinding> findings = service().audit("mock", null, pods(null));
+		List<SecurityFinding> findings = service().audit("mock", null, pods(null)).findings();
 
 		assertThat(findings).filteredOn((f) -> "Workloads run as an identity with cluster-admin".equals(f.title()))
 			.singleElement()
@@ -140,7 +159,7 @@ class SecurityAuditServiceTest {
 	void doesNotReportTheClusterAdminBindingEveryClusterShipsWith() {
 		seedBuiltIn();
 
-		assertThat(service().audit("mock", null, List.of())).isEmpty();
+		assertThat(service().audit("mock", null, List.of()).findings()).isEmpty();
 	}
 
 	/**
@@ -176,7 +195,7 @@ class SecurityAuditServiceTest {
 		clusterBinding("kube-thing", "cluster-admin", "ServiceAccount", "kube-system", "controller");
 		pod("app", "web-1", "default");
 
-		assertThat(service().audit("mock", null, pods(null))).isEmpty();
+		assertThat(service().audit("mock", null, pods(null)).findings()).isEmpty();
 	}
 
 	/**
@@ -198,7 +217,7 @@ class SecurityAuditServiceTest {
 		// Exactly one: the subject names its own blast radius, so there is no second
 		// pod-listing finding — the answer is every pod, and every person, in the
 		// cluster.
-		assertThat(service().audit("mock", null, pods(null))).singleElement().satisfies((f) -> {
+		assertThat(service().audit("mock", null, pods(null)).findings()).singleElement().satisfies((f) -> {
 			assertThat(f.title()).isEqualTo("ClusterRoleBinding grants cluster-admin to every authenticated identity");
 			assertThat(f.object()).isEqualTo("ClusterRoleBinding/everyone");
 			assertThat(f.severity()).isEqualTo("critical");
@@ -226,7 +245,7 @@ class SecurityAuditServiceTest {
 		clusterBinding("mis-kinded", "cluster-admin", "Group", null, "system:anonymous");
 		pod("app", "web-1", "default");
 
-		List<SecurityFinding> findings = service().audit("mock", null, pods(null));
+		List<SecurityFinding> findings = service().audit("mock", null, pods(null)).findings();
 
 		assertThat(findings).extracting(SecurityFinding::object)
 			.containsExactly("ClusterRoleBinding/nobody", "ClusterRoleBinding/open-door");
@@ -257,13 +276,13 @@ class SecurityAuditServiceTest {
 	void reportsANamespacedGrantToAnAuthenticationPopulationAsTheNarrowerThingItIs() {
 		roleBindingTo("app", "ns-everyone", "cluster-admin", "Group", null, "system:authenticated");
 
-		assertThat(service().audit("mock", null, pods(null))).singleElement().satisfies((f) -> {
+		assertThat(service().audit("mock", null, pods(null)).findings()).singleElement().satisfies((f) -> {
 			assertThat(f.severity()).isEqualTo("warning");
 			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin to every authenticated identity");
 			assertThat(f.object()).isEqualTo("RoleBinding/app/ns-everyone");
 			assertThat(f.detail()).contains("full control of namespace 'app'");
 		});
-		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+		assertThat(service().audit("mock", "app", pods("app")).findings()).singleElement().satisfies((f) -> {
 			assertThat(f.severity()).isEqualTo("warning");
 			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin to every authenticated identity");
 			assertThat(f.object()).isEqualTo("RoleBinding/app/ns-everyone");
@@ -292,14 +311,14 @@ class SecurityAuditServiceTest {
 		roleBindingTo("other", "bob-admin", "cluster-admin", "User", null, "bob");
 		pod("app", "web-1", "default");
 
-		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+		assertThat(service().audit("mock", "app", pods("app")).findings()).singleElement().satisfies((f) -> {
 			assertThat(f.severity()).isEqualTo("warning");
 			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin in one namespace");
 			assertThat(f.object()).isEqualTo("RoleBinding/app/alice-admin");
 			assertThat(f.detail()).contains("subject User alice").contains("full control of namespace 'app'");
 		});
 		// Neither ever belonged to the cluster-wide view ALONE; both are still in it.
-		assertThat(service().audit("mock", null, pods(null))).extracting(SecurityFinding::object)
+		assertThat(service().audit("mock", null, pods(null)).findings()).extracting(SecurityFinding::object)
 			.containsExactly("RoleBinding/app/alice-admin", "RoleBinding/other/bob-admin");
 	}
 
@@ -315,8 +334,8 @@ class SecurityAuditServiceTest {
 		clusterBinding("everyone", "cluster-admin", "Group", null, "system:authenticated");
 		pod("app", "web-1", "default");
 
-		assertThat(service().audit("mock", "app", pods("app"))).isEmpty();
-		assertThat(service().audit("mock", null, pods(null))).extracting(SecurityFinding::object)
+		assertThat(service().audit("mock", "app", pods("app")).findings()).isEmpty();
+		assertThat(service().audit("mock", null, pods(null)).findings()).extracting(SecurityFinding::object)
 			.containsExactly("ClusterRoleBinding/alice-admin", "ClusterRoleBinding/everyone");
 	}
 
@@ -331,7 +350,7 @@ class SecurityAuditServiceTest {
 		clusterBinding("everything", "cluster-admin", "Group", null, "system:serviceaccounts");
 		pod("app", "web-1", "default");
 
-		List<SecurityFinding> findings = service().audit("mock", null, pods(null));
+		List<SecurityFinding> findings = service().audit("mock", null, pods(null)).findings();
 
 		// Exactly one: the binding names the blast radius itself, so there is no second
 		// finding listing pods — the answer would be "all of them, plus tomorrow's".
@@ -354,7 +373,7 @@ class SecurityAuditServiceTest {
 		// accounts it hands cluster-admin to are exactly the ones in scope. The 'other'
 		// scope below is the control that proves the filter still bites — without it,
 		// scoping alone would prove nothing.
-		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+		assertThat(service().audit("mock", "app", pods("app")).findings()).singleElement().satisfies((f) -> {
 			assertThat(f.title())
 				.isEqualTo("ClusterRoleBinding grants cluster-admin to every ServiceAccount in a namespace");
 			assertThat(f.object()).isEqualTo("ClusterRoleBinding/app-everything");
@@ -362,8 +381,8 @@ class SecurityAuditServiceTest {
 			assertThat(f.detail()).contains("every ServiceAccount in namespace 'app'")
 				.contains("administrator of the whole cluster");
 		});
-		assertThat(service().audit("mock", "other", pods("other"))).isEmpty();
-		assertThat(service().audit("mock", null, pods(null))).extracting(SecurityFinding::object)
+		assertThat(service().audit("mock", "other", pods("other")).findings()).isEmpty();
+		assertThat(service().audit("mock", null, pods(null)).findings()).extracting(SecurityFinding::object)
 			.containsExactly("ClusterRoleBinding/app-everything");
 	}
 
@@ -375,7 +394,7 @@ class SecurityAuditServiceTest {
 	void reportsAGroupGrantConfinedToOneNamespaceAsTheNarrowerThingItIs() {
 		roleBindingTo("app", "ns-everything", "cluster-admin", "Group", null, "system:serviceaccounts:app");
 
-		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+		assertThat(service().audit("mock", "app", pods("app")).findings()).singleElement().satisfies((f) -> {
 			assertThat(f.severity()).isEqualTo("warning");
 			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin to a whole group of ServiceAccounts");
 			assertThat(f.object()).isEqualTo("RoleBinding/app/ns-everything");
@@ -388,7 +407,7 @@ class SecurityAuditServiceTest {
 		clusterBinding("readers", "view", "ServiceAccount", "app", "viewer");
 		pod("app", "reader-1", "viewer");
 
-		assertThat(service().audit("mock", "app", pods("app"))).isEmpty();
+		assertThat(service().audit("mock", "app", pods("app")).findings()).isEmpty();
 	}
 
 	@Test
@@ -396,7 +415,7 @@ class SecurityAuditServiceTest {
 		clusterBinding("build-admin", "cluster-admin", "ServiceAccount", "app", "builder");
 		pod("app", "web-1", "default");
 
-		List<SecurityFinding> findings = service().audit("mock", "app", pods("app"));
+		List<SecurityFinding> findings = service().audit("mock", "app", pods("app")).findings();
 
 		assertThat(findings).extracting(SecurityFinding::title)
 			.containsExactly("ClusterRoleBinding grants cluster-admin");
@@ -407,8 +426,8 @@ class SecurityAuditServiceTest {
 	void leavesGrantsToOtherNamespacesOutOfANamespacedAudit() {
 		clusterBinding("robot-admin", "cluster-admin", "ServiceAccount", "other", "robot");
 
-		assertThat(service().audit("mock", "app", pods("app"))).isEmpty();
-		assertThat(service().audit("mock", null, pods(null))).extracting(SecurityFinding::object)
+		assertThat(service().audit("mock", "app", pods("app")).findings()).isEmpty();
+		assertThat(service().audit("mock", null, pods(null)).findings()).extracting(SecurityFinding::object)
 			.contains("ClusterRoleBinding/robot-admin");
 	}
 
@@ -416,7 +435,7 @@ class SecurityAuditServiceTest {
 	void doesNotReportAccountsTheClusterOwns() {
 		clusterBinding("kube-thing", "cluster-admin", "ServiceAccount", "kube-system", "controller");
 
-		assertThat(service().audit("mock", null, pods(null))).isEmpty();
+		assertThat(service().audit("mock", null, pods(null)).findings()).isEmpty();
 	}
 
 	@Test
@@ -424,7 +443,7 @@ class SecurityAuditServiceTest {
 		roleBinding("app", "ns-admin", "cluster-admin", "deployer");
 		pod("app", "deploy-1", "deployer");
 
-		List<SecurityFinding> findings = service().audit("mock", "app", pods("app"));
+		List<SecurityFinding> findings = service().audit("mock", "app", pods("app")).findings();
 
 		assertThat(findings).extracting(SecurityFinding::severity).containsOnly("warning");
 		assertThat(findings).extracting(SecurityFinding::object)
@@ -468,8 +487,61 @@ class SecurityAuditServiceTest {
 
 		// No cluster registered: the scan cannot run, and reporting nothing would read as
 		// "no over-privileged identities", which is the dangerous direction.
-		assertThat(service.audit("missing", "app", List.of())).singleElement()
+		SecurityAudit audit = service.audit("missing", "app", List.of());
+
+		assertThat(audit.findings()).singleElement()
 			.satisfies((f) -> assertThat(f.title()).isEqualTo("RBAC grants could not be read"));
+		// And the same fact as a claim about the LIST, so a reader who never scrolls to
+		// that card still learns the audit did not cover this half (#388).
+		assertThat(audit.incomplete()).singleElement().satisfies((gap) -> {
+			assertThat(gap.dimension()).isEqualTo("RBAC grants");
+			assertThat(gap.reason()).contains("could not be listed").contains("cluster-admin");
+		});
+	}
+
+	/**
+	 * The other emitter: the container cap.
+	 *
+	 * <p>
+	 * Seeded well past {@code MAX_CONTAINER_FINDINGS} so the cap certainly bites — the
+	 * threshold itself is a judgement about readability that has never been measured
+	 * against a real cluster, and nothing here claims otherwise. What is pinned is that
+	 * when it does bite, the list says so about ITSELF and not only in a card.
+	 */
+	@Test
+	void saysTheListIsPartialWhenTheContainerCapBites() {
+		for (int i = 0; i < 25; i++) {
+			privilegedPod("app", "runner-p" + i);
+		}
+
+		SecurityAudit audit = service().audit("mock", "app", pods("app"));
+
+		// The finding stays: an operator reading the list still meets the reason beside
+		// the
+		// objects it concerns.
+		assertThat(audit.findings()).extracting(SecurityFinding::title)
+			.contains("Further container privileges not listed");
+		assertThat(audit.incomplete()).singleElement().satisfies((gap) -> {
+			assertThat(gap.dimension()).isEqualTo("container privileges");
+			assertThat(gap.reason()).contains("5 further container privilege findings");
+		});
+	}
+
+	/**
+	 * The control. A notice that always appears stops meaning anything, so an audit that
+	 * saw everything must say nothing about coverage — including one that found plenty.
+	 */
+	@Test
+	void saysNothingAboutCoverageWhenTheAuditSawEverything() {
+		clusterBinding("ci-admin", "cluster-admin", "ServiceAccount", "app", "ci");
+		privilegedPod("app", "runner-p0");
+		pod("app", "runner-1", "ci");
+
+		SecurityAudit audit = service().audit("mock", "app", pods("app"));
+
+		// Not vacuous: this scope has findings, it just has no gaps.
+		assertThat(audit.findings()).isNotEmpty();
+		assertThat(audit.incomplete()).isEmpty();
 	}
 
 }

@@ -4486,6 +4486,28 @@ body.dragging {
   color: var(--danger-fg);
 }
 
+/* "The audit did not see everything." Shares .dx-stale's shape on purpose (#388): both are
+   claims about the WHOLE panel, so both are strips, while a finding — a claim about one
+   object — is a card with a severity badge. That is the whole visual grammar here, and it is
+   why this must not borrow a severity token's colour: coverage is not a severity, and
+   painting it --info-fg would file it back under the grade it was just taken out of. Full
+   strength --text on --panel, the pairing .dx-stale already measures, and the left edge is
+   --muted rather than a semantic tint.
+   The 90ch cap is the same one .dx-p carries and is not cosmetic: uncapped, this strip
+   measured 200 characters per line at the wide viewport, which is the length nobody reads —
+   on the one line whose whole job is to be read before the list below it. */
+.dx-coverage {
+  max-width: 90ch;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 8px;
+}
+
 /* "There was a summary and it no longer applies." Full-strength text, not muted: it is a
    correction to something the reader may have read, not a footnote. */
 .dx-stale {

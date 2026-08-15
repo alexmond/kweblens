@@ -102,7 +102,10 @@ public class HealthTools {
 			+ "the cluster's configuration, not a failure and not who is asking; nothing here is broken.")
 	public List<SecurityFinding> checkSecurity(@ToolParam(description = "kweblens cluster id") String clusterId,
 			@ToolParam(required = false, description = "namespace, or omit for the whole cluster") String namespace) {
-		return this.security.audit(clusterId, namespace);
+		// The findings only. The audit's coverage gaps summarise this same list and each
+		// one already has its finding here — so nothing is lost, the tool's shape is
+		// unchanged, and no new field crosses the MCP boundary to be redacted.
+		return this.security.audit(clusterId, namespace).findings();
 	}
 
 	@Tool(description = "Current CPU and memory usage per pod, from metrics-server. Use for OOM questions: "

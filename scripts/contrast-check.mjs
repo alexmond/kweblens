@@ -423,6 +423,17 @@ const SCENES = [
     selectors: ['.dx-sev-info', '.dx-item.dx-info .dx-item-title', '.dx-item.dx-info .dx-detail'],
   },
   {
+    // The same admission, said once about the LIST instead of twice about objects (#388).
+    // `.dx-coverage` sits at the top of the panel beside the count, so this scrolls to the
+    // strip itself rather than to a card — the two scenes above scroll DOWN past it, and a
+    // selector that has left the viewport reports `outside the viewport`, which this file
+    // counts as a failed sample. `.dx-count` rides along because the notice is only in the
+    // right place if the line it sits beside is readable too.
+    name: 'diagnosis: the list is partial, said in the header (stubbed)',
+    prepare: 'close;partial;leaf:Pods;wait:500;leaf:Cluster/Overview;wait:1500;scroll:.dx-coverage',
+    selectors: ['.dx-coverage', '.dx-count'],
+  },
+  {
     // The editor dialog's Review Changes tab — the second diff (T1), which asks the cluster
     // what it WOULD store. Behind the admin login: its tabs are `v-if="!readonly"`, so a
     // signed-out run does not merely fail to measure them, it never renders them.
@@ -1024,6 +1035,20 @@ const PARTIAL_DIAGNOSIS = {
   analysedAt: null,
   summaryOutdated: false,
   aiAvailable: false,
+  // What the SERVER says about the list, which is a different claim from any of the findings
+  // above and is why `.dx-coverage` exists (#388). Reasons copied from `SecurityAuditService`.
+  // The panel builds its notice from this field ALONE — delete these two entries and the strip
+  // goes away no matter what the findings are called, which is the property the vitest pins.
+  incomplete: [
+    {
+      dimension: 'container privileges',
+      reason: '7 further container privilege findings are not listed, so the most severe stay readable.',
+    },
+    {
+      dimension: 'RBAC grants',
+      reason: 'RoleBindings and ClusterRoleBindings could not be listed, so no cluster-admin grant was checked.',
+    },
+  ],
 };
 
 async function stubPartialDiagnosis(page) {

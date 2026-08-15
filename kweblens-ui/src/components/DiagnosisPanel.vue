@@ -22,6 +22,7 @@ import {
   analysisNote,
   analysisState,
   countLine,
+  coverageNotice,
   type DiagnoseResult,
   groupFindings,
   parseSummary,
@@ -42,6 +43,10 @@ const findings = computed(() => sortFindings(data.value?.findings ?? []));
 const groups = computed(() => groupFindings(data.value?.findings ?? []));
 const blocks = computed(() => parseSummary(data.value?.summary));
 const enriched = computed(() => data.value?.aiEnriched === true);
+// A claim about the LIST, so it is read off `incomplete` and never off a finding's title —
+// see diagnosis.ts. It renders once, next to the count, because that is where the reader
+// who never scrolls the list still meets it.
+const coverage = computed(() => coverageNotice(data.value));
 const state = computed(() => analysisState(data.value));
 const note = computed(() => analysisNote(data.value));
 const label = computed(() => analyseLabel(state.value));
@@ -92,6 +97,12 @@ const analyse = async () => {
     <p v-else-if="loading" class="dx-note">Checking…</p>
 
     <template v-else-if="data">
+      <!-- How much of the check RAN, above everything the check found. The count line
+           beside it grades severity and cannot carry this: "14 critical, 20 warning, 7 info"
+           is true of a list that saw half the cluster. A strip, not a card, because it is a
+           claim about the list rather than about any object in it. -->
+      <p v-if="coverage" class="dx-coverage">{{ coverage }}</p>
+
       <p v-if="analyseError" class="dx-note dx-analyse-error">Analysis failed: {{ analyseError }}</p>
 
       <!-- The summary is optional and its absence is normal: it needs an LLM key AND an
