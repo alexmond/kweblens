@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    A TUI's stdout IS its display, so NOTHING may write to it but the renderer.
+
+    This file is how logging gets off the terminal, and there are three things about it
+    that are decisions rather than boilerplate.
+
+    1. It is `logback.xml`, NOT `logback-spring.xml`.
+       logback configures itself on the first call to LoggerFactory, which happens long
+       before a Spring context exists (fabric8, JLine and Boot's own bootstrap all log).
+       A `-spring` file is only read once Boot's LoggingSystem initialises, so until then
+       logback would fall back to its BUILT-IN default: a ConsoleAppender at DEBUG,
+       straight onto the screen. Naming the file `logback.xml` means the very first log
+       call already lands in the file appender below. The cost is that Boot re-applies
+       this configuration once more during startup, which is harmless — there is no
+       console appender either time.
+
+    2. It <include>s nothing.
+       Spring Boot 4 applies its logging defaults PROGRAMMATICALLY; there is no
+       `org/springframework/boot/logging/logback/defaults.xml` in spring-boot-4.0.6.jar to
+       include the way a Boot 2/3 custom config would. So the pattern and the converters
+       are spelled out here. Do not add an <include> for a file that is not in the jar —
+       it fails the whole configuration and logback falls back to the console default,
+       i.e. onto the screen.
+
+    3. There is no ConsoleAppender at all, at any level.
+       Not "console at WARN". A single stray line desynchronises a diff-drawing renderer,
+       and the GH#361 spike spent an hour on a "TamboUI rendering bug" that was logback
+       writing to the pty. Anything that does not go through logback — a library's
+       printStackTrace, an uncaught exception in a watch thread — is caught separately by
+       TerminalOutputGuard, which swaps System.out/System.err for this same file.
+
+    The file is $KWEBLENS_TUI_LOG_FILE if set, else <tmpdir>/kweblens-tui.log.
+    TerminalOutputGuard.logFile() resolves it identically, so both halves write to one
+    place; keep the two in step.
+-->
+<configuration>
+
+	<property name="KWEBLENS_TUI_LOG"
+			  value="${KWEBLENS_TUI_LOG_FILE:-${java.io.tmpdir}/kweblens-tui.log}"/>
+
+	<appender name="FILE" class="ch.qos.logback.core.FileAppender">
+		<file>${KWEBLENS_TUI_LOG}</file>
+		<append>true</append>
+		<immediateFlush>true</immediateFlush>
+		<encoder>
+			<charset>UTF-8</charset>
+			<pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{40} - %msg%n</pattern>
+		</encoder>
+	</appender>
+
+	<!--
+	    WARN, matching application.yml's logging.level.root. Boot re-applies
+	    logging.level.* on top of this file, so the yml stays the place to change it; this
+	    value is what governs the log calls made before Boot starts.
+	-->
+	<root level="WARN">
+		<appender-ref ref="FILE"/>
+	</root>
+
+</configuration>

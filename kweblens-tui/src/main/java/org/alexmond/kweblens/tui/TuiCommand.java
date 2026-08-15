@@ -2,6 +2,7 @@ package org.alexmond.kweblens.tui;
 
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -16,16 +17,23 @@ import org.springframework.util.StringUtils;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.render.Screen;
+import org.alexmond.kweblens.tui.screen.TickRate;
 
 /**
- * The argv seam. picocli resolves the flags and hands off; from #364 the screen is owned
- * by TamboUI after this point, and this class stays the place where a cluster id and a
- * kind are turned into a {@link ResourceQuery}.
+ * The argv seam. picocli resolves the flags and hands off; the screen is owned by TamboUI
+ * after this point, and this class stays the place where a cluster id and a kind are
+ * turned into a {@link ResourceQuery}.
  *
  * <p>
- * v1 has one mode: list a kind and exit. That is deliberately the smallest thing that
- * proves the module boots, reaches a cluster through the port and comes back — the
- * interactive screen is #364 and the command line <em>inside</em> it is #365.
+ * Two modes. The default is the live screen (#364). {@code --once} prints one listing and
+ * exits, which is what a pipe, a script or a terminal-less CI job wants — and which is
+ * the only mode that existed in #362. The command line <em>inside</em> the screen is
+ * #365; nothing here is meant to grow into it.
+ *
+ * <p>
+ * Nothing in this file imports {@code dev.tamboui}. The screen is behind {@link Screen}
+ * so the decision between the two modes stays testable without a terminal.
  */
 // A terminal app's stdout IS its interface, which is why Sonar's S106 suppression is
 // path-scoped to this module as well as kweblens-cli. Everything printable is written
@@ -49,6 +57,8 @@ public class TuiCommand implements Callable<Integer> {
 
 	private final TuiListing listing;
 
+	private final Screen screen;
+
 	private final TuiProperties properties;
 
 	@Option(names = { "-c", "--context" },
@@ -64,6 +74,13 @@ public class TuiCommand implements Callable<Integer> {
 
 	@Option(names = "--contexts", description = "List the kubeconfig contexts this build can open, then exit.")
 	private boolean listContexts;
+
+	@Option(names = "--once", description = "Print one listing and exit instead of opening the live screen.")
+	private boolean once;
+
+	@Option(names = "--tick", description = "Repaint period in milliseconds (default: ${DEFAULT-VALUE}). "
+			+ "Clamped to 20..10000, and the screen says so when it clamps.")
+	private long tickMillis = TickRate.DEFAULT.toMillis();
 
 	@Override
 	public Integer call() {
@@ -90,9 +107,13 @@ public class TuiCommand implements Callable<Integer> {
 			return fail(out, "Unknown kind '" + this.kind + "'. This build knows: " + String.join(", ", TuiKinds.ids()),
 					EXIT_BAD_ARGUMENT);
 		}
-		this.listing.print(new ResourceQuery(clusterId, descriptor.get(), this.namespace),
-				this.properties.getChunkSize(), out);
-		return 0;
+		ResourceQuery query = new ResourceQuery(clusterId, descriptor.get(), this.namespace);
+		if (this.once) {
+			this.listing.print(query, this.properties.getChunkSize(), out);
+			return 0;
+		}
+		return this.screen.run(query, this.properties.getChunkSize(), TickRate.of(Duration.ofMillis(this.tickMillis)),
+				out);
 	}
 
 	/**
