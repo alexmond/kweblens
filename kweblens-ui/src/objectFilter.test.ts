@@ -137,6 +137,52 @@ describe('regex is opt-in, and a broken one is a sentence', () => {
   });
 });
 
+// ---- the regex dialect (GH#410) ---------------------------------------------------------------
+// Every case here is about the one thing a pattern must never do: mean something other than what
+// it says, without saying so. Before the `u` flag, `/\p{L}/` was read as the literal text "p{L}"
+// — zero rows, no error — which is the confidently-wrong answer the rest of this file exists to
+// prevent. The price is that a handful of patterns the pre-Unicode dialect tolerated are now
+// refused; refused is fine, silently reinterpreted is not.
+
+describe('a regex means what Unicode says it means', () => {
+  it('reads \\p{L} as the letter class, not as the text “p{L}”', () => {
+    // The fleet is chosen so the two readings cannot agree: as a property class the pattern
+    // selects the all-letters name, and as literal text it selects the name that spells the
+    // escape. Before the fix this case returned ['p{L}'].
+    const objects = [pod('web', 'default'), pod('123', 'default'), pod('p{L}', 'default')];
+    expect(parseFilter('name:/^\\p{L}+$/').error).toBeNull();
+    expect(kept('name:/^\\p{L}+$/', objects)).toEqual(['web']);
+    expect(kept('name:/^\\P{L}+$/', objects)).toEqual(['123']);
+  });
+
+  it('measures a character, not half of a surrogate pair', () => {
+    // `.` walks code points in Unicode mode, as java.util.regex always has.
+    expect(kept('name:/^.$/', [pod('😀', 'default'), pod('ab', 'default')])).toEqual(['😀']);
+  });
+
+  it('folds case over the whole of Unicode, like the Java port', () => {
+    // U+212A KELVIN SIGN folds to "k" under simple case folding — `i` alone does not do this,
+    // and the terminal's CASE_INSENSITIVE | UNICODE_CASE always has.
+    expect(kept('name:/K/', [pod('k8s', 'default'), pod('web', 'default')])).toEqual(['k8s']);
+  });
+
+  it('refuses a pattern only the old dialect accepted, and names the mode that refused it', () => {
+    // An escaped hyphen is a harmless habit and it used to work; in Unicode mode it is not a
+    // legal escape. So the query is not applied, every row stays, and the sentence says why —
+    // "Invalid escape" alone would read as an accusation about a pattern that looks fine.
+    const filter = parseFilter('/kube\\-system/');
+    expect(filter.error).toContain('Invalid escape');
+    expect(filter.error).toContain('Unicode mode');
+    expect(filter.terms).toHaveLength(0);
+    expect(kept('/kube\\-system/', FLEET)).toHaveLength(FLEET.length);
+  });
+
+  it('does not blame Unicode mode for a pattern no mode would accept', () => {
+    // `/web(/` is broken either way, so the extra clause would be a false lead.
+    expect(parseFilter('/web(/').error).not.toContain('Unicode mode');
+  });
+});
+
 describe('field terms narrow to one field', () => {
   it('matches only that field', () => {
     // "prod" is in the namespace of three pods and in no name; ns: and name: must disagree.
@@ -459,6 +505,9 @@ describe('the help the popover renders stays true', () => {
     expect(notes).toContain('label:partition');
     expect(notes).toContain('field selectors');
     expect(notes).toContain('nothing is truncated');
+    // A /regex/ is the running engine's, and there are two of them. FilterHelp.java carries the
+    // same sentence and pins the same words; that is what keeps the transcription honest.
+    expect(notes).toContain('belongs to the engine that runs it');
   });
 });
 

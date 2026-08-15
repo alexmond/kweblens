@@ -101,7 +101,7 @@ conjunction `kubectl -l a=b,c=d` uses. A leading `-` negates any term.
 | `-nginx`              | everything that does not
 | `web prod`            | both, ANDed
 | `"two words"`         | text with a space in it
-| `/^web-\d+$/`         | a regex over name, namespace and kind, case-insensitive
+| `/^web-\d+$/`         | a regex over name, namespace and kind, case-insensitive and Unicode-aware
 | `ns:kube-system`      | one field only — also `name:` and `kind:`
 | `name:/^web/`         | a field matched by regex
 | `status:Pending`      | the state an overview card counts — the whole word, not part of it
@@ -116,6 +116,15 @@ Label matching is Kubernetes' own, taken from `apimachinery`'s `labels.Requireme
 including the part that surprises people: `!=` and `notin` match an object that does not carry the
 key at all. Label values compare exactly, case and all, like `kubectl -l`; only the free-text
 matching is case-insensitive.
+
+A `/regex/` belongs to the engine that runs it — V8 in the browser, `java.util.regex` in the
+terminal — and the browser compiles it in **Unicode mode** (`iu`). That is what makes `\p{L}` the
+letter class rather than a search for the text `p{L}`, which is what it silently was until
+https://github.com/alexmond/kweblens/issues/410[#410]; it also makes `.` one whole character and
+folds case over the whole of Unicode, both of which the terminal always did. The cost is that a
+pattern leaning on JavaScript's old web-compatibility rule — an escape the engine does not define,
+such as `\-` for a plain `-` — is now an **error naming the reason** instead of a different
+pattern. Refused means refused: the query is not applied and every row stays on screen.
 
 Three deliberate differences from `kubectl -l`, stated in the help popover as well as here:
 

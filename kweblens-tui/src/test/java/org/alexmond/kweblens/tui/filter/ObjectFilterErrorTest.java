@@ -83,7 +83,9 @@ class ObjectFilterErrorTest {
 	void saysWhereTheGrammarIsKnowinglyNarrowerThanKubectl() {
 		String notes = String.join(" ", FilterHelp.NOTES);
 		assertThat(notes).contains("label:partition").contains("field selectors").contains("nothing is truncated");
-		assertThat(FilterHelp.NOTES).hasSize(6);
+		assertThat(notes).as("a /regex/ is the running engine's, and there are two of them")
+			.contains("belongs to the engine that runs it");
+		assertThat(FilterHelp.NOTES).hasSize(7);
 	}
 
 }
