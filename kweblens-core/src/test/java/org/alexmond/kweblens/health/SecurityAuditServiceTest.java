@@ -244,10 +244,14 @@ class SecurityAuditServiceTest {
 	 * deeper, and severity here has always meant what the binding confers.
 	 *
 	 * <p>
-	 * It is read in the CLUSTER-WIDE audit because the subject belongs to no namespace,
-	 * the long-standing rule a RoleBinding naming a User also follows. The namespaced
-	 * assertion below is the control that says so out loud rather than leaving it to be
-	 * discovered.
+	 * <b>The last assertion is the one #387 pinned the wrong way round, flipped
+	 * (#398).</b> It used to assert the audit of {@code app} was EMPTY: the subject
+	 * carries no namespace, so the scope filter dropped the binding from the audit of the
+	 * one namespace it is entirely about, while the cluster-wide view still showed it. A
+	 * RoleBinding is judged by its own namespace now, so both scopes report it — and this
+	 * test is where that is proved, because a Group carrying no namespace is exactly the
+	 * shape the old filter discarded. Restore the old rule and this assertion fails
+	 * (measured), which is what says it reaches the filter rather than passing around it.
 	 */
 	@Test
 	void reportsANamespacedGrantToAnAuthenticationPopulationAsTheNarrowerThingItIs() {
@@ -259,7 +263,61 @@ class SecurityAuditServiceTest {
 			assertThat(f.object()).isEqualTo("RoleBinding/app/ns-everyone");
 			assertThat(f.detail()).contains("full control of namespace 'app'");
 		});
+		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+			assertThat(f.severity()).isEqualTo("warning");
+			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin to every authenticated identity");
+			assertThat(f.object()).isEqualTo("RoleBinding/app/ns-everyone");
+			assertThat(f.detail()).contains("full control of namespace 'app'");
+		});
+	}
+
+	/**
+	 * The defect #398 names, in its plainest form: an operator auditing {@code app} was
+	 * not shown a RoleBinding <b>in {@code app}</b> handing {@code cluster-admin} to a
+	 * User. Pre-existing for Users since long before #382 — the recent population work
+	 * only made it visible.
+	 *
+	 * <p>
+	 * <b>The boundary the fix must not blow through</b> is the second binding: the same
+	 * shape, the same namespace-less subject, in a namespace the audit did not ask about.
+	 * It is excluded by the list request itself, which is the point — listing
+	 * RoleBindings cluster-wide and filtering afterwards would answer a namespaced
+	 * question with a cluster-wide read, and this decoy is what fails when someone does
+	 * (measured: making {@code grants()} list {@code inAnyNamespace()} unconditionally
+	 * fails here and nowhere else, since the request count stays at two).
+	 */
+	@Test
+	void reportsARoleBindingInTheAuditedNamespaceWhateverKindOfSubjectItNames() {
+		roleBindingTo("app", "alice-admin", "cluster-admin", "User", null, "alice");
+		roleBindingTo("other", "bob-admin", "cluster-admin", "User", null, "bob");
+		pod("app", "web-1", "default");
+
+		assertThat(service().audit("mock", "app", pods("app"))).singleElement().satisfies((f) -> {
+			assertThat(f.severity()).isEqualTo("warning");
+			assertThat(f.title()).isEqualTo("RoleBinding grants cluster-admin in one namespace");
+			assertThat(f.object()).isEqualTo("RoleBinding/app/alice-admin");
+			assertThat(f.detail()).contains("subject User alice").contains("full control of namespace 'app'");
+		});
+		// Neither ever belonged to the cluster-wide view ALONE; both are still in it.
+		assertThat(service().audit("mock", null, pods(null))).extracting(SecurityFinding::object)
+			.containsExactly("RoleBinding/app/alice-admin", "RoleBinding/other/bob-admin");
+	}
+
+	/**
+	 * The half the old rule got right, kept: a ClusterRoleBinding has no namespace of its
+	 * own, so only its subject can put it in a namespaced scope. A User and an
+	 * authentication population belong to none, so both stay in the cluster-wide view —
+	 * and the empty namespaced audit is the decoy that proves the filter still bites.
+	 */
+	@Test
+	void leavesAClusterScopedGrantToANamespacelessSubjectOutOfANamespacedAudit() {
+		clusterBinding("alice-admin", "cluster-admin", "User", null, "alice");
+		clusterBinding("everyone", "cluster-admin", "Group", null, "system:authenticated");
+		pod("app", "web-1", "default");
+
 		assertThat(service().audit("mock", "app", pods("app"))).isEmpty();
+		assertThat(service().audit("mock", null, pods(null))).extracting(SecurityFinding::object)
+			.containsExactly("ClusterRoleBinding/alice-admin", "ClusterRoleBinding/everyone");
 	}
 
 	/**

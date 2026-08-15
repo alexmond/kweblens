@@ -160,10 +160,7 @@ public class SecurityAuditService {
 		}
 		boolean account = "ServiceAccount".equals(subject.getKind());
 		String subjectNamespace = subjectNamespace(subject, grant.namespace());
-		// A namespace-scoped diagnosis reports a cluster-scoped binding only when it
-		// grants something to an identity in that namespace. A User, or a group that
-		// spans the cluster, is not namespaced, so it belongs to the cluster-wide view.
-		if (namespace != null && !namespace.equals(subjectNamespace)) {
+		if (namespace != null && outOfScope(grant, subjectNamespace, namespace)) {
 			return;
 		}
 		findings.add(bindingFinding(grant, subject, subjectNamespace));
@@ -181,18 +178,52 @@ public class SecurityAuditService {
 	}
 
 	/**
+	 * Whether a namespaced audit should leave this binding out — <b>decided by the
+	 * binding's own namespace whenever it has one</b> (#398).
+	 *
+	 * <p>
+	 * <b>A RoleBinding carries its scope on itself.</b> It was listed
+	 * {@code inNamespace(namespace)}, so it is in the audited namespace by construction,
+	 * and what it confers is full control of exactly that namespace — the audit of that
+	 * namespace is the one place it is entirely relevant. Whether its <i>subject</i>
+	 * belongs to a namespace decides nothing here: a {@code User}, or one of the open
+	 * populations, belongs to none, and until #398 that dropped a RoleBinding in
+	 * {@code app} granting {@code cluster-admin} to {@code system:authenticated} out of
+	 * the audit of {@code app} while the cluster-wide view still showed it. The narrower
+	 * view losing a finding is the wrong direction.
+	 *
+	 * <p>
+	 * <b>A ClusterRoleBinding has no namespace of its own</b>, so its subject is the only
+	 * thing that can put it in a namespaced scope, and the existing rule stands: an
+	 * identity in that namespace, or {@code system:serviceaccounts:<ns>} naming it — the
+	 * accounts it hands cluster-admin to are exactly the ones in scope. A User, a
+	 * cluster-spanning {@code system:serviceaccounts}, or an authentication population
+	 * (#387) belongs to no namespace, so a cluster-scoped grant to it belongs to the
+	 * cluster-wide view only.
+	 *
+	 * <p>
+	 * <b>This costs no extra request</b>, and must not: the namespaced audit still lists
+	 * RoleBindings in one namespace. Listing them cluster-wide and filtering afterwards
+	 * would answer a namespaced question with a cluster-wide read.
+	 */
+	private boolean outOfScope(Grant grant, String subjectNamespace, String namespace) {
+		return grant.clusterScoped() && !namespace.equals(subjectNamespace);
+	}
+
+	/**
 	 * The namespace a subject belongs to, or null if it belongs to no single one.
 	 *
 	 * <p>
-	 * A ServiceAccount has one. So does {@code system:serviceaccounts:<ns>}, which is
-	 * what lets a namespaced audit of that namespace see a cluster-scoped binding aimed
-	 * at it — the accounts it hands cluster-admin to are exactly the ones in scope.
-	 * {@code system:serviceaccounts} spans the cluster and so stays in the cluster-wide
-	 * view, like a User — and so do the authentication populations (#387), which are
-	 * everyone in the cluster and everyone outside it. A grant to one of those appears in
-	 * the cluster-wide diagnosis only, including when the binding that makes it is a
-	 * namespaced RoleBinding: the subject belongs to no namespace, which is the same rule
-	 * a RoleBinding naming a User has always followed.
+	 * A ServiceAccount has one. So does {@code system:serviceaccounts:<ns>}.
+	 * {@code system:serviceaccounts} spans the cluster, like a User — and so do the
+	 * authentication populations (#387), which are everyone in the cluster and everyone
+	 * outside it.
+	 *
+	 * <p>
+	 * This answers "which namespace is this identity in", which is <b>only half</b> of
+	 * whether a binding is in a namespaced scope — see {@link #outOfScope}. It is also
+	 * what keys the pods-by-account join and what names a ServiceAccount in a finding, so
+	 * null here means "no single namespace", never "not in scope".
 	 */
 	private String subjectNamespace(Subject subject, String bindingNamespace) {
 		if ("ServiceAccount".equals(subject.getKind())) {
@@ -382,6 +413,10 @@ public class SecurityAuditService {
 		KubernetesClient client = this.clusters.require(clusterId);
 		Map<String, Grant> byRef = new TreeMap<>();
 		var roleBindings = client.rbac().roleBindings();
+		// Scoped by the request, not filtered afterwards: a namespaced audit asks the API
+		// server for one namespace's RoleBindings, which is what makes every RoleBinding
+		// it
+		// sees in scope by construction (#398).
 		List<RoleBinding> namespaced = ((namespace != null) ? roleBindings.inNamespace(namespace)
 				: roleBindings.inAnyNamespace())
 			.list()
