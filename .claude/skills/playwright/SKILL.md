@@ -44,7 +44,7 @@ and the reason is in its own header comment — read that before changing one.
 |---|---|
 | `dev-run.sh` | You need something to drive. `--sim` (no cluster), `--ai`, `--files`, `--port`, `--stop`. |
 | `ui-shot.mjs` | You need to *see* it. Captures the viewport × theme matrix, not one image. |
-| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, a word the browser broke mid-word or that spills past its own padding box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, a pill squeezed below its own label, width a row leaves unused. Exits 1 over budget; `--self-test` checks the instrument. |
+| `ui-measure.mjs` | You need geometry: box, overflow vs container, characters per line, a word the browser broke mid-word or that spills past its own padding box, what an ellipsis is cutting (sub-pixel), two labels that truncate to the same string, a pill squeezed below its own label, width a row leaves unused, controls that share a line without agreeing where they sit on it. Exits 1 over budget; `--style` rebuilds a fixed defect so a check can be watched to fire; `--self-test` checks the instrument. |
 | `contrast-check.mjs` | You touched `styles.css`. WCAG in both themes, backdrop decoded from the rendered pixels. Exits 1 under the floor; `--self-test` checks the instrument itself. |
 | `perf-sweep.mjs` | You changed how a list renders. Walks every nav leaf, fails on slow loads or main-thread hangs. |
 | `resize-check.mjs` | You changed a multiline field. Proves the corner grabber exists AND that a pulled height survives typing. `--self-test` checks the instrument. |
@@ -162,6 +162,40 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-14 — **`row` counts flex LINES, so it reported the drawer header as fine before AND
+  after #379 — a green line over a 14.34px step.** The expand toggle sat at `top=60` and Naive's
+  close at `top=74.34`, on one flex line the whole time because `.n-drawer-header` is `nowrap`.
+  Nothing else came close either: no overflow, no clipping, no mangled text, correct colours. A
+  screenshot shows it only if you already know to look at two glyphs 14px apart, which is how it
+  was eventually reported (#392). → A **`line`** report on `ui-measure`: the CONTROLS under a
+  selector, clustered into lines by cross-axis overlap, failing when the controls on a line agree
+  on none of top / centre / bottom by more than **2px** — unrounded, stated, with a 0.4px control
+  that must stay quiet and a 3px one that must fire. Three false positives were found and killed
+  while writing it, each of which would have made the check unusable: **(a)** with only overlap
+  clustering, `.app` reported a nav category summary against a status chip 500px away in another
+  column, because two tall columns' controls overlap on the cross axis all day — lines are now
+  runs of controls **consecutive in the DOM**, plus a guard that the branch each takes from their
+  common ancestor is part of that line rather than a column crossing it; **(b)** the hit test
+  (`elementFromPoint` at each control's centre, folded in because #354 and #379 each wrote it ad
+  hoc and threw it away) called three nav leaves "painted over" by the Collapse button — they
+  were **scrolled out of `.nav-scroll`**, whose rect the window-only visibility check never
+  consulted; **(c)** with the drawer open it reported twenty-two DEFECTs over `.app` — every
+  control the drawer covers, which is what an overlay is FOR. A cover only fails when the thing
+  on top shares normal flow with the control; an out-of-flow ancestor between them is a layer,
+  printed and not failed. And **(d)**, the one that was not a false positive but a false
+  POPULATION: 40 of the rail's 41 leaves had real 23px rects while their `<details>` were shut,
+  because Chromium hides a closed one's content with `content-visibility`, which skips the
+  subtree and leaves its LAST layout behind — so a collapsed nav was contributing forty ghost
+  boxes to every reading, and the hit test was right to say something was painted over them.
+  `checkVisibility({ contentVisibilityAuto: true, … })` is the filter: 1 of 41 visible collapsed,
+  48 of 48 expanded. **`getBoundingClientRect()` is not evidence that anything is on screen.**
+  The positive control is `--style`, a new flag that injects CSS into the
+  running page: #379's removed declarations re-injected reproduce `top=60` vs `top=74.34` exactly,
+  at 1400 and 1900, and the check names those two controls out of 125 on screen while staying
+  silent on the same scene as the app serves it. **A check whose verdict does not change between
+  the defect and the fix is worse than no check, and the only way to know is to rebuild the
+  defect and watch it fire.**
 
 - 2026-08-14 — **A watchlist entry named a selector so broad it measured the element BEHIND the
   one it was for, and reported that element's ratio under the wrong name.** GH#389: `.n-tag` was

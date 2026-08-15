@@ -30,6 +30,8 @@
 //   twins     two matches whose DIFFERENT text truncates to the SAME visible string — the
 //             row that stops naming itself, which is worse than any amount of clipping
 //   row       how much of a container's width its own children actually reach
+//   line      whether the CONTROLS that share a line agree where they sit on the cross axis,
+//             and whether each of them is actually the thing under its own centre
 //   count     how many matched (a selector matching 0 is reported, never silently passed)
 //
 // Exit code is 1 if anything overflows its container or the viewport, so it can gate a
@@ -43,7 +45,18 @@
 //
 // Options: --view <name|px> (narrow|normal|wide, default normal; a bare number is the
 //          bottom-end escape hatch — see `viewport` in lib/kw-playwright.mjs), --theme <name>,
-//          --leaf <label>, --path <path>. Env: PORT, BASE_URL, PREPARE.
+//          --leaf <label>, --path <path>, --style <css>. Env: PORT, BASE_URL, PREPARE.
+//
+// `--style` injects a stylesheet into the running page before anything is measured. It is
+// here for one job: rebuilding a defect that has already been fixed, so a check can be
+// watched to FIRE rather than merely being quiet. Every check in this file was written after
+// its defect was fixed, and this repo's standing rule is that a check written after the fix
+// proves only that it is quiet. #379's own positive control was exactly this — re-injecting
+// the removed declarations at runtime — written ad hoc and thrown away, which is how it came
+// to be written a second time here (#392):
+//
+//   node scripts/ui-measure.mjs --view wide --leaf Pods \
+//     --style '.n-drawer-header{align-items:center}' '.n-drawer-header'
 //
 // A selector reported as `absent` is a FAILED measurement, not a pass — the same trap
 // contrast-check's "not present" row exists for. Bring the surface on screen with
@@ -67,6 +80,7 @@ const view = flag('view') ?? 'normal';
 const theme = flag('theme');
 const leaf = flag('leaf');
 const path = flag('path');
+const style = flag('style');
 
 function measureOne(els) {
   if (!els.length) return null;
@@ -608,9 +622,237 @@ function measureOne(els) {
     return { kids: kids.length, lines: lines.length, inner: Math.round(inner), unused: Math.round(unused) };
   };
 
+  // ---- Do the controls sharing a line agree where they sit on the cross axis? (#392) ----
+  //
+  // `row` counts flex LINES, which is the along-axis question, and #379 is what that cannot
+  // see. In the expanded drawer the header's expand toggle measured `top=60` and Naive's close
+  // `top=74.34` — a 14.34px step down the right edge between two controls that were on one
+  // flex line the whole time, because `.n-drawer-header` is `nowrap`. `row` printed
+  // `2 children on 1 line(s)` before the fix and after it; `box`, `overflow`, `clipped`,
+  // `sliced`, `words`, `chip` and `twins` were all silent and all correct, and `contrast-check`
+  // had nothing to say about a colour that was fine. The defect is entirely in the CROSS axis,
+  // and a green line covering a real defect is worse than no check at all.
+  //
+  // So this compares the BOXES themselves, not a count of lines:
+  //
+  //   1. Find the CONTROLS under the match — buttons, links, inputs, tabs and the like. Not
+  //      runs of text, which is what keeps the baseline trap out: `.drawer-title` is
+  //      `align-items: baseline`, so a kind eyebrow and a name legitimately have different
+  //      tops and a check over text would fire on every well-set header in the app.
+  //   2. Cluster them into lines: a line is a run of controls CONSECUTIVE in document order
+  //      that overlap the run's running intersection on the cross axis. Two controls the
+  //      layout put on separate rows do not overlap, so the two cases that are correct by
+  //      design stay quiet: `.drawer-title` is a grid at pane >=900px with the name on row 1
+  //      and the identity badges on row 2, and a wrapped flex row at a narrow width is several
+  //      lines on purpose. Overlap has to clear a fifth of the smaller box (min 1px) so two
+  //      rows touching at the seam are not read as one line — and a fifth, not a half, because
+  //      the defect itself only overlapped by 6.66px of 18px (37%).
+  //   3. On each line, ask whether the controls agree on ANY of three edges: top, centre or
+  //      bottom. One of the three agreeing is a deliberate alignment; disagreeing on all three
+  //      is a step. Centre matters as much as top, because an 18px icon beside a 21px button
+  //      can share a top and still read as a half-step — and bottom matters because a control
+  //      group aligned to the bottom of a row is a design, not a defect.
+  //
+  // The tolerance is 2px, on the UNROUNDED boxes. Not zero: sub-pixel layout is normal, and a
+  // check that fails on things that are fine is itself an instrument defect — this file has
+  // already shipped one (`clipOver` compared two separately rounded edges and reported
+  // `OVERFLOWS by 1px` on a pill overflowing by 0.00px, a false positive on every shrink-wrapped
+  // pill in a table). 2px is above anything layout produces by accident (fractional metrics and
+  // percentage widths land well under 1px; a 1px border on one control and not its neighbour is
+  // 1px) and far below the 14.34px the reader actually saw. The control pair in `--self-test`
+  // is the argument: 0.4px must not fire, 3px must.
+  //
+  // A control that is not the topmost thing at its own centre is reported too, rather than
+  // being written ad hoc for a third time — #354's dropdown painted the next option across a
+  // two-line one, and #379's own verification hit-tested every header control with
+  // `elementFromPoint`. Only a cover from INSIDE the matched element fails: a drawer, a modal
+  // mask or a dropdown over the surface is a fact about the scene, not about the layout under
+  // test, so it is printed as `under another layer` and left alone. A control with
+  // `pointer-events: none` is skipped — clicks pass through it by declaration, which is a
+  // different claim from "something is painted on top of it".
+  //
+  // Out-of-flow controls (`position: absolute` / `fixed`) are left out for the same reason
+  // `row` leaves them out: they are placed by coordinates rather than by the line, so a step
+  // between one of them and its neighbour is what the author asked for. That is a known hole —
+  // if Naive's close really had been absolute, as its own `n-base-close--absolute` class claims,
+  // this check would have stayed quiet on #379. It is not: it computes to `position: relative`
+  // and is a laid-out flex child, which is why the defect existed at all.
+  const controlAlignment = () => {
+    const SEL =
+      'button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, summary,' +
+      ' [role="tab"], [role="switch"], [role="checkbox"], [role="menuitem"], [contenteditable="true"]';
+    const TOL = 2;
+    const name = (e) => {
+      if (!e) return 'nothing';
+      const raw = typeof e.className === 'string' ? e.className : (e.className?.baseVal ?? '');
+      const cls = raw.trim().split(/\s+/)[0];
+      const txt =
+        e.getAttribute?.('aria-label') ||
+        e.getAttribute?.('title') ||
+        (e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+      return `${e.tagName.toLowerCase()}${cls ? `.${cls}` : ''}${txt ? ` "${txt}"` : ''}`;
+    };
+    let controls = 0;
+    let lines = 0;
+    let worst = null;
+    const covered = [];
+    const layered = [];
+    const unhit = [];
+    for (const e of els) {
+      // A box is not a rendered control. `checkVisibility` rather than a `visibility` read,
+      // because the population this check works on is full of boxes that are not painted: the
+      // rail's categories are `<details>`, and Chromium hides a closed one's content with
+      // `content-visibility`, which SKIPS the subtree while preserving its last layout. So 40 of
+      // the nav's 41 leaves reported real 23px rects, from a layout taken when the tree was
+      // open, sitting across the summaries that are now there — and the hit test called 47 of
+      // them "painted over", correctly, about content nobody can see. Measured: with the
+      // categories collapsed, `checkVisibility` says 1 of 41 is visible; expanded, 48 of 48.
+      const found = [...e.querySelectorAll(SEL)].filter((c) => {
+        const cr = c.getBoundingClientRect();
+        if (cr.width <= 0 || cr.height <= 0) return false;
+        const ccs = getComputedStyle(c);
+        if (ccs.position === 'absolute' || ccs.position === 'fixed') return false;
+        return c.checkVisibility
+          ? c.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })
+          : ccs.visibility !== 'hidden';
+      });
+      // A control inside another control is one control, not two.
+      const ctls = found.filter((c) => !found.some((o) => o !== c && o.contains(c)));
+      controls += ctls.length;
+
+      for (const c of ctls) {
+        const cr = c.getBoundingClientRect();
+        const x = cr.left + cr.width / 2;
+        const y = cr.top + cr.height / 2;
+        // A point can only be hit-tested where it is on screen — and "on screen" means inside
+        // every ancestor that clips, not just inside the window. The first version asked the
+        // window only, and the rail's scroller made it lie: a nav leaf scrolled below
+        // `.nav-scroll` still HAS a rect down there, in the strip where the Collapse button
+        // sits, so `elementFromPoint` truthfully returned the Collapse button and the run
+        // reported three leaves as painted over. Nothing was painted over anything; the leaves
+        // were scrolled away. Same for a table body taller than its scroller, which reported
+        // its own rows as covered by `main.content`.
+        let vis = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+        for (let a = c.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+          const acs = getComputedStyle(a);
+          if (!/auto|scroll|hidden|clip/.test(acs.overflowX + acs.overflowY)) continue;
+          const ar = a.getBoundingClientRect();
+          vis = {
+            left: Math.max(vis.left, ar.left),
+            top: Math.max(vis.top, ar.top),
+            right: Math.min(vis.right, ar.right),
+            bottom: Math.min(vis.bottom, ar.bottom),
+          };
+        }
+        if (x < vis.left || x > vis.right || y < vis.top || y > vis.bottom) {
+          unhit.push(name(c));
+          continue;
+        }
+        if (getComputedStyle(c).pointerEvents === 'none') continue;
+        const hit = document.elementFromPoint(x, y);
+        if (hit && (hit === c || c.contains(hit))) continue;
+        // A cover is only a DEFECT when the thing on top is in normal flow with the control —
+        // that is a layout painting one of its own controls under another, which is #354: a
+        // Naive dropdown pinned every option to 34px, so a two-line one overflowed and the next
+        // option's label was painted across it, statically, in flow. An out-of-flow ancestor
+        // between them is a LAYER: a drawer, a modal, a popover, a sticky footer. The first
+        // version drew that line at "inside the matched element" instead, and with the drawer
+        // open a run over `.app` reported twenty-two DEFECTs — every control in the list behind
+        // the drawer, which is what an overlay is FOR. Layers are printed, never failed.
+        let over = hit;
+        let layer = false;
+        while (over && !over.contains(c)) {
+          const ocs = getComputedStyle(over);
+          if (ocs.position === 'absolute' || ocs.position === 'fixed' || ocs.position === 'sticky') layer = true;
+          over = over.parentElement;
+        }
+        (hit && !layer ? covered : layered).push({ ctl: name(c), by: name(hit) });
+      }
+
+      // Lines are runs of controls that are CONSECUTIVE in document order and overlap
+      // vertically. Consecutive matters as much as overlapping: without it, a selector over a
+      // whole page compares a nav leaf on the left with a filter chip on the right, because two
+      // tall columns' controls overlap on the cross axis all day. Measured on `.app`, the first
+      // version reported the Cluster category summary and the Running status chip — 500px and
+      // one layout column apart — as a 13.61px step, which is the kind of confident nonsense
+      // that gets a check switched off. Controls the layout put beside each other are adjacent
+      // in the DOM; controls on opposite sides of a page are not.
+      const groups = [];
+      let open = null;
+      for (const c of ctls) {
+        const cr = c.getBoundingClientRect();
+        const over = open ? Math.min(open.bottom, cr.bottom) - Math.max(open.top, cr.top) : -1;
+        if (open && over >= Math.max(1, 0.2 * Math.min(open.bottom - open.top, cr.height))) {
+          open.top = Math.max(open.top, cr.top);
+          open.bottom = Math.min(open.bottom, cr.bottom);
+          open.members.push([c, cr]);
+        } else {
+          open = { top: cr.top, bottom: cr.bottom, members: [[c, cr]] };
+          groups.push(open);
+        }
+      }
+      lines += groups.length;
+
+      // Is this run one GROUP of controls, or two columns that happen to cross the same band?
+      //
+      // Document adjacency was not enough on its own. `.app` next reported the nav's Cluster
+      // category summary against the rail's `All clusters` tile — adjacent in the DOM, 8px
+      // apart horizontally, overlapping on the cross axis, and in two different page columns
+      // that each stack their own rows. So the branch each control takes from the run's nearest
+      // common ancestor has to look like part of THIS line:
+      //
+      //   (a) it may not be much taller than the line — a 700px rail crossing a 40px band is a
+      //       column, not a row; and
+      //   (b) it may not hold a control that is not in this run — a branch with rows of its own
+      //       is a stack, and the run is reaching across it.
+      //
+      // Both are needed: (b) alone passes a column that happens to hold one control, (a) alone
+      // passes a short two-row branch. A flat wrapped toolbar — the case that matters most —
+      // takes each control as its own branch and satisfies both.
+      const isOneGroup = (g) => {
+        const band = { top: Math.min(...g.members.map(([, r]) => r.top)), bottom: Math.max(...g.members.map(([, r]) => r.bottom)) };
+        const height = band.bottom - band.top;
+        let nca = g.members[0][0];
+        while (nca && !g.members.every(([c]) => nca.contains(c))) nca = nca.parentElement;
+        if (!nca) return false;
+        for (const [c] of g.members) {
+          let branch = c;
+          while (branch.parentElement && branch.parentElement !== nca) branch = branch.parentElement;
+          if (branch === c) continue;
+          if (branch.getBoundingClientRect().height > 4 * height) return false;
+          if (ctls.some((o) => branch.contains(o) && !g.members.some(([m]) => m === o))) return false;
+        }
+        return true;
+      };
+
+      for (const g of groups) {
+        if (g.members.length < 2) continue;
+        if (!isOneGroup(g)) continue;
+        const edges = {
+          top: g.members.map(([, r]) => r.top),
+          centre: g.members.map(([, r]) => r.top + r.height / 2),
+          bottom: g.members.map(([, r]) => r.bottom),
+        };
+        const spread = (a) => Math.max(...a) - Math.min(...a);
+        const by = { top: spread(edges.top), centre: spread(edges.centre), bottom: spread(edges.bottom) };
+        const edge = Object.keys(by).reduce((a, b) => (by[a] <= by[b] ? a : b));
+        const step = by[edge];
+        // Name the two the closest-agreeing edge is furthest apart on: with three controls on a
+        // line, "these two" is what sends the reader to the right pair of elements.
+        const vals = edges[edge];
+        const lo = g.members[vals.indexOf(Math.min(...vals))][0];
+        const hi = g.members[vals.indexOf(Math.max(...vals))][0];
+        const hit = { step, edge, n: g.members.length, by, a: name(lo), b: name(hi) };
+        if (!worst || step > worst.step) worst = hit;
+      }
+    }
+    return { controls, lines, worst, covered, layered, unhit, tolerance: TOL };
+  };
+
   const words = widestWord();
   return {
     count: els.length,
+    line: controlAlignment(),
     word: words.worst,
     wordAbsorbed: words.absorbed,
     chip: wrappedChip(),
@@ -743,6 +985,49 @@ const SELF_TEST_FIXTURE = `
      .5 boundary — the geometry that made the rounded comparison report a phantom 1px. */
   #flush-box { left: 310.5px; width: 99.69px; }
   .flush-clip { display: block; width: 99.69px; background: #eee; }
+  /* The line controls (#392) — no backticks. #step-hdr is #379 rebuilt from its parts: a
+     centring flex header, a two-row grid title (name + expand on row 1, identity badges on
+     row 2), and a close whose own height differs from the expand's. Centred on a 46.69px
+     header, the close lands 14.34px below the expand that is pinned to the title's first row.
+     #ok-hdr is the same header after the fix — flex-start and one height for both.
+     #noise-row and #step-row are the tolerance pair: 0.4px of nudge is layout noise and must
+     stay quiet, 3px is a step and must fire. #centred-row is the case a top-only check would
+     ruin: two controls of different heights deliberately centred, agreeing on their middles.
+     #two-row and #wrap-row are the two the issue names as legitimate — a grid with a control
+     per row, and a flex row that wraps because it must — and #baseline-text is the third: text
+     of two sizes on a baseline, which is not a control and must never be compared.
+     #covered-btn / #clear-btn are the hit-test pair, absolutely positioned ON SCREEN in the
+     800x600 self-test viewport because elementFromPoint answers about the viewport only. */
+  .hdr { display: flex; width: 400px; padding: 0; }
+  .hdr > .main { flex: 1 1 auto; min-width: 0; padding: 0; }
+  .hdr .ttl { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; row-gap: 5px; }
+  .hdr .nm { grid-column: 1; grid-row: 1; font-size: 15px; }
+  .hdr .ex { grid-column: 2; grid-row: 1; height: 21px; padding: 0; }
+  .hdr .bdg { grid-column: 1 / -1; grid-row: 2; height: 20.69px; }
+  .hdr > .cl { padding: 0; }
+  #step-hdr { align-items: center; }
+  #step-hdr > .cl { height: 18px; align-self: center; }
+  #ok-hdr { align-items: flex-start; }
+  #ok-hdr > .cl { height: 21px; align-self: flex-start; }
+  .ctlrow { display: flex; align-items: flex-start; gap: 6px; width: 300px; padding: 0; }
+  .ctlrow > button { height: 24px; padding: 0; }
+  #noise-row > .b2 { margin-top: 0.4px; }
+  #step-row > .b2 { margin-top: 3px; }
+  #centred-row { align-items: center; }
+  #centred-row > .b1 { height: 18px; }
+  #centred-row > .b2 { height: 30px; }
+  .tworow { display: grid; grid-template-columns: 1fr; row-gap: 6px; width: 300px; padding: 0; }
+  .tworow > button { height: 24px; padding: 0; }
+  #wrap-row { display: flex; flex-wrap: wrap; gap: 6px; width: 90px; padding: 0; }
+  #wrap-row > button { width: 70px; height: 24px; padding: 0; }
+  #baseline-text { display: flex; align-items: baseline; gap: 6px; width: 300px; padding: 0; }
+  #baseline-text > .big { font-size: 22px; }
+  #baseline-text > .small { font-size: 10px; }
+  .hitbox { position: absolute; left: 400px; width: 200px; padding: 0; }
+  #covered-box { top: 400px; }
+  #clear-box { top: 460px; }
+  .hitbox > button { height: 24px; width: 120px; padding: 0; }
+  .hitbox > .over { height: 24px; width: 120px; margin-top: -24px; background: #ccc; position: relative; }
   .rowbox { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; width: 1000px; }
   .rowbox > i { height: 30px; background: #ccc; display: block; }
   #empty-row > i  { width: 100px; }
@@ -770,6 +1055,32 @@ const SELF_TEST_FIXTURE = `
 <div class="cell" id="plain-cell"><span class="notag plain-text">CrashLoopBackOff</span></div>
 <div class="clipbox" id="over-box"><span class="over-clip">CrashLoopBackOff</span></div>
 <div class="clipbox" id="flush-box"><span class="flush-clip">Not referenced</span></div>
+<div class="hdr" id="step-hdr">
+  <div class="main"><div class="ttl"><span class="nm">sim-pod-0</span><button class="ex">E</button>
+  <div class="bdg"><span>Pod</span></div></div></div><button class="cl">X</button></div>
+<div class="hdr" id="ok-hdr">
+  <div class="main"><div class="ttl"><span class="nm">sim-pod-0</span><button class="ex">E</button>
+  <div class="bdg"><span>Pod</span></div></div></div><button class="cl">X</button></div>
+<div class="ctlrow" id="noise-row"><button class="b1">A</button><button class="b2">B</button></div>
+<div class="ctlrow" id="step-row"><button class="b1">A</button><button class="b2">B</button></div>
+<div class="ctlrow" id="centred-row"><button class="b1">A</button><button class="b2">B</button></div>
+<div class="tworow" id="two-row"><button>A</button><button>B</button></div>
+<div id="wrap-row"><button>A</button><button>B</button></div>
+<div id="baseline-text"><span class="big">PersistentVolume</span><span class="small">Cluster scoped</span></div>
+<div class="hitbox" id="covered-box"><button>Restart</button><div class="over"></div></div>
+<div class="hitbox" id="clear-box"><button>Restart</button></div>
+<details id="ghost-group"><summary>Ghost</summary><ul><li><button>Nodes</button></li></ul></details>
+<details id="live-group" open><summary>Live</summary><ul><li><button>Nodes</button></li></ul></details>
+<script>
+  /* The rail's shape: a category is a <details>, and Chromium hides a closed one's content with
+     content-visibility, which SKIPS the subtree and keeps its LAST layout. So the leaf inside
+     has to be laid out while open and then shut, or the control passes for the wrong reason —
+     content that was never laid out has a zero rect and is filtered as a zero-size box. */
+  var ghost = document.getElementById('ghost-group');
+  ghost.open = true;
+  ghost.querySelector('button').getBoundingClientRect();
+  ghost.open = false;
+</script>
 <div id="empty-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="full-row" class="rowbox"><i></i><i></i><i></i></div>
 <div id="wrapped" class="rowbox"><i></i><i></i><i></i><i></i></div>
@@ -809,6 +1120,18 @@ const SELF_TEST_CASES = [
   ['.plain-text', 'sliced', false, 'clipped TEXT is the clipped check; this one is only about shapes'],
   ['.over-clip', 'overclip', true, 'a 200px box in a 120px hidden-overflow parent really is over its clipper'],
   ['.flush-clip', 'overclip', false, 'a shrink-wrapped label sits ON its clipper edge; two roundings of it are not an overflow'],
+  ['#step-hdr', 'line', true, 'a close centred on a two-row header, 14.34px below the expand — #379 rebuilt'],
+  ['#ok-hdr', 'line', false, 'the same header with both controls on the title row — the fix'],
+  ['#noise-row', 'line', false, '0.4px between two controls is sub-pixel layout, not a step'],
+  ['#step-row', 'line', true, '3px is a step: the tolerance is 2px and it is stated, not implied'],
+  ['#centred-row', 'line', false, 'an 18px and a 30px control CENTRED agree on their middles'],
+  ['#two-row', 'line', false, 'a control per grid row is two rows on purpose — no line holds two'],
+  ['#wrap-row', 'line', false, 'a flex row that had to wrap is not misalignment'],
+  ['#baseline-text', 'line', false, 'baseline-aligned TEXT of two sizes is not controls'],
+  ['#live-group', 'ghost', true, 'an OPEN details has its summary and its leaf on screen: 2 controls'],
+  ['#ghost-group', 'ghost', false, 'a shut one keeps the leaf’s last layout — a box nobody can see'],
+  ['#covered-box', 'covered', true, 'a control painted over from inside its own container — #354'],
+  ['#clear-box', 'covered', false, 'the same control with nothing on top of it'],
   ['#empty-row', 'row', true, '3x100px + gaps = 320px of a 1000px row — the shape of #236'],
   ['#full-row', 'row', false, '3x320px + gaps = 1000px, so the row is used'],
   ['#wrapped', 'row', false, '4x320px wraps to a second line; a short LAST line is not waste'],
@@ -836,7 +1159,13 @@ if (argv.includes('--self-test')) {
   for (const [sel, metric, wantDefect, why] of SELF_TEST_CASES) {
     const got = await p.$$eval(sel, measureOne);
     const fired =
-      metric === 'row'
+      metric === 'line'
+        ? !!got?.line?.worst && got.line.worst.step > got.line.tolerance
+        : metric === 'ghost'
+        ? (got?.line?.controls ?? 0) > 1
+        : metric === 'covered'
+        ? (got?.line?.covered ?? []).length > 0
+        : metric === 'row'
         ? rowIsEmpty(got?.row)
         : metric === 'twins'
           ? (got?.twins ?? []).length > 0
@@ -856,7 +1185,17 @@ if (argv.includes('--self-test')) {
     const ok = fired === wantDefect;
     if (!ok) bad += 1;
     const detail =
-      metric === 'row'
+      metric === 'line'
+        ? got?.line?.worst
+          ? `${got.line.controls} controls, closest edge ${got.line.worst.edge} to ${got.line.worst.step.toFixed(2)}px`
+          : `${got?.line?.controls ?? 0} controls, no line holds two`
+        : metric === 'ghost'
+        ? `${got?.line?.controls ?? 0} control(s) on screen`
+        : metric === 'covered'
+        ? got?.line?.covered?.length
+          ? `covered by ${got.line.covered[0].by}`
+          : 'nothing painted over a control'
+        : metric === 'row'
         ? got?.row
           ? `${got.row.unused}px unused of ${got.row.inner}px`
           : 'no row measured'
@@ -899,6 +1238,9 @@ if (argv.includes('--self-test')) {
 const { browser, page } = await open({ view, url: path ? new URL(path, BASE_URL).href : BASE_URL });
 let failed = false;
 try {
+  // Before anything is measured, and before the surface is even navigated to, so a rebuilt
+  // defect is in force for every element the scene later brings on screen.
+  if (style) await page.addStyleTag({ content: style });
   if (theme) await setTheme(page, theme);
   if (leaf) await openLeaf(page, leaf);
   await runPrepare(page, process.env.PREPARE);
@@ -949,6 +1291,45 @@ try {
       const verdict = m.measure > 200 ? ' <-- DEFECT' : m.measure > 90 ? ' <-- uncomfortable' : '';
       console.log(`  measure  ~${m.measure} chars/line at ${m.fontSize}${verdict}`);
       if (m.measure > 200) failed = true;
+    }
+    if (m.line && (m.line.controls > 0 || m.line.unhit.length)) {
+      const px = (v) => v.toFixed(2).replace(/\.00$/, '');
+      const w = m.line.worst;
+      // Printed whenever the match holds controls, not only when it is over the threshold —
+      // same reason `row` prints always: "these two are on one line, to 0.00px" is the answer
+      // a before/after needs, and a number that only appears when it is bad cannot be one.
+      console.log(
+        `  line     ${m.line.controls} control(s) on ${m.line.lines} line(s)` +
+          (w
+            ? `; the closest edge they share is ${w.edge} to ${px(w.step)}px`
+            : '; no line holds two controls of one group, so there is nothing to compare'),
+      );
+      if (w && w.step > m.line.tolerance) {
+        console.log(
+          `           ${w.a} and ${w.b} share a line and agree on no edge:` +
+            ` top ${px(w.by.top)}px, centre ${px(w.by.centre)}px, bottom ${px(w.by.bottom)}px` +
+            `  <-- DEFECT: a control sits a step off the one beside it (over ${m.line.tolerance}px)`,
+        );
+        failed = true;
+      }
+      for (const c of m.line.covered) {
+        console.log(`           ${c.ctl} is not what is under its own centre — ${c.by} is  <-- DEFECT: painted over`);
+        failed = true;
+      }
+      // Printed, never failed: something outside the matched element is on top of it — an open
+      // drawer, a modal mask, a dropdown. That is a fact about the scene, not about this layout.
+      for (const c of m.line.layered) {
+        console.log(`           ${c.ctl} is under another layer (${c.by}) — a scene fact, not this layout`);
+      }
+      // An unhit control is a FAILED measurement, not a pass, and the COUNT is what says so —
+      // one line per control turned a nav sweep into twenty lines of noise, which is how a
+      // report stops being read. The population is still named, one example deep.
+      if (m.line.unhit.length) {
+        console.log(
+          `           ${m.line.unhit.length} control(s) not hit-tested — their centres are off screen or` +
+            ` scrolled out of a container (e.g. ${m.line.unhit[0]})`,
+        );
+      }
     }
     if (m.row) {
       // Reported whenever the element has children in flow, not only when it is over the
@@ -1011,5 +1392,11 @@ try {
   await browser.close();
 }
 
-console.log(`\nview=${view}${theme ? ` theme=${theme}` : ''} — ${failed ? 'PROBLEMS FOUND' : 'nothing over budget'}`);
+// The injected stylesheet is named in the verdict, never only in the command line: a run under
+// `--style` is measuring a page this build does not serve, and a number copied out of it would
+// otherwise read as a finding about the app.
+console.log(
+  `\nview=${view}${theme ? ` theme=${theme}` : ''}${style ? ` --style '${style}' INJECTED (not the app's own CSS)` : ''}` +
+    ` — ${failed ? 'PROBLEMS FOUND' : 'nothing over budget'}`,
+);
 process.exit(failed ? 1 : 0);
