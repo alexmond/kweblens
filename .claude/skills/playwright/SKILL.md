@@ -197,6 +197,40 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   the defect and the fix is worse than no check, and the only way to know is to rebuild the
   defect and watch it fire.**
 
+- 2026-08-14 — **GH#394 fixed, and the mechanism was not the one the symptom suggested.** The
+  guess was that the build's *rename* pulls the jar out from under the JVM. Measured: a rename is
+  **survivable** — the JVM holds two fds on the jar, so it keeps reading the old inode and the
+  instance is fine. What kills it is a step earlier: **maven-jar-plugin TRUNCATES the live inode
+  in place** and writes the 600 KB thin jar into it, and only then does `spring-boot:repackage`
+  rename that inode aside. Proof is in `/proc/<pid>/fd`, which moves from `…/kweblens.jar` to
+  `…/kweblens.jar.original` across a build — the victim is left holding a jar with no
+  `BOOT-INF/lib`. → `dev-run.sh` starts every instance from a per-port **copy**
+  (`kweblens-run-<port>.jar`, `cp --reflink=auto`, 0 exclusive bytes on this box's btrfs), so the
+  build cannot reach it; an insulated instance survived the identical build that had just left an
+  exposed one with 16 `NoClassDefFoundError`s. `dev-verify.sh` refuses (exit 3, `--force` to
+  override) when an instance is reading the file it is about to replace, naming pids and ports.
+  Three further things fell out, each of which had been silently wrong: **(a) `/actuator/health`
+  is NOT a liveness check for this** — on every wedged instance produced it kept answering `200`
+  and `"status":"UP"` while the app served nothing, because its classes all load during startup;
+  `--list` asks `/` as well, and only `serving` means serving. **(b) The PORT column was wrong
+  whenever the simulator was on** — it took the first `lsof` LISTEN row, which is the sim's
+  loopback API server, so `--port 8391` was listed as `37619`; it now reads `PORT=` from
+  `/proc/<pid>/environ` and prefers the wildcard bind. **(c) A `JAR REPLACED` note fires before
+  any symptom**, which is the case that matters — such an instance answers correctly until it
+  needs a class it has not loaded, so it is *latently* dead and looks perfect. `--self-check`
+  gained the two-directional control: a socket that accepts and never answers must not read as
+  `serving` (a TCP-connect check would have passed it), and a real instance must. And **(d) the
+  first `JAR REPLACED` accused a healthy instance**, caught only because that control was run
+  against the fix rather than the bug: it asked "is the jar newer than the process", while
+  `dev-run.sh` writes the per-port copy **7 ms** before forking the JVM and `ps -o lstart=` has
+  one-second resolution — so on a perfectly good launch that comparison is a coin flip. It is now
+  identity-based (the inode the JVM holds vs the inode at the path), with the mtime kept only as a
+  30 s-grace fallback for an in-place overwrite. **A comparison between two events milliseconds
+  apart, read through a one-second clock, is not a check.**
+  **A wedge has no single presentation — hang, connection reset, non-200, and health-UP-but-
+  nothing-else all appeared from the same cause — so probe the surface you measure, not the
+  process.**
+
 - 2026-08-14 — **A watchlist entry named a selector so broad it measured the element BEHIND the
   one it was for, and reported that element's ratio under the wrong name.** GH#389: `.n-tag` was
   on the list as "the drawer's `<NTag type="info">Helm</NTag>`", the component-library colour
@@ -225,11 +259,9 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   listener and the live one kept its *process* after losing its listener —
   `NoClassDefFoundError: …$MatchComparator` / `…ThrowableProxy`. `dev-run.sh --list` matches on
   the jar path and `comm`, both still true of a JVM whose classloader can no longer find
-  anything, so the instance list said `running` throughout. → Filed as **GH#394**; until it is
-  fixed, **run the gate before the measurements, or restart what you are measuring after it**,
-  and treat a 500 on `/` as "I just rebuilt under it" rather than a product bug. Same family as
+  anything, so the instance list said `running` throughout. → Filed as **GH#394**. Same family as
   the provenance entries below: *the app answered* is not *my app answered*, and this time the
-  build that broke it was mine.
+  build that broke it was mine. **FIXED** — see the entry above.
 - 2026-08-14 — **The fix for that shipped a smaller version of the same defect, and the control
   written to prove the fix is what caught it.** `contrast-check` gained `WHY_ABSENT`, a reason
   per selector appended to an empty ratio so "not applicable in this instance" (`.btn` needs
