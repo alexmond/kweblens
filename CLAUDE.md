@@ -86,9 +86,18 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
 - **Suspect the instrument before the code.** Every wrong UI conclusion here came from a broken
   tool, not broken reasoning. **Build a positive control — a case whose answer you already know —
   before believing a surprising result.** Same rule for process detection and heap probes.
-- **Performance has two layers.** (1) *In the gate:* `useResourceData.test.ts` asserts the
-  resource-list watch coalesces a burst into ≤1 `objects` update per animation frame. **When you
-  add a live-updated list, add its watch to that batching pattern** (buffer + flush per rAF).
+- **A live list buffers and flushes on a period — never repaints per event — and BOTH surfaces
+  are gated on it.** In the SPA the period is an animation frame and the gate is
+  `useResourceData.test.ts`, which fires **157** `ADDED` events and asserts ≤1 `objects` update
+  per frame. In the terminal the period is a **tick** and the gate is
+  `kweblens-tui`'s `ScreenLoopTest` + `WatchCoalescerTest`, which fire the same 157 and assert
+  one repaint. **When you add a live-updated list, add its watch to that batching pattern** —
+  buffer keyed by `namespace/name`, flush once per period, and the flush is where the *one*
+  `ObjectStates.forList` call happens. In a terminal this is not a frame-rate question: a redraw
+  posted per event is a TamboUI `UiRunnable`, which `pollEvent` treats as **FIFO with
+  keystrokes**, so per-event repainting **starves the keyboard** and the app will not quit
+  (`ScreenLoopTest.aRedrawPostedPerEventIsFifoWithKeystrokes` is the standing control).
+- **Performance has two more layers.** (1) *In the gate:* the batching tests above.
   (2) *On demand:* `perf-sweep.mjs` walks every nav leaf and fails on `LOAD_MS`/`BLOCK_MS`. Run
   it against the simulator with `KWEBLENS_SIMULATOR_ENABLED=true KWEBLENS_LOAD_KUBECONFIG=false
   KWEBLENS_SIMULATOR_SIZE=200`.
@@ -155,6 +164,23 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   is the enforcement. Lists go through `listRawChunked`, verdicts through `ObjectStates.forList`
   — **one status context per page, never per row**. Terminal stack settled by the #361 spike:
   TamboUI 0.4.0 + JLine 3.30.16. The module is in the `default` profile, **not** published.
+  Three things about the screen (#364) that a change will get wrong otherwise:
+  - **Build widget rows for the visible window only.** Table build+render at 132×44, warmed:
+    2 206 rows cost **0.69 ms** windowed vs **27.7 ms** naive (40×); 10 000 rows cost **0.68 ms**
+    vs **120.8 ms** (178×). Windowed is *flat* in list size and naive is linear — that, not the
+    ratio, is the property. TamboUI's `Table` *will* scroll the whole list and is correct when it
+    does; it just charges a `Row` per object per frame, forever, on a tick.
+  - **A resize is observed from `Frame.area()` in the renderer, never from a `ResizeEvent`.**
+    `TuiRunner.run` consumes `ResizeEvent` itself and never reaches the `EventHandler` —
+    measured 0 deliveries across three real SIGWINCHes while the layout redrew correctly.
+    `ScreenLoopTest` asserts that count stays **zero**, because a handler that never fires looks
+    identical to one that works if the layout is right either way.
+  - **Nothing but the renderer may write to stdout**, and it takes two halves:
+    `kweblens-tui/src/main/resources/logback.xml` (file appender, **no** console appender, and
+    plain `logback.xml` not `logback-spring.xml` so it is in force before Spring exists — Boot 4
+    applies its logging defaults programmatically and ships no `defaults.xml` to `<include>`)
+    **plus** `TerminalOutputGuard`, which swaps `System.out`/`System.err` for the same file while
+    the screen is up and catches everything that never goes through logback.
 - **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
   build; what is excluded are its `it`-**tagged tests**, via surefire `excludedGroups`.
 

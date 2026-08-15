@@ -208,9 +208,19 @@ header states as `[R]` rather than leaving you to assume it.
 ./mvnw -pl kweblens-tui -am package
 java -jar kweblens-tui/target/kweblens-tui-exec.jar --contexts             # what can be opened
 java -jar kweblens-tui/target/kweblens-tui-exec.jar -c staging -k pods -n kube-system
+java -jar kweblens-tui/target/kweblens-tui-exec.jar -c staging -k pods --once   # one listing, no screen
 ```
 
-The interactive screen (table, command line, filters, logs, exec) is in progress — see #364-#370.
+The default is a **live table**: `j`/`k` move, `ctrl-d`/`ctrl-u` page, `g`/`G` jump to the ends,
+`q` quits. It follows a watch, but it **repaints on a tick rather than on an event** — `--tick`
+sets the period in milliseconds (default 100, clamped to 20…10000, and the header tells you when
+it clamped rather than clamping silently). `--once` prints one listing and exits, which is what a
+pipe or a terminal-less job wants.
+
+Logs go to `$KWEBLENS_TUI_LOG_FILE` (default `<tmpdir>/kweblens-tui.log`) and never to the
+terminal, because the terminal is the screen.
+
+The command line, filters, the detail pane, log follow and exec are still to come — #365–#370.
 
 ## Container image
 

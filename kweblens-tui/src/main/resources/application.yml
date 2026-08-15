@@ -10,12 +10,12 @@ spring:
 
 logging:
   level:
-    # A terminal app's stdout IS its output. Boot's INFO startup lines would interleave with
-    # it, and once #364 draws a screen they would interleave with the SCREEN — which is
-    # exactly the failure the GH#361 spike hit and first mistook for a rendering bug in the
-    # library. WARN keeps the stream clean for v1's plain listing; #364 must go further and
-    # take logging off the terminal's stream entirely, because a diff-drawing TUI cannot
-    # share stdout with anything at all.
+    # A terminal app's stdout IS its output, and once a screen is drawn it is the SCREEN.
+    # This value only sets the LEVEL. Where the lines GO is decided by logback.xml next to
+    # this file: a file appender and no console appender at any level, so nothing logback
+    # writes can land on a frame. Read logback.xml's header before changing either — the
+    # two are one answer, and the GH#361 spike lost an hour to the half of it that was
+    # missing. Anything that does not go through logback is caught by TerminalOutputGuard.
     root: warn
 
 kweblens:
