@@ -23,6 +23,7 @@ import org.alexmond.kweblens.tui.screen.ResourceModel;
 import org.alexmond.kweblens.tui.screen.ResourceRow;
 import org.alexmond.kweblens.tui.screen.TickRate;
 import org.alexmond.kweblens.tui.screen.WatchCoalescer;
+import org.alexmond.kweblens.tui.screen.WatchSupervisor;
 
 /**
  * The live table: one repaint per tick, never one per event.
@@ -34,6 +35,14 @@ import org.alexmond.kweblens.tui.screen.WatchCoalescer;
  * cursor moved; nothing else repaints at all. <b>Nothing here is posted from the watch
  * thread</b> — see {@link WatchCoalescer} for the measurement that makes that
  * non-negotiable.
+ *
+ * <h2>And whether any of it is still true</h2>
+ *
+ * The same tick asks {@link WatchSupervisor}, which is the other half of an honest live
+ * table: the coalescer says what changed, the supervisor says whether changes are still
+ * arriving at all. A watch that has died puts a NOT LIVE notice at the front of the
+ * header and repaints once a second while it is down, because a table that has quietly
+ * stopped updating looks exactly like one that has nothing to report (GH#413).
  *
  * <h2>How a resize is noticed</h2>
  *
@@ -60,6 +69,8 @@ public class ResourceScreen implements EventHandler, Renderer {
 
 	private final WatchCoalescer coalescer;
 
+	private final WatchSupervisor supervisor;
+
 	private final ResourceQuery query;
 
 	private final TickRate tick;
@@ -83,9 +94,11 @@ public class ResourceScreen implements EventHandler, Renderer {
 
 	private ColumnLayout columns = ColumnLayout.forWidth(0);
 
-	public ResourceScreen(ResourceModel model, WatchCoalescer coalescer, ResourceQuery query, TickRate tick) {
+	public ResourceScreen(ResourceModel model, WatchCoalescer coalescer, WatchSupervisor supervisor,
+			ResourceQuery query, TickRate tick) {
 		this.model = model;
 		this.coalescer = coalescer;
+		this.supervisor = supervisor;
 		this.query = query;
 		this.tick = tick;
 	}
@@ -94,7 +107,13 @@ public class ResourceScreen implements EventHandler, Renderer {
 	public boolean handle(Event event, TuiRunner runner) {
 		if (event instanceof TickEvent) {
 			this.ticks.incrementAndGet();
-			return this.coalescer.flush().repaints();
+			// The supervisor first: a recovery replaces the model wholesale, and anything
+			// the new watch buffered while it was re-listing belongs on top of that, not
+			// under it. It is also the half that owes a repaint when nothing else does —
+			// a frozen table has to change on screen or it is still a lie.
+			boolean repaint = this.supervisor.tick();
+			repaint |= this.coalescer.flush().repaints();
+			return repaint;
 		}
 		if (event instanceof ResizeEvent) {
 			// Unreachable in TuiRunner.run, and counted rather than assumed — see the
@@ -162,9 +181,22 @@ public class ResourceScreen implements EventHandler, Renderer {
 		this.renders.incrementAndGet();
 	}
 
+	/**
+	 * The chrome line, and the one place a dead watch is admitted to.
+	 *
+	 * <p>
+	 * The notice goes <b>in front</b> of everything else rather than after it. Every
+	 * field that follows — the row count above all — is a claim about the cluster, and
+	 * once the watch has stopped they are claims about a moment that has passed; a
+	 * warning appended at the end is also the first thing a narrow terminal drops.
+	 */
 	String header() {
 		String scope = scope();
-		StringBuilder line = new StringBuilder(128);
+		StringBuilder line = new StringBuilder(192);
+		String notice = this.supervisor.notice();
+		if (!notice.isEmpty()) {
+			line.append(notice).append("  │  ");
+		}
 		line.append("kweblens-tui ")
 			.append(TuiPosture.current().badge())
 			.append(" · ")

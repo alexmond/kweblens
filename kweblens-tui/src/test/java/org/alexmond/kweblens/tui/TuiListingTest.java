@@ -21,6 +21,7 @@ import org.alexmond.kweblens.tui.data.LogStream;
 import org.alexmond.kweblens.tui.data.PodTarget;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
+import org.alexmond.kweblens.tui.data.WatchEnd;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -151,7 +152,8 @@ class TuiListingTest {
 		}
 
 		@Override
-		public Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent) {
+		public Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent,
+				Consumer<WatchEnd> onEnd) {
 			throw new UnsupportedOperationException();
 		}
 

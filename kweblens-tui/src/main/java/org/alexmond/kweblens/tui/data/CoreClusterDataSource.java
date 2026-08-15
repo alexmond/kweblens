@@ -7,7 +7,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
-import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.dsl.ExecListener;
 import io.fabric8.kubernetes.client.dsl.ExecWatch;
 import io.fabric8.kubernetes.client.dsl.LogWatch;
@@ -81,10 +80,18 @@ public class CoreClusterDataSource implements ClusterDataSource {
 		return this.resources.getRaw(query.clusterId(), query.descriptor(), query.namespace(), name);
 	}
 
+	/**
+	 * The end of the stream is reported through {@link CoreWatch}, which is also the
+	 * handle — one object, so the question "did we close this ourselves?" has exactly one
+	 * answer and it is the one the caller's close set.
+	 */
 	@Override
-	public Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent) {
-		Watch watch = this.resources.watchRaw(query.clusterId(), query.descriptor(), query.namespace(), onEvent);
-		return watch::close;
+	public Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent,
+			Consumer<WatchEnd> onEnd) {
+		CoreWatch handle = new CoreWatch(onEnd);
+		handle
+			.attach(this.resources.watchRaw(query.clusterId(), query.descriptor(), query.namespace(), onEvent, handle));
+		return handle;
 	}
 
 	@Override

@@ -1,6 +1,7 @@
 package org.alexmond.kweblens.tui.render;
 
 import java.io.ByteArrayOutputStream;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
@@ -30,6 +31,9 @@ public final class ScreenHarness implements AutoCloseable {
 
 	public static final int HEIGHT = 44;
 
+	/** How many ticks {@link #tickUntil} will spend before it calls the test failed. */
+	private static final int TICK_LIMIT = 200;
+
 	private final AtomicLong frame = new AtomicLong();
 
 	private final FakeBackend backend;
@@ -53,9 +57,17 @@ public final class ScreenHarness implements AutoCloseable {
 	 * test's first assertion is about a steady state.
 	 */
 	public static ScreenHarness start(FakeCluster cluster, int chunkSize) throws Exception {
+		return start(cluster, chunkSize, Clock.systemUTC());
+	}
+
+	/**
+	 * The same screen on a clock the test moves by hand, which is what makes "stopped
+	 * updating 12s ago" and a retry backoff assertions rather than sleeps.
+	 */
+	public static ScreenHarness start(FakeCluster cluster, int chunkSize, Clock clock) throws Exception {
 		FakeBackend backend = new FakeBackend(WIDTH, HEIGHT);
 		ResourceQuery query = new ResourceQuery("fake", WellKnownKinds.PODS, "ns");
-		ScreenSession session = new ScreenSession(cluster, query, TickRate.defaults());
+		ScreenSession session = new ScreenSession(cluster, query, TickRate.defaults(), clock);
 		TuiConfig config = TuiConfig.builder()
 			.backend(backend)
 			.noTick()
@@ -105,6 +117,24 @@ public final class ScreenHarness implements AutoCloseable {
 		await(() -> this.screen().ticksHandled() > before, "the tick to be handled");
 		tick();
 		await(() -> this.screen().ticksHandled() > before + 1, "the barrier tick, proving the repaint finished");
+	}
+
+	/**
+	 * Keep ticking until {@code condition} holds.
+	 *
+	 * <p>
+	 * A reconnect is not finished by the tick that starts it — the network half runs on
+	 * the supervisor's own thread — so a test that wants to see a recovery has to let the
+	 * loop keep running rather than await on a single tick.
+	 */
+	public void tickUntil(BooleanSupplier condition, String what) {
+		for (int i = 0; i < TICK_LIMIT; i++) {
+			if (condition.getAsBoolean()) {
+				return;
+			}
+			tickAndSettle();
+		}
+		throw new AssertionError("ticked " + TICK_LIMIT + " times waiting for " + what);
 	}
 
 	/** Wait for {@code condition}, or fail the test after two seconds. */

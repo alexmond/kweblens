@@ -1,5 +1,6 @@
 package org.alexmond.kweblens.tui.render;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 
@@ -11,6 +12,7 @@ import org.alexmond.kweblens.tui.screen.ResourceModel;
 import org.alexmond.kweblens.tui.screen.ResourceRow;
 import org.alexmond.kweblens.tui.screen.TickRate;
 import org.alexmond.kweblens.tui.screen.WatchCoalescer;
+import org.alexmond.kweblens.tui.screen.WatchSupervisor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,7 +22,9 @@ class ResourceScreenTest {
 	private final ResourceModel model = new ResourceModel();
 
 	private ResourceScreen screen(ResourceQuery query, TickRate tick) {
-		return new ResourceScreen(this.model, new WatchCoalescer(this.model, (objects) -> List.of()), query, tick);
+		WatchSupervisor supervisor = new WatchSupervisor(Clock.systemUTC(), this.model, (onEnd) -> List.of());
+		return new ResourceScreen(this.model, new WatchCoalescer(this.model, (objects) -> List.of()), supervisor, query,
+				tick);
 	}
 
 	@Test

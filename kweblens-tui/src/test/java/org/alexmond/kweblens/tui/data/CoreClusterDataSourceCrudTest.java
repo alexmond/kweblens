@@ -85,13 +85,46 @@ class CoreClusterDataSourceCrudTest {
 	void watchDeliversEventsAndStopsWhenTheSubscriptionIsClosed() {
 		CoreClusterDataSource source = CoreStack.dataSource(this.client);
 		List<String> actions = new CopyOnWriteArrayList<>();
+		List<WatchEnd> ends = new CopyOnWriteArrayList<>();
 
-		try (Subscription subscription = source.watch(pods(), (action, object) -> actions.add(action))) {
+		try (Subscription subscription = source.watch(pods(), (action, object) -> actions.add(action), ends::add)) {
 			seedPod("watched", "Pending");
 			Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() -> !actions.isEmpty());
 		}
 
 		assertThat(actions).contains("ADDED");
+	}
+
+	/**
+	 * The half of GH#413 that has to be true against the real client, not a double.
+	 *
+	 * <p>
+	 * fabric8 routes a locally requested close through the watcher's no-argument
+	 * {@code onClose()} — {@code Watch.close()} calls {@code closeEvent()} — so the
+	 * ending the TUI causes and the ending it needs to hear about arrive on the same code
+	 * path. If this ever reported, quitting would announce a lost watch on the way out
+	 * and, far worse, every reconnect would read its own close of the previous handle as
+	 * a fresh failure and reconnect forever.
+	 */
+	@Test
+	void closingASubscriptionIsNotReportedAsAWatchThatDied() {
+		CoreClusterDataSource source = CoreStack.dataSource(this.client);
+		List<String> actions = new CopyOnWriteArrayList<>();
+		List<WatchEnd> ends = new CopyOnWriteArrayList<>();
+
+		Subscription subscription = source.watch(pods(), (action, object) -> actions.add(action), ends::add);
+		seedPod("quietly-closed", "Pending");
+		Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() -> !actions.isEmpty());
+		subscription.close();
+
+		// The positive control is the assertion above it: the watch was demonstrably open
+		// and delivering, so "no ending reported" is a decision and not a watch that
+		// never
+		// started. Give any asynchronous callback room to arrive before believing it.
+		Awaitility.await()
+			.during(500, TimeUnit.MILLISECONDS)
+			.atMost(5, TimeUnit.SECONDS)
+			.untilAsserted(() -> assertThat(ends).isEmpty());
 	}
 
 }

@@ -97,9 +97,20 @@ public interface ClusterDataSource {
 	 * <b>Never repaint per event.</b> Buffer and flush on a tick (#364): measured on this
 	 * stack, one redraw posted per watch event does not merely cost frames, it starves
 	 * the keyboard — a 2 000-event burst left keystrokes unprocessed entirely.
+	 * <p>
+	 * <b>{@code onEnd} is not optional and there is no overload without it</b> (GH#413).
+	 * A watch stops on etcd compaction, a proxy's idle timeout, an API-server restart; a
+	 * screen that is not told goes on drawing the last state it saw with a row count that
+	 * reads as current, which is worse than an error because there is nothing to notice.
+	 * The signal existed and was dropped, so the fix is a parameter a caller cannot
+	 * forget rather than a second method it can pick.
+	 * @param onEvent called on the watch thread, once per change; must stay cheap
+	 * @param onEnd called at most once, on the watch thread, when nothing further will
+	 * arrive — <b>never</b> for a close the caller itself asked for
 	 * @return a handle that must be closed to stop watching
 	 */
-	Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent);
+	Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent,
+			Consumer<WatchEnd> onEnd);
 
 	/**
 	 * Follow a container's log from now. The returned {@link LogStream} must be closed,
