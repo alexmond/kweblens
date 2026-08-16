@@ -278,6 +278,20 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   to Maven Central and publishing is irreversible, making it a release blocker. → Raised to P1
   with a comment stating what I knew that the filer did not. Re-rank on facts the filer lacked,
   and record the reasoning on the ticket.
+- 2026-08-16 — **I merged three PRs onto a red `main` without noticing, because I only ever
+  checked the PR's own checks.** `983486d`, `8216a2a` and `315211d` each went in with
+  `statusCheckRollup = SUCCESS` on the branch, and `main`'s own post-merge run failed on all
+  three — a `kweblens-tui` test that passes locally and fails on CI. §7 said to check the PR; it
+  never said to check what the merge produced. → **After merging, check `main`'s run, not just the
+  PR's.** `gh run list --branch main --limit 5` is the whole cost. A branch that was green before
+  the merge is not evidence about the commit that the merge created, and three rounds of "all
+  checks passed" hid a red trunk.
+- 2026-08-16 — **A gate that cannot reach CI is worse than no gate, and it can look perfect
+  locally.** #421's first draft lived in a Java package called `build`, which `.gitignore:5`
+  silently swallows: 4/4 green locally, `git status --porcelain` empty, and it would never have
+  been committed. Its author caught it by asserting **the gate's own file is in `git ls-files`**.
+  → A new check should assert that it is itself tracked and that it scanned what it claims to
+  scan; "it passed" and "it ran" are different facts.
 - 2026-08-14 — **Two agents reached opposite conclusions about the same file and both had done
   real work.** Averaging them would have produced a wrong doc. Reading `relations.ts` settled it
   in one command. → When reports conflict, the code is the tiebreaker; say plainly which one was
