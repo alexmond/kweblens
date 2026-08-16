@@ -5,18 +5,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
-import org.alexmond.kweblens.tui.data.WatchEnd;
 import org.alexmond.kweblens.tui.screen.CoreRowBatch;
 import org.alexmond.kweblens.tui.screen.ResourceModel;
 import org.alexmond.kweblens.tui.screen.ResourceRow;
 import org.alexmond.kweblens.tui.screen.RowBatch;
 import org.alexmond.kweblens.tui.screen.TickRate;
 import org.alexmond.kweblens.tui.screen.WatchCoalescer;
+import org.alexmond.kweblens.tui.screen.WatchLease;
 import org.alexmond.kweblens.tui.screen.WatchSupervisor;
 
 /**
@@ -49,6 +48,11 @@ import org.alexmond.kweblens.tui.screen.WatchSupervisor;
  * replaces the model with them on the render thread: a row deleted while the screen was
  * blind disappears only if the re-list is a <em>replacement</em>, and the objects are
  * still dropped a page at a time.
+ *
+ * <p>
+ * <b>And the replaced watch is not still being listened to.</b> Both subscriptions are
+ * opened through {@link #open}, which points the buffer at the new one before opening it,
+ * so the dying watch cannot put a row back after the re-list has corrected it (GH#417).
  */
 public class ScreenSession implements AutoCloseable {
 
@@ -110,7 +114,22 @@ public class ScreenSession implements AutoCloseable {
 	 * connection open on the cluster for nobody.
 	 */
 	public void subscribe() {
-		this.watch.set(this.cluster.watch(this.query, this.coalescer::offer, this.supervisor.listener()));
+		this.watch.set(open(this.supervisor.lease()));
+	}
+
+	/**
+	 * Point the buffer at this subscription and open it, in that order.
+	 *
+	 * <p>
+	 * The rebase comes first because it is what makes the previous subscription's events
+	 * unwelcome — both the ones it already left in the buffer, which the rebase throws
+	 * away, and the ones it delivers on its way out, which are stamped with a generation
+	 * the buffer now refuses. Both are older than the list this subscription is about to
+	 * take, and applying either on top of that list is GH#417.
+	 */
+	private Subscription open(WatchLease lease) {
+		this.coalescer.rebase(lease.generation());
+		return this.cluster.watch(this.query, this.coalescer.sink(lease.generation()), lease.onEnd());
 	}
 
 	/** Fill the model from the cluster, a page at a time. */
@@ -128,12 +147,12 @@ public class ScreenSession implements AutoCloseable {
 	 * stays NOT LIVE with a watch open — understating liveness rather than overstating
 	 * it, and the next attempt closes that watch before opening another.
 	 */
-	private List<ResourceRow> reconnect(Consumer<WatchEnd> onEnd) {
+	private List<ResourceRow> reconnect(WatchLease lease) {
 		Subscription previous = this.watch.getAndSet(null);
 		if (previous != null) {
 			previous.close();
 		}
-		Subscription opened = this.cluster.watch(this.query, this.coalescer::offer, onEnd);
+		Subscription opened = open(lease);
 		this.watch.set(opened);
 		if (this.closed.get()) {
 			// close() ran while this attempt was on the network. Nobody else will release

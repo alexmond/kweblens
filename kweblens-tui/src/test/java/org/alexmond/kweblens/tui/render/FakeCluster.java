@@ -4,8 +4,11 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -41,6 +44,17 @@ public class FakeCluster implements ClusterDataSource {
 	private final AtomicInteger closed = new AtomicInteger();
 
 	private final AtomicInteger lists = new AtomicInteger();
+
+	/**
+	 * Every sink ever handed to {@link #watch}, in the order they were opened, including
+	 * the ones that have since been replaced — see {@link #fireFromWatch}.
+	 */
+	private final List<BiConsumer<String, GenericKubernetesResource>> sinks = new CopyOnWriteArrayList<>();
+
+	/** Set while a {@link #list} is parked on {@link #holdNextList()}. */
+	private final AtomicBoolean listHeld = new AtomicBoolean();
+
+	private final AtomicReference<CountDownLatch> listGate = new AtomicReference<>();
 
 	private volatile BiConsumer<String, GenericKubernetesResource> subscriber;
 
@@ -83,6 +97,45 @@ public class FakeCluster implements ClusterDataSource {
 		BiConsumer<String, GenericKubernetesResource> target = this.subscriber;
 		if (target != null) {
 			target.accept(action, object);
+		}
+	}
+
+	/**
+	 * Deliver one event through the sink a <em>particular</em> subscription was given,
+	 * including one that has since been closed and replaced.
+	 *
+	 * <p>
+	 * That is not a simulation of anything: it is the same consumer object {@link #watch}
+	 * was handed, called the way fabric8 calls it. A watch does not stop delivering the
+	 * instant it is closed — the ending and the close race with whatever the client had
+	 * already read — and an event that arrives from a dead handle is what GH#417 is
+	 * about.
+	 * @param watch which subscription, in the order they were opened, from zero
+	 */
+	public void fireFromWatch(int watch, String action, GenericKubernetesResource object) {
+		this.sinks.get(watch).accept(action, object);
+	}
+
+	/**
+	 * Park the next {@link #list} until {@link #releaseList()}, so a test can hold a
+	 * reconnect open between its re-subscribe and its re-list — the window GH#417 lives
+	 * in — instead of racing it.
+	 */
+	public FakeCluster holdNextList() {
+		this.listGate.set(new CountDownLatch(1));
+		return this;
+	}
+
+	/** Whether a list is parked right now. */
+	public boolean listHeld() {
+		return this.listHeld.get();
+	}
+
+	/** Let the parked list finish. */
+	public void releaseList() {
+		CountDownLatch gate = this.listGate.getAndSet(null);
+		if (gate != null) {
+			gate.countDown();
 		}
 	}
 
@@ -137,6 +190,7 @@ public class FakeCluster implements ClusterDataSource {
 
 	@Override
 	public void list(ResourceQuery query, int chunkSize, Consumer<List<GenericKubernetesResource>> onPage) {
+		hold();
 		this.lists.incrementAndGet();
 		List<GenericKubernetesResource> snapshot = List.copyOf(this.initial);
 		int size = (chunkSize > 0) ? chunkSize : Math.max(1, snapshot.size());
@@ -163,12 +217,31 @@ public class FakeCluster implements ClusterDataSource {
 			throw refusal;
 		}
 		this.opened.incrementAndGet();
+		this.sinks.add(onEvent);
 		this.subscriber = onEvent;
 		this.ender = onEnd;
 		return () -> {
 			this.closed.incrementAndGet();
 			this.watchClosed.set(true);
 		};
+	}
+
+	private void hold() {
+		CountDownLatch gate = this.listGate.get();
+		if (gate == null) {
+			return;
+		}
+		this.listHeld.set(true);
+		try {
+			gate.await();
+		}
+		catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("the held list was interrupted", ex);
+		}
+		finally {
+			this.listHeld.set(false);
+		}
 	}
 
 	@Override

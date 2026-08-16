@@ -137,12 +137,23 @@ public class WatchSupervisor implements AutoCloseable {
 	}
 
 	/**
-	 * A listener for one new subscription. Every call mints a generation, so the handle
-	 * this is given to is the only one whose ending will be believed.
+	 * Mint one new subscription. The generation it carries is the only one whose ending
+	 * will be believed <em>and</em> the only one whose events the buffer will keep once a
+	 * later subscription has replaced it — see {@link WatchLease}.
 	 */
-	public Consumer<WatchEnd> listener() {
+	public WatchLease lease() {
 		long minted = this.generation.incrementAndGet();
-		return (end) -> ended(minted, end);
+		return new WatchLease(minted, (end) -> ended(minted, end));
+	}
+
+	/**
+	 * Just the ending half of a {@link #lease()}, for a caller that opens no watch and so
+	 * has no events to stamp. Package-private on purpose: everything that does open one
+	 * needs the generation as well, and taking the shorter method would be how an event
+	 * loses the identity that tells it from a superseded watch's (GH#417).
+	 */
+	Consumer<WatchEnd> listener() {
+		return lease().onEnd();
 	}
 
 	/** Called on the watch thread. Stamps a reference and returns; nothing else. */
@@ -219,17 +230,17 @@ public class WatchSupervisor implements AutoCloseable {
 	private void startAttempt() {
 		this.attempting = true;
 		this.attempts++;
-		Consumer<WatchEnd> listener = listener();
-		recovery().execute(() -> reconnect(listener));
+		WatchLease lease = lease();
+		recovery().execute(() -> reconnect(lease));
 	}
 
 	/**
 	 * On the recovery thread. Every exit stamps {@link #outcome}, or the screen would
 	 * wait forever.
 	 */
-	private void reconnect(Consumer<WatchEnd> listener) {
+	private void reconnect(WatchLease lease) {
 		try {
-			this.outcome.set(new Outcome(List.copyOf(this.restart.reconnect(listener)), null));
+			this.outcome.set(new Outcome(List.copyOf(this.restart.reconnect(lease)), null));
 		}
 		catch (RuntimeException ex) {
 			this.outcome.set(new Outcome(null, ex));
@@ -299,6 +310,20 @@ public class WatchSupervisor implements AutoCloseable {
 	/** Whether the table on screen is being kept up to date. */
 	public boolean live() {
 		return this.loss == null;
+	}
+
+	/**
+	 * Whether a finished reconnect is sitting here waiting for a tick to install it.
+	 *
+	 * <p>
+	 * It exists for one test. GH#417 is an <b>ordering</b>: an event that lands in the
+	 * buffer after the last flush and before the replacement rows are installed. A test
+	 * that fires the event and hopes is not a race test — it passes on the benign
+	 * interleaving, which is most of them — so the test reads this to know the rows are
+	 * ready, fires into the dead watch, and then ticks once.
+	 */
+	public boolean recoveryPending() {
+		return this.outcome.get() != null;
 	}
 
 	/**
