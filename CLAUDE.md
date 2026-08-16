@@ -282,6 +282,20 @@ broken. It is not; do not "fix" it.
 - Lint rules that bite: **SpringLambda** wants `(e) -> …` (`:apply` does **not** add these, so it
   fails at `validate` on the next build); **SpringTernary** wants `(a != b) ? x : y`;
   **InnerTypeLast**; **UseUnderscoresInNumericLiterals** (`86_400`); **AppendCharacterWithChar**.
+- **A control character in source is written as an ESCAPE, never as a raw byte** — and this one
+  gate is at `test`, not `validate`. `grep` classifies a file containing a NUL as binary and
+  prints **nothing** for every search over it: no match, no warning, no exit status you can tell
+  apart from "no match" — which is how a review of #407 nearly reported a function that had just
+  been added as missing. A raw `U+001F` greps but makes `file` say `data`; only the escape leaves
+  the file greppable **and** text. `DiagnosisSummaryCache` has always joined its fingerprint
+  fields that way — the convention predates #408, and the two files it fixed were the deviation.
+  `TrackedSourcesStayGreppableTest` (in **`kweblens-core`**, the module `-Prelease` cannot drop)
+  scans **every path `git ls-files` lists**, reads the working tree, and names file, byte offset
+  and line. Tab, LF and CR are the only raw control bytes allowed; the sole exclusion is `.png`,
+  and an exclusion that stops matching a real file is **itself a failure**. Two traps it also
+  pins: a Java package named `build`/`target`/`dist` is **invisible to git here** (`.gitignore`
+  line 5 is `build/`), so the gate checks that its own source is tracked; and a brand-new file is
+  scanned only once `git add`ed, because tracked is what `git ls-files` means.
 
 ## Gotchas (load-bearing)
 

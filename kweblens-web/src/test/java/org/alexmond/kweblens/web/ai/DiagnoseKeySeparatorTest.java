@@ -32,6 +32,16 @@ import static org.assertj.core.api.Assertions.fail;
  * silence, and nearly reported the function did not exist. So the character must be
  * written as a source escape, and no raw control byte may return to either file by any
  * route.
+ *
+ * <p>
+ * That last claim is now made for the whole repository by
+ * {@code TrackedSourcesStayGreppableTest} in {@code kweblens-core} (#421), which scans
+ * every file {@code git ls-files} lists. The narrow check here is kept deliberately: it
+ * is the module-local sentinel for the two files the defect actually happened in, it runs
+ * in a {@code -pl kweblens-web} build where the repository-wide gate is not in the
+ * reactor, and it sits beside the two cross-language assertions — that the SPA and the
+ * server join on the <em>same</em> character, written as an escape — which no byte
+ * scanner can make.
  */
 class DiagnoseKeySeparatorTest {
 
