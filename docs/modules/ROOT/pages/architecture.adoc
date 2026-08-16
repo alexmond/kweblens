@@ -103,8 +103,9 @@ Each user-facing surface is a directory under `org.alexmond.kweblens.web`:
 `ui/`:: `SpaController`, which forwards `/`, `/ui` and `/ui/` to the built SPA's `index.html`.
 `security/`:: `SecurityConfig` and `AuditService`.
 `nav/`:: `NavCatalog`, the declarative category → kind → list-route registry (39 built-in kinds
-across 7 static categories), and `ClusterNavService`, which discovers CRDs and promotes a
-Gateway category at runtime when the Gateway API CRDs are present.
+across 8 static categories), and `ClusterNavService`, which discovers CRDs, promotes a Gateway
+category at runtime when the Gateway API CRDs are present, and decides per cluster whether the
+Autoscaling category is offered at all.
 `mcp/`:: The `@Tool` beans and `McpConfig`, plus `ToolRedaction` — the boundary that strips
 Secret values before anything leaves for an inference log.
 `helm/`:: The jhelm-backed release surface.

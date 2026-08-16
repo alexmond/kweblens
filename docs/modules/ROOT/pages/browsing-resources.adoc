@@ -8,7 +8,7 @@ in one important case, what it deliberately does not send.
 == The navigation
 
 The left menu is a declarative registry, not a hand-built menu. `NavCatalog` holds **39 built-in
-kinds across 7 static categories**, in this order:
+kinds across 8 static categories**, in this order:
 
 [cols="1,1,4"]
 |===
@@ -16,7 +16,8 @@ kinds across 7 static categories**, in this order:
 
 | Cluster | 3 | Nodes, Namespaces, Events
 | Workloads | 8 | Pods, Deployments, Stateful Sets, Daemon Sets, Replica Sets, Jobs, Cron Jobs, Replication Controllers
-| Config | 13 | Config Maps, Secrets, Resource Quotas, Limit Ranges, Horizontal Pod Autoscalers, Pod Disruption Budgets, Priority Classes, Runtime Classes, Leases, Mutating Webhook Configs, Validating Webhook Configs, Validating Admission Policies, Validating Admission Policy Bindings
+| Autoscaling | 1 | Horizontal Pod Autoscalers (joined at runtime by the cluster's Vertical Pod Autoscalers; shown only where there is something to show — see <<autoscaling>>)
+| Config | 12 | Config Maps, Secrets, Resource Quotas, Limit Ranges, Pod Disruption Budgets, Priority Classes, Runtime Classes, Leases, Mutating Webhook Configs, Validating Webhook Configs, Validating Admission Policies, Validating Admission Policy Bindings
 | Network | 6 | Services, Ingresses, Endpoint Slices, Endpoints, Ingress Classes, Network Policies
 | Storage | 3 | Persistent Volume Claims, Persistent Volumes, Storage Classes
 | Access Control | 5 | Service Accounts, Cluster Roles, Roles, Cluster Role Bindings, Role Bindings
@@ -54,6 +55,29 @@ being dropped.
 The promotion is **conditional**. A static entry for a CRD-delivered kind would give every
 cluster without Gateway API a dead category that errors when clicked, so the category only exists
 where the group does.
+
+[#autoscaling]
+=== The Autoscaling category is offered, not assumed
+
+The two answers to "what scales this workload" used to be filed in two places: the built-in
+`HorizontalPodAutoscaler` sat in **Config**, next to ConfigMaps and Secrets, while the
+CRD-delivered `VerticalPodAutoscaler` sat under its API group in Custom Resources. They are one
+category now — **Autoscaling**, immediately after Workloads, the thing they act on.
+
+Inside it the order is by **what each kind changes**: an HPA changes how many pods there are, a
+VPA changes how big each one is, and "how many" is the question asked first when a workload's
+capacity moves.
+
+The category is shown only where the cluster has something to put in it — a VPA kind installed,
+or at least one HorizontalPodAutoscaler. On a cluster that autoscales nothing there is no
+category and no row that could only ever say "0 items"; create either and it appears the next
+time the menu is fetched. If the "is there an HPA" probe fails, the category is shown anyway: a
+menu hidden by a failed measurement would be a claim about the cluster that was never measured.
+
+`VerticalPodAutoscalerCheckpoint` is deliberately **not** in the category. It is the recommender's
+saved histogram for one target — the cluster writes them, and there are more of them than there
+are VPAs — while the recommendation an operator wants is on the VPA's own `status`. It stays
+under Custom Resources with its API group, so it is demoted rather than hidden.
 
 == Namespace filter and badge counts
 

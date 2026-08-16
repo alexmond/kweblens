@@ -143,8 +143,11 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   `portforward/`, `schema/`, `config/` (`KweblensProperties`).
 - **`kweblens-web`** — the runnable app, one `web/<area>/` slice per surface: `api/` (JSON +
   `ProblemDetail`), `ui/` (`SpaController`), `security/` (`SecurityConfig`, `AuditService`),
-  `mcp/`, `nav/` (`NavCatalog`: 39 built-in kinds / 7 static categories + discovered CRDs;
-  `ClusterNavService` promotes a Gateway category when those CRDs exist), `helm/`, `exec/`,
+  `mcp/`, `nav/` (`NavCatalog`: 39 built-in kinds / 8 static categories + discovered CRDs;
+  `ClusterNavService` promotes a Gateway category when those CRDs exist and **withholds
+  Autoscaling** — declared in the catalog, holding the HPA plus the cluster's VPA kinds — from a
+  cluster that has neither, so no cluster grows a row that can only say "0 items" (#428)),
+  `helm/`, `exec/`,
   `files/`, `search/` (global search), `diag/`, `ai/`, `sim/`, `config/`.
   `/actuator/{health,info,metrics,prometheus}` — note `metrics` and `prometheus` are **not** in
   `SecurityConfig`'s permit list, so they are public in open-mode and authenticated in closed.
@@ -496,6 +499,11 @@ new tool returning raw objects must go through it.**
   access reimplemented in a controller. That rule produced every Freelens-parity surface.
 - **The left menu is a declarative nav registry** (category → kind → list-route) in `NavCatalog`,
   and **Custom Resources is dynamic**, generated from the cluster's CRDs grouped by API group.
+  A category may be **offered conditionally** — Gateway synthesised when its CRDs exist,
+  Autoscaling declared but withheld from a cluster with neither an HPA nor a VPA kind — and that
+  is the sanctioned exception, not licence to compute the menu. Both decisions live in
+  `ClusterNavService`, both are presentation only (`find` resolves every catalog id on every
+  cluster), and the case that must be tested is the **absent** one.
 - **Design references**: `docs/references/freelens-ia.md` (full IA map) and
   `freelens-reference-deck.md`. The deck records its headless `xvfb` capture as blocked on this
   box — **that note is disputed**; re-test before relying on it either way.

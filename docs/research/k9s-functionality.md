@@ -105,9 +105,10 @@ automatically. The hand-written `aliases.yaml` template ships only **eight** ent
 `jo`, `cr`, `crb`, `ro`, `rb`, `np`); the other ~117 come from API discovery.
 
 This is a genuine architectural difference from kweblens, and it cuts both ways. kweblens's
-`NavCatalog` is a curated registry — **7 static categories, 39 built-in kinds** (*verified by reading
-the file*, not by trusting the docs) — plus CRDs discovered by `ClusterNavService` and grouped by API
-group, plus a Gateway category promoted when those CRDs exist. Curation is why kweblens's left menu
+`NavCatalog` is a curated registry — **8 static categories, 39 built-in kinds** (*verified by reading
+the file*, not by trusting the docs; it was 7 when this was written, before #428 gave Autoscaling its
+own) — plus CRDs discovered by `ClusterNavService` and grouped by API group, plus a Gateway category
+promoted when those CRDs exist. Curation is why kweblens's left menu
 reads as a product and k9s's alias list reads as a dump. Discovery is why k9s can address a resource
 kweblens has never heard of, immediately, with no code change.
 

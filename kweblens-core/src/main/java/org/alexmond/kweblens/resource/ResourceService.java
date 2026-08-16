@@ -202,6 +202,23 @@ public class ResourceService {
 	}
 
 	/**
+	 * Whether the cluster holds <b>at least one</b> object of this kind, across all
+	 * namespaces.
+	 *
+	 * <p>
+	 * Deliberately not {@code count(...) > 0}. A total needs
+	 * {@code metadata.remainingItemCount}, and where the API server omits it on a
+	 * truncated page {@link #count} falls back to listing the whole collection — which is
+	 * the one thing a yes/no question must never do. "Is there one" is answered by the
+	 * first page and never needs a second request.
+	 */
+	public boolean hasAny(String clusterId, ResourceDescriptor descriptor) {
+		GenericKubernetesResourceList page = listPage(clusterId, descriptor, null,
+				new ListOptionsBuilder().withLimit(1L).build(), false);
+		return page.getItems() != null && !page.getItems().isEmpty();
+	}
+
+	/**
 	 * One page of a kind — the single item {@link #count} reasons about, or one chunk of
 	 * {@link #listRawChunked}.
 	 * @param continuing whether {@code options} carries a continue token, which is the

@@ -14,6 +14,12 @@ import org.alexmond.kweblens.resource.WellKnownKinds;
  * ({@code /clusters/{cluster}/r/{id}}), so adding a built-in kind is one line here. The
  * dynamic Custom Resources section (CRD-discovered) is layered on later (issue #12); Helm
  * and Access Control write surfaces arrive with their own milestones.
+ *
+ * <p>
+ * One category here is <b>conditional</b>: Autoscaling is declared like any other, but
+ * {@link ClusterNavService} withholds it from clusters that have nothing to put in it.
+ * The declaration still stands — {@link #find} resolves its route ids on every cluster,
+ * so a bookmarked list keeps working even where the menu does not offer it.
  */
 @Component
 public class NavCatalog {
@@ -46,14 +52,20 @@ public class NavCatalog {
 					ResourceDescriptor.namespaced("cronjobs", "Cron Jobs", "CronJob", BATCH, "v1", "cronjobs"),
 					ResourceDescriptor.coreNamespaced("replicationcontrollers", "Replication Controllers",
 							"ReplicationController", "replicationcontrollers"))),
+			// Autoscaling sits next to the workloads it acts on, not in Config: an HPA
+			// filed beside ConfigMaps and Secrets was findable only by someone who
+			// already knew where it was (#428). Declared here with its one built-in kind;
+			// ClusterNavService adds the cluster's VPA kinds and decides whether the
+			// category is shown at all.
+			new NavCategory("Autoscaling", "bi-graph-up-arrow",
+					List.of(ResourceDescriptor.namespaced("horizontalpodautoscalers", "Horizontal Pod Autoscalers",
+							"HorizontalPodAutoscaler", "autoscaling", "v2", "horizontalpodautoscalers"))),
 			new NavCategory("Config", "bi-sliders", List.of(
 					ResourceDescriptor.coreNamespaced("configmaps", "Config Maps", "ConfigMap", "configmaps"),
 					ResourceDescriptor.coreNamespaced("secrets", "Secrets", "Secret", "secrets"),
 					ResourceDescriptor.coreNamespaced("resourcequotas", "Resource Quotas", "ResourceQuota",
 							"resourcequotas"),
 					ResourceDescriptor.coreNamespaced("limitranges", "Limit Ranges", "LimitRange", "limitranges"),
-					ResourceDescriptor.namespaced("horizontalpodautoscalers", "Horizontal Pod Autoscalers",
-							"HorizontalPodAutoscaler", "autoscaling", "v2", "horizontalpodautoscalers"),
 					ResourceDescriptor.namespaced("poddisruptionbudgets", "Pod Disruption Budgets",
 							"PodDisruptionBudget", "policy", "v1", "poddisruptionbudgets"),
 					ResourceDescriptor.cluster("priorityclasses", "Priority Classes", "PriorityClass",

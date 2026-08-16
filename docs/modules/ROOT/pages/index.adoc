@@ -41,9 +41,10 @@ reach.
 | Area | Detail
 
 | xref:browsing-resources.adoc[Resource browsing]
-| 39 built-in kinds across 7 static categories, plus Custom Resources discovered from the
+| 39 built-in kinds across 8 static categories, plus Custom Resources discovered from the
 cluster's CRDs and rendered with the CRD's own printer columns. A *Gateway* category is promoted
-at runtime when the Gateway API CRDs are present.
+at runtime when the Gateway API CRDs are present, and *Autoscaling* holds the HPA and the
+cluster's VPA kinds wherever there is one.
 
 | Live updates
 | Kubernetes watches streamed to the browser over SSE, batched per animation frame so a
