@@ -1,9 +1,6 @@
 package org.alexmond.kweblens.tui.screen;
 
 import java.util.List;
-import java.util.function.Consumer;
-
-import org.alexmond.kweblens.tui.data.WatchEnd;
 
 /**
  * How the screen re-establishes a watch that died: close the old handle, subscribe again,
@@ -38,12 +35,13 @@ public interface WatchRestart {
 	/**
 	 * Subscribe, then list. Called on the recovery thread, never concurrently with
 	 * itself.
-	 * @param onEnd the listener the <em>new</em> subscription must report its own ending
-	 * to
+	 * @param lease the identity of the <em>new</em> subscription: where it reports its
+	 * own ending, and the generation its events must be stamped with so that the watch it
+	 * replaces cannot put a row back after the re-list has corrected it (GH#417)
 	 * @return every row of the kind, for the render thread to install
 	 * @throws RuntimeException if the cluster refused; the supervisor backs off and
 	 * retries
 	 */
-	List<ResourceRow> reconnect(Consumer<WatchEnd> onEnd);
+	List<ResourceRow> reconnect(WatchLease lease);
 
 }

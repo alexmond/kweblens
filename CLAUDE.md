@@ -189,6 +189,20 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     never be reported** — fabric8 routes it through the same no-arg `onClose()`, so `CoreWatch`
     suppresses it; without that, every reconnect reads its own close of the old handle as a fresh
     failure and reconnects forever.
+  - **The buffer belongs to ONE subscription, and which one is captured when the watch is
+    opened — never read when an event arrives.** The recovery's `replaceAll` is followed by the
+    tick's flush, so an event the dying watch left in the buffer landed on top of the row the
+    fresh list had just corrected: one row older than the table around it, on a screen that had
+    just said it was live again (#417). `WatchSupervisor.lease()` mints the generation once and
+    hands it to both halves — `WatchCoalescer.sink(generation)` for the events and the `onEnd`
+    listener for the ending — and `ScreenSession.open` calls `coalescer.rebase(generation)`
+    **before** `cluster.watch`, which discards what the old watch buffered and refuses what it
+    delivers afterwards. **Reading the shared counter at `offer` time is the bug, not the fix**:
+    the counter names the newest subscription, and it is bumped on the render thread while the
+    dying watch is still open, so an arrival-stamped event is stamped with its successor's
+    identity. The cost is one `long` compare inside the lock `offer` already takes — #364's tick
+    cannot afford a per-event comparison that walks anything. The identity-less `offer` is
+    package-private so only the in-package coalescing tests can reach it.
   - **Nothing but the renderer may write to stdout**, and it takes two halves:
     `kweblens-tui/src/main/resources/logback.xml` (file appender, **no** console appender, and
     plain `logback.xml` not `logback-spring.xml` so it is in force before Spring exists — Boot 4
