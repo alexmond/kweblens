@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.kind.KindCatalog;
 import org.alexmond.kweblens.tui.screen.TickRate;
 
 /**
@@ -48,6 +49,8 @@ public class TuiScreen implements Screen {
 
 	private final ClusterDataSource cluster;
 
+	private final KindCatalog catalog;
+
 	@Override
 	public int run(ResourceQuery query, int chunkSize, TickRate tick, PrintWriter out) {
 		if (System.console() == null) {
@@ -70,8 +73,8 @@ public class TuiScreen implements Screen {
 	 */
 	int run(ResourceQuery query, int chunkSize, TickRate tick, TuiConfig config, PrintWriter out,
 			Consumer<ScreenSession> started) {
-		try (ScreenSession session = new ScreenSession(this.cluster, query, tick);
-				TerminalOutputGuard guard = TerminalOutputGuard.open()) {
+		try (ScreenSession session = new ScreenSession(this.cluster, query, tick)
+			.kinds(this.catalog.of(query.clusterId())); TerminalOutputGuard guard = TerminalOutputGuard.open()) {
 			TuiConfig effective = (config != null) ? config : defaults(tick, guard);
 			try (TuiRunner runner = TuiRunner.create(effective)) {
 				guard.install();

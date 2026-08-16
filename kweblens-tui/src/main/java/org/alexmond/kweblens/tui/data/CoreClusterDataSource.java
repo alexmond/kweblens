@@ -20,6 +20,8 @@ import org.alexmond.kweblens.exec.ExecService;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.health.ObjectStates;
 import org.alexmond.kweblens.log.LogService;
+import org.alexmond.kweblens.resource.ApiDiscoveryService;
+import org.alexmond.kweblens.resource.DiscoveredKind;
 import org.alexmond.kweblens.resource.ResourceService;
 
 /**
@@ -52,6 +54,8 @@ public class CoreClusterDataSource implements ClusterDataSource {
 
 	private final ClusterRegistry clusters;
 
+	private final ApiDiscoveryService discovery;
+
 	private final ResourceService resources;
 
 	private final ObjectStates states;
@@ -63,6 +67,11 @@ public class CoreClusterDataSource implements ClusterDataSource {
 	@Override
 	public List<String> clusters() {
 		return this.clusters.list().stream().map(ClusterInfo::id).toList();
+	}
+
+	@Override
+	public List<DiscoveredKind> kinds(String clusterId) {
+		return this.discovery.kinds(clusterId);
 	}
 
 	@Override

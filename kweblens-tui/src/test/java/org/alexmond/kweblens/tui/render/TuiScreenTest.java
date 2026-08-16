@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.kind.KindCatalog;
 import org.alexmond.kweblens.tui.screen.TickRate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -23,13 +24,21 @@ class TuiScreenTest {
 
 	private static final ResourceQuery QUERY = new ResourceQuery("fake", WellKnownKinds.PODS, "ns");
 
+	/**
+	 * A screen over {@code cluster}, with the command line's vocabulary discovered from
+	 * it.
+	 */
+	private static TuiScreen screen(FakeCluster cluster) {
+		return new TuiScreen(cluster, new KindCatalog(cluster));
+	}
+
 	@Test
 	void withoutATtyItRefusesAndSaysWhereToLook() {
 		Assumptions.assumeTrue(System.console() == null,
 				"this asserts the no-terminal branch, so it needs a JVM without one");
 		StringWriter out = new StringWriter();
 
-		int code = new TuiScreen(new FakeCluster()).run(QUERY, 500, TickRate.defaults(), new PrintWriter(out));
+		int code = screen(new FakeCluster()).run(QUERY, 500, TickRate.defaults(), new PrintWriter(out));
 
 		assertThat(code).isEqualTo(TuiScreen.EXIT_NO_TERMINAL);
 		assertThat(out.toString()).contains("Not a terminal").contains("--once");
@@ -43,8 +52,8 @@ class TuiScreenTest {
 		AtomicInteger code = new AtomicInteger(-1);
 		StringWriter out = new StringWriter();
 
-		Thread thread = new Thread(() -> code.set(new TuiScreen(cluster).run(QUERY, 5, TickRate.defaults(),
-				config(backend), new PrintWriter(out), session::set)), "tui-screen-test");
+		Thread thread = new Thread(() -> code.set(screen(cluster).run(QUERY, 5, TickRate.defaults(), config(backend),
+				new PrintWriter(out), session::set)), "tui-screen-test");
 		thread.setDaemon(true);
 		thread.start();
 		await(() -> session.get() != null && session.get().screen().renders() >= 1);
@@ -65,7 +74,7 @@ class TuiScreenTest {
 
 		// A backend whose size() throws is the cheapest way to make TuiRunner.create
 		// fail.
-		int code = new TuiScreen(new FakeCluster()).run(QUERY, 500, TickRate.defaults(), config(new BrokenBackend()),
+		int code = screen(new FakeCluster()).run(QUERY, 500, TickRate.defaults(), config(new BrokenBackend()),
 				new PrintWriter(out), (session) -> {
 				});
 

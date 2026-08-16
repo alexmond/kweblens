@@ -17,6 +17,8 @@ import org.springframework.util.StringUtils;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.kind.KindCatalog;
+import org.alexmond.kweblens.tui.kind.KindIndex;
 import org.alexmond.kweblens.tui.render.Screen;
 import org.alexmond.kweblens.tui.screen.TickRate;
 
@@ -59,6 +61,8 @@ public class TuiCommand implements Callable<Integer> {
 
 	private final Screen screen;
 
+	private final KindCatalog kinds;
+
 	private final TuiProperties properties;
 
 	@Option(names = { "-c", "--context" },
@@ -74,6 +78,10 @@ public class TuiCommand implements Callable<Integer> {
 
 	@Option(names = "--contexts", description = "List the kubeconfig contexts this build can open, then exit.")
 	private boolean listContexts;
+
+	@Option(names = "--aliases",
+			description = "List every name the ':' command line answers to on this cluster, then exit.")
+	private boolean listAliases;
 
 	@Option(names = "--once", description = "Print one listing and exit instead of opening the live screen.")
 	private boolean once;
@@ -102,10 +110,15 @@ public class TuiCommand implements Callable<Integer> {
 					: "Several contexts and no usable current-context; pass --context.";
 			return fail(out, reason + " Available: " + String.join(", ", ids), EXIT_BAD_ARGUMENT);
 		}
-		Optional<ResourceDescriptor> descriptor = TuiKinds.byId(this.kind);
+		KindIndex index = this.kinds.of(clusterId);
+		if (this.listAliases) {
+			index.aliases().forEach(out::println);
+			out.flush();
+			return 0;
+		}
+		Optional<ResourceDescriptor> descriptor = index.resolve(this.kind);
 		if (descriptor.isEmpty()) {
-			return fail(out, "Unknown kind '" + this.kind + "'. This build knows: " + String.join(", ", TuiKinds.ids()),
-					EXIT_BAD_ARGUMENT);
+			return fail(out, unknownKind(index), EXIT_BAD_ARGUMENT);
 		}
 		ResourceQuery query = new ResourceQuery(clusterId, descriptor.get(), this.namespace);
 		if (this.once) {
@@ -135,6 +148,22 @@ public class TuiCommand implements Callable<Integer> {
 			return current;
 		}
 		return (ids.size() == 1) ? ids.get(0) : null;
+	}
+
+	/**
+	 * Why {@code --kind} did not resolve — and it matters which of the two reasons it is.
+	 * A cluster that refused discovery knows no kinds at all, which is a different
+	 * problem from a typo and has a different fix.
+	 */
+	private String unknownKind(KindIndex index) {
+		if (index.size() == 0) {
+			return "Nothing was discovered on this cluster, so '" + this.kind + "' cannot be resolved. "
+					+ "The API server refused discovery or could not be reached.";
+		}
+		List<String> near = index.complete(this.kind, 5);
+		String hint = (near.isEmpty()) ? " Run --aliases to see every name."
+				: " Did you mean: " + String.join(", ", near) + "?";
+		return "Unknown kind '" + this.kind + "'. This cluster serves " + index.size() + " kinds." + hint;
 	}
 
 	private static Integer fail(PrintWriter out, String message, int code) {

@@ -16,6 +16,9 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
 
 import org.alexmond.kweblens.health.ObjectState;
+import org.alexmond.kweblens.resource.DiscoveredKind;
+import org.alexmond.kweblens.resource.ResourceDescriptor;
+import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ExecSession;
 import org.alexmond.kweblens.tui.data.LogStream;
@@ -183,20 +186,53 @@ public class FakeCluster implements ClusterDataSource {
 		return this.lists.get();
 	}
 
+	/**
+	 * What the command line can name here. Deliberately small and deliberately
+	 * <b>including a CRD-shaped kind no catalog knows</b>, so a navigation test proves
+	 * the screen reaches a kind by discovery rather than by a built-in list.
+	 */
+	private final List<DiscoveredKind> kinds = new ArrayList<>(
+			List.of(new DiscoveredKind(WellKnownKinds.PODS, "pod", List.of("po")),
+					new DiscoveredKind(WellKnownKinds.NAMESPACES, "namespace", List.of("ns")),
+					new DiscoveredKind(WellKnownKinds.EVENTS, "event", List.of("ev")),
+					new DiscoveredKind(ResourceDescriptor.namespaced("apps.deployments", "Deployment", "Deployment",
+							"apps", "v1", "deployments"), "deployment", List.of("deploy")),
+					new DiscoveredKind(ResourceDescriptor.namespaced("traefik.io.ingressroutes", "IngressRoute",
+							"IngressRoute", "traefik.io", "v1alpha1", "ingressroutes"), "ingressroute", List.of())));
+
+	/** The object {@link #get} hands back, for a drill-down. */
+	private volatile GenericKubernetesResource object;
+
 	@Override
 	public List<String> clusters() {
 		return List.of("fake");
 	}
 
 	@Override
+	public List<DiscoveredKind> kinds(String clusterId) {
+		return List.copyOf(this.kinds);
+	}
+
+	/**
+	 * What the next {@link #get} returns — the object a drill-down reads a selector off.
+	 */
+	public FakeCluster withObject(GenericKubernetesResource single) {
+		this.object = single;
+		return this;
+	}
+
+	@Override
 	public void list(ResourceQuery query, int chunkSize, Consumer<List<GenericKubernetesResource>> onPage) {
 		hold();
-		this.lists.incrementAndGet();
 		List<GenericKubernetesResource> snapshot = List.copyOf(this.initial);
 		int size = (chunkSize > 0) ? chunkSize : Math.max(1, snapshot.size());
 		for (int from = 0; from < snapshot.size(); from += size) {
 			onPage.accept(List.copyOf(snapshot.subList(from, Math.min(from + size, snapshot.size()))));
 		}
+		// Counted when the pages have been delivered, not when the request starts, so a
+		// test that waits on lists() is waiting for rows and not for an intention. Same
+		// lesson as GH#423's tick counter.
+		this.lists.incrementAndGet();
 	}
 
 	@Override
@@ -206,7 +242,7 @@ public class FakeCluster implements ClusterDataSource {
 
 	@Override
 	public GenericKubernetesResource get(ResourceQuery query, String name) {
-		throw new UnsupportedOperationException("not used by the screen");
+		return this.object;
 	}
 
 	@Override
