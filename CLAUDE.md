@@ -157,13 +157,37 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   through `kweblens-core`, never to a running kweblens server**, on the operator's own kubeconfig
   and therefore their own RBAC. Boots `WebApplicationType.NONE`; `TuiDependencyTest` fails the
   build if `kweblens-web` or any servlet class reaches the classpath. All cluster access goes
-  through **one `ClusterDataSource` port** (list / watch / get / logs / exec) with **exactly one
+  through **one `ClusterDataSource` port** (kinds / list / watch / get / logs / exec) with **exactly one
   adapter**, `CoreClusterDataSource` — the port exists so an HTTP adapter is possible later, and
   a second implementation is a deliberate decision, not a side effect. **v1 is read-only and the
   header says so** (`TuiPosture`, k9s's `[R]`/`[RW]`); the port has no write method at all, which
   is the enforcement. Lists go through `listRawChunked`, verdicts through `ObjectStates.forList`
   — **one status context per page, never per row**. Terminal stack settled by the #361 spike:
   TamboUI 0.4.0 + JLine 3.30.16. The module is in the `default` profile, **not** published.
+  - **Curation and discovery are both wanted, and they are different things** (#365). `NavCatalog`
+    orders the web menu; the TUI's `:` command line makes everything *addressable*, from
+    `ApiDiscoveryService` — every group/version the API server publishes, with its plural,
+    singular, kind and **server-declared** short names. Measured on `k3stest`: **404 aliases,
+    all 39 `NavCatalog` kinds, plus CRDs no catalog lists** (`hc` → HelmChart, `gtw` → Gateway).
+    **Never add a hand-written alias table**; `TuiKinds` was exactly that and is deleted.
+    Discovery is ~30 round trips (7.5 s on `k3stest`), so `KindCatalog` memoises it per cluster —
+    a CRD installed while the screen is up is not addressable until restart, which is the
+    accepted trade.
+  - **The on-screen key list is DERIVED from `KeyMap.BINDINGS`, and `KeyMapTest` fails both ways**
+    — a bound visible key missing from the bar, or a word in the bar no key produces. This is
+    k9s's `HydrateMenu(Hints())` and it is copied on purpose: a hand-written help screen always
+    eventually lies. Adding a key is a row in that table; there is no second place to edit.
+  - **Drill-down is a visible, editable filter, never a hidden join.** Enter on a Deployment
+    opens `pods(kube-system)[1] </k8s-app=kube-dns>` — a query in **this** product's grammar
+    (#366's port of `objectFilter.ts`), so it can be read, checked and widened. Where no query
+    can express the relationship (a Node's pods need a field selector) `DrillDown` **declines in
+    words**; it never approximates. `esc` clears a filter *before* it pops a level, and that
+    applies to a drill-down's filter too.
+  - **A counter a test waits on must be bumped when the work FINISHES** (#423). `ticksHandled`
+    was incremented on entry to the tick handler, so `ScreenHarness.tickAndSettle` released the
+    test mid-tick; a test that then moved `MovableClock` 60 s was mutating state a live
+    `WatchSupervisor.tick()` was reading, and the retry it saw depended on the machine. Green
+    here, red on CI, three commits. `ScreenTickBarrierTest` is the standing control.
   Three things about the screen (#364) that a change will get wrong otherwise:
   - **Build widget rows for the visible window only.** Table build+render at 132×44, warmed:
     2 206 rows cost **0.69 ms** windowed vs **27.7 ms** naive (40×); 10 000 rows cost **0.68 ms**

@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
 import org.alexmond.kweblens.health.ObjectState;
+import org.alexmond.kweblens.resource.DiscoveredKind;
 
 /**
  * Everything the terminal asks a cluster for: <b>list, watch, get, logs, exec</b> — and
@@ -53,6 +54,22 @@ public interface ClusterDataSource {
 	 * "default" to assume.
 	 */
 	List<String> clusters();
+
+	/**
+	 * Every kind the cluster serves, with the names it answers to — the command line's
+	 * whole vocabulary.
+	 *
+	 * <p>
+	 * <b>Discovered, never listed here.</b> The catalog one module over is a curated menu
+	 * and a good one; it cannot name a CRD installed this morning. This returns what the
+	 * API server publishes, so a kind is addressable the moment it exists, and the short
+	 * names are the server's own rather than a table that goes stale silently.
+	 *
+	 * <p>
+	 * One round trip per group/version, so a caller holding a screen open should ask once
+	 * and remember the answer rather than asking per keystroke.
+	 */
+	List<DiscoveredKind> kinds(String clusterId);
 
 	/**
 	 * Every object of a kind, delivered a page at a time.

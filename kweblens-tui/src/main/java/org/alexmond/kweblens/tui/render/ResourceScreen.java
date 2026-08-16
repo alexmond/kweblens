@@ -1,5 +1,7 @@
 package org.alexmond.kweblens.tui.render;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import dev.tamboui.layout.Constraint;
@@ -7,6 +9,8 @@ import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.Line;
+import dev.tamboui.text.Text;
 import dev.tamboui.tui.EventHandler;
 import dev.tamboui.tui.Renderer;
 import dev.tamboui.tui.TuiRunner;
@@ -19,9 +23,14 @@ import dev.tamboui.widgets.paragraph.Paragraph;
 import org.alexmond.kweblens.tui.TuiPosture;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.screen.ColumnLayout;
+import org.alexmond.kweblens.tui.screen.FrameTitle;
+import org.alexmond.kweblens.tui.screen.KeyMap;
+import org.alexmond.kweblens.tui.screen.Navigation;
 import org.alexmond.kweblens.tui.screen.ResourceModel;
 import org.alexmond.kweblens.tui.screen.ResourceRow;
 import org.alexmond.kweblens.tui.screen.TickRate;
+import org.alexmond.kweblens.tui.screen.View;
+import org.alexmond.kweblens.tui.screen.ViewController;
 import org.alexmond.kweblens.tui.screen.WatchCoalescer;
 import org.alexmond.kweblens.tui.screen.WatchSupervisor;
 
@@ -31,10 +40,17 @@ import org.alexmond.kweblens.tui.screen.WatchSupervisor;
  * <p>
  * This class is the whole of the coalescing rule's TUI half, and it is three lines of it:
  * a {@link TickEvent} asks {@link WatchCoalescer#flush()} whether the model changed and
- * repaints only if it did; a {@link KeyEvent} moves the cursor and repaints only if the
- * cursor moved; nothing else repaints at all. <b>Nothing here is posted from the watch
- * thread</b> — see {@link WatchCoalescer} for the measurement that makes that
- * non-negotiable.
+ * repaints only if it did; a {@link KeyEvent} is translated and handed to
+ * {@link ViewController}, which repaints only if something changed; nothing else repaints
+ * at all. <b>Nothing here is posted from the watch thread</b> — see
+ * {@link WatchCoalescer} for the measurement that makes that non-negotiable.
+ *
+ * <h2>Every key goes through the binding table</h2>
+ *
+ * A press becomes a {@code KeyStroke} ({@link Keys}) and then a {@code KeyAction}
+ * ({@link KeyMap}). There is no {@code if (key.isChar('x'))} left in this file, and that
+ * is the point: the hint bar and the help pane are projections of that same table, so a
+ * key that does something the help does not mention is not a thing that can be written.
  *
  * <h2>And whether any of it is still true</h2>
  *
@@ -57,13 +73,16 @@ import org.alexmond.kweblens.tui.screen.WatchSupervisor;
  *
  * <h2>v1 is read-only, and the header says so</h2>
  *
- * Every key here moves a cursor or quits. There is no key that changes the cluster,
- * because {@code ClusterDataSource} has no method that could.
+ * Every key here moves a cursor, opens a prompt or navigates. There is no key that
+ * changes the cluster, because {@code ClusterDataSource} has no method that could.
  */
 public class ResourceScreen implements EventHandler, Renderer {
 
 	/** How much of a screen ctrl-d and ctrl-u move. */
 	private static final int HALF_PAGE_DIVISOR = 2;
+
+	/** Header, frame title, hint bar, status line: the rows the table does not get. */
+	private static final int CHROME_LINES = 4;
 
 	private final ResourceModel model;
 
@@ -71,13 +90,15 @@ public class ResourceScreen implements EventHandler, Renderer {
 
 	private final WatchSupervisor supervisor;
 
-	private final ResourceQuery query;
-
 	private final TickRate tick;
+
+	private final ViewController controller;
 
 	private final ResourceTableView table = new ResourceTableView();
 
 	private final Style chrome = Style.create().dim();
+
+	private final Style titleStyle = Style.create().bold();
 
 	private final AtomicInteger renders = new AtomicInteger();
 
@@ -89,30 +110,54 @@ public class ResourceScreen implements EventHandler, Renderer {
 
 	private final AtomicInteger ticks = new AtomicInteger();
 
+	/**
+	 * The kind and scope on screen; replaced by {@link #retarget} when a view changes.
+	 */
+	private ResourceQuery query;
+
 	/** The area the current layout was computed for. Null until the first frame. */
 	private Rect area;
 
 	private ColumnLayout columns = ColumnLayout.forWidth(0);
 
+	/**
+	 * A screen with nowhere to navigate: it draws, it moves its cursor, and every command
+	 * says the cluster serves no kinds. What the chrome tests use.
+	 */
 	public ResourceScreen(ResourceModel model, WatchCoalescer coalescer, WatchSupervisor supervisor,
 			ResourceQuery query, TickRate tick) {
+		this(model, coalescer, supervisor, query, tick, new NoNavigation(query));
+	}
+
+	public ResourceScreen(ResourceModel model, WatchCoalescer coalescer, WatchSupervisor supervisor,
+			ResourceQuery query, TickRate tick, Navigation navigation) {
 		this.model = model;
 		this.coalescer = coalescer;
 		this.supervisor = supervisor;
 		this.query = query;
 		this.tick = tick;
+		this.controller = new ViewController(navigation, model, View.of(query.descriptor(), query.namespace()),
+				this::halfPage);
 	}
 
 	@Override
 	public boolean handle(Event event, TuiRunner runner) {
 		if (event instanceof TickEvent) {
-			this.ticks.incrementAndGet();
 			// The supervisor first: a recovery replaces the model wholesale, and anything
 			// the new watch buffered while it was re-listing belongs on top of that, not
 			// under it. It is also the half that owes a repaint when nothing else does —
 			// a frozen table has to change on screen or it is still a lie.
 			boolean repaint = this.supervisor.tick();
 			repaint |= this.coalescer.flush().repaints();
+			// Counted LAST, and GH#423 is what that sentence costs when it is not.
+			// ScreenHarness.tickAndSettle uses this counter as its barrier, so a counter
+			// bumped on ENTRY means "a tick started" while claiming to mean "a tick
+			// finished": the test was released mid-tick, moved the clock sixty seconds,
+			// and the supervisor call still in flight then read the new time and started
+			// a
+			// retry the test had already decided was not due. Green on this box, red on a
+			// slower one, for three commits.
+			this.ticks.incrementAndGet();
 			return repaint;
 		}
 		if (event instanceof ResizeEvent) {
@@ -129,30 +174,22 @@ public class ResourceScreen implements EventHandler, Renderer {
 	}
 
 	private boolean key(KeyEvent key, TuiRunner runner) {
-		if (key.isQuit() || key.isCharIgnoreCase('q') || key.isCtrlC()) {
+		ViewController.Outcome outcome = this.controller.key(Keys.of(key));
+		if (outcome == ViewController.Outcome.QUIT) {
 			runner.quit();
 			return false;
 		}
-		int page = Math.max(1, viewportHeight() / HALF_PAGE_DIVISOR);
-		if (key.isDown() || key.isChar('j')) {
-			return this.model.moveSelection(1);
-		}
-		if (key.isUp() || key.isChar('k')) {
-			return this.model.moveSelection(-1);
-		}
-		if (key.isPageDown() || (key.isChar('d') && key.hasCtrl())) {
-			return this.model.moveSelection(page);
-		}
-		if (key.isPageUp() || (key.isChar('u') && key.hasCtrl())) {
-			return this.model.moveSelection(-page);
-		}
-		if (key.isHome() || key.isChar('g')) {
-			return this.model.selectTo(0);
-		}
-		if (key.isEnd() || key.isChar('G')) {
-			return this.model.selectTo(Integer.MAX_VALUE);
-		}
-		return false;
+		return outcome == ViewController.Outcome.REPAINT;
+	}
+
+	/**
+	 * Point the screen at another kind. Called by {@link ScreenSession#switchTo} on the
+	 * render thread; the layout is invalidated because a cluster-scoped kind has no
+	 * NAMESPACE column and a namespaced one does.
+	 */
+	void retarget(ResourceQuery next) {
+		this.query = next;
+		this.area = null;
 	}
 
 	@Override
@@ -165,11 +202,14 @@ public class ResourceScreen implements EventHandler, Renderer {
 					this.query.descriptor().namespaced());
 		}
 		var parts = Layout.vertical()
-			.constraints(Constraint.length(1), Constraint.fill(1), Constraint.length(1))
+			.constraints(Constraint.length(1), Constraint.length(1), Constraint.fill(1), Constraint.length(1),
+					Constraint.length(1))
 			.split(full);
 		frame.renderWidget(Paragraph.builder().text(header()).style(this.chrome).build(), parts.get(0));
-		int built = this.table.render(frame, parts.get(1), this.model, this.columns);
-		frame.renderWidget(Paragraph.builder().text(footer()).style(this.chrome).build(), parts.get(2));
+		frame.renderWidget(Paragraph.builder().text(title()).style(this.titleStyle).build(), parts.get(1));
+		int built = body(frame, parts.get(2));
+		frame.renderWidget(Paragraph.builder().text(KeyMap.hints()).style(this.chrome).build(), parts.get(3));
+		frame.renderWidget(Paragraph.builder().text(footer()).style(this.chrome).build(), parts.get(4));
 		// Counters last, and renders last of all: an observer that waits on one of these
 		// must not be able to read a half-drawn frame's numbers. That is not tidiness —
 		// awaiting on a counter written first is how a test reads the PREVIOUS frame's
@@ -179,6 +219,28 @@ public class ResourceScreen implements EventHandler, Renderer {
 			this.layouts.incrementAndGet();
 		}
 		this.renders.incrementAndGet();
+	}
+
+	/** The table, or the help pane over it. */
+	private int body(Frame frame, Rect area) {
+		if (!this.controller.help()) {
+			return this.table.render(frame, area, this.model, this.columns);
+		}
+		List<Line> lines = new ArrayList<>();
+		lines.add(Line.from("Keys — every binding, including the ones the bar has no room for"));
+		for (String row : KeyMap.helpRows()) {
+			lines.add(Line.from("  " + row));
+		}
+		lines.add(Line.empty());
+		lines.add(Line.from("  namespaces on 1-9: " + namespaces()));
+		lines.add(Line.from("  :<kind> [namespace] [filter]  —  " + this.controller.kindCount() + " kinds discovered"));
+		frame.renderWidget(Paragraph.builder().text(Text.from(lines)).build(), area);
+		return 0;
+	}
+
+	private String namespaces() {
+		List<String> recent = this.controller.favourites().recent();
+		return (recent.isEmpty()) ? "none yet — they fill up as you visit them" : String.join(", ", recent);
 	}
 
 	/**
@@ -216,11 +278,44 @@ public class ResourceScreen implements EventHandler, Renderer {
 		return line.toString();
 	}
 
+	/**
+	 * The frame title and the breadcrumbs: what you are looking at, and every level you
+	 * can walk back through.
+	 */
+	String title() {
+		StringBuilder line = new StringBuilder(96);
+		line.append(FrameTitle.of(this.controller.current(), this.model.size()));
+		if (this.model.size() != this.model.total()) {
+			line.append(" of ").append(this.model.total());
+		}
+		List<String> crumbs = this.controller.crumbs();
+		if (crumbs.size() > 1) {
+			line.append("   │   ");
+			for (String crumb : crumbs) {
+				line.append('<').append(crumb).append(">   ");
+			}
+		}
+		return line.toString().stripTrailing();
+	}
+
+	/**
+	 * The bottom line: the prompt when one is open, otherwise where the cursor is and
+	 * anything that could not be done.
+	 */
 	String footer() {
+		if (this.controller.prompt().open()) {
+			return this.controller.prompt().rendered() + candidates();
+		}
 		String selected = this.model.selectedRow().map(ResourceRow::name).orElse("—");
 		int position = (this.model.size() == 0) ? 0 : this.model.selectedIndex() + 1;
-		return "j/k move · ctrl-d/u page · g/G ends · q quit   │   " + position + "/" + this.model.size() + "  "
-				+ selected;
+		String line = position + "/" + this.model.size() + "  " + selected;
+		String message = this.controller.message();
+		return (message.isEmpty()) ? line : line + "   │   " + message;
+	}
+
+	private String candidates() {
+		List<String> candidates = this.controller.prompt().candidates();
+		return (candidates.isEmpty()) ? "" : "   │   " + String.join("  ", candidates);
 	}
 
 	/**
@@ -236,8 +331,17 @@ public class ResourceScreen implements EventHandler, Renderer {
 				: this.query.namespace();
 	}
 
+	private int halfPage() {
+		return Math.max(1, viewportHeight() / HALF_PAGE_DIVISOR);
+	}
+
 	private int viewportHeight() {
-		return (this.area != null) ? Math.max(1, this.area.height() - 3) : 1;
+		return (this.area != null) ? Math.max(1, this.area.height() - CHROME_LINES) : 1;
+	}
+
+	/** The view stack, the prompt and the history — what the keys act on. */
+	public ViewController controller() {
+		return this.controller;
 	}
 
 	/** How many times {@link #render} ran — the TUI's definition of a repaint. */
@@ -246,9 +350,14 @@ public class ResourceScreen implements EventHandler, Renderer {
 	}
 
 	/**
-	 * How many ticks this handler has processed. A tick is not a repaint — that is the
-	 * whole point — so a test that wants to know a tick landed must read this and not
+	 * How many ticks this handler has <b>finished</b>. A tick is not a repaint — that is
+	 * the whole point — so a test that wants to know a tick landed must read this and not
 	 * {@link #renders()}.
+	 *
+	 * <p>
+	 * <b>Finished, not started</b>, and the distinction is load-bearing: this counter is
+	 * what {@code ScreenHarness.tickAndSettle} waits on, so a test that reads state after
+	 * it must be able to rely on no tick being in flight. See {@link #handle} (GH#423).
 	 */
 	public int ticksHandled() {
 		return this.ticks.get();

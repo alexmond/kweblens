@@ -14,6 +14,7 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.health.ObjectState;
+import org.alexmond.kweblens.resource.DiscoveredKind;
 import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ExecSession;
@@ -130,6 +131,11 @@ class TuiListingTest {
 		@Override
 		public List<String> clusters() {
 			return List.of("k3stest");
+		}
+
+		@Override
+		public List<DiscoveredKind> kinds(String clusterId) {
+			throw new UnsupportedOperationException("a listing names no kinds; the command line does");
 		}
 
 		@Override

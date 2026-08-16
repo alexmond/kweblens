@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 
 /**
  * What the screen is showing: the rows, in a stable order, and where the cursor is.
@@ -36,8 +37,16 @@ public class ResourceModel {
 	 * The ordered view, rebuilt only when the map changes. {@code TreeMap.values()} is a
 	 * view but not random-access, and the renderer indexes into it once per visible row
 	 * per frame.
+	 *
+	 * <p>
+	 * It is also where the filter is applied. <b>The filter narrows the view, never the
+	 * rows</b>: a watch event for an object the filter hides still updates the map, so
+	 * clearing the filter shows the object as it is now rather than as it was when it was
+	 * last visible.
 	 */
 	private List<ResourceRow> ordered = List.of();
+
+	private Predicate<ResourceRow> filter = RowFilters.ALL;
 
 	private int selected;
 
@@ -78,8 +87,48 @@ public class ResourceModel {
 	}
 
 	private void reindex() {
-		this.ordered = List.copyOf(this.rows.values());
+		List<ResourceRow> visible = new ArrayList<>(this.rows.size());
+		for (ResourceRow row : this.rows.values()) {
+			if (this.filter.test(row)) {
+				visible.add(row);
+			}
+		}
+		this.ordered = List.copyOf(visible);
 		this.selected = clamp(this.selected);
+	}
+
+	/**
+	 * Narrow what is shown. Returns true if the visible set changed, which is what the
+	 * caller turns into a repaint.
+	 *
+	 * <p>
+	 * The cursor is clamped rather than kept on the row it was on: a filter that hides
+	 * the selected row has to put the cursor somewhere, and the top of what is left is a
+	 * place the reader can see, while a remembered index into a list that no longer
+	 * contains it is not.
+	 */
+	public boolean applyFilter(Predicate<ResourceRow> replacement) {
+		this.filter = (replacement != null) ? replacement : RowFilters.ALL;
+		List<ResourceRow> before = this.ordered;
+		reindex();
+		return !before.equals(this.ordered);
+	}
+
+	/** Empty the model — what switching to another kind does before it re-lists. */
+	public void clear() {
+		this.rows.clear();
+		this.selected = 0;
+		this.offset = 0;
+		reindex();
+	}
+
+	/**
+	 * How many rows there are before the filter. The frame title counts {@link #size()},
+	 * but "1 of 137" needs both, and a reader who cannot see the second number cannot
+	 * tell a narrow filter from an empty cluster.
+	 */
+	public int total() {
+		return this.rows.size();
 	}
 
 	/** Every row, in display order. */

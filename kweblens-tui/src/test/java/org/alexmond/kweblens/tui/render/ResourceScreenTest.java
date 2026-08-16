@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.screen.KeyStroke;
 import org.alexmond.kweblens.tui.screen.ResourceModel;
 import org.alexmond.kweblens.tui.screen.ResourceRow;
 import org.alexmond.kweblens.tui.screen.TickRate;
@@ -64,7 +65,7 @@ class ResourceScreenTest {
 		ResourceScreen screen = screen(new ResourceQuery("prod", WellKnownKinds.PODS, "ns"), TickRate.defaults());
 		this.model.selectTo(1);
 
-		assertThat(screen.footer()).contains("2/2").contains("b").contains("q quit");
+		assertThat(screen.footer()).contains("2/2").contains("b");
 	}
 
 	@Test
@@ -72,6 +73,37 @@ class ResourceScreenTest {
 		ResourceScreen screen = screen(new ResourceQuery("prod", WellKnownKinds.PODS, "ns"), TickRate.defaults());
 
 		assertThat(screen.footer()).contains("0/0").contains("—");
+	}
+
+	@Test
+	void theFrameTitleCarriesTheKindTheScopeAndTheCount() {
+		this.model.replaceAll(List.of(new ResourceRow("ns/a", "ns", "a", "Running", "1d"),
+				new ResourceRow("ns/b", "ns", "b", "Running", "1d")));
+		ResourceScreen screen = screen(new ResourceQuery("prod", WellKnownKinds.PODS, "kube-system"),
+				TickRate.defaults());
+
+		assertThat(screen.title()).startsWith("pods(kube-system)[2]");
+	}
+
+	@Test
+	void theFrameTitleShowsTheActiveFilterAndHowMuchItIsHiding() {
+		this.model.replaceAll(List.of(new ResourceRow("ns/coredns-a", "ns", "coredns-a", "Running", "1d"),
+				new ResourceRow("ns/traefik", "ns", "traefik", "Running", "1d")));
+		ResourceScreen screen = screen(new ResourceQuery("prod", WellKnownKinds.PODS, "ns"), TickRate.defaults());
+
+		screen.controller().key(KeyStroke.of('/'));
+		"coredns".chars().forEach((c) -> screen.controller().key(KeyStroke.of((char) c)));
+		screen.controller().key(KeyStroke.key(KeyStroke.Kind.ENTER));
+
+		assertThat(screen.title()).contains("pods(ns)[1]").contains("of 2").contains("</coredns>");
+	}
+
+	@Test
+	void theHintBarIsTheBindingTableAndNotAStringBesideIt() {
+		ResourceScreen screen = screen(new ResourceQuery("prod", WellKnownKinds.PODS, "ns"), TickRate.defaults());
+		screen.controller().key(KeyStroke.of('?'));
+
+		assertThat(screen.controller().help()).isTrue();
 	}
 
 }

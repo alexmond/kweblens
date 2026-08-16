@@ -297,11 +297,18 @@ public class WatchSupervisor implements AutoCloseable {
 			.append(" · stopped updating ")
 			.append(Duration.between(this.lostAt, now).toSeconds())
 			.append("s ago · ");
-		if (this.attempting) {
-			return line.append("reconnecting (attempt ").append(this.attempts).append(')').toString();
-		}
+		// Why the last attempt failed stays on the line WHILE the next one is running.
+		// It used to be dropped for the duration of an attempt, which loses the only
+		// thing
+		// that distinguishes "the cluster is slow" from "this credential is refused" —
+		// they need different actions and "reconnecting (attempt 5)" names neither. It
+		// also made the sentence flicker in and out on a cadence nobody chose, which is
+		// how GH#423's assertion could be true or false depending on the machine.
 		if (this.lastFailure != null) {
 			line.append("reconnect failed: ").append(this.lastFailure).append(" · ");
+		}
+		if (this.attempting) {
+			return line.append("reconnecting (attempt ").append(this.attempts).append(')').toString();
 		}
 		long wait = Math.max(0, Duration.between(now, this.nextAttemptAt).toSeconds());
 		return line.append("retrying in ").append(wait).append('s').toString();

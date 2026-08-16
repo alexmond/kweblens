@@ -110,6 +110,15 @@ public final class ScreenHarness implements AutoCloseable {
 	 * also free, and provably so: it finds an empty buffer, returns {@code Flush.IDLE}
 	 * and owes no repaint, which is why every assertion below counts exactly one render
 	 * per {@code tickAndSettle} rather than two.
+	 *
+	 * <p>
+	 * <b>This only holds because {@code ticksHandled} counts finished ticks</b> (GH#423).
+	 * While it was bumped on entry, the second await released the test while the second
+	 * tick was still inside {@code supervisor.tick()} — so a test that moved the clock
+	 * next was mutating state a live tick was in the middle of reading, and the retry it
+	 * saw depended on how fast the machine was. If that counter ever moves back to the
+	 * top of the handler, every assertion made after a {@code tickAndSettle} becomes a
+	 * race again.
 	 */
 	public void tickAndSettle() {
 		int before = this.screen().ticksHandled();

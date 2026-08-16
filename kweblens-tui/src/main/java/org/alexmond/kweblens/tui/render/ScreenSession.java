@@ -5,13 +5,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Predicate;
+
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
+import org.alexmond.kweblens.tui.kind.KindIndex;
 import org.alexmond.kweblens.tui.screen.CoreRowBatch;
+import org.alexmond.kweblens.tui.screen.Navigation;
 import org.alexmond.kweblens.tui.screen.ResourceModel;
 import org.alexmond.kweblens.tui.screen.ResourceRow;
+import org.alexmond.kweblens.tui.screen.RetargetableRowBatch;
 import org.alexmond.kweblens.tui.screen.RowBatch;
 import org.alexmond.kweblens.tui.screen.TickRate;
 import org.alexmond.kweblens.tui.screen.WatchCoalescer;
@@ -54,15 +61,26 @@ import org.alexmond.kweblens.tui.screen.WatchSupervisor;
  * opened through {@link #open}, which points the buffer at the new one before opening it,
  * so the dying watch cannot put a row back after the re-list has corrected it (GH#417).
  */
-public class ScreenSession implements AutoCloseable {
+public class ScreenSession implements Navigation, AutoCloseable {
 
 	private final ClusterDataSource cluster;
 
-	private final ResourceQuery query;
+	/**
+	 * The kind and scope being shown. Mutable because the view stack is: {@code :svc}, a
+	 * namespace favourite and a drill-down all change it, and every one of them runs on
+	 * the render thread inside {@link #switchTo}. It is an {@link AtomicReference} rather
+	 * than a plain field because the recovery thread reads it in {@link #reconnect}.
+	 */
+	private final AtomicReference<ResourceQuery> query;
 
 	private final ResourceModel model = new ResourceModel();
 
-	private final RowBatch projection;
+	/**
+	 * Builds the projection for a query — one {@code StatusContext} per page, per kind.
+	 */
+	private final Function<ResourceQuery, RowBatch> projections;
+
+	private final RetargetableRowBatch projection;
 
 	private final WatchCoalescer coalescer;
 
@@ -84,6 +102,13 @@ public class ScreenSession implements AutoCloseable {
 	/** Remembered from {@link #load(int)}, so a reconnect re-lists the same way. */
 	private int chunkSize;
 
+	/**
+	 * What the command line can name. Empty until {@link #kinds(KindIndex)} is called, so
+	 * a session built without discovery draws perfectly well and answers {@code :}
+	 * honestly rather than pretending it knows nothing exists.
+	 */
+	private KindIndex kinds = KindIndex.empty();
+
 	public ScreenSession(ClusterDataSource cluster, ResourceQuery query, TickRate tick) {
 		this(cluster, query, tick, Clock.systemUTC());
 	}
@@ -92,20 +117,24 @@ public class ScreenSession implements AutoCloseable {
 	 * With an explicit clock, which is what makes "stopped updating 12s ago" assertable.
 	 */
 	public ScreenSession(ClusterDataSource cluster, ResourceQuery query, TickRate tick, Clock clock) {
-		this(cluster, query, tick, clock, new CoreRowBatch(cluster, query, clock));
+		this(cluster, query, tick, clock, (target) -> new CoreRowBatch(cluster, target, clock));
 	}
 
 	/**
-	 * With an explicit projection, so a test needs neither core services nor a cluster.
+	 * With a projection <em>factory</em>, so a test needs neither core services nor a
+	 * cluster — and, more to the point, because a view stack needs it: switching to
+	 * another kind has to open that kind's {@code StatusContext}, and a projection fixed
+	 * at construction would hand Pod verdicts to a page of Services.
 	 */
 	public ScreenSession(ClusterDataSource cluster, ResourceQuery query, TickRate tick, Clock clock,
-			RowBatch projection) {
+			Function<ResourceQuery, RowBatch> projections) {
 		this.cluster = cluster;
-		this.query = query;
-		this.projection = projection;
-		this.coalescer = new WatchCoalescer(this.model, projection);
+		this.query = new AtomicReference<>(query);
+		this.projections = projections;
+		this.projection = new RetargetableRowBatch(projections.apply(query));
+		this.coalescer = new WatchCoalescer(this.model, this.projection);
 		this.supervisor = new WatchSupervisor(clock, this.model, this::reconnect);
-		this.screen = new ResourceScreen(this.model, this.coalescer, this.supervisor, query, tick);
+		this.screen = new ResourceScreen(this.model, this.coalescer, this.supervisor, query, tick, this);
 	}
 
 	/**
@@ -129,13 +158,77 @@ public class ScreenSession implements AutoCloseable {
 	 */
 	private Subscription open(WatchLease lease) {
 		this.coalescer.rebase(lease.generation());
-		return this.cluster.watch(this.query, this.coalescer.sink(lease.generation()), lease.onEnd());
+		return this.cluster.watch(this.query.get(), this.coalescer.sink(lease.generation()), lease.onEnd());
 	}
 
 	/** Fill the model from the cluster, a page at a time. */
 	public void load(int chunkSize) {
 		this.chunkSize = chunkSize;
-		this.cluster.list(this.query, chunkSize, (page) -> this.model.upsert(this.projection.project(page)));
+		this.cluster.list(this.query.get(), chunkSize, (page) -> this.model.upsert(this.projection.project(page)));
+	}
+
+	/**
+	 * Show another kind, scope or filter: the whole of what a {@code :} command, a
+	 * namespace favourite, a drill-down and an {@code esc} do to the data.
+	 *
+	 * <p>
+	 * The order is the same one a reconnect keeps, and for the same reason. Close the old
+	 * watch; point the projection at the new kind; empty the model, because rows of the
+	 * old kind are not rows of the new one; open the new subscription, which
+	 * <em>rebases</em> the buffer so anything the old watch is still delivering is
+	 * refused rather than projected against the wrong kind; then list.
+	 *
+	 * <p>
+	 * <b>This blocks the render thread for one list.</b> That is deliberate for a
+	 * navigation the operator just asked for — they are waiting for the new view either
+	 * way, and doing it on the recovery thread would mean drawing the old kind's rows
+	 * under the new kind's title for as long as the list took. A watch that dies is the
+	 * opposite case (nobody asked, and it can take thirty seconds), which is why
+	 * {@link WatchSupervisor} does that one off-thread.
+	 */
+	public void switchTo(ResourceQuery next, Predicate<ResourceRow> filter) {
+		Subscription previous = this.watch.getAndSet(null);
+		if (previous != null) {
+			previous.close();
+		}
+		this.query.set(next);
+		this.projection.retarget(this.projections.apply(next));
+		this.model.clear();
+		this.model.applyFilter(filter);
+		this.screen.retarget(next);
+		this.watch.set(open(this.supervisor.lease()));
+		load(this.chunkSize);
+	}
+
+	/** The kind and scope on screen. */
+	public ResourceQuery query() {
+		return this.query.get();
+	}
+
+	/** Hand the session the cluster's discovered kinds, so {@code :} can name them. */
+	public ScreenSession kinds(KindIndex index) {
+		this.kinds = (index != null) ? index : KindIndex.empty();
+		return this;
+	}
+
+	@Override
+	public KindIndex kinds() {
+		return this.kinds;
+	}
+
+	@Override
+	public String clusterId() {
+		return this.query.get().clusterId();
+	}
+
+	@Override
+	public GenericKubernetesResource object(String namespace, String name) {
+		return this.cluster.get(this.query.get().inNamespace(namespace), name);
+	}
+
+	@Override
+	public void show(ResourceQuery target, Predicate<ResourceRow> filter) {
+		switchTo(target, filter);
 	}
 
 	/**
@@ -160,7 +253,7 @@ public class ScreenSession implements AutoCloseable {
 			opened.close();
 		}
 		List<ResourceRow> fresh = new ArrayList<>();
-		this.cluster.list(this.query, this.chunkSize, (page) -> fresh.addAll(this.projection.project(page)));
+		this.cluster.list(this.query.get(), this.chunkSize, (page) -> fresh.addAll(this.projection.project(page)));
 		return fresh;
 	}
 

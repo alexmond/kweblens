@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
@@ -15,6 +16,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.CoreStack;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.kind.KindCatalog;
 import org.alexmond.kweblens.tui.render.Screen;
 import org.alexmond.kweblens.tui.screen.TickRate;
 
@@ -32,12 +34,15 @@ class TuiCommandTest {
 
 	KubernetesClient client;
 
+	KubernetesMockServer server;
+
 	/** What the screen was asked to draw, if it was asked at all. */
 	private final AtomicReference<ResourceQuery> drawn = new AtomicReference<>();
 
 	private final AtomicReference<TickRate> rate = new AtomicReference<>();
 
 	private Run run(String... args) {
+		CoreStack.stubDiscovery(this.server);
 		TuiProperties properties = new TuiProperties();
 		properties.setLoadKubeconfig(false);
 		ClusterRegistry registry = CoreStack.registry(this.client);
@@ -48,7 +53,8 @@ class TuiCommandTest {
 			this.rate.set(tick);
 			return 0;
 		};
-		TuiCommand command = new TuiCommand(bootstrap, source, new TuiListing(source), screen, properties);
+		TuiCommand command = new TuiCommand(bootstrap, source, new TuiListing(source), screen, new KindCatalog(source),
+				properties);
 
 		ByteArrayOutputStream captured = new ByteArrayOutputStream();
 		PrintStream original = System.out;
@@ -120,12 +126,32 @@ class TuiCommandTest {
 	}
 
 	@Test
-	void anUnknownKindIsRefusedWithTheOnesThisBuildKnows() {
+	void anUnknownKindIsRefusedAndSaysHowManyTheClusterDoesServe() {
 		Run run = run("--context", CoreStack.CLUSTER, "--kind", "widgets");
 
 		assertThat(run.code()).isEqualTo(2);
-		assertThat(run.output()).contains("Unknown kind").contains("pods");
+		assertThat(run.output()).contains("Unknown kind 'widgets'").contains("kinds").contains("--aliases");
 		assertThat(this.drawn.get()).as("a refusal must not have opened a screen first").isNull();
+	}
+
+	@Test
+	void aKindIsResolvedByItsServerDeclaredShortName() {
+		seedNamespace("short-name-demo");
+
+		Run run = run("--once", "--kind", "ns");
+
+		assertThat(run.code()).isZero();
+		assertThat(run.output()).contains("short-name-demo");
+	}
+
+	@Test
+	void aliasesListEveryNameTheCommandLineAnswersToIncludingACrdTheCatalogHasNever() {
+		Run run = run("--aliases");
+
+		assertThat(run.code()).isZero();
+		assertThat(run.output().lines().toList()).contains("po", "pods", "pod", "v1/pods")
+			.as("a CRD kind no NavCatalog lists, reachable because discovery found it")
+			.contains("ingressroutes", "ingressroute", "ingressroutes.traefik.io", "traefik.io/v1alpha1/ingressroutes");
 	}
 
 	@Test

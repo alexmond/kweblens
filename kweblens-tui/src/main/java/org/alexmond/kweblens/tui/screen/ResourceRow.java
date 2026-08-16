@@ -3,6 +3,9 @@ package org.alexmond.kweblens.tui.screen;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
@@ -30,14 +33,37 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
  * @param state the verdict's label, or null when nothing judges this kind
  * @param age a short human age, e.g. {@code 3d} — empty when the object carries no
  * creation timestamp
+ * @param labels {@code metadata.labels}, empty and never null. <b>The one field here that
+ * is not a short string, and it earns its place:</b> drill-down is implemented as a label
+ * requirement in the filter grammar ({@link DrillDown}), so a row that cannot answer
+ * "what are your labels" cannot be selected by the query the title is showing. The cost
+ * is the map the client already allocated — retaining it holds the map and its strings,
+ * not the object graph they came out of, which is the thing #292/#293 is about.
  */
-public record ResourceRow(String key, String namespace, String name, String state, String age) {
+public record ResourceRow(String key, String namespace, String name, String state, String age,
+		Map<String, String> labels) {
 
 	private static final long MINUTE_SECONDS = 60L;
 
 	private static final long HOUR_SECONDS = 3_600L;
 
 	private static final long DAY_SECONDS = 86_400L;
+
+	public ResourceRow {
+		// Not Map.copyOf: a YAML `key:` with nothing after it is a present key with a
+		// null value, which Map.copyOf refuses and the cluster does not. The same
+		// reasoning FilterRow already records.
+		labels = (labels != null) ? Collections.unmodifiableMap(new LinkedHashMap<>(labels)) : Map.of();
+	}
+
+	/**
+	 * A row with no labels — every caller that is describing a row rather than projecting
+	 * an object, which is most tests and the whole of {@code WatchSupervisor}'s recovery
+	 * fixtures. It delegates, so there is still one canonical shape.
+	 */
+	public ResourceRow(String key, String namespace, String name, String state, String age) {
+		this(key, namespace, name, state, age, Map.of());
+	}
 
 	/**
 	 * The coalescing key for an object: {@code namespace/name}, and it must be derivable
@@ -68,7 +94,8 @@ public record ResourceRow(String key, String namespace, String name, String stat
 		String namespace = (metadata != null) ? text(metadata.getNamespace()) : "";
 		String name = (metadata != null) ? text(metadata.getName()) : "";
 		String age = (metadata != null) ? age(metadata.getCreationTimestamp(), now) : "";
-		return new ResourceRow(namespace + "/" + name, namespace, name, state, age);
+		Map<String, String> labels = (metadata != null) ? metadata.getLabels() : null;
+		return new ResourceRow(namespace + "/" + name, namespace, name, state, age, labels);
 	}
 
 	/**
