@@ -10,9 +10,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The two cheap probes the nav is built on: {@link ResourceService#count}, the number
- * behind a badge, and {@link ResourceService#hasAny}, the yes/no behind a category that
- * is only offered when the cluster has something to put in it.
+ * {@link ResourceService#count} — the cheap count behind the nav badges.
  *
  * <p>
  * The mock is deliberately <b>not</b> in crud mode here. The fabric8 CRUD dispatcher
@@ -130,40 +128,6 @@ class ResourceCountTest {
 			.always();
 
 		assertThat(service().count("mock", CONFIG_MAPS, "default")).isZero();
-	}
-
-	@Test
-	void hasAnyAsksAcrossAllNamespacesForOneItem() {
-		// Cluster-wide and limit=1: the nav asks "does this cluster autoscale anything",
-		// which is not a per-namespace question and does not need a total.
-		server.expect()
-			.get()
-			.withPath("/api/v1/configmaps?limit=1")
-			.andReturn(200, list(configMap("cm1"), "\"remainingItemCount\":149,\"continue\":\"tok\""))
-			.always();
-
-		assertThat(service().hasAny("mock", CONFIG_MAPS)).isTrue();
-	}
-
-	@Test
-	void hasAnyIsFalseForAnEmptyKind() {
-		server.expect().get().withPath("/api/v1/configmaps?limit=1").andReturn(200, list("", "")).always();
-
-		assertThat(service().hasAny("mock", CONFIG_MAPS)).isFalse();
-	}
-
-	@Test
-	void hasAnyNeverFallsBackToAFullList() {
-		// The truncated-without-remainingItemCount case, where count() lists everything.
-		// A yes/no question must not: only the limit=1 path is stubbed, so a second
-		// request would fail the test rather than quietly cost a full list.
-		server.expect()
-			.get()
-			.withPath("/api/v1/configmaps?limit=1")
-			.andReturn(200, list(configMap("cm1"), "\"continue\":\"tok\""))
-			.always();
-
-		assertThat(service().hasAny("mock", CONFIG_MAPS)).isTrue();
 	}
 
 }

@@ -16,7 +16,7 @@ kinds across 8 static categories**, in this order:
 
 | Cluster | 3 | Nodes, Namespaces, Events
 | Workloads | 8 | Pods, Deployments, Stateful Sets, Daemon Sets, Replica Sets, Jobs, Cron Jobs, Replication Controllers
-| Autoscaling | 1 | Horizontal Pod Autoscalers (joined at runtime by the cluster's Vertical Pod Autoscalers; shown only where there is something to show — see <<autoscaling>>)
+| Autoscaling | 1 | Horizontal Pod Autoscalers, joined at runtime by the cluster's Vertical Pod Autoscalers where that CRD is installed — see <<autoscaling>>
 | Config | 12 | Config Maps, Secrets, Resource Quotas, Limit Ranges, Pod Disruption Budgets, Priority Classes, Runtime Classes, Leases, Mutating Webhook Configs, Validating Webhook Configs, Validating Admission Policies, Validating Admission Policy Bindings
 | Network | 6 | Services, Ingresses, Endpoint Slices, Endpoints, Ingress Classes, Network Policies
 | Storage | 3 | Persistent Volume Claims, Persistent Volumes, Storage Classes
@@ -57,7 +57,7 @@ cluster without Gateway API a dead category that errors when clicked, so the cat
 where the group does.
 
 [#autoscaling]
-=== The Autoscaling category is offered, not assumed
+=== Autoscaling joins a built-in kind and a CRD-delivered one
 
 The two answers to "what scales this workload" used to be filed in two places: the built-in
 `HorizontalPodAutoscaler` sat in **Config**, next to ConfigMaps and Secrets, while the
@@ -68,11 +68,13 @@ Inside it the order is by **what each kind changes**: an HPA changes how many po
 VPA changes how big each one is, and "how many" is the question asked first when a workload's
 capacity moves.
 
-The category is shown only where the cluster has something to put in it — a VPA kind installed,
-or at least one HorizontalPodAutoscaler. On a cluster that autoscales nothing there is no
-category and no row that could only ever say "0 items"; create either and it appears the next
-time the menu is fetched. If the "is there an HPA" probe fails, the category is shown anyway: a
-menu hidden by a failed measurement would be a claim about the cluster that was never measured.
+The category is on **every** cluster, and only the VPA half is conditional. `HorizontalPodAutoscaler`
+is a built-in kind — `autoscaling/v2`, served by every supported cluster — so there is always
+something to navigate to, and an empty list is a correct answer: it is how you see that a cluster
+has no HPAs yet. Every one of the other 38 built-in kinds is in the menu on those terms, and
+nothing is probed to decide it. The VPA kinds appear where their CRD is installed, which is the
+Gateway rule and the only thing that rule covers: a kind the cluster's API does not serve does
+not go in the menu.
 
 `VerticalPodAutoscalerCheckpoint` is deliberately **not** in the category. It is the recommender's
 saved histogram for one target — the cluster writes them, and there are more of them than there

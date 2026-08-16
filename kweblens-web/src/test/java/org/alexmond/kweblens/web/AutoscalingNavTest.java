@@ -21,21 +21,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The Autoscaling category (#428): the built-in HorizontalPodAutoscaler and the
- * CRD-delivered VerticalPodAutoscaler under one heading, shown only on a cluster that has
- * one of them.
+ * CRD-delivered VerticalPodAutoscaler under one heading, next to the workloads they act
+ * on rather than in Config and Custom Resources respectively.
  *
  * <p>
- * <b>The absent case is the point.</b> HPA used to sit in Config, where on most clusters
- * it was a row that could only ever say "0 items"; VPA sat under an API-group name in
- * Custom Resources. Joining them is easy — not growing a dead category on the clusters
- * that autoscale nothing is the part that has to be tested, so
- * {@link #addsNoCategoryWhenTheClusterAutoscalesNothing} is the control: make promotion
- * unconditional and it is the test that goes red.
+ * <b>The case without the CRD is the control.</b> The category itself is offered on every
+ * cluster — HPA is a built-in kind that every cluster serves, and an empty list is a
+ * correct answer, so hiding it would make HPA the one built-in kind whose menu presence
+ * depended on its object count. What is conditional is the CRD-delivered half, and
+ * {@link #holdsTheHpaAloneWhenTheVpaCrdIsNotInstalled} is what makes that testable:
+ * declare a VPA kind unconditionally (a second entry in {@code NavCatalog}, say) and it
+ * is the test that goes red.
  *
  * <p>
- * Non-static mock client: what the nav holds depends on which CRDs and objects exist, so
- * a client shared across the class would let one test's cluster decide another test's
- * nav.
+ * Non-static mock client: what the nav holds depends on which CRDs exist, so a client
+ * shared across the class would let one test's cluster decide another test's nav.
  */
 @SpringBootTest(properties = "kweblens.load-kubeconfig=false")
 @EnableKubernetesMockClient(crud = true)
@@ -178,21 +178,29 @@ class AutoscalingNavTest {
 	}
 
 	@Test
-	void addsNoCategoryWhenTheClusterAutoscalesNothing() {
-		// No VPA CRDs and no HorizontalPodAutoscaler. Making promotion unconditional —
-		// declaring Autoscaling and always passing it through — makes this test red,
-		// which
-		// is what "no dead category" has to mean to be worth claiming.
+	void holdsTheHpaAloneWhenTheVpaCrdIsNotInstalled() {
+		// The control for the conditional half. The category is still offered — HPA is a
+		// built-in kind every cluster serves, so there is something to navigate to — and
+		// it
+		// holds exactly one kind. Declare a VPA kind unconditionally and
+		// `containsExactly`
+		// is what goes red, which is the Gateway rule stated as a test: a CRD-delivered
+		// kind does not go in the menu of a cluster whose API does not serve it.
 		crd("ingressroutes", "IngressRoute", "traefik.io", "Namespaced");
 
-		assertThat(navFor("as-6")).extracting(NavCategory::label).doesNotContain("Autoscaling");
+		assertThat(category("as-6", "Autoscaling").items()).extracting("kind")
+			.containsExactly("HorizontalPodAutoscaler");
 	}
 
 	@Test
-	void appearsOnAClusterThatHasAnHpaButNoVpaCrds() {
-		// The other half of the same rule: the category is about what the cluster has,
-		// not
-		// about which of the two kinds delivers it.
+	void doesNotDependOnHowManyHorizontalPodAutoscalersTheClusterHolds() {
+		// The pair to the test above, which measures the same cluster with none: an empty
+		// list is a correct answer for a built-in kind and is how an operator sees "no
+		// HPAs
+		// yet". kweblens shows all 39 built-in kinds regardless of object count, and
+		// making
+		// this the one exception would be a new principle that nothing on screen
+		// explains.
 		horizontalPodAutoscaler();
 
 		assertThat(category("as-7", "Autoscaling").items()).extracting("kind")
@@ -200,14 +208,21 @@ class AutoscalingNavTest {
 	}
 
 	@Test
-	void stillResolvesTheHpaRouteIdOnAClusterThatIsNotOfferedTheCategory() {
-		// Withholding the category is presentation only. A bookmarked list, a saved link
-		// or an agent's resourceId still resolves, because find() reads the catalog.
+	void resolvesBothKindsByTheirRouteIds() {
+		// Everything above is presentation. The built-in id resolves on a cluster that
+		// was
+		// never offered the VPA half, and a promoted kind keeps the id it had under
+		// Custom
+		// Resources, so a bookmarked list or an agent's resourceId is unaffected.
+		vpaCrds();
 		navFor("as-8");
 
 		assertThat(this.clusterNav.find("as-8", "horizontalpodautoscalers")).get()
 			.extracting("kind")
 			.isEqualTo("HorizontalPodAutoscaler");
+		assertThat(this.clusterNav.find("as-8", "autoscaling.k8s.io.verticalpodautoscalers")).get()
+			.extracting("kind")
+			.isEqualTo("VerticalPodAutoscaler");
 	}
 
 }

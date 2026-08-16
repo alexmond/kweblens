@@ -10,13 +10,11 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.stereotype.Service;
 
 import org.alexmond.kweblens.resource.CrdService;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
-import org.alexmond.kweblens.resource.ResourceService;
 
 /**
  * The per-cluster navigation: the static {@link NavCatalog} plus a dynamic <b>Custom
@@ -24,13 +22,13 @@ import org.alexmond.kweblens.resource.ResourceService;
  * Also resolves a route id back to its descriptor, whether built-in or custom.
  *
  * <p>
- * Two categories are decided here rather than declared: <b>Gateway</b> is synthesised
- * when its CRDs exist, and <b>Autoscaling</b> is declared in the catalog but withheld
- * from a cluster that has nothing autoscaling. Both are the same rule from opposite ends
- * — a category is offered when the cluster has something to put in it — and both are
- * presentation only: {@link #find} resolves every catalog route id on every cluster.
+ * Two categories take CRD-delivered kinds rather than only declared ones: <b>Gateway</b>
+ * is synthesised when its CRDs exist, and the catalog's <b>Autoscaling</b> category gains
+ * the cluster's VPA kinds when theirs are installed. One rule, in both cases about the
+ * CRD-delivered kinds alone: a kind the cluster's API does not serve is not put in the
+ * menu. Everything here is presentation — {@link #find} resolves every catalog route id
+ * on every cluster.
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ClusterNavService {
@@ -109,8 +107,6 @@ public class ClusterNavService {
 
 	private final CrdService crdService;
 
-	private final ResourceService resources;
-
 	/**
 	 * The static categories, with the cluster's CRDs nested under <b>Custom Resources</b>
 	 * as one collapsible sub-group per API group (alphabetical), each holding its kinds.
@@ -136,7 +132,7 @@ public class ClusterNavService {
 				categories.add(new NavCategory(category.label(), category.icon(), category.items(), groups));
 			}
 			else if (category.label().equals(AUTOSCALING)) {
-				autoscalingCategory(clusterId, category, autoscalingKinds).ifPresent(categories::add);
+				categories.add(autoscalingCategory(category, autoscalingKinds));
 			}
 			else {
 				categories.add(category);
@@ -186,51 +182,27 @@ public class ClusterNavService {
 	}
 
 	/**
-	 * The Autoscaling category for this cluster, or empty when the cluster has nothing to
-	 * put in it.
+	 * The catalog's Autoscaling category with this cluster's VPA kinds added.
 	 *
 	 * <p>
-	 * <b>Why this one is conditional in both directions.</b> The VPA kinds are
-	 * CRD-delivered, so on most clusters they do not exist at all; the HPA kind always
-	 * exists but is empty on most clusters, and its row under Config was the complaint
-	 * that opened #428 — a menu entry that is only ever "0 items". So the category is
-	 * offered when the cluster has either: any VPA kind installed, or at least one
-	 * HorizontalPodAutoscaler. A cluster with neither gets no category and no dead row,
-	 * and grows one as soon as either becomes true.
+	 * <b>The category is offered on every cluster, and nothing is probed to decide
+	 * it.</b> Gateway's rule hides a category whose kinds are not in the cluster's API at
+	 * all — clicking one would error. That does not apply here:
+	 * {@code HorizontalPodAutoscaler} is a built-in kind, {@code autoscaling/v2}, GA and
+	 * served by every supported cluster, so the category always has something to navigate
+	 * to. An empty list is a correct answer — it is how an operator sees "no HPAs yet" —
+	 * and every one of the other 38 built-in kinds is in the menu on the same terms.
+	 * Making this the one kind whose presence depends on its object count would be a new
+	 * and invisible principle.
 	 *
 	 * <p>
-	 * The HPA question costs <b>one {@code limit=1} list per nav request</b>
-	 * ({@link ResourceService#hasAny}), and it <b>fails open</b>: a probe that errors
-	 * leaves the category shown, because a menu hidden by a failed measurement is a claim
-	 * about the cluster that was never measured.
+	 * So only the VPA half is conditional, which is the half Gateway's rule really
+	 * covers: a CRD-delivered kind appears when the CRD is installed.
 	 */
-	private Optional<NavCategory> autoscalingCategory(String clusterId, NavCategory declared,
-			List<ResourceDescriptor> discovered) {
-		if (discovered.isEmpty() && !holdsAny(clusterId, declared.items())) {
-			return Optional.empty();
-		}
+	private NavCategory autoscalingCategory(NavCategory declared, List<ResourceDescriptor> discovered) {
 		List<ResourceDescriptor> kinds = new ArrayList<>(declared.items());
 		kinds.addAll(discovered);
-		return Optional.of(new NavCategory(declared.label(), declared.icon(), ordered(kinds, AUTOSCALING_KIND_ORDER)));
-	}
-
-	/**
-	 * Whether the cluster holds an object of any of these kinds; unknown counts as yes.
-	 */
-	private boolean holdsAny(String clusterId, List<ResourceDescriptor> kinds) {
-		for (ResourceDescriptor descriptor : kinds) {
-			try {
-				if (this.resources.hasAny(clusterId, descriptor)) {
-					return true;
-				}
-			}
-			catch (RuntimeException ex) {
-				log.debug("Could not probe '{}' on '{}', so its category stays: {}", descriptor.id(), clusterId,
-						ex.getMessage());
-				return true;
-			}
-		}
-		return false;
+		return new NavCategory(declared.label(), declared.icon(), ordered(kinds, AUTOSCALING_KIND_ORDER));
 	}
 
 	/**
