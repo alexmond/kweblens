@@ -143,8 +143,9 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   `portforward/`, `schema/`, `config/` (`KweblensProperties`).
 - **`kweblens-web`** — the runnable app, one `web/<area>/` slice per surface: `api/` (JSON +
   `ProblemDetail`), `ui/` (`SpaController`), `security/` (`SecurityConfig`, `AuditService`),
-  `mcp/`, `nav/` (`NavCatalog`: 39 built-in kinds / 7 static categories + discovered CRDs;
-  `ClusterNavService` promotes a Gateway category when those CRDs exist), `helm/`, `exec/`,
+  `mcp/`, `nav/` (`NavCatalog`: 39 built-in kinds / 8 static categories + discovered CRDs;
+  `ClusterNavService` promotes a Gateway category when those CRDs exist and adds the cluster's
+  VPA kinds to the declared **Autoscaling** category when theirs are (#428)), `helm/`, `exec/`,
   `files/`, `search/` (global search), `diag/`, `ai/`, `sim/`, `config/`.
   `/actuator/{health,info,metrics,prometheus}` — note `metrics` and `prometheus` are **not** in
   `SecurityConfig`'s permit list, so they are public in open-mode and authenticated in closed.
@@ -512,6 +513,15 @@ new tool returning raw objects must go through it.**
   access reimplemented in a controller. That rule produced every Freelens-parity surface.
 - **The left menu is a declarative nav registry** (category → kind → list-route) in `NavCatalog`,
   and **Custom Resources is dynamic**, generated from the cluster's CRDs grouped by API group.
+  **What a cluster changes is which CRD-delivered kinds are in it, and nothing else.** Gateway is
+  synthesised when its CRDs exist; Autoscaling is declared and gains the cluster's VPA kinds when
+  theirs are. Both decisions live in `ClusterNavService`, both are presentation only (`find`
+  resolves every catalog id on every cluster), and the case that must be tested is the one
+  **without** the CRD. **A built-in kind is in the menu on every cluster regardless of how many
+  objects it has** — an empty list is a correct answer, and #428 nearly shipped HPA as the single
+  exception, which would have been a new principle with nothing on screen to explain it. So the
+  nav asks the API server **nothing** about object counts: it is a hot path (every `/nav`, and
+  `/counts` builds on it) and a probe there buys a rule that should not exist.
 - **Design references**: `docs/references/freelens-ia.md` (full IA map) and
   `freelens-reference-deck.md`. The deck records its headless `xvfb` capture as blocked on this
   box — **that note is disputed**; re-test before relying on it either way.

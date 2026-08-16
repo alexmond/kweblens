@@ -23,7 +23,7 @@ Because it runs as a server rather than on your laptop, the browser needs no kub
 
 | Area | Detail |
 |---|---|
-| **Resource browsing** | 39 built-in kinds across 7 static categories (Cluster, Workloads, Config, Network, Storage, Access Control, Custom Resources), plus **Custom Resources discovered from the cluster's CRDs**, rendered with the CRD's own printer columns; a **Gateway** category is promoted at runtime when the Gateway API CRDs are present |
+| **Resource browsing** | 39 built-in kinds across 8 static categories (Cluster, Workloads, Autoscaling, Config, Network, Storage, Access Control, Custom Resources), plus **Custom Resources discovered from the cluster's CRDs**, rendered with the CRD's own printer columns; a **Gateway** category is promoted at runtime when the Gateway API CRDs are present, and **Autoscaling** holds the HPA plus the cluster's Vertical Pod Autoscalers where that CRD is installed |
 | **Live updates** | Kubernetes watches streamed to the browser over SSE, batched per animation frame so a large-list event burst can't freeze the tab |
 | **Overviews** | A cluster overview plus Workloads / Network / Storage / Config category overviews — stat cards, the objects needing attention named rather than only counted, click-through to the filtered list, namespace-scoped |
 | **YAML editing** | CodeMirror 6 with completion and validation driven by **the cluster's own OpenAPI v3 schema**, plus Form (generated from the schema), Warnings and Review-Changes (diff) tabs, then apply or JSON-merge patch |

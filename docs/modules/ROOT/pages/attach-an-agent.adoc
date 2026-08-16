@@ -177,7 +177,7 @@ prints:
 - `sim` — Simulator
 - Cluster: nodes, namespaces, events
 - Workloads: pods, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, replicationcontrollers
-- Config: configmaps, secrets, resourcequotas, limitranges, horizontalpodautoscalers, …
+- Config: configmaps, secrets, resourcequotas, limitranges, poddisruptionbudgets, …
 - Network: services, ingresses, endpointslices, endpoints, ingressclasses, networkpolicies
 - Storage: persistentvolumeclaims, persistentvolumes, storageclasses
 - Access Control: serviceaccounts, clusterroles, roles, clusterrolebindings, rolebindings

@@ -704,13 +704,6 @@ body {
   max-width: 100%;
 }
 
-/* Single-item categories rendered as top-level leaves (Nodes, Namespaces, Events):
-   sit at the category level (no indent guide, no chevron). */
-.top-leaf > .leaf {
-  padding: 5px 8px;
-  font-weight: 500;
-}
-
 /* Favorites: star toggle + pinned section.
 
    No margin: `.leaf`'s own 6px flex gap spaces the star from the count that follows it. The

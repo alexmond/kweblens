@@ -58,23 +58,9 @@ const toggle = (label: string, isOpen: boolean) => {
   open.value = next;
 };
 
-// A category with a single kind and no sub-groups is redundant as a group — render it flat.
-const isTopLeaf = (cat: NavCategory): boolean => cat.items.length === 1 && (cat.subgroups?.length ?? 0) === 0;
-
-// Two collision sets of their own (#327). Favorites is one because pinning both halves of a
-// near-identical pair is exactly when they end up adjacent; the flat top-level kinds are one
-// because they are rendered as a run of rows with no group between them.
+// A collision set of its own (#327): pinning both halves of a near-identical pair is exactly
+// when they end up adjacent.
 const favParts = computed(() => navLabelParts(favItems.value.map((i) => i.label)));
-
-const topLeafParts = computed(() => {
-  const items = props.categories.filter(isTopLeaf).map((c) => c.items[0]);
-  const parts = navLabelParts(items.map((i) => i.label));
-  return new Map(items.map((it, i) => [it.id, parts[i]]));
-});
-
-// A label with no entry can only mean the maps and the render disagree about the set, so fall
-// back to the unsplit label rather than rendering nothing.
-const topLeafPartsFor = (item: NavItem) => topLeafParts.value.get(item.id) ?? { head: '', tail: item.label };
 </script>
 
 <template>
@@ -95,20 +81,16 @@ const topLeafPartsFor = (item: NavItem) => topLeafParts.value.get(item.id) ?? { 
         </li>
       </ul>
     </div>
+    <!-- Every category renders as a group, including one holding a single kind. A category
+         with one kind used to be flattened into a bare row, and #428 is what showed the cost:
+         on a cluster with no VPA CRD the Autoscaling category is HPA alone, so the word
+         "Autoscaling" left the menu entirely on exactly the clusters the ticket was about —
+         an operator scanning headings for it finds nothing. The heading is what a category
+         IS. (The flat rule's own comment named "Nodes, Namespaces, Events", which have been
+         one Cluster category for many releases; it was a leftover from a nav shape that no
+         longer exists.) -->
     <template v-for="cat in categories" :key="cat.label">
-      <div v-if="isTopLeaf(cat)" class="top-leaf">
-        <NavLeaf
-          :item="cat.items[0]"
-          :parts="topLeafPartsFor(cat.items[0])"
-          :selected="selected"
-          :count="counts[cat.items[0].id]"
-          :favorited="favorites.includes(cat.items[0].id)"
-          @select="(i) => emit('select', i)"
-          @toggle-favorite="(id) => emit('toggle-favorite', id)"
-        />
-      </div>
       <NavGroup
-        v-else
         :cat="cat"
         :nested="false"
         :selected="selected"

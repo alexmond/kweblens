@@ -22,6 +22,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.web.mcp.ClusterTools;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -98,7 +99,15 @@ class ClusterEndpointsTest {
 
 	@Test
 	void apiListsClusters() throws Exception {
-		mvc.perform(get("/api/v1/clusters")).andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value("test"));
+		// Contains, not "is first". The ClusterRegistry is one bean shared by every test
+		// class in this Spring context and `list()` sorts by id, so which cluster is at
+		// index 0 depends on what some other class registered and on the order surefire
+		// happened to run them in. This asserted `$[0].id` and passed only because no
+		// test
+		// class sorting before this one had registered an id sorting before "test".
+		mvc.perform(get("/api/v1/clusters"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$..id").value(hasItem("test")));
 	}
 
 	@Test
