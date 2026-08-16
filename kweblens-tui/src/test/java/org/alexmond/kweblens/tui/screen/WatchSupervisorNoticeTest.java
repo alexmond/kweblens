@@ -41,12 +41,17 @@ class WatchSupervisorNoticeTest {
 
 	private final ResourceModel model = new ResourceModel();
 
+	/**
+	 * As {@code ScreenSession} installs a recovery, minus the coalescer half (GH#420).
+	 */
+	private final RecoveryInstall install = (generation, rows) -> this.model.replaceAll(rows);
+
 	@Test
 	void aReconnectInFlightStillSaysWhyTheLastOneFailed() throws Exception {
 		AtomicInteger attempts = new AtomicInteger();
 		CountDownLatch running = new CountDownLatch(1);
 		CountDownLatch release = new CountDownLatch(1);
-		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (lease) -> {
+		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.install, (lease) -> {
 			if (attempts.incrementAndGet() > 1) {
 				// The second attempt is held open, so the header can be read at a moment
 				// that used to say nothing about the failure at all.

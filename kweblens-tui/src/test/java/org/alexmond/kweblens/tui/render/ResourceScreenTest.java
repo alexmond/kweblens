@@ -23,7 +23,8 @@ class ResourceScreenTest {
 	private final ResourceModel model = new ResourceModel();
 
 	private ResourceScreen screen(ResourceQuery query, TickRate tick) {
-		WatchSupervisor supervisor = new WatchSupervisor(Clock.systemUTC(), this.model, (onEnd) -> List.of());
+		WatchSupervisor supervisor = new WatchSupervisor(Clock.systemUTC(),
+				(generation, rows) -> this.model.replaceAll(rows), (onEnd) -> List.of());
 		return new ResourceScreen(this.model, new WatchCoalescer(this.model, (objects) -> List.of()), supervisor, query,
 				tick);
 	}

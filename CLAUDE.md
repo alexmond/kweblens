@@ -237,6 +237,22 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     identity. The cost is one `long` compare inside the lock `offer` already takes — #364's tick
     cannot afford a per-event comparison that walks anything. The identity-less `offer` is
     package-private so only the in-package coalescing tests can reach it.
+  - **And a subscription's events are applied only after its OWN list has been installed.**
+    Refusing the dead watch was half of it; the live one is delivering from the moment it is
+    opened, while its re-list is still on the network, and a tick in that interval used to flush
+    those events onto the rows the list was about to replace — so the `replaceAll` that installed
+    it **wiped an update newer than the list**, unbounded in exactly the way #417 was (#420).
+    So `rebase` does not only name the new subscription, it **holds** its events: they are staged,
+    not buffered, until `WatchCoalescer.installed(generation)` says that subscription's rows are
+    in the model, and then they are flushed **on top of** them. Every `rebase` therefore owes an
+    `installed` — `ScreenSession.load` for the two paths that list on the calling thread,
+    `ScreenSession.install` (via `RecoveryInstall`, which is why `WatchSupervisor` no longer holds
+    the model) for the reconnect, which does not. **`replaceAll` and the release are one call**,
+    because splitting them is the defect. A `subscribe()` with no `load()` is a table that never
+    moves. The cost is one field read choosing between two maps, in the lock `offer` already
+    takes. **Promoting all of it is deliberate**: an event that is somehow older than the list
+    can only be one whose successor is already in flight, so it self-corrects within a watch
+    latency — where a lost event self-corrects never.
   - **Nothing but the renderer may write to stdout**, and it takes two halves:
     `kweblens-tui/src/main/resources/logback.xml` (file appender, **no** console appender, and
     plain `logback.xml` not `logback-spring.xml` so it is in force before Spring exists — Boot 4

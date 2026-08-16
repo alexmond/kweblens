@@ -53,11 +53,29 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
  * that object</em>, which is not a bound: a row that stops changing keeps the stale value
  * until the next full recovery.
  *
+ * <h2>And when they may be applied</h2>
+ *
+ * Refusing the old subscription's events was only half of it. The <b>new</b>
+ * subscription's events are open for business from the moment it is opened, while its own
+ * list is still on the network — and a tick in that interval used to flush them onto the
+ * rows the list is about to replace, so the {@code replaceAll} that installed it wiped
+ * them. An event newer than the list was therefore <em>lost</em>, with exactly the
+ * unbounded self-correction above, in the opposite direction. That is GH#420, and it is
+ * why {@link #rebase} does not merely name the new subscription but <b>holds</b> its
+ * events: they are staged, not buffered, until {@link #installed} says that
+ * subscription's own list is in the model, and are promoted onto it rather than under it.
+ *
  * <p>
- * It costs a tick nothing. The discrimination is one {@code long} comparison per event,
- * made under the lock {@link #offer} already takes, and one map clear per reconnect —
- * there is nothing per-event that walks anything, which #364's 100 ms tick could not have
- * afforded.
+ * So the two halves are one sentence: <b>a subscription's events are kept only from the
+ * moment it is opened, and applied only after its own list has landed.</b>
+ *
+ * <p>
+ * It costs a tick nothing. The discrimination is one {@code long} comparison per event
+ * and one field read that picks which of two maps the event goes into, both made under
+ * the lock {@link #offer} already takes; a reconnect costs two map clears and one map
+ * move whose size is bounded by the number of distinct objects that changed while the
+ * list was in flight. There is nothing per-event that walks anything, which #364's 100 ms
+ * tick could not have afforded.
  *
  * <h2>Threading</h2>
  *
@@ -86,6 +104,15 @@ public class WatchCoalescer {
 	 */
 	private final Map<String, Pending> pending = new LinkedHashMap<>();
 
+	/**
+	 * The same map, for the subscription whose list has not been installed yet —
+	 * coalesced the same way and by the same key, and invisible to {@link #flush()} until
+	 * {@link #installed} moves it across. Its size is bounded by the number of distinct
+	 * objects that changed while the list was in flight, which is at worst the number of
+	 * objects the list itself is carrying.
+	 */
+	private final Map<String, Pending> staged = new LinkedHashMap<>();
+
 	private final AtomicBoolean flushing = new AtomicBoolean();
 
 	private final AtomicLong received = new AtomicLong();
@@ -106,6 +133,15 @@ public class WatchCoalescer {
 	 * each other agree on.
 	 */
 	private long baseline;
+
+	/**
+	 * Whether {@link #baseline}'s own list is still in flight, and therefore whether its
+	 * events go to {@link #staged} rather than {@link #pending}. Guarded by {@link #lock}
+	 * for the same reason {@link #baseline} is. <b>False until the first
+	 * {@link #rebase}</b>: a buffer nobody has pointed at a subscription is not waiting
+	 * for anybody's list, which is what the in-package coalescing tests use.
+	 */
+	private boolean awaitingList;
 
 	public WatchCoalescer(ResourceModel model, RowBatch projection) {
 		this.model = model;
@@ -137,6 +173,15 @@ public class WatchCoalescer {
 	 * {@link #offer}, and the list taken next is newer than both. Discarding is safe
 	 * precisely because a re-list follows: the buffered change is in the rows that are
 	 * about to replace the model anyway.
+	 *
+	 * <p>
+	 * It also <b>starts the hold</b>: until {@link #installed} is called with this same
+	 * generation, what this subscription delivers is staged rather than buffered, because
+	 * a flush that applied it would be applying it to rows the subscription's own list is
+	 * about to replace (GH#420). Every caller therefore owes an {@link #installed} —
+	 * {@code ScreenSession} pairs the two, and a rebase whose list never lands leaves a
+	 * table that says NOT LIVE and does not move, which is the truthful posture rather
+	 * than a lost update.
 	 * @param generation the identity of the subscription now feeding this buffer
 	 */
 	public void rebase(long generation) {
@@ -144,6 +189,38 @@ public class WatchCoalescer {
 		try {
 			this.baseline = generation;
 			this.pending.clear();
+			this.staged.clear();
+			this.awaitingList = true;
+		}
+		finally {
+			this.lock.unlock();
+		}
+	}
+
+	/**
+	 * Say that {@code generation}'s own list is now in the model, so what it delivered
+	 * while that list was in flight may be applied — <b>on top of the list, on the next
+	 * flush</b>, which is the ordering the whole recovery turns on.
+	 *
+	 * <p>
+	 * A generation below the current baseline is a list belonging to a subscription that
+	 * has since been replaced; releasing the hold on <em>its</em> word would let the
+	 * replacement's events out before the replacement's own list had landed, so it is
+	 * ignored. That is the same rule {@link #offer} applies to events, one level up.
+	 * @param generation the subscription whose list has been installed
+	 */
+	public void installed(long generation) {
+		this.lock.lock();
+		try {
+			if (generation < this.baseline) {
+				return;
+			}
+			// pending is empty here in every reachable ordering — rebase cleared it and
+			// nothing has been buffered since — so this is a move, not a merge. putAll is
+			// still the right call: staged is newer than anything pending could hold.
+			this.pending.putAll(this.staged);
+			this.staged.clear();
+			this.awaitingList = false;
 		}
 		finally {
 			this.lock.unlock();
@@ -195,7 +272,10 @@ public class WatchCoalescer {
 				return;
 			}
 			this.received.incrementAndGet();
-			this.pending.put(key, new Pending(DELETED.equals(action), object));
+			// One field read decides which map: kept either way, applied only once this
+			// subscription's own list is in the model (GH#420).
+			Map<String, Pending> into = (this.awaitingList) ? this.staged : this.pending;
+			into.put(key, new Pending(DELETED.equals(action), object));
 		}
 		finally {
 			this.lock.unlock();
@@ -288,11 +368,31 @@ public class WatchCoalescer {
 		return this.stale.get();
 	}
 
-	/** How many events are buffered right now, waiting for a tick. */
+	/**
+	 * How many events are buffered right now, waiting for a tick — including the ones
+	 * staged behind a list that has not been installed yet, because "buffered" is a claim
+	 * about what has been kept, not about what the next flush will apply.
+	 */
 	public int buffered() {
 		this.lock.lock();
 		try {
-			return this.pending.size();
+			return this.pending.size() + this.staged.size();
+		}
+		finally {
+			this.lock.unlock();
+		}
+	}
+
+	/**
+	 * How many of {@link #buffered()} are being held until the current subscription's own
+	 * list is installed. Counted rather than assumed, for the same reason
+	 * {@link #stale()} is: a hold that never releases and a hold that is not there both
+	 * look like a table that is simply quiet.
+	 */
+	public int held() {
+		this.lock.lock();
+		try {
+			return this.staged.size();
 		}
 		finally {
 			this.lock.unlock();
