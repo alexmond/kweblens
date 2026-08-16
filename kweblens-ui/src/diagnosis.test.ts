@@ -9,6 +9,7 @@ import {
   type DiagnoseResult,
   type Finding,
   groupFindings,
+  KEY_SEPARATOR,
   parseSummary,
   relativeAge,
   severityOf,
@@ -141,6 +142,21 @@ describe('groupFindings', () => {
     // A pile of warnings must not outrank one critical.
     const groups = groupFindings([f('warning', 'a'), f('warning', 'a'), f('warning', 'a'), f('critical', 'b')]);
     expect(groups.map((g) => g.title)).toEqual(['b', 'a']);
+  });
+
+  it('keys on a separator that no severity or title can contain', () => {
+    // U+001F. The server joins the same two fields with the same character — the pair is
+    // pinned by DiagnoseKeySeparatorTest, because two surfaces that group differently would
+    // disagree without saying so. Written as an escape, never as a literal byte: a raw
+    // control byte in the source makes grep call the whole file binary and print nothing
+    // for every search over it (#408).
+    expect(KEY_SEPARATOR).toBe(String.fromCharCode(0x1f));
+    expect(KEY_SEPARATOR).toHaveLength(1);
+    // Positive control for the property the separator buys: titles carrying `|` and `:`
+    // stay distinct groups. A printable separator is what makes two different pairs join
+    // to one key, and both of those characters occur in real finding titles.
+    const groups = groupFindings([f('critical', 'a|b'), f('critical', 'a'), f('critical', 'b: c')]);
+    expect(groups.map((g) => g.title).sort()).toEqual(['a', 'a|b', 'b: c']);
   });
 
   it('hides nothing and reinterprets nothing', () => {
