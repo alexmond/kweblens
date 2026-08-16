@@ -55,9 +55,10 @@ import org.alexmond.kweblens.tui.data.WatchEnd;
  * reason. The <b>recovery thread</b> runs {@link WatchRestart#reconnect} — the two calls
  * that block on a network — and stamps its result. The <b>render thread</b> owns
  * everything else, inside {@link #tick()}: it is the only thread that reads or writes the
- * fields below and the only one that touches {@link ResourceModel}. Doing the reconnect
- * on the tick instead would have been shorter and would have parked the keyboard for a
- * client timeout every time a dead API server was retried.
+ * fields below and the only one that runs {@link RecoveryInstall}, which is where
+ * {@link ResourceModel} is touched. Doing the reconnect on the tick instead would have
+ * been shorter and would have parked the keyboard for a client timeout every time a dead
+ * API server was retried.
  *
  * <h2>Stale reports cannot be mistaken for new ones</h2>
  *
@@ -83,7 +84,12 @@ public class WatchSupervisor implements AutoCloseable {
 
 	private final Clock clock;
 
-	private final ResourceModel model;
+	/**
+	 * Where a finished reconnect lands. Not {@link ResourceModel} directly: installing a
+	 * re-list is a replacement <em>and</em> the release of the new subscription's held
+	 * events, and the two are one step — see {@link RecoveryInstall}.
+	 */
+	private final RecoveryInstall install;
 
 	private final WatchRestart restart;
 
@@ -130,9 +136,9 @@ public class WatchSupervisor implements AutoCloseable {
 	 */
 	private long shownSeconds = -1;
 
-	public WatchSupervisor(Clock clock, ResourceModel model, WatchRestart restart) {
+	public WatchSupervisor(Clock clock, RecoveryInstall install, WatchRestart restart) {
 		this.clock = clock;
-		this.model = model;
+		this.install = install;
 		this.restart = restart;
 	}
 
@@ -220,7 +226,11 @@ public class WatchSupervisor implements AutoCloseable {
 			this.backoff = next(this.backoff);
 			return true;
 		}
-		this.model.replaceAll(done.rows());
+		// One call, because the replacement and the release of what the new subscription
+		// buffered while it was re-listing are one step. Split them and the events
+		// flushed
+		// in between are wiped by the replacement (GH#420).
+		this.install.install(done.generation(), done.rows());
 		this.recoveries++;
 		this.loss = null;
 		this.lastFailure = null;
@@ -240,10 +250,10 @@ public class WatchSupervisor implements AutoCloseable {
 	 */
 	private void reconnect(WatchLease lease) {
 		try {
-			this.outcome.set(new Outcome(List.copyOf(this.restart.reconnect(lease)), null));
+			this.outcome.set(new Outcome(lease.generation(), List.copyOf(this.restart.reconnect(lease)), null));
 		}
 		catch (RuntimeException ex) {
-			this.outcome.set(new Outcome(null, ex));
+			this.outcome.set(new Outcome(lease.generation(), null, ex));
 		}
 	}
 
@@ -363,8 +373,13 @@ public class WatchSupervisor implements AutoCloseable {
 	 * What one reconnect produced: the whole kind's rows, or the exception that stopped
 	 * it. Exactly one is null, which is why they are not two references anyone has to
 	 * keep consistent.
+	 *
+	 * @param generation the subscription that took this list, carried here because the
+	 * install has to name it — the events waiting on it are that subscription's alone
+	 * @param rows every row of the kind, or null if the attempt failed
+	 * @param failure why it failed, or null if it did not
 	 */
-	private record Outcome(List<ResourceRow> rows, RuntimeException failure) {
+	private record Outcome(long generation, List<ResourceRow> rows, RuntimeException failure) {
 	}
 
 }

@@ -56,6 +56,10 @@ class ScreenTickBarrierTest {
 		try (ScreenSession session = new ScreenSession(cluster, QUERY, TickRate.defaults(), Clock.systemUTC(),
 				(query) -> parked)) {
 			session.subscribe();
+			// Subscribe and load are one operation (GH#420): a subscription's events are
+			// held until its own list is in the model, so a subscribe on its own leaves a
+			// buffer that never flushes and a tick with nothing to do.
+			session.load(500);
 			cluster.fire("ADDED", FakeCluster.object("a"));
 
 			Thread tick = new Thread(() -> session.screen().handle(TickEvent.of(1, Duration.ofMillis(100)), null),

@@ -30,6 +30,13 @@ class WatchSupervisorTest {
 
 	private final ResourceModel model = new ResourceModel();
 
+	/**
+	 * What the screen does with a finished reconnect, minus the half this class knows
+	 * nothing about: {@code ScreenSession} also releases the new subscription's held
+	 * events here (GH#420), and {@code WatchCoalescerHoldTest} is where that is asserted.
+	 */
+	private final RecoveryInstall install = (generation, rows) -> this.model.replaceAll(rows);
+
 	private static ResourceRow row(String name) {
 		return new ResourceRow("ns/" + name, "ns", name, "Running", "1d");
 	}
@@ -41,7 +48,7 @@ class WatchSupervisorTest {
 
 	@Test
 	void aLiveWatchSaysNothingAndCostsTheTickNothing() {
-		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (onEnd) -> List.of())) {
+		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.install, (onEnd) -> List.of())) {
 			supervisor.listener();
 
 			// The control. Ticks pass, time passes, and the header stays clean — so a
@@ -59,7 +66,7 @@ class WatchSupervisorTest {
 	@Test
 	void aWatchThatFailsIsVisibleOnTheVeryNextTickAndNamesTheReason() {
 		AtomicReference<Consumer<WatchEnd>> ends = new AtomicReference<>();
-		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (onEnd) -> {
+		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.install, (onEnd) -> {
 			throw new IllegalStateException("cluster unreachable");
 		})) {
 			ends.set(supervisor.listener());
@@ -76,7 +83,7 @@ class WatchSupervisorTest {
 
 	@Test
 	void aStreamThatEndedCleanlyIsStillNotLiveAndSaysSoInItsOwnWords() {
-		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (onEnd) -> List.of())) {
+		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.install, (onEnd) -> List.of())) {
 			Consumer<WatchEnd> ends = supervisor.listener();
 
 			ends.accept(WatchEnd.completed());
@@ -91,7 +98,7 @@ class WatchSupervisorTest {
 
 	@Test
 	void theElapsedTimeMovesOnceASecondAndNotOncePerTick() {
-		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (onEnd) -> {
+		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.install, (onEnd) -> {
 			throw new IllegalStateException("still down");
 		})) {
 			supervisor.listener().accept(WatchEnd.failed(new IllegalStateException("gone")));
@@ -110,7 +117,7 @@ class WatchSupervisorTest {
 	void oneLossIsOneReconnectAndItReplacesTheRowsRatherThanAddingToThem() {
 		this.model.replaceAll(List.of(row("a"), row("deleted-while-blind")));
 		AtomicInteger reconnects = new AtomicInteger();
-		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (onEnd) -> {
+		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.install, (onEnd) -> {
 			reconnects.incrementAndGet();
 			return List.of(row("a"), row("b"));
 		})) {
@@ -143,7 +150,7 @@ class WatchSupervisorTest {
 	void aClusterThatKeepsRefusingIsRetriedOnABackoffAndNeverTwiceAtOnce() {
 		AtomicInteger inFlight = new AtomicInteger();
 		AtomicInteger overlaps = new AtomicInteger();
-		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (onEnd) -> {
+		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.install, (onEnd) -> {
 			if (inFlight.incrementAndGet() > 1) {
 				overlaps.incrementAndGet();
 			}

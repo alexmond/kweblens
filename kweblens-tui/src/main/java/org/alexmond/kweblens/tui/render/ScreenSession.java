@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -60,6 +61,14 @@ import org.alexmond.kweblens.tui.screen.WatchSupervisor;
  * <b>And the replaced watch is not still being listened to.</b> Both subscriptions are
  * opened through {@link #open}, which points the buffer at the new one before opening it,
  * so the dying watch cannot put a row back after the re-list has corrected it (GH#417).
+ *
+ * <p>
+ * <b>Nor is the replacement heard before its own list.</b> The same rebase holds the new
+ * subscription's events until the rows it took are in the model, and {@link #install} is
+ * the one place that installs them and releases the hold — in that order, so a change
+ * newer than the list lands on top of it instead of being wiped by it (GH#420). The two
+ * paths that list on the calling thread release the same hold at the end of
+ * {@link #load(int)}.
  */
 public class ScreenSession implements Navigation, AutoCloseable {
 
@@ -92,6 +101,14 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * Written by the render thread and by the recovery thread — see {@link #reconnect}.
 	 */
 	private final AtomicReference<Subscription> watch = new AtomicReference<>();
+
+	/**
+	 * The generation of the subscription {@link #open} most recently minted — what
+	 * {@link #load(int)} names when it says that subscription's list has landed. Written
+	 * by the render thread and by the recovery thread, for the same reason {@link #watch}
+	 * is.
+	 */
+	private final AtomicLong subscription = new AtomicLong();
 
 	/**
 	 * Raised before {@link #close()} releases anything, so a reconnect in flight cleans
@@ -133,7 +150,7 @@ public class ScreenSession implements Navigation, AutoCloseable {
 		this.projections = projections;
 		this.projection = new RetargetableRowBatch(projections.apply(query));
 		this.coalescer = new WatchCoalescer(this.model, this.projection);
-		this.supervisor = new WatchSupervisor(clock, this.model, this::reconnect);
+		this.supervisor = new WatchSupervisor(clock, this::install, this::reconnect);
 		this.screen = new ResourceScreen(this.model, this.coalescer, this.supervisor, query, tick, this);
 	}
 
@@ -141,6 +158,11 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * Start buffering changes. The session owns the handle from here, and
 	 * {@link #close()} is what releases it — a watch that outlives the screen holds a
 	 * connection open on the cluster for nobody.
+	 *
+	 * <p>
+	 * <b>{@link #load(int)} must follow.</b> The subscription's events are held until its
+	 * own list is in the model (GH#420), so a subscribe with no list is a table that
+	 * never moves; the two are one operation everywhere they are used.
 	 */
 	public void subscribe() {
 		this.watch.set(open(this.supervisor.lease()));
@@ -155,16 +177,49 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * away, and the ones it delivers on its way out, which are stamped with a generation
 	 * the buffer now refuses. Both are older than the list this subscription is about to
 	 * take, and applying either on top of that list is GH#417.
+	 *
+	 * <p>
+	 * The rebase also holds this subscription's own events back until its list has
+	 * landed, which is GH#420 — so every call here is paired with an {@code installed}
+	 * once the rows are in the model: {@link #load(int)} for the two paths that list on
+	 * this thread, {@link #install} for the reconnect, which does not.
 	 */
 	private Subscription open(WatchLease lease) {
+		this.subscription.set(lease.generation());
 		this.coalescer.rebase(lease.generation());
 		return this.cluster.watch(this.query.get(), this.coalescer.sink(lease.generation()), lease.onEnd());
 	}
 
-	/** Fill the model from the cluster, a page at a time. */
+	/**
+	 * Fill the model from the cluster, a page at a time, and let the watch opened just
+	 * before it start being applied.
+	 *
+	 * <p>
+	 * This is the paired half of {@link #open}'s hold for the two paths that list on the
+	 * calling thread — the first load and {@link #switchTo} — where no tick can run in
+	 * between and the hold is therefore invisible. The reconnect is the path where it is
+	 * not, and it releases the hold in {@link #install} instead.
+	 */
 	public void load(int chunkSize) {
 		this.chunkSize = chunkSize;
 		this.cluster.list(this.query.get(), chunkSize, (page) -> this.model.upsert(this.projection.project(page)));
+		this.coalescer.installed(this.subscription.get());
+	}
+
+	/**
+	 * Put a finished reconnect on screen, on the render thread: the rows replace the
+	 * model, and only then may the subscription that took them be heard.
+	 *
+	 * <p>
+	 * The order is the whole of GH#420. The replacement is what makes a re-list honest
+	 * (#413) and it is also what wipes anything already applied, so the events this
+	 * subscription delivered while its list was on the network have to arrive
+	 * <em>after</em> it — which is why they were held rather than flushed, and why the
+	 * release is here rather than one line earlier.
+	 */
+	private void install(long generation, List<ResourceRow> rows) {
+		this.model.replaceAll(rows);
+		this.coalescer.installed(generation);
 	}
 
 	/**

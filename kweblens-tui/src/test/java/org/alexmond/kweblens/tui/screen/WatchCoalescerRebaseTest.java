@@ -65,9 +65,14 @@ class WatchCoalescerRebaseTest {
 	@Test
 	void anEventFromASupersededSubscriptionIsRefusedAndItsReplacementIsNot() {
 		this.coalescer.rebase(1);
+		// A rebase also holds the new subscription's events until its own list is in the
+		// model (GH#420), and every caller pairs the two; this test is about which
+		// subscription is heard, so it takes that pairing as read and gets on with it.
+		this.coalescer.installed(1);
 		this.coalescer.sink(1).accept("ADDED", pod("a"));
 		assertThat(this.coalescer.flush()).isEqualTo(Flush.APPLIED);
 		this.coalescer.rebase(2);
+		this.coalescer.installed(2);
 
 		// The watch that has been replaced, still talking.
 		this.coalescer.sink(1).accept("DELETED", pod("a"));
