@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.kind.KindCatalog;
+import org.alexmond.kweblens.tui.screen.Eventually;
 import org.alexmond.kweblens.tui.screen.TickRate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,7 +57,8 @@ class TuiScreenTest {
 				new PrintWriter(out), session::set)), "tui-screen-test");
 		thread.setDaemon(true);
 		thread.start();
-		await(() -> session.get() != null && session.get().screen().renders() >= 1);
+		Eventually.await(() -> session.get() != null && session.get().screen().renders() >= 1,
+				"the screen to load and draw its first frame");
 
 		assertThat(session.get().model().size()).as("five per page, two pages, nothing held between them")
 			.isEqualTo(10);
@@ -80,17 +82,6 @@ class TuiScreenTest {
 
 		assertThat(code).isEqualTo(TuiScreen.EXIT_SCREEN_FAILED);
 		assertThat(out.toString()).contains("The screen could not run");
-	}
-
-	private static void await(java.util.function.BooleanSupplier condition) {
-		long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-		while (System.nanoTime() < deadline) {
-			if (condition.getAsBoolean()) {
-				return;
-			}
-			Thread.onSpinWait();
-		}
-		throw new AssertionError("timed out");
 	}
 
 	private static TuiConfig config(dev.tamboui.terminal.Backend backend) {

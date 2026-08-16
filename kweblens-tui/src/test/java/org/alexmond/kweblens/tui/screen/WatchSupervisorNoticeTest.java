@@ -3,6 +3,7 @@ package org.alexmond.kweblens.tui.screen;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  * makes the sentence appear and disappear on a cadence nobody chose, so "is the failure
  * visible" had no stable answer — which is what a timing-sensitive assertion in
  * {@code ScreenWatchLostTest} was quietly depending on.
+ *
+ * <h2>Every tick here is dispatched on purpose (GH#427)</h2>
+ *
+ * The first version of this test reached the first refusal by ticking up to 500 times and
+ * calling the test failed if it had not arrived — which made a pass depend on the runner
+ * being fast enough, the very defect #423 was fixed for. There is no need to search for
+ * the moment: the two things a tick does are separable and each has a state that says it
+ * happened. The tick that adopts the loss <b>also starts the first attempt</b> (the first
+ * retry is due immediately, by design), the recovery thread stamps its refusal where
+ * {@link WatchSupervisor#recoveryPending()} can see it, and exactly one further tick
+ * installs it. So this test dispatches <b>two</b> ticks to reach the first refusal, never
+ * a variable number, and the only wait is {@link Eventually} on the stamped state.
  */
 class WatchSupervisorNoticeTest {
 
@@ -30,27 +43,34 @@ class WatchSupervisorNoticeTest {
 
 	@Test
 	void aReconnectInFlightStillSaysWhyTheLastOneFailed() throws Exception {
+		AtomicInteger attempts = new AtomicInteger();
 		CountDownLatch running = new CountDownLatch(1);
 		CountDownLatch release = new CountDownLatch(1);
-		CountDownLatch first = new CountDownLatch(1);
 		try (WatchSupervisor supervisor = new WatchSupervisor(this.clock, this.model, (lease) -> {
-			if (first.getCount() > 0) {
-				first.countDown();
-				throw new IllegalStateException("connect timed out");
+			if (attempts.incrementAndGet() > 1) {
+				// The second attempt is held open, so the header can be read at a moment
+				// that used to say nothing about the failure at all.
+				running.countDown();
+				awaitLatch(release);
 			}
-			running.countDown();
-			awaitLatch(release);
 			throw new IllegalStateException("connect timed out");
 		})) {
 			supervisor.listener().accept(WatchEnd.failed(new IllegalStateException("410: too old resource version")));
-			tickUntil(supervisor, () -> supervisor.failures() >= 1, "the first refusal");
+
+			// One tick adopts the loss and starts attempt 1 — the first retry is due the
+			// moment the loss is noticed, so both happen inside this call.
+			assertThat(supervisor.tick()).as("the tick that notices the loss owes a repaint").isTrue();
+			assertThat(supervisor.attempts()).isEqualTo(1);
+			Eventually.await(supervisor::recoveryPending, "the first attempt to be refused by the cluster");
+
+			// And one more installs the refusal the recovery thread stamped.
+			assertThat(supervisor.tick()).as("the tick that installs the refusal owes a repaint").isTrue();
+			assertThat(supervisor.failures()).isEqualTo(1);
 			assertThat(supervisor.notice()).contains("reconnect failed: connect timed out").contains("retrying in");
 
-			// Second attempt, held open, so the header is read at a moment that used to
-			// say nothing about the failure at all.
 			this.clock.advance(Duration.ofSeconds(2));
 			supervisor.tick();
-			assertThat(running.await(5, TimeUnit.SECONDS)).isTrue();
+			assertThat(running.await(5, TimeUnit.SECONDS)).as("the second attempt is in flight").isTrue();
 
 			assertThat(supervisor.notice()).as("mid-attempt the operator is still told what went wrong last time")
 				.contains("NOT LIVE")
@@ -58,17 +78,6 @@ class WatchSupervisorNoticeTest {
 				.contains("reconnecting (attempt 2)");
 			release.countDown();
 		}
-	}
-
-	private static void tickUntil(WatchSupervisor supervisor, java.util.function.BooleanSupplier condition,
-			String what) {
-		for (int i = 0; i < 500; i++) {
-			if (condition.getAsBoolean()) {
-				return;
-			}
-			supervisor.tick();
-		}
-		throw new AssertionError("ticked 500 times waiting for " + what);
 	}
 
 	private static void awaitLatch(CountDownLatch latch) {

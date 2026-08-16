@@ -26,8 +26,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class WatchSupervisorTest {
 
-	private static final Duration TIMEOUT = Duration.ofSeconds(5);
-
 	private final MovableClock clock = MovableClock.at("2026-08-13T12:00:00Z");
 
 	private final ResourceModel model = new ResourceModel();
@@ -38,15 +36,7 @@ class WatchSupervisorTest {
 
 	/** Tick until {@code condition} holds — the reconnect finishes on its own thread. */
 	private void tickUntil(WatchSupervisor supervisor, BooleanSupplier condition, String what) {
-		long deadline = System.nanoTime() + TIMEOUT.toNanos();
-		while (System.nanoTime() < deadline) {
-			if (condition.getAsBoolean()) {
-				return;
-			}
-			supervisor.tick();
-			Thread.onSpinWait();
-		}
-		throw new AssertionError("timed out waiting for " + what);
+		Eventually.await(supervisor::tick, condition, what);
 	}
 
 	@Test

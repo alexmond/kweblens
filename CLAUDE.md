@@ -188,6 +188,16 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     test mid-tick; a test that then moved `MovableClock` 60 s was mutating state a live
     `WatchSupervisor.tick()` was reading, and the retry it saw depended on the machine. Green
     here, red on CI, three commits. `ScreenTickBarrierTest` is the standing control.
+  - **A test waits for a STATE, never for a number of iterations** (#427). An iteration count is
+    a timeout with no unit: `tickUntil`'s 500 supervisor ticks measured **5.0 ms** of wall clock
+    on an idle 24-core box (126 of them were actually needed), so the reconnect thread was given
+    5 ms and a loaded runner gave it less — reproduced locally, 2 of 3 runs red on one saturated
+    core, with CI's exact message. **Raising the bound is not a fix.** `Eventually` (test sources,
+    `tui/screen`) is now the single waiter everywhere in this module — a wall-clock bound, an
+    optional per-pass nudge, and a failure naming what never happened; it spins briefly and then
+    **parks**, because a test thread that only spins competes with the thread it is waiting for.
+    Better still, wait for nothing: where the ordering is knowable, dispatch the exact ticks and
+    wait only on a state the other thread publishes (`recoveryPending()`, a latch).
   Three things about the screen (#364) that a change will get wrong otherwise:
   - **Build widget rows for the visible window only.** Table build+render at 132×44, warmed:
     2 206 rows cost **0.69 ms** windowed vs **27.7 ms** naive (40×); 10 000 rows cost **0.68 ms**

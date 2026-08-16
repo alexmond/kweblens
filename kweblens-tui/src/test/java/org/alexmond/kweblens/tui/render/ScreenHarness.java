@@ -12,6 +12,7 @@ import dev.tamboui.tui.event.TickEvent;
 
 import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.screen.Eventually;
 import org.alexmond.kweblens.tui.screen.TickRate;
 
 /**
@@ -30,9 +31,6 @@ public final class ScreenHarness implements AutoCloseable {
 	public static final int WIDTH = 132;
 
 	public static final int HEIGHT = 44;
-
-	/** How many ticks {@link #tickUntil} will spend before it calls the test failed. */
-	private static final int TICK_LIMIT = 200;
 
 	private final AtomicLong frame = new AtomicLong();
 
@@ -135,27 +133,20 @@ public final class ScreenHarness implements AutoCloseable {
 	 * A reconnect is not finished by the tick that starts it — the network half runs on
 	 * the supervisor's own thread — so a test that wants to see a recovery has to let the
 	 * loop keep running rather than await on a single tick.
+	 *
+	 * <p>
+	 * The bound is {@link Eventually#LIMIT} of wall clock, never a count of ticks. A
+	 * count was what this method used to spend, and it is the GH#427 defect: 200 ticks is
+	 * whatever wall clock 200 ticks happen to take on the machine that runs them, so the
+	 * reconnect thread is given an amount of time nobody chose.
 	 */
 	public void tickUntil(BooleanSupplier condition, String what) {
-		for (int i = 0; i < TICK_LIMIT; i++) {
-			if (condition.getAsBoolean()) {
-				return;
-			}
-			tickAndSettle();
-		}
-		throw new AssertionError("ticked " + TICK_LIMIT + " times waiting for " + what);
+		Eventually.await(this::tickAndSettle, condition, what);
 	}
 
-	/** Wait for {@code condition}, or fail the test after two seconds. */
+	/** Wait for {@code condition}, or fail the test naming it. */
 	public void await(BooleanSupplier condition, String what) {
-		long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-		while (System.nanoTime() < deadline) {
-			if (condition.getAsBoolean()) {
-				return;
-			}
-			Thread.onSpinWait();
-		}
-		throw new AssertionError("timed out waiting for " + what);
+		Eventually.await(condition, what);
 	}
 
 	public FakeBackend backend() {
