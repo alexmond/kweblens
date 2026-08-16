@@ -260,6 +260,30 @@ export function severityOf(finding: Finding): Severity {
   return s === 'critical' || s === 'warning' ? s : 'info';
 }
 
+/**
+ * Separator joining severity and title into one group key: U+001F INFORMATION SEPARATOR ONE.
+ *
+ * <p>It has to be a character that cannot occur in either component, or the key is ambiguous:
+ * with a printable separator `('critical', 'a|b')` and `('critical|a', 'b')` produce the same
+ * string. Do NOT "simplify" this to `:` or `|` — both appear in real finding titles. U+001F is
+ * a C0 control character ASCII reserves for exactly this (U+001E and U+001D are the record and
+ * group equivalents if a nested key ever appears), and no severity or title can contain one.
+ * The server's `DiagnosisSummaryCache` already joins its fingerprint fields with the same
+ * character, so this is the established convention rather than a one-off.
+ *
+ * <p>Written as an ESCAPE, never as a literal byte, and that half is not cosmetic. This was a
+ * raw NUL in the source until #408, which made `grep` classify diagnosis.ts as binary: every
+ * search over this file printed nothing at all — no match, no warning, no exit status you could
+ * tell from "no match" — and a review of #407 nearly concluded a function that was right here
+ * did not exist. U+001F does not trip grep's binary heuristic, but a raw control byte in the
+ * source is still worth avoiding, so the source stays plain ASCII.
+ *
+ * <p>`DiagnoseService.KEY_SEPARATOR` on the server must be the SAME character: the two group
+ * the same findings on two surfaces, and a divergence would make them disagree silently.
+ * `DiagnoseKeySeparatorTest` pins them together rather than trusting authorship.
+ */
+export const KEY_SEPARATOR = '\u001f';
+
 /** Findings sharing a title, kept together so one repeated check cannot crowd out the rest. */
 export interface FindingGroup {
   title: string;
@@ -292,7 +316,7 @@ export function groupFindings(findings: Finding[]): FindingGroup[] {
   const byKey = new Map<string, FindingGroup>();
   for (const finding of sortFindings(findings)) {
     const severity = severityOf(finding);
-    const key = severity + ' ' + finding.title;
+    const key = severity + KEY_SEPARATOR + finding.title;
     const existing = byKey.get(key);
     if (existing) {
       existing.findings.push(finding);

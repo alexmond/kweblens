@@ -93,6 +93,35 @@ public class DiagnoseService {
 	private static final String IDLE_TITLE = "Service points at a scaled-down workload";
 
 	/**
+	 * Separator joining severity and title into one group key: U+001F INFORMATION
+	 * SEPARATOR ONE.
+	 *
+	 * <p>
+	 * It has to be a character that cannot occur in either component, or the key is
+	 * ambiguous: with a printable separator {@code ("critical", "a|b")} and
+	 * {@code ("critical|a", "b")} join to the same string. Do <b>not</b> simplify it to
+	 * {@code :} or {@code |} — both appear in real finding titles. U+001F is a C0 control
+	 * character ASCII reserves for exactly this (U+001E record and U+001D group are the
+	 * equivalents if a nested key ever appears), and no severity or title can hold one.
+	 * {@link DiagnosisSummaryCache} joins its fingerprint fields with the same character
+	 * and its records with U+001E, so this is the package's convention rather than a
+	 * one-off.
+	 *
+	 * <p>
+	 * Written as an ESCAPE, never as a literal byte, and that half is not cosmetic. This
+	 * was a raw NUL in the source until #408, which made {@code grep} classify this file
+	 * as binary: every search over it printed nothing at all — no match, no warning, and
+	 * no exit status you could tell apart from "no match".
+	 *
+	 * <p>
+	 * {@code KEY_SEPARATOR} in {@code kweblens-ui/src/diagnosis.ts} must be the SAME
+	 * character: the two group the same findings on two surfaces, so a divergence would
+	 * make them disagree silently. {@code DiagnoseKeySeparatorTest} pins them together
+	 * rather than leaving it to a coincidence of authorship.
+	 */
+	static final char KEY_SEPARATOR = '\u001F';
+
+	/**
 	 * Cap on the problem groups sent to the model — the findings are grouped first, so
 	 * this is 25 <em>distinct</em> problems, not 25 objects. A cluster whose findings all
 	 * say the same thing costs one group; only a cluster with more than 25 genuinely
@@ -454,7 +483,8 @@ public class DiagnoseService {
 	static PromptInput promptInput(List<Finding> findings) {
 		Map<String, List<Finding>> groups = new LinkedHashMap<>();
 		for (Finding finding : findings) {
-			groups.computeIfAbsent(finding.severity() + ' ' + finding.title(), (key) -> new ArrayList<>()).add(finding);
+			groups.computeIfAbsent(finding.severity() + KEY_SEPARATOR + finding.title(), (key) -> new ArrayList<>())
+				.add(finding);
 		}
 		List<List<Finding>> ordered = new ArrayList<>(groups.values());
 		int shown = Math.min(ordered.size(), MAX_PROMPT_GROUPS);
