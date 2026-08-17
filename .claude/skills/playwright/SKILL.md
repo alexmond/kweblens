@@ -50,6 +50,7 @@ and the reason is in its own header comment — read that before changing one.
 | `resize-check.mjs` | You changed a multiline field. Proves the corner grabber exists AND that a pulled height survives typing. `--self-test` checks the instrument. |
 | `cluster-switch-check.mjs` | You touched per-cluster state. Switches cluster and fails if a value from the previous one is still on screen. |
 | `state-link-check.mjs` | You touched an overview card, a state vocabulary, or the `status:` filter. Clicks every state and fails unless the card's number, the list header's `N of M` and the rows drawn are all the same number. |
+| `tui-drive.sh` | The surface is the **terminal**, not the browser. Runs `kweblens-tui`'s shipped jar in a real `tmux` pane, sends keys, returns the frame as text. `--self-check` proves the rig first. See "The other screen" below. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
 | `dev-verify.sh` | Before every commit. Format + full reactor. Green here means green on the PR. |
 | `dev-test.sh` | A targeted `-Dtest` run while iterating. |
@@ -109,6 +110,41 @@ Prefix a step with `?` to skip it when its selector is absent; that matters beca
 the first time — without `?` the second pass waits for a modal that is already dealt with
 until it times out and takes the run with it.
 
+## The other screen — `kweblens-tui` on a real terminal
+
+Everything above drives a browser. `kweblens-tui` has no browser, and until #426 nothing drove
+it on a terminal at all: every claim about it came from `FakeBackend`, which runs the real event
+loop with no terminal under it. `scripts/tui-drive.sh` is the sibling instrument.
+
+```bash
+./mvnw -pl kweblens-tui -am package -DskipTests    # the SHIPPED exec jar is the point
+scripts/tui-drive.sh --self-check                  # positive control; no jar, no cluster
+scripts/tui-drive.sh --context k3stest --keys ':,svc,Enter' --hold 4 --quit
+scripts/tui-drive.sh --context k3stest --size 80x20 --until 'every binding' --keys '?'
+```
+
+`tmux` (≥ 3.2) is the only requirement — no Python package, no npm install. **It is on demand
+and never a gate**; a pty rig that is flaky in CI is worse than no rig (#423).
+
+Three rules carry over from the browser side and one is new:
+
+- **A rig that drives `TuiScreen` in-process is `FakeBackend` again.** The shipped jar and a real
+  terminal are the parts that were never covered.
+- **Prove the rig before believing it.** `--self-check` drives six known-answer cases through the
+  identical pane: two cursor-addressed writes read back from the cells they were addressed to,
+  the **alternate screen** (the app draws on it; a capture that only read the primary screen
+  would call a perfect frame blank), `stty size`, an `ESC[c` reply reaching the program, and a
+  keystroke arriving at its stdin.
+- **Know which debts your terminal does not pay, and say so.** tmux 3.5a does **not** answer
+  `ESC[?2027$p`, which is the app's very first output; the self-check reports that rather than
+  failing on it, because the app renders regardless.
+- **No frame is a failed measurement, not a pass** — the same rule as an absent selector. The
+  script says so, `jcmd Thread.print`s every `java` under the pane, prints the parked threads and
+  exits 1.
+
+Captures land in `.tui/`, **gitignored like `.playwright/`** and for the same reason: a rendered
+frame is a picture of a live cluster in text — context name, namespaces, node and object names.
+
 ## Rules that keep the results true
 
 **An absent selector is a failed run, not a pass.** `contrast-check` prints `not present`,
@@ -163,6 +199,20 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-17 — **A bare `pty.fork()` reported `kweblens-tui` as producing no frames, and the
+  reading was nearly "the app hangs on a terminal that is not the author's".** It was the rig,
+  and by ONE variable: `pty.fork()` leaves the pty window size at **0×0** and nothing sets it, so
+  JLine reports zero rows, the renderer has zero area, and the app correctly draws nothing.
+  Measured on the same jar, same pipe pair, same unanswered DECRQM: **0 bytes of frame at 0×0,
+  1 407 bytes and a full table after one `TIOCSWINSZ` to 44×132.** The two supporting
+  observations were red herrings, both reproduced and both uninformative — the startup
+  `ESC[?2027$p` is answered by *nothing* here (tmux 3.5a does not answer it either) and the app
+  does not wait for it, and the empty `kweblens-tui.log` is what a **healthy** run leaves,
+  because `logging.level.root` is `warn`. → `scripts/tui-drive.sh` (tmux, real emulator, real
+  size), whose `--self-check` asserts the size, the alternate screen, the query/reply channel and
+  key delivery before any claim about the app, and whose no-frame path dumps threads instead of
+  concluding. **A silent app and a silent rig look identical; only a positive control separates
+  them.**
 - 2026-08-15 — **`--stop-stale` judged every JVM on the box against the tree that ran it, so it
   stopped other agents' servers.** `instances()` is box-wide on purpose; the staleness predicate
   used RELATIVE paths, i.e. "has *my* source changed since *your* process started". Measured: a

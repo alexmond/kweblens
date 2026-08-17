@@ -15,6 +15,7 @@ once — the reason is in the header comment of each script.
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
 | [`state-link-check.mjs`](state-link-check.mjs) | Click every state on an overview card and fail unless the list it opens holds exactly the objects the card counted. |
 | [`resize-check.mjs`](resize-check.mjs) | Drag a multiline field's corner, then type: fail unless it has a grabber AND the pulled height survives. |
+| [`tui-drive.sh`](tui-drive.sh) | Run **`kweblens-tui`'s shipped jar on a real terminal**, send keys, read the frame back as text. `--self-check` proves the rig before you believe it. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
 | [`alloc-probe.sh`](alloc-probe.sh) | *Which code* spends that heap, by call site and thread. A class histogram cannot say. |
@@ -466,6 +467,46 @@ PREPARE='?click:.bar-btn:has-text("Sign in");?fill:.n-modal input[type=password]
 
 Measuring the panel is still usually the better call — its text-bearing children are
 sampled along with it, so one selector covers the row.
+
+## Checking the terminal UI
+
+`tui-drive.sh` is the browser scripts' sibling for `kweblens-tui`: it starts the **shipped exec
+jar** in a `tmux` pane of a stated size, sends keys, and hands the rendered frame back as text.
+Only `tmux` (≥ 3.2) is needed — no Python package, no npm install. It is **on demand and never a
+gate**; a pty rig that is flaky in CI is worse than no rig (#423).
+
+```bash
+./mvnw -pl kweblens-tui -am package -DskipTests      # the shipped jar is the point
+scripts/tui-drive.sh --self-check                    # positive control; no jar, no cluster
+scripts/tui-drive.sh --context k3stest
+scripts/tui-drive.sh --context k3stest --keys ':,svc,Enter' --hold 4 --quit
+scripts/tui-drive.sh --context k3stest --keys '?' --until 'every binding'
+scripts/tui-drive.sh --context k3stest --size 80x20   # the resize class, at a stated size
+```
+
+**It exists because the previous attempt could not tell the app from the rig** (#426). A bare
+`pty.fork()` pipe pair got the startup mode query and then nothing, and the natural reading was
+"the app hangs against a terminal that is not the author's". It was the rig, and one variable
+separates them: **`pty.fork()` leaves the window size at 0×0 and nobody sets it**, so JLine
+reports zero rows and the renderer draws a zero-area frame — correctly. `TIOCSWINSZ` to 44×132,
+nothing else changed, and the same jar wrote 1 407 bytes of table where it had written 0.
+
+So the `--self-check` is not decoration. It drives six known-answer cases through the identical
+rig: two cursor-addressed writes read back from the cells they were written to, the **alternate
+screen** (the app draws on it — a capture that only read the primary screen would call a perfect
+frame blank), `stty size` reporting the size that was asked for, an `ESC[c` reply reaching the
+program, and a keystroke arriving at its stdin. It also **reports one debt it does not pay**:
+tmux 3.5a does not answer `ESC[?2027$p` either, and the app renders regardless — silence after
+that query is not a symptom of anything.
+
+A run that produces no frame is a **failed measurement, not a pass**: it says so, dumps every
+`java` under the pane with `jcmd Thread.print`, prints the threads that matter, and exits 1.
+The frame is still printed and saved, because "no frame" and "a frame that did not match
+`--until`" are different claims.
+
+Output lands in `.tui/`, **gitignored and it must stay that way** — a rendered frame carries the
+context name, namespaces, node names and object names of a live cluster, exactly like
+`.playwright/`. Read a capture before quoting it anywhere.
 
 ## Watching CI
 

@@ -39,6 +39,11 @@ kweblens-web/presentation/
 # server hostname, node names and namespaces. Never commit one.
 .playwright/
 
+# `scripts/tui-drive.sh` captures: the same thing in text — a rendered terminal frame carries
+# the context name, namespaces, node names and object names of a live cluster, plus the thread
+# dumps taken when a run produced no frame. Never commit one.
+.tui/
+
 # Throwaway git worktrees for parallel agent runs. Ephemeral by construction — each is a
 # checkout that is removed when its run ends — so committing one would commit a copy of the
 # repo inside itself.
