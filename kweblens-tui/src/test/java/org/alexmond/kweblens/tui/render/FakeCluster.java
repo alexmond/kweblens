@@ -3,7 +3,9 @@ package org.alexmond.kweblens.tui.render;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,6 +42,12 @@ public class FakeCluster implements ClusterDataSource {
 
 	private final List<GenericKubernetesResource> initial = new ArrayList<>();
 
+	/**
+	 * Per-kind answers, by descriptor id; {@link #initial} is what a kind without one
+	 * gets.
+	 */
+	private final Map<String, List<GenericKubernetesResource>> byKind = new ConcurrentHashMap<>();
+
 	private final AtomicBoolean watchClosed = new AtomicBoolean();
 
 	private final AtomicInteger opened = new AtomicInteger();
@@ -57,7 +65,11 @@ public class FakeCluster implements ClusterDataSource {
 	/** Set while a {@link #list} is parked on {@link #holdNextList()}. */
 	private final AtomicBoolean listHeld = new AtomicBoolean();
 
-	private final AtomicReference<CountDownLatch> listGate = new AtomicReference<>();
+	/** The gate the <em>next</em> list will take, or null when no hold is armed. */
+	private final AtomicReference<CountDownLatch> nextGate = new AtomicReference<>();
+
+	/** The gate a list is parked on right now, so {@link #releaseList()} can find it. */
+	private final AtomicReference<CountDownLatch> heldGate = new AtomicReference<>();
 
 	private volatile BiConsumer<String, GenericKubernetesResource> subscriber;
 
@@ -70,8 +82,16 @@ public class FakeCluster implements ClusterDataSource {
 
 	/** A Pod-shaped object with the given name in namespace {@code ns}. */
 	public static GenericKubernetesResource object(String name) {
+		return object("Pod", name);
+	}
+
+	/**
+	 * The same, of another kind — so a test that switches kinds can tell which list's
+	 * rows are on screen from the rows themselves rather than from a count.
+	 */
+	public static GenericKubernetesResource object(String kind, String name) {
 		return new GenericKubernetesResourceBuilder().withApiVersion("v1")
-			.withKind("Pod")
+			.withKind(kind)
 			.withNewMetadata()
 			.withNamespace("ns")
 			.withName(name)
@@ -92,6 +112,19 @@ public class FakeCluster implements ClusterDataSource {
 	public FakeCluster setObjects(List<GenericKubernetesResource> objects) {
 		this.initial.clear();
 		this.initial.addAll(objects);
+		return this;
+	}
+
+	/**
+	 * What a list of <em>this kind</em> returns, leaving every other kind alone.
+	 *
+	 * <p>
+	 * Without it every list here answers the same objects, and a test about a kind switch
+	 * would be asserting on rows that are correct for both kinds — which is precisely the
+	 * defect it is trying to see (GH#431).
+	 */
+	public FakeCluster setObjects(ResourceDescriptor kind, List<GenericKubernetesResource> objects) {
+		this.byKind.put(kind.id(), List.copyOf(objects));
 		return this;
 	}
 
@@ -123,9 +156,17 @@ public class FakeCluster implements ClusterDataSource {
 	 * Park the next {@link #list} until {@link #releaseList()}, so a test can hold a
 	 * reconnect open between its re-subscribe and its re-list — the window GH#417 lives
 	 * in — instead of racing it.
+	 *
+	 * <p>
+	 * <b>The next one, and only that one.</b> The gate is taken by the first list that
+	 * reaches it, so a list the test issues <em>while</em> the reconnect is parked — a
+	 * {@code switchTo} typed inside the window, which is GH#431 — runs straight through
+	 * instead of deadlocking behind it. Holding every list until the release would make
+	 * the render thread wait on a background thread the test is deliberately holding
+	 * still.
 	 */
 	public FakeCluster holdNextList() {
-		this.listGate.set(new CountDownLatch(1));
+		this.nextGate.set(new CountDownLatch(1));
 		return this;
 	}
 
@@ -134,9 +175,12 @@ public class FakeCluster implements ClusterDataSource {
 		return this.listHeld.get();
 	}
 
-	/** Let the parked list finish. */
+	/** Let the parked list finish, or disarm a hold no list ever reached. */
 	public void releaseList() {
-		CountDownLatch gate = this.listGate.getAndSet(null);
+		CountDownLatch gate = this.heldGate.getAndSet(null);
+		if (gate == null) {
+			gate = this.nextGate.getAndSet(null);
+		}
 		if (gate != null) {
 			gate.countDown();
 		}
@@ -224,7 +268,8 @@ public class FakeCluster implements ClusterDataSource {
 	@Override
 	public void list(ResourceQuery query, int chunkSize, Consumer<List<GenericKubernetesResource>> onPage) {
 		hold();
-		List<GenericKubernetesResource> snapshot = List.copyOf(this.initial);
+		List<GenericKubernetesResource> snapshot = this.byKind.getOrDefault(query.descriptor().id(),
+				List.copyOf(this.initial));
 		int size = (chunkSize > 0) ? chunkSize : Math.max(1, snapshot.size());
 		for (int from = 0; from < snapshot.size(); from += size) {
 			onPage.accept(List.copyOf(snapshot.subList(from, Math.min(from + size, snapshot.size()))));
@@ -263,10 +308,11 @@ public class FakeCluster implements ClusterDataSource {
 	}
 
 	private void hold() {
-		CountDownLatch gate = this.listGate.get();
+		CountDownLatch gate = this.nextGate.getAndSet(null);
 		if (gate == null) {
 			return;
 		}
+		this.heldGate.set(gate);
 		this.listHeld.set(true);
 		try {
 			gate.await();

@@ -66,6 +66,17 @@ import org.alexmond.kweblens.tui.data.WatchEnd;
  * that is no longer the current one is dropped, so a handle that fails while it is being
  * replaced cannot register as the failure of its own replacement — which would have
  * looked exactly like a reconnect loop.
+ *
+ * <h2>Neither can a finished reconnect the screen has moved past</h2>
+ *
+ * The same generation answers the other end of it. A recovery reads the session's query
+ * on the recovery thread, so an operator who types {@code :svc} while one is in flight
+ * gets a list of a kind, or a scope, that is no longer on screen — and installing it
+ * unconditionally put those rows under the new kind's title and then cleared NOT LIVE,
+ * which is GH#431. An outcome whose generation is below the current one is therefore
+ * <b>discarded</b>: the screen has already opened and listed a subscription of its own,
+ * and {@link #watching(long)} — called by the path that did that listing, and only when
+ * it succeeded — is what says so.
  */
 public class WatchSupervisor implements AutoCloseable {
 
@@ -128,6 +139,8 @@ public class WatchSupervisor implements AutoCloseable {
 
 	private int recoveries;
 
+	private int superseded;
+
 	private String lastFailure;
 
 	/**
@@ -146,10 +159,54 @@ public class WatchSupervisor implements AutoCloseable {
 	 * Mint one new subscription. The generation it carries is the only one whose ending
 	 * will be believed <em>and</em> the only one whose events the buffer will keep once a
 	 * later subscription has replaced it — see {@link WatchLease}.
+	 *
+	 * <p>
+	 * It is also what tells a reconnect that the screen has moved on. The counter is
+	 * bumped by whoever opens a subscription, so a lease taken by a {@code switchTo}
+	 * while a recovery is in flight leaves that recovery's generation <em>below</em> the
+	 * current one, which is how {@link #adoptOutcome()} recognises rows nobody is showing
+	 * (GH#431).
 	 */
 	public WatchLease lease() {
 		long minted = this.generation.incrementAndGet();
 		return new WatchLease(minted, (end) -> ended(minted, end));
+	}
+
+	/**
+	 * The screen has opened subscription {@code generation} itself and its list is in the
+	 * model — the first subscribe, or a {@code switchTo} the operator asked for. Called
+	 * on the thread that did the listing, which is the render thread for every case after
+	 * the first.
+	 *
+	 * <p>
+	 * <b>This is what ends a loss that a reconnect never got to finish.</b> A watch dies,
+	 * the operator types {@code :svc} while the recovery is still on the network, and the
+	 * screen closes that watch, opens one of its own and lists the new kind
+	 * synchronously. The table is being kept up to date again — by a different
+	 * subscription, for a different kind — so leaving NOT LIVE on the header would be as
+	 * wrong as clearing it on the strength of the superseded list, only in the other
+	 * direction (GH#431). The reconnect's own outcome is discarded when it lands.
+	 *
+	 * <p>
+	 * A generation that is not the current one is ignored, so this cannot be used to
+	 * pronounce a screen live on the word of a subscription that has already been
+	 * replaced. {@link #attempting} is deliberately <em>not</em> cleared: the recovery
+	 * thread is still running, and the one-attempt-in-flight rule is what keeps a cluster
+	 * that is refusing from being asked twice at once.
+	 *
+	 * <p>
+	 * No repaint is returned because none is owed here: every caller is a navigation the
+	 * operator just made, and the key that made it already repaints the screen.
+	 * @param generation the subscription the screen opened and listed
+	 */
+	public void watching(long generation) {
+		if (generation != this.generation.get()) {
+			return;
+		}
+		this.loss = null;
+		this.lastFailure = null;
+		this.backoff = FIRST_RETRY;
+		this.shownSeconds = -1;
 	}
 
 	/**
@@ -217,6 +274,21 @@ public class WatchSupervisor implements AutoCloseable {
 			return false;
 		}
 		this.attempting = false;
+		if (done.generation() < this.generation.get()) {
+			// The screen opened a subscription of its own while this one was on the
+			// network
+			// — :svc, a drill-down, a namespace favourite. Its rows are a list of
+			// whatever
+			// kind and scope the session had when the recovery thread read them, and the
+			// screen is showing neither; installing them puts one kind's rows under
+			// another
+			// kind's title and calls the table live (GH#431). The switch already said
+			// what
+			// the posture is, in watching(), because it is the one that knows whether its
+			// own subscribe and list succeeded.
+			this.superseded++;
+			return false;
+		}
 		if (done.rows() == null) {
 			this.failures++;
 			this.lastFailure = message(done.failure());
@@ -359,6 +431,19 @@ public class WatchSupervisor implements AutoCloseable {
 	/** How many times the screen went from NOT LIVE back to live. */
 	public int recoveries() {
 		return this.recoveries;
+	}
+
+	/**
+	 * How many finished reconnects were thrown away because the screen had moved to
+	 * another subscription while they were on the network.
+	 *
+	 * <p>
+	 * Counted rather than assumed, for the same reason {@code WatchCoalescer.stale()} is:
+	 * a guard that never fires and a guard that is not there look identical from the
+	 * outside, and this one fires only inside a window an operator has to type into.
+	 */
+	public int superseded() {
+		return this.superseded;
 	}
 
 	@Override
