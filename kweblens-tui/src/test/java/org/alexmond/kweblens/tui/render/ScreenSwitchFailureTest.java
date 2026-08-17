@@ -47,10 +47,55 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ScreenSwitchFailureTest {
 
-	/** Long enough to clear the supervisor's first backoff, which is one second. */
+	/**
+	 * Long enough to clear the supervisor's first backoff, which is one second — and only
+	 * long enough while the gap in force really is that first one, which is what
+	 * {@link #theClusterAnswersAgainOnTheNextRetry} is for.
+	 */
 	private static final Duration PAST_THE_BACKOFF = Duration.ofSeconds(5);
 
 	private final MovableClock clock = MovableClock.at("2026-08-16T12:00:00Z");
+
+	/**
+	 * Let the cluster start answering, on the retry after the one it refused: wait for
+	 * the attempt already in flight to be <b>taken up</b>, then stop refusing, then move
+	 * the clock past the gap that refusal armed.
+	 *
+	 * <p>
+	 * <b>The order of those three is the whole of GH#444.</b>
+	 *
+	 * <p>
+	 * The tick that notices the loss also dispatches the first attempt, and the cluster
+	 * is still refusing, so that attempt fails on the recovery thread. Where its outcome
+	 * is adopted decides the whole schedule: {@code adoptOutcome} arms the next attempt
+	 * one backoff after <em>the moment it runs</em>. Adopted before the advance, the next
+	 * attempt is due at {@code T+1s} and a five-second jump clears it; adopted after, it
+	 * is due at {@code T+5s+1s} — one second past a clock that only moves when this test
+	 * says so, so the retry never comes and the wait below spends its whole wall-clock
+	 * bound. That is not a bound that is too short: measured, the losing interleaving
+	 * costs {@code Eventually}'s full ten seconds and ~20 000 nudges, which is exactly
+	 * what CI reported, and it reproduces at one run in ten with this test pinned to a
+	 * saturated core.
+	 *
+	 * <p>
+	 * So the clock is moved from a state the render thread has published rather than from
+	 * a moment in the middle of another thread's work — the same rule
+	 * {@code ScreenWatchLostTest}'s refusal loop and {@code WatchSupervisorTest}'s
+	 * backoff ladder already keep, and the same family as GH#423. Waiting on the refusal
+	 * also makes the recovery this test asserts the <em>second</em> attempt every time —
+	 * and that is why the cluster is mended here rather than before the wait. Mended
+	 * first, a first attempt slow enough to reach the cluster after it simply
+	 * <em>succeeded</em>, so the retry-after-a-refusal this test exists for was sometimes
+	 * never run at all (measured: 3 rounds in 40 on a saturated core).
+	 */
+	private void theClusterAnswersAgainOnTheNextRetry(ScreenHarness harness, WatchSupervisor supervisor,
+			FakeCluster cluster) {
+		harness.tickUntil(() -> supervisor.failures() >= 1, "the refused reconnect to be taken up");
+		assertThat(supervisor.attempts()).as("the gap now in force is the first one, which PAST_THE_BACKOFF clears")
+			.isEqualTo(1);
+		cluster.serveAgain();
+		this.clock.advance(PAST_THE_BACKOFF);
+	}
 
 	private static void press(ScreenHarness harness, char character) {
 		harness.runner().dispatch(KeyEvent.ofChar(character));
@@ -109,8 +154,7 @@ class ScreenSwitchFailureTest {
 			// And it is not a dead end: the retry loop the supervisor runs for a watch
 			// that died takes this kind up too, so the screen heals when the cluster
 			// does.
-			cluster.serveAgain();
-			this.clock.advance(PAST_THE_BACKOFF);
+			theClusterAnswersAgainOnTheNextRetry(harness, supervisor, cluster);
 			harness.tickUntil(supervisor::live, "the screen to recover the kind it switched to");
 			assertThat(harness.session().model().rows()).extracting(ResourceRow::name)
 				.containsExactly("default", "kube-system");
@@ -148,8 +192,7 @@ class ScreenSwitchFailureTest {
 			assertThat(harness.screen().footer()).contains("Could not list Namespace")
 				.contains("cannot list namespaces");
 
-			cluster.serveAgain();
-			this.clock.advance(PAST_THE_BACKOFF);
+			theClusterAnswersAgainOnTheNextRetry(harness, supervisor, cluster);
 			harness.tickUntil(supervisor::live, "the screen to recover the kind it switched to");
 			assertThat(harness.session().model().rows()).extracting(ResourceRow::name)
 				.containsExactly("default", "kube-system");
