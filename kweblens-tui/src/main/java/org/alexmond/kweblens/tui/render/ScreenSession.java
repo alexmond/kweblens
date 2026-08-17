@@ -14,6 +14,7 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
+import org.alexmond.kweblens.tui.data.WatchEnd;
 import org.alexmond.kweblens.tui.kind.KindIndex;
 import org.alexmond.kweblens.tui.screen.CoreRowBatch;
 import org.alexmond.kweblens.tui.screen.Navigation;
@@ -78,6 +79,13 @@ import org.alexmond.kweblens.tui.screen.WatchSupervisor;
  * discards them by generation, and {@link #load(int)} — which is exactly the set of paths
  * that subscribe and list on the calling thread — is what tells it the screen is live
  * again on its own subscription instead (GH#431).
+ *
+ * <p>
+ * <b>And a switch the cluster refuses is a message, not an exception.</b> Those same two
+ * calls are the ones that can fail, on the render thread, inside a key press;
+ * {@link #switchTo} therefore catches both, empties the model, reports the subscription
+ * lost so the header leads with NOT LIVE and the retry loop takes the new kind up, and
+ * hands the sentence back for the footer (GH#434).
  */
 public class ScreenSession implements Navigation, AutoCloseable {
 
@@ -217,8 +225,9 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * rows will be discarded (GH#431). Pairing it with the release rather than putting it
 	 * in {@link #switchTo} is deliberate: {@link #load(int)} is exactly the set of paths
 	 * that subscribe and list on the calling thread, so there is no second place to
-	 * remember. If the list throws, neither half runs and the screen keeps saying NOT
-	 * LIVE, which is true.
+	 * remember. If the list throws, neither half runs — so a loss already on the header
+	 * stays there, which is true, and {@link #switchTo} reports the refusal for the case
+	 * where there was no loss to leave standing (GH#434).
 	 */
 	public void load(int chunkSize) {
 		this.chunkSize = chunkSize;
@@ -270,8 +279,35 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * screen is live on this subscription (GH#431). Nothing here waits for the recovery
 	 * thread — a navigation the operator asked for must not be held up by a network call
 	 * nobody asked for.
+	 *
+	 * <p>
+	 * <b>And a switch the cluster refuses stays switched</b> (GH#434). Both of the last
+	 * two steps can throw — {@code watch} before any subscription exists, {@code list}
+	 * after one does — and letting either leave this method takes the exception out of
+	 * {@code ViewController.key}, out of {@code ResourceScreen.handle} and into TamboUI's
+	 * runner, which catches it, replaces the whole screen with a scrollable stack trace
+	 * and <em>never leaves that state</em> (measured against 0.4.0: {@code inErrorState}
+	 * is set and never cleared, and the default {@code RenderErrorHandler} is
+	 * {@code displayAndQuit}). So it is caught here, and the screen is left in one
+	 * coherent state rather than half of two:
+	 * <ul>
+	 * <li><b>on the kind the operator asked for, and empty.</b> The view stack was pushed
+	 * before this was called, so rolling the data back would put the previous kind's rows
+	 * under the new kind's title and breadcrumbs — the shape of GH#431, arrived at from
+	 * the other side. Rolling the stack back too would need a re-subscribe and a re-list
+	 * of the old kind, which is the same pair of calls that has just been refused.</li>
+	 * <li><b>with nothing kept from a list that did not finish.</b> Pages already
+	 * projected are dropped, because a partial page count reads exactly like a
+	 * collection's size.</li>
+	 * <li><b>saying so, in both places.</b> The supervisor is told the subscription is
+	 * lost, so the header leads with NOT LIVE and the retry loop that exists for a dead
+	 * watch keeps trying this kind until it answers — an RBAC refusal will simply keep
+	 * refusing, and the notice says which. The sentence returned lands in the
+	 * controller's footer message.</li>
+	 * </ul>
+	 * @return what could not be done, or empty when the view was filled
 	 */
-	public void switchTo(ResourceQuery next, Predicate<ResourceRow> filter) {
+	public String switchTo(ResourceQuery next, Predicate<ResourceRow> filter) {
 		Subscription previous = this.watch.getAndSet(null);
 		if (previous != null) {
 			previous.close();
@@ -281,8 +317,46 @@ public class ScreenSession implements Navigation, AutoCloseable {
 		this.model.clear();
 		this.model.applyFilter(filter);
 		this.screen.retarget(next);
-		this.watch.set(open(this.supervisor.lease()));
-		load(this.chunkSize);
+		WatchLease lease = this.supervisor.lease();
+		try {
+			this.watch.set(open(lease));
+		}
+		catch (RuntimeException ex) {
+			return refused(lease, next, WatchEnd.notSubscribed(ex), "watch");
+		}
+		try {
+			load(this.chunkSize);
+		}
+		catch (RuntimeException ex) {
+			return refused(lease, next, WatchEnd.notListed(ex), "list");
+		}
+		return "";
+	}
+
+	/**
+	 * Record a navigation the cluster would not serve, and say what it was.
+	 *
+	 * <p>
+	 * The ending is reported through the switch's <em>own</em> lease, which is the
+	 * newest, so {@code WatchSupervisor} believes it — and believing it is the whole
+	 * point: {@link #load(int)} never reached {@code watching()}, but on a screen that
+	 * was live a moment ago there is no loss to leave standing either, so without this
+	 * the header would go on calling an empty table live. Reporting it also puts the
+	 * recovery loop behind the new kind, so the screen heals itself when the cluster
+	 * does.
+	 */
+	private String refused(WatchLease lease, ResourceQuery next, WatchEnd end, String step) {
+		this.model.clear();
+		lease.onEnd().accept(end);
+		return "Could not " + step + " " + next.kind() + " (" + scopeOf(next) + "): " + end.reason()
+				+ " — the table is empty and NOT LIVE while it retries.";
+	}
+
+	private static String scopeOf(ResourceQuery query) {
+		if (!query.descriptor().namespaced()) {
+			return "cluster-scoped";
+		}
+		return (query.namespace() == null || query.namespace().isBlank()) ? "all namespaces" : query.namespace();
 	}
 
 	/** The kind and scope on screen. */
@@ -312,8 +386,8 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	}
 
 	@Override
-	public void show(ResourceQuery target, Predicate<ResourceRow> filter) {
-		switchTo(target, filter);
+	public String show(ResourceQuery target, Predicate<ResourceRow> filter) {
+		return switchTo(target, filter);
 	}
 
 	/**

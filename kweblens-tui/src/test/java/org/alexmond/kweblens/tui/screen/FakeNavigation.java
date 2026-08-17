@@ -44,6 +44,9 @@ public class FakeNavigation implements Navigation {
 
 	private GenericKubernetesResource object;
 
+	/** What {@link #show} answers; empty means the view was filled. */
+	private String refusal = "";
+
 	@Override
 	public String clusterId() {
 		return "fake";
@@ -60,9 +63,21 @@ public class FakeNavigation implements Navigation {
 	}
 
 	@Override
-	public void show(ResourceQuery query, Predicate<ResourceRow> filter) {
+	public String show(ResourceQuery query, Predicate<ResourceRow> filter) {
 		this.shown.add(query);
 		this.filters.add(filter);
+		return this.refusal;
+	}
+
+	/**
+	 * What every subsequent {@code show} answers — a cluster that will not serve the view
+	 * the controller asked for (GH#434). The query is still recorded, because the
+	 * navigation was still made: the controller pushed the level and this is the session
+	 * saying it could not fill it.
+	 */
+	public FakeNavigation refusing(String reason) {
+		this.refusal = reason;
+		return this;
 	}
 
 	/** What a drill-down will read a selector off. */

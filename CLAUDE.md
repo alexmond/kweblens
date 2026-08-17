@@ -268,6 +268,20 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     subscription of its own *and* that subscription's rows — and not at all if the list threw.
     Both halves are load-bearing and each is caught by one assertion of
     `ScreenSwitchDuringRecoveryTest` and by **nothing else in the module**.
+  - **A navigation reports what it could not do; it never throws it** (#434). `Navigation.show`
+    returns a sentence, empty when the view was filled, because `switchTo` subscribes and lists
+    on the render thread and either call can be refused. **An exception out of an `EventHandler`
+    does not kill TamboUI and does not print** — measured on 0.4.0 and pinned by
+    `TuiRunnerEscapedExceptionTest`: the runner catches it, the default `RenderErrorHandler` is
+    `displayAndQuit`, `inErrorState` is set and **never cleared**, so the table is replaced by a
+    stack trace the session never comes back from, with nothing in the log. So both failure
+    points are caught, and the state left behind is **the kind the operator asked for, empty,
+    NOT LIVE, with the reason in the footer** — not a rollback, because the view stack was
+    pushed before the session was asked for anything and rolling it back needs the same
+    subscribe-and-list pair that was just refused. The loss goes to `WatchSupervisor` through
+    the switch's own lease, which is what puts the retry loop behind the new kind; nothing is
+    kept from a list that did not finish, because a partial page count reads as a collection's
+    size. `ScreenSwitchFailureTest` drives both points.
   - **Nothing but the renderer may write to stdout**, and it takes two halves:
     `kweblens-tui/src/main/resources/logback.xml` (file appender, **no** console appender, and
     plain `logback.xml` not `logback-spring.xml` so it is in force before Spring exists — Boot 4

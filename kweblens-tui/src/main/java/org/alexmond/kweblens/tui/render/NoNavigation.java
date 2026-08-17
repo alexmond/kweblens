@@ -38,8 +38,10 @@ record NoNavigation(ResourceQuery query) implements Navigation {
 	}
 
 	@Override
-	public void show(ResourceQuery target, Predicate<ResourceRow> filter) {
-		// Nothing to show onto. A screen built this way has no session behind it.
+	public String show(ResourceQuery target, Predicate<ResourceRow> filter) {
+		// Nothing to show onto. A screen built this way has no session behind it, and
+		// KindIndex.empty() means no command ever resolves far enough to reach here.
+		return "";
 	}
 
 }

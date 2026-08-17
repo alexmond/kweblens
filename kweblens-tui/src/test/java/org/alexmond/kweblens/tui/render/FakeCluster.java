@@ -80,6 +80,12 @@ public class FakeCluster implements ClusterDataSource {
 	 */
 	private volatile RuntimeException refuseWatch;
 
+	/** When set, {@link #list} throws it — see {@link #refuseList}. */
+	private volatile RuntimeException refuseList;
+
+	/** How many pages {@link #list} delivers before {@link #refuseList} is thrown. */
+	private volatile int refuseListAfterPages;
+
 	/** A Pod-shaped object with the given name in namespace {@code ns}. */
 	public static GenericKubernetesResource object(String name) {
 		return object("Pod", name);
@@ -208,6 +214,29 @@ public class FakeCluster implements ClusterDataSource {
 		return this;
 	}
 
+	/**
+	 * Make {@code list} throw, from now until {@link #serveAgain()}.
+	 *
+	 * <p>
+	 * <b>After {@code afterPages} pages have been delivered</b>, because the two are
+	 * different failures: a list refused outright leaves the model empty by itself, while
+	 * one that dies mid-collection has already put rows in it — and a partial page count
+	 * on a header reads exactly like the size of the collection. Pass zero for the first
+	 * shape, one or more for the second.
+	 */
+	public FakeCluster refuseList(int afterPages, RuntimeException failure) {
+		this.refuseListAfterPages = afterPages;
+		this.refuseList = failure;
+		return this;
+	}
+
+	/** Stop refusing, so a test can watch the screen recover from what it just broke. */
+	public FakeCluster serveAgain() {
+		this.refuseWatch = null;
+		this.refuseList = null;
+		return this;
+	}
+
 	/** Whether the subscription was released — a watch left open leaks a connection. */
 	public boolean watchClosed() {
 		return this.watchClosed.get();
@@ -271,8 +300,20 @@ public class FakeCluster implements ClusterDataSource {
 		List<GenericKubernetesResource> snapshot = this.byKind.getOrDefault(query.descriptor().id(),
 				List.copyOf(this.initial));
 		int size = (chunkSize > 0) ? chunkSize : Math.max(1, snapshot.size());
+		RuntimeException refusal = this.refuseList;
+		int stopAfter = this.refuseListAfterPages;
+		int delivered = 0;
 		for (int from = 0; from < snapshot.size(); from += size) {
+			if (refusal != null && delivered >= stopAfter) {
+				throw refusal;
+			}
 			onPage.accept(List.copyOf(snapshot.subList(from, Math.min(from + size, snapshot.size()))));
+			delivered++;
+		}
+		if (refusal != null) {
+			// A refusal armed for more pages than the kind has is still a refusal: a list
+			// that ends without delivering the collection has failed either way.
+			throw refusal;
 		}
 		// Counted when the pages have been delivered, not when the request starts, so a
 		// test that waits on lists() is waiting for rows and not for an intention. Same

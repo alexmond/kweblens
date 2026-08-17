@@ -36,7 +36,19 @@ public interface Navigation {
 	 */
 	GenericKubernetesResource object(String namespace, String name);
 
-	/** Show this kind, at this scope, narrowed by this predicate. */
-	void show(ResourceQuery query, Predicate<ResourceRow> filter);
+	/**
+	 * Show this kind, at this scope, narrowed by this predicate.
+	 *
+	 * <p>
+	 * <b>It returns what could not be done rather than throwing it</b> (GH#434). A
+	 * navigation subscribes and lists on the render thread, and either call can be
+	 * refused — a cluster that went away between the keystroke and the list, an RBAC
+	 * refusal on a kind the discovery document still names. An exception from here leaves
+	 * the event loop, and TamboUI's runner answers that by replacing the whole screen
+	 * with a stack trace it never comes back from; a sentence is answered by the footer
+	 * the controller already keeps for exactly this.
+	 * @return what could not be done, or empty when the view was filled
+	 */
+	String show(ResourceQuery query, Predicate<ResourceRow> filter);
 
 }
