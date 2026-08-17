@@ -36,7 +36,10 @@ read their *previous* logs will confidently diagnose a crashloop it has no evide
 | The kinds this cluster serves, grouped by category, with the `resourceId` every other tool
 takes. It exists because those ids are *per cluster* — they include the CRDs this particular
 cluster serves — and an assistant that had to guess them would guess wrong on exactly the custom
-resources it was asked about.
+resources it was asked about. Every kind appears *exactly once*: a custom kind under a category
+named `Custom Resources / <api group>`, unless it is one of the few promoted into a category of
+its own (Gateway, and the cluster's VPA kinds under Autoscaling), in which case it appears there
+and not under its group.
 |===
 
 === Evidence — `DiagnosticTools` (4)

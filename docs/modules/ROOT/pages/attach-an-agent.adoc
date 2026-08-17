@@ -165,18 +165,23 @@ curl -s "$KWEBLENS/api/v1/clusters" | jq -r '.[] | "- `\(.id)` — \(.name)"'
 
 CLUSTER=$(curl -s "$KWEBLENS/api/v1/clusters" | jq -r '.[0].id')
 curl -s "$KWEBLENS/api/v1/clusters/$CLUSTER/nav" |
-  jq -r '.[] | select(.items | length > 0)
+  jq -r '.. | objects | select(.items | length > 0)
          | "- \(.label): " + ([.items[].id] | join(", "))'
 ----
 
-Both are `GET`s, so in `open-mode` they need no credentials. Against the built-in simulator that
-prints:
+The recursive `..` is load-bearing: a cluster's CRDs are nested one sub-group per API group under
+Custom Resources, so a `jq` that reads only the top level prints `Custom Resources:
+customresourcedefinitions` and reports a cluster with dozens of custom kinds as having none.
+
+Both are `GET`s, so in `open-mode` they need no credentials. Against the built-in simulator, which
+registers no CRDs, that prints:
 
 [source]
 ----
 - `sim` — Simulator
 - Cluster: nodes, namespaces, events
 - Workloads: pods, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, replicationcontrollers
+- Autoscaling: horizontalpodautoscalers
 - Config: configmaps, secrets, resourcequotas, limitranges, poddisruptionbudgets, …
 - Network: services, ingresses, endpointslices, endpoints, ingressclasses, networkpolicies
 - Storage: persistentvolumeclaims, persistentvolumes, storageclasses
