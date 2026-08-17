@@ -11,15 +11,18 @@ import org.alexmond.kweblens.resource.WellKnownKinds;
 /**
  * The static left-navigation registry: categories → kinds. This is the single source that
  * drives both the rendered menu and the resource routes
- * ({@code /clusters/{cluster}/r/{id}}), so adding a built-in kind is one line here. The
- * dynamic Custom Resources section (CRD-discovered) is layered on later (issue #12); Helm
- * and Access Control write surfaces arrive with their own milestones.
+ * ({@code /clusters/{cluster}/r/{id}}), so adding a built-in kind is one line here.
  *
  * <p>
- * One category here is <b>conditional</b>: Autoscaling is declared like any other, but
- * {@link ClusterNavService} withholds it from clusters that have nothing to put in it.
- * The declaration still stands — {@link #find} resolves its route ids on every cluster,
- * so a bookmarked list keeps working even where the menu does not offer it.
+ * Every category declared here is shown on every cluster, and nothing is probed to decide
+ * that. {@link ClusterNavService} <b>adds</b> to two of them from what the cluster's API
+ * actually serves — the CRD-discovered kinds under <b>Custom Resources</b>, grouped by
+ * API group, and the cluster's VPA kinds appended to <b>Autoscaling</b> when those CRDs
+ * exist. It withholds nothing declared here: an empty list is a correct answer for a
+ * built-in kind, and making one kind's presence depend on its object count would be a
+ * rule that applies nowhere else in this menu (#428). The conditional half is
+ * CRD-delivered kinds alone, because a static entry for a kind the API does not serve is
+ * a dead menu row.
  */
 @Component
 public class NavCatalog {
@@ -54,9 +57,9 @@ public class NavCatalog {
 							"ReplicationController", "replicationcontrollers"))),
 			// Autoscaling sits next to the workloads it acts on, not in Config: an HPA
 			// filed beside ConfigMaps and Secrets was findable only by someone who
-			// already knew where it was (#428). Declared here with its one built-in kind;
-			// ClusterNavService adds the cluster's VPA kinds and decides whether the
-			// category is shown at all.
+			// already knew where it was (#428). Its one built-in kind is served by every
+			// cluster, so this category is always shown; ClusterNavService only appends
+			// the cluster's VPA kinds where their CRDs exist.
 			new NavCategory("Autoscaling", "bi-graph-up-arrow",
 					List.of(ResourceDescriptor.namespaced("horizontalpodautoscalers", "Horizontal Pod Autoscalers",
 							"HorizontalPodAutoscaler", "autoscaling", "v2", "horizontalpodautoscalers"))),
