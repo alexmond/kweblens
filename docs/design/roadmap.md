@@ -5,7 +5,7 @@ and against the issue tracker's actual state — not against the previous cut of
 (2026-08-10), which had already fallen behind a five-ticket epic that merged in a day.
 
 Read [`competitor-analysis.md`](../competitive-review/competitor-analysis.md) for the landscape
-(note: it is a dated snapshot and still describes a 3-tool MCP server; it is 15) and
+(note: it is a dated snapshot and still describes a 3-tool MCP server; it is 17) and
 [`adr-001-identity-model.md`](adr-001-identity-model.md) for the identity decision. This
 document says what kweblens is *for*, what is actually true of it today, and what is left.
 
@@ -69,8 +69,8 @@ Each row is checked against the code, not the tracker.
 | **D1** relations breadth | **SHIPPED** | `RelationService` is now a dispatcher over five resolvers (`NetworkRelations`, `ReferenceRelations`, `WorkloadRelations`, `StorageRelations`, `AccessRelations`) resolving **12** relation keys, up from 3 (#220). [`detail-sections-audit.md`](detail-sections-audit.md) §"Group B status" is the current record. Not resolved, deliberately: Ingress → TLS secret **expiry** (`Relation` carries objects, so a *missing* reference can only be dropped or fabricated), requests-vs-usage (a metrics path, not a relation), and a general reverse index. |
 | **D2** agent-attach story | **DONE** — see [R5](#r5--d2-the-agent-attach-page--done) | `docs/modules/ROOT/pages/attach-an-agent.adoc` + an MCP section in `docs/deployment.md` + an *Attach an agent* block in `README.md`. The transport was documented correctly; the *auth* was not — `mcp.adoc` claimed the tool endpoints were public in open-mode, and `POST /mcp/message` measures `401`. |
 | **D3** analyzer breadth / cross-manifest rules | **DONE — GH#353** | `DiagnoseService` now runs a fourth validator: `kweblens-core`'s `SecurityAuditService`, which reports privileged and explicitly-root containers from the pod list the diagnosis already had, `cluster-admin` grants, and — the cross-manifest one — the ServiceAccounts those grants name joined to the pods that run as them. It shares the `grantedBy` subject predicate (`RbacSubjects`) with `AccessRelations` rather than re-implementing the join, and costs two list requests for the whole scope, nothing per pod. |
-| **D4** guarded MCP write tools | **UNBLOCKED, unscoped — GH#355** | 15 `@Tool` methods across three beans (`ClusterTools` 4, `DiagnosticTools` 4, `HealthTools` 7 — counted on `@Tool\(`, because a bare `@Tool` grep also matches `@ToolParam` and returns 49). None mutating. The T1 gate has lifted; what is left is Radar's scoping question (destructive-annotated, no delete, no shell), not a missing guardrail. |
-| **Chore I** docs currency | **DONE** | `README.md` and `CLAUDE.md` both say 15 read-only tools and SSE; the README frames identity per ADR-001 rather than as "the gap that matters". Only `competitor-analysis.md` still says 3, and it is a dated research snapshot. |
+| **D4** guarded MCP write tools | **UNBLOCKED, unscoped — GH#355** | 17 `@Tool` methods across three beans (`ClusterTools` 4, `DiagnosticTools` 4, `HealthTools` 9 — counted on `^\s*@Tool\(`, because a bare `@Tool` grep also matches `@ToolParam` and the import, and returns three times the real number). None mutating; `McpToolSurfaceTest` now pins the registered set rather than leaving it to a grep. The T1 gate has lifted; what is left is Radar's scoping question (destructive-annotated, no delete, no shell), not a missing guardrail. |
+| **Chore I** docs currency | **DONE** | `README.md` and `CLAUDE.md` both say 17 read-only tools and SSE, and a test now fails the build if either goes stale (#383); the README frames identity per ADR-001 rather than as "the gap that matters". Only `competitor-analysis.md` still says 3, and it is a dated research snapshot. |
 
 **Three structural things the old cut got wrong, worth naming so they are not repeated:**
 
