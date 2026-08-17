@@ -169,6 +169,9 @@ public class ScreenSession implements Navigation, AutoCloseable {
 		this.coalescer = new WatchCoalescer(this.model, this.projection);
 		this.supervisor = new WatchSupervisor(clock, this::install, this::reconnect);
 		this.screen = new ResourceScreen(this.model, this.coalescer, this.supervisor, query, tick, this);
+		// The first kind's columns, from the same place every later kind's come from, so
+		// the opening frame is not the one screen state with no headings.
+		this.screen.retarget(query, this.projection.columns());
 	}
 
 	/**
@@ -316,7 +319,7 @@ public class ScreenSession implements Navigation, AutoCloseable {
 		this.projection.retarget(this.projections.apply(next));
 		this.model.clear();
 		this.model.applyFilter(filter);
-		this.screen.retarget(next);
+		this.screen.retarget(next, this.projection.columns());
 		WatchLease lease = this.supervisor.lease();
 		try {
 			this.watch.set(open(lease));

@@ -5,6 +5,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
+import org.alexmond.kweblens.column.Column;
+
 /**
  * A {@link RowBatch} that can be pointed at another kind without anything that holds it
  * being rebuilt.
@@ -41,6 +43,16 @@ public class RetargetableRowBatch implements RowBatch {
 	@Override
 	public List<ResourceRow> project(List<GenericKubernetesResource> objects) {
 		return this.delegate.get().project(objects);
+	}
+
+	/**
+	 * The current kind's columns. Read on the render thread when the table is laid out,
+	 * and written by {@link #retarget} on that same thread — so the headings and the rows
+	 * under them always name the same kind.
+	 */
+	@Override
+	public List<Column> columns() {
+		return this.delegate.get().columns();
 	}
 
 }

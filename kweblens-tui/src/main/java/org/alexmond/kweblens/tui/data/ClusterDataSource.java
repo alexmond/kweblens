@@ -8,6 +8,7 @@ import java.util.function.Consumer;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
+import org.alexmond.kweblens.column.Column;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.resource.DiscoveredKind;
 
@@ -102,6 +103,21 @@ public interface ClusterDataSource {
 	 * straight from the cluster. Do not switch exhaustively over it.
 	 */
 	List<Optional<ObjectState>> states(ResourceQuery query, List<GenericKubernetesResource> objects);
+
+	/**
+	 * The kind-specific columns this kind's rows carry — the values the server computes
+	 * once instead of every surface deriving them (GH#367).
+	 *
+	 * <p>
+	 * <b>Per kind, never per object.</b> A built-in in the covered tranche answers from a
+	 * static table; a custom kind answers from its CRD's
+	 * {@code additionalPrinterColumns}, which is a call to the cluster, so this is asked
+	 * once when a kind is opened and the result travels with the projection.
+	 * @param query the kind and cluster
+	 * @return the columns, empty for a kind with none — which draws the framework's own
+	 * four columns and nothing else, exactly as every kind did before this
+	 */
+	List<Column> columns(ResourceQuery query);
 
 	/** One object by name, or {@code null} if it does not exist. */
 	GenericKubernetesResource get(ResourceQuery query, String name);

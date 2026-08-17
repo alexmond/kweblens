@@ -1,0 +1,205 @@
+{
+  "cases": [
+    {
+      "kind": "pods",
+      "name": "two containers, one ready, one restarting",
+      "values": {
+        "ready": "1/2",
+        "restarts": "3",
+        "node": "node-a"
+      }
+    },
+    {
+      "kind": "pods",
+      "name": "pending, nothing scheduled and no container statuses yet",
+      "values": {
+        "ready": "0/0",
+        "restarts": "0",
+        "node": "—"
+      }
+    },
+    {
+      "kind": "pods",
+      "name": "a container that has never restarted omits the count",
+      "values": {
+        "ready": "2/2",
+        "restarts": "7",
+        "node": "—"
+      }
+    },
+    {
+      "kind": "deployments",
+      "name": "partially available",
+      "values": {
+        "ready": "2/3",
+        "uptodate": "3",
+        "available": "2"
+      }
+    },
+    {
+      "kind": "deployments",
+      "name": "scaled to zero, which is a number and not a gap",
+      "values": {
+        "ready": "0/0",
+        "uptodate": "0",
+        "available": "0"
+      }
+    },
+    {
+      "kind": "deployments",
+      "name": "never rolled out, so status carries nothing at all",
+      "values": {
+        "ready": "0/1",
+        "uptodate": "0",
+        "available": "0"
+      }
+    },
+    {
+      "kind": "nodes",
+      "name": "cordoned control plane with a role label that has no role after the slash",
+      "values": {
+        "roles": "control-plane, etcd",
+        "taints": "2",
+        "version": "v1.31.3+k3s1",
+        "ip": "192.0.2.5",
+        "schedulable": "False",
+        "conditions": "Ready, EtcdIsVoter",
+        "ext-ip": "—",
+        "pod-capacity": "110",
+        "capacity": "8 CPU, 15.5Gi",
+        "instance-type": "k3s",
+        "zone": "eu-west-1a",
+        "os-image": "Fedora Linux 42",
+        "kernel": "6.19.14-108.fc42.x86_64",
+        "runtime": "containerd://2.0.0",
+        "arch": "amd64"
+      }
+    },
+    {
+      "kind": "nodes",
+      "name": "an address entry that exists but carries no address",
+      "values": {
+        "roles": "—",
+        "taints": "0",
+        "version": "—",
+        "ip": "—",
+        "schedulable": "True",
+        "conditions": "—",
+        "ext-ip": "",
+        "pod-capacity": "—",
+        "capacity": "—",
+        "instance-type": "—",
+        "zone": "—",
+        "os-image": "—",
+        "kernel": "—",
+        "runtime": "—",
+        "arch": "—"
+      }
+    },
+    {
+      "kind": "nodes",
+      "name": "zone and instance type from the beta labels only",
+      "values": {
+        "roles": "—",
+        "taints": "0",
+        "version": "v1.30.1",
+        "ip": "198.51.100.9",
+        "schedulable": "True",
+        "conditions": "—",
+        "ext-ip": "203.0.113.9",
+        "pod-capacity": "58",
+        "capacity": "2 CPU",
+        "instance-type": "m5.large",
+        "zone": "us-east-1b",
+        "os-image": "—",
+        "kernel": "—",
+        "runtime": "—",
+        "arch": "—"
+      }
+    },
+    {
+      "kind": "services",
+      "name": "two ports, one of them relying on the protocol default",
+      "values": {
+        "type": "ClusterIP",
+        "clusterip": "192.0.2.10",
+        "ports": "53/UDP, 9153/TCP"
+      }
+    },
+    {
+      "kind": "services",
+      "name": "headless, no ports declared",
+      "values": {
+        "type": "ClusterIP",
+        "clusterip": "None",
+        "ports": "—"
+      }
+    },
+    {
+      "kind": "services",
+      "name": "no spec at all",
+      "values": {
+        "type": "—",
+        "clusterip": "—",
+        "ports": "—"
+      }
+    },
+    {
+      "kind": "events",
+      "name": "a repeated warning about a pod",
+      "values": {
+        "type": "Warning",
+        "reason": "BackOff",
+        "object": "Pod/web-0",
+        "message": "Back-off restarting failed container app in pod web-0_shop",
+        "count": "12"
+      }
+    },
+    {
+      "kind": "events",
+      "name": "no involved object, no message, no count",
+      "values": {
+        "type": "Normal",
+        "reason": "Scheduled",
+        "object": "—",
+        "message": "—",
+        "count": "—"
+      }
+    },
+    {
+      "kind": "events",
+      "name": "an involved object with a kind and no name",
+      "values": {
+        "type": "Normal",
+        "reason": "NodeReady",
+        "object": "Node",
+        "message": "Node cp-1 status is now: NodeReady",
+        "count": "1"
+      }
+    }
+  ],
+  "printerColumns": [
+    {
+      "name": "a CRD declaring a path, a filter, a boolean, a date and a path to nothing",
+      "values": {
+        ".status.phase": "Deployed",
+        ".status.conditions[?(@.type==\"Ready\")].status": "True",
+        ".spec.synced": "True",
+        ".spec.replicas": "3",
+        ".spec.chart.name": "traefik",
+        ".spec.versions.0.name": "v1beta1",
+        ".metadata.creationTimestamp": "2d",
+        ".status.nowhere.at.all": "—"
+      }
+    },
+    {
+      "name": "the same declarations against an object that carries none of them",
+      "values": {
+        ".status.phase": "—",
+        ".status.conditions[?(@.type==\"Ready\")].status": "—",
+        ".spec.synced": "False",
+        ".metadata.creationTimestamp": "—"
+      }
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 package org.alexmond.kweblens.tui.screen;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,6 +74,49 @@ class ColumnLayoutTest {
 		assertThat(clusterScoped.namespace()).isZero();
 		assertThat(clusterScoped.name()).isGreaterThan(ColumnLayout.forWidth(132, true).name());
 		assertThat(clusterScoped.total()).isLessThanOrEqualTo(132);
+	}
+
+	@Test
+	void aKindsOwnColumnsGetRoomAndTheNamePaysForIt() {
+		List<String> pod = List.of("Ready", "Restarts", "Node");
+
+		ColumnLayout with = ColumnLayout.forWidth(132, true, pod);
+		ColumnLayout without = ColumnLayout.forWidth(132, true, List.of());
+
+		assertThat(with.extras()).hasSize(3).allSatisfy((width) -> assertThat(width).isPositive());
+		assertThat(with.name()).isLessThan(without.name());
+		assertThat(with.total()).isLessThanOrEqualTo(132);
+	}
+
+	/**
+	 * Nodes carry fifteen. On a wide terminal they all fit; on a normal one they do not,
+	 * and what has to survive is the name — a row you cannot identify is worse than a row
+	 * whose architecture you cannot see.
+	 */
+	@Test
+	void theKindsColumnsAreTheFirstToGoAndTheyGoFromTheRight() {
+		List<String> nodes = List.of("Roles", "Taints", "Version", "Internal IP", "Schedulable", "Conditions",
+				"External IP", "Pod Capacity", "Capacity", "Instance Type", "Zone", "OS Image", "Kernel",
+				"Container Runtime", "Architecture");
+
+		assertThat(ColumnLayout.forWidth(300, false, nodes).extras()).hasSize(15);
+		assertThat(ColumnLayout.forWidth(132, false, nodes).extras()).hasSizeLessThan(15).isNotEmpty();
+		assertThat(ColumnLayout.forWidth(60, false, nodes).extras()).hasSizeLessThan(5);
+		assertThat(ColumnLayout.forWidth(40, false, nodes).extras()).isEmpty();
+		assertThat(ColumnLayout.forWidth(40, false, nodes).age()).as("age survives longer than any kind column")
+			.isPositive();
+	}
+
+	@Test
+	void aLayoutWithKindColumnsStillNeverOverflows() {
+		List<String> nodes = List.of("Roles", "Taints", "Version", "Internal IP", "Schedulable", "Conditions",
+				"External IP", "Pod Capacity", "Capacity", "Instance Type", "Zone", "OS Image", "Kernel",
+				"Container Runtime", "Architecture");
+		for (int width = 1; width <= 300; width++) {
+			assertThat(ColumnLayout.forWidth(width, true, nodes).total())
+				.as("layout at width %d must fit in %d cells", width, width)
+				.isLessThanOrEqualTo(width);
+		}
 	}
 
 }

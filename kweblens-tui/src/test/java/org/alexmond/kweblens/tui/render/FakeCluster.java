@@ -17,6 +17,8 @@ import java.util.function.Consumer;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
 
+import org.alexmond.kweblens.column.Column;
+import org.alexmond.kweblens.column.ColumnCatalog;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.resource.DiscoveredKind;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
@@ -324,6 +326,16 @@ public class FakeCluster implements ClusterDataSource {
 	@Override
 	public List<Optional<ObjectState>> states(ResourceQuery query, List<GenericKubernetesResource> objects) {
 		return objects.stream().map((object) -> Optional.<ObjectState>empty()).toList();
+	}
+
+	/**
+	 * The real catalog, deliberately. The columns are a pure function of the kind, so a
+	 * fake answer here would only make the screen tests assert against a table that does
+	 * not exist — and it is the catalog's own headings a table test needs to see.
+	 */
+	@Override
+	public List<Column> columns(ResourceQuery query) {
+		return ColumnCatalog.forDescriptor(query.descriptor());
 	}
 
 	@Override

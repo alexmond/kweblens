@@ -462,6 +462,24 @@ broken. It is not; do not "fix" it.
   the row, not a list of kinds**, because a hard-coded kind list would be a second copy of the
   server's rule that goes stale silently. A `null` renders as `—`, never an empty string: "we did
   not send it" and "it is empty" are different claims. This is **not** redaction.
+- **A computed column value is computed ONCE, server-side, and the gate on it is a PARITY gate**
+  (#367). `kweblens-core`'s `column/` holds the kind-specific columns for the five kinds a terminal
+  opens first — **pods, deployments, nodes, services, events** — while the entries that are *one
+  dotted path* get an **evaluator** (`ObjectPath`) rather than a value, because a path has no logic
+  to drift. `ColumnCatalog` is keyed on **(group, kind)**, never the SPA's resource id: discovery
+  assembles its own ids. **The `Status` column is deliberately not in it** — that is
+  `ObjectStates.forList` already (#360) and it needs a `StatusContext` opened once per *list*, which
+  a per-object function cannot do. **Never hand-write the expected string on both sides**:
+  `column-parity/expected.json` is *rendered by* `columns.ts`
+  (`kweblens-ui/src/columnParity.test.ts`; regenerate with `UPDATE_COLUMN_PARITY=1`) and asserted by
+  core's `ColumnParityTest`, because two hand-written expectations that agree prove only that one
+  author held one idea twice. The corpus is what caught the cases a faithful port gets wrong: a Node
+  address entry that exists with no `address` renders **empty, not `—`**, and a count the API server
+  omits renders **`0`, not `—`** (`toNum`). One divergence is chosen and stated: a CRD printer-column
+  path landing on an object or an array renders `—` where the SPA prints `[object Object]`. In the
+  terminal the values travel on `ResourceRow.values` and **the kind's columns are the first thing
+  dropped when the width runs out** — a row you cannot identify is worse than a column you cannot
+  see. Widths stay the terminal's own; nothing about a pixel crosses the seam.
 - **An SSE stream that never writes never notices a disconnect.** `SseEmitter` learns its client
   is gone only from a *failed write*, so a data-driven stream holds its cluster-side resource open
   on a departed subscriber for as long as the cluster stays quiet. `SseKeepAlive` writes a
