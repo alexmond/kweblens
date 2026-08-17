@@ -21,17 +21,29 @@ package org.alexmond.kweblens.tui.data;
  * stopped, and a reconnect that closes the old handle must not read that close as a fresh
  * loss.
  *
+ * <h2>A subscription that never started is an ending too</h2>
+ *
+ * {@link #notSubscribed} and {@link #notListed} are reported by
+ * {@code ScreenSession.switchTo} when the kind the operator asked for could not be
+ * watched, or could not be listed (GH#434). Nothing arrives in either case, which is the
+ * same consequence the two endings above have and therefore the same posture and the same
+ * response — so the supervisor's machinery is the right machinery and the only thing that
+ * has to differ is, again, the words. <b>Which is why the phrase is carried rather than
+ * derived from {@link #clean}</b>: "watch failed" about a watch that was open and a list
+ * that was refused is a sentence that sends an operator to the wrong place.
+ *
  * @param clean whether the stream ended without an error
+ * @param what which step stopped, in two or three words — never null, never empty
  * @param reason a short phrase for a header — never null, never empty
  */
-public record WatchEnd(boolean clean, String reason) {
+public record WatchEnd(boolean clean, String what, String reason) {
 
 	/** As much of a failure's message as a one-line header can carry. */
 	private static final int REASON_LIMIT = 80;
 
 	/** The stream ended without an error. */
 	public static WatchEnd completed() {
-		return new WatchEnd(true, "the stream ended");
+		return new WatchEnd(true, "watch ended", "the stream ended");
 	}
 
 	/**
@@ -39,12 +51,25 @@ public record WatchEnd(boolean clean, String reason) {
 	 * it has given up rather than a blip.
 	 */
 	public static WatchEnd failed(Throwable cause) {
-		return new WatchEnd(false, describe(cause));
+		return new WatchEnd(false, "watch failed", describe(cause));
+	}
+
+	/** The subscription could not be opened at all, so there is nothing to end. */
+	public static WatchEnd notSubscribed(Throwable cause) {
+		return new WatchEnd(false, "could not watch", describe(cause));
+	}
+
+	/**
+	 * The subscription was opened and its own list was refused — so its events are held
+	 * behind a list that never landed, and nothing will reach the screen.
+	 */
+	public static WatchEnd notListed(Throwable cause) {
+		return new WatchEnd(false, "could not list", describe(cause));
 	}
 
 	/** What the header says happened, in four or five words. */
 	public String summary() {
-		return ((this.clean) ? "watch ended" : "watch failed") + ": " + this.reason;
+		return this.what + ": " + this.reason;
 	}
 
 	/**

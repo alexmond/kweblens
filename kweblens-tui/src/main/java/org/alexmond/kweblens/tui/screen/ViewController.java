@@ -269,10 +269,22 @@ public class ViewController {
 		open(view);
 	}
 
-	/** Ask the session for this view's rows, and apply its filter to them. */
+	/**
+	 * Ask the session for this view's rows, and apply its filter to them.
+	 *
+	 * <p>
+	 * <b>A navigation that could not be filled says so here</b> (GH#434). The session
+	 * subscribes and lists on this thread, so a cluster that refuses either one has no
+	 * other way to reach the operator: it hands back a sentence, and it lands in the same
+	 * {@link #message} as "this cluster serves no such kind" one case over. The level
+	 * stays where the operator put it and the table is empty — see
+	 * {@code ScreenSession.switchTo} for why an empty view the header calls NOT LIVE is
+	 * the coherent state and a rollback is not.
+	 */
 	private void open(View view) {
 		this.favourites.remember(view.namespace());
-		this.navigation.show(new ResourceQuery(this.navigation.clusterId(), view.descriptor(), view.namespace()),
+		this.message = this.navigation.show(
+				new ResourceQuery(this.navigation.clusterId(), view.descriptor(), view.namespace()),
 				RowFilters.of(view.filter(), view.descriptor().kind()));
 	}
 

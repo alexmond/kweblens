@@ -60,6 +60,26 @@ class ViewControllerTest {
 		assertThat(this.controller.current().crumb()).isEqualTo("ingressroutes");
 	}
 
+	/**
+	 * GH#434's controller half. A kind that resolves and a view that could not be filled
+	 * are different failures and the second one used to have nowhere to go: the session
+	 * threw, and the exception went past this class entirely. It lands in the same
+	 * {@link ViewController#message()} as the case above, and the level stays where the
+	 * operator put it — {@code esc} is the way back, not an automatic rollback.
+	 */
+	@Test
+	void aViewTheSessionCouldNotFillSaysSoAndStaysWhereTheOperatorPutIt() {
+		this.navigation.refusing("Could not watch IngressRoute (kube-system): forbidden");
+
+		command("ir");
+
+		assertThat(this.controller.message()).isEqualTo("Could not watch IngressRoute (kube-system): forbidden");
+		assertThat(this.controller.current().descriptor())
+			.as("the level the operator asked for is the level they are on")
+			.isEqualTo(FakeNavigation.INGRESS_ROUTES);
+		assertThat(this.navigation.last().descriptor()).isEqualTo(FakeNavigation.INGRESS_ROUTES);
+	}
+
 	@Test
 	void aKindNobodyServesIsRefusedWithTheNearestNamesRatherThanSilently() {
 		command("podz");
