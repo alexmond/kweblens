@@ -149,6 +149,28 @@ describe('navLabelParts', () => {
     }
   });
 
+  it('keeps a real CRD group distinct now that its labels are written, not raw kinds (#433)', () => {
+    // The same traefik.io group as above, as the rail renders it since CRD labels became
+    // derived: `IngressRouteTCP` is `Ingress Route TCPs`. Spaces give the splitter MORE
+    // places to cut, but they also make every label longer, so the guarantee has to be
+    // re-proved rather than assumed to carry over.
+    const traefik = [
+      'Ingress Route TCPs',
+      'Ingress Route UDPs',
+      'Ingress Routes',
+      'Middleware TCPs',
+      'Middlewares',
+      'Servers Transport TCPs',
+      'Servers Transports',
+      'TLS Options',
+      'TLS Stores',
+      'Traefik Services',
+    ];
+    for (const fits of [24, 18, 14, 12]) {
+      expectAllDistinct(traefik, fits);
+    }
+  });
+
   it('keeps the two pairs from #327 distinct at every width that fits 12 characters', () => {
     for (let fits = 12; fits <= 36; fits += 1) {
       expectAllDistinct(['VerticalPodAutoscaler', 'VerticalPodAutoscalerCheckpoint'], fits);

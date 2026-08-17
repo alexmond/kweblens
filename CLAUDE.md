@@ -536,6 +536,15 @@ new tool returning raw objects must go through it.**
   exception, which would have been a new principle with nothing on screen to explain it. So the
   nav asks the API server **nothing** about object counts: it is a hot path (every `/nav`, and
   `/counts` builds on it) and a probe there buys a rule that should not exist.
+  **A CRD leaf's LABEL is derived, never tabulated** (`KindLabel`, #433). It re-spaces the kind
+  at its camel-case humps with acronym runs kept whole (`HTTPRoute` → `HTTP Route`, never
+  `H T T P Route`) and takes the plural from the CRD's own `spec.names.plural` — so the
+  invariant `KindLabelTest` pins is that de-spacing and lower-casing a label gives back the
+  resource path the API server serves. **Never add a kind→label table** (a second catalog of CRD
+  names that goes stale silently) and **never hand-roll an inflector**: `Policy`/`Policies`,
+  `Ingress`/`Ingresses` and the already-plural `VLogs` are not a suffix rule, and the cluster
+  has already declared the answer. Labels are display only — `id` and `kind` stay raw, which is
+  why `find()` and the MCP `list_resource_kinds` output are unmoved.
 - **Design references**: `docs/references/freelens-ia.md` (full IA map) and
   `freelens-reference-deck.md`. The deck records its headless `xvfb` capture as blocked on this
   box — **that note is disputed**; re-test before relying on it either way.

@@ -112,7 +112,12 @@ public class CrdService {
 			return null;
 		}
 		boolean namespaced = "Namespaced".equals(spec.getScope());
-		return new ResourceDescriptor(group + "." + plural, kind, kind, group, version, plural, namespaced, false);
+		// The label is written — `HTTP Routes`, not `HTTPRoute` — because a CRD kind now
+		// sits next to built-in ones in the same list (#433). KindLabel derives it from
+		// the CRD's own two names, never from a table here. The id and the kind keep
+		// their raw values: routes and MCP tool arguments do not move.
+		return new ResourceDescriptor(group + "." + plural, KindLabel.forCustomResource(kind, plural), kind, group,
+				version, plural, namespaced, false);
 	}
 
 	private String servedVersion(CustomResourceDefinitionSpec spec) {

@@ -141,4 +141,28 @@ class GatewayNavTest {
 			.isEqualTo("HTTPRoute");
 	}
 
+	/**
+	 * The labels are written, the ids are not (#433). {@code HTTPRoute} is the case that
+	 * decides the algorithm — a naive split on capitals renders {@code H T T P Routes} —
+	 * and {@code BackendTLSPolicy} carries both an acronym and an irregular plural.
+	 */
+	@Test
+	void labelsPromotedKindsInWordsWhileTheirRouteIdsStayRaw() {
+		crd("httproutes", "HTTPRoute", "gateway.networking.k8s.io", "Namespaced");
+		crd("backendtlspolicies", "BackendTLSPolicy", "gateway.networking.k8s.io", "Namespaced");
+		crd("gateways", "Gateway", "gateway.networking.k8s.io", "Namespaced");
+		crd("gatewayclasses", "GatewayClass", "gateway.networking.k8s.io", "Cluster");
+
+		NavCategory gateway = navFor("gw-6").stream()
+			.filter((c) -> c.label().equals("Gateway"))
+			.findFirst()
+			.orElseThrow();
+
+		assertThat(gateway.items()).extracting("label")
+			.containsExactly("Gateway Classes", "Gateways", "HTTP Routes", "Backend TLS Policies");
+		assertThat(gateway.items()).extracting("id")
+			.containsExactly("gateway.networking.k8s.io.gatewayclasses", "gateway.networking.k8s.io.gateways",
+					"gateway.networking.k8s.io.httproutes", "gateway.networking.k8s.io.backendtlspolicies");
+	}
+
 }
