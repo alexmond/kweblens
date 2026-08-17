@@ -254,6 +254,20 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     takes. **Promoting all of it is deliberate**: an event that is somehow older than the list
     can only be one whose successor is already in flight, so it self-corrects within a watch
     latency — where a lost event self-corrects never.
+  - **And a recovery the operator navigated past installs nothing, and decides nothing.**
+    `switchTo` (`:svc`, a drill-down, a namespace favourite) runs on the render thread while
+    the recovery thread is still inside `reconnect`, reading a query that has since been
+    retargeted — so the rows it hands back are a list of a kind or a scope nobody is showing,
+    and installing them put one kind's rows under another kind's title and then cleared NOT
+    LIVE (#431). The generation already travels with the rows, so `WatchSupervisor` **discards
+    an outcome whose generation is below the current one** (counted as `superseded()`, because
+    a guard that never fires looks like one that is not there) — the lease a switch takes is
+    what moves the counter past it. **The header is answered from the other side**:
+    `watching(generation)` is called from `ScreenSession.load`, which is exactly the set of
+    paths that subscribe and list on the calling thread, so the loss ends when the screen has a
+    subscription of its own *and* that subscription's rows — and not at all if the list threw.
+    Both halves are load-bearing and each is caught by one assertion of
+    `ScreenSwitchDuringRecoveryTest` and by **nothing else in the module**.
   - **Nothing but the renderer may write to stdout**, and it takes two halves:
     `kweblens-tui/src/main/resources/logback.xml` (file appender, **no** console appender, and
     plain `logback.xml` not `logback-spring.xml` so it is in force before Spring exists — Boot 4
