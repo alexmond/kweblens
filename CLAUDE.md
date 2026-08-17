@@ -42,6 +42,9 @@ node scripts/ui-measure.mjs '.sel'    # box / overflow / chars-per-line; exits 1
 node scripts/contrast-check.mjs       # WCAG contrast, BOTH themes; exits 1 on failure
 node scripts/resize-check.mjs         # multiline fields: is there a grabber, does the pull HOLD
 node scripts/perf-sweep.mjs           # on-demand hang/long-load sweep
+
+scripts/tui-drive.sh --self-check     # kweblens-tui on a REAL terminal (tmux); prove the rig first
+scripts/tui-drive.sh --context <ctx> --keys ':,svc,Enter'
 ```
 
 Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/ci.yml`) runs
@@ -288,6 +291,16 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     applies its logging defaults programmatically and ships no `defaults.xml` to `<include>`)
     **plus** `TerminalOutputGuard`, which swaps `System.out`/`System.err` for the same file while
     the screen is up and catches everything that never goes through logback.
+  - **The last inch is a REAL terminal, and it is `scripts/tui-drive.sh`** (#426) — the shipped
+    exec jar in a `tmux` pane, keys sent, the frame read back as text. `FakeBackend` is the right
+    rig for the loop and covers none of JLine's detection, raw mode, the alternate screen or the
+    redirect. **On demand, never a gate**, and `--self-check` runs first: a rig that cannot see a
+    frame and an app that draws none are the same silence. What a bare `pty.fork()` gets wrong is
+    the **window size** — it leaves the pty at 0×0, JLine reports zero rows, and the app correctly
+    draws nothing (measured: 0 bytes at 0×0, 1 407 and a full table after one `TIOCSWINSZ`). The
+    startup `ESC[?2027$p` is answered by nothing here, tmux included, and is not waited on; an
+    **empty `kweblens-tui.log` is what a healthy run leaves**, because root is `warn`. Captures
+    land in `.tui/`, gitignored for the same reason as `.playwright/`.
 - **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
   build; what is excluded are its `it`-**tagged tests**, via surefire `excludedGroups`.
 
