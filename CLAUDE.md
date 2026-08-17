@@ -492,6 +492,18 @@ broken. It is not; do not "fix" it.
 (evidence, 4), `HealthTools` (verdicts, 8). A new tool is one `@Tool` method on a bean wired into
 that provider — **keep the count correct here and in the README**, it is the number people check.
 
+**A tool that shares a UI structure must walk it, not sample its top level.**
+`list_resource_kinds` mapped `NavCategory.items()` only, so on every cluster it answered "no
+custom kinds" — the nav's CRDs hang off `subgroups()`, one per API group, and ~110 kinds were
+invisible to the one tool that exists so an assistant need not guess an id (#436). It now walks
+the tree and emits each sub-group as its own category labelled `Custom Resources / <api group>`:
+the category name is the only context a tool gives, and the reader is picking a `resourceId`, not
+rendering a menu. A **promoted** kind stays at exactly one appearance for free, because
+`ClusterNavService` removes it from the sub-groups it builds — a union of the two levels would
+double it. The invariant is testable and is the gate: **walk the output, resolve every
+`resourceId` through `ClusterNavService.find`, and assert nothing the nav knows is missing**
+(`ClusterToolsKindsTest`). A kind count would pass the day someone adds a kind.
+
 **Transport: SSE over WebMVC.** `GET /sse` holds the stream open and emits `event:endpoint`;
 messages POST to `/mcp/message`. **There is no `POST /mcp`** — it 404s. This was probed against a
 running server, so don't "correct" it from `application.yml`. It is also why the CSRF exemption

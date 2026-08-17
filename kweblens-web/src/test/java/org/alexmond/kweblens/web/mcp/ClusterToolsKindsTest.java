@@ -2,6 +2,7 @@ package org.alexmond.kweblens.web.mcp;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinitionBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -13,6 +14,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.resource.CrdService;
+import org.alexmond.kweblens.resource.ResourceDescriptor;
+import org.alexmond.kweblens.web.nav.ClusterNavService;
+import org.alexmond.kweblens.web.nav.NavCatalog;
+import org.alexmond.kweblens.web.nav.NavCategory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,6 +40,15 @@ class ClusterToolsKindsTest {
 
 	private static final String CLUSTER = "mcp-kinds";
 
+	/**
+	 * One cluster id per test, because {@code CrdService.customResourceDescriptors} is
+	 * {@code @Cacheable} on the cluster id with no eviction — two tests seeding different
+	 * CRDs into the same id inside the 10 s TTL would read each other's discovery.
+	 */
+	private static final String INVARIANT_CLUSTER = "mcp-kinds-invariant";
+
+	private static final String FILING_CLUSTER = "mcp-kinds-filing";
+
 	KubernetesClient client;
 
 	@Autowired
@@ -42,9 +57,20 @@ class ClusterToolsKindsTest {
 	@Autowired
 	private ClusterTools tools;
 
+	@Autowired
+	private ClusterNavService clusterNav;
+
+	@Autowired
+	private NavCatalog navCatalog;
+
+	@Autowired
+	private CrdService crds;
+
 	@AfterEach
 	void unregister() {
 		this.registry.unregister(CLUSTER);
+		this.registry.unregister(INVARIANT_CLUSTER);
+		this.registry.unregister(FILING_CLUSTER);
 	}
 
 	private void crd(String plural, String kind, String group) {
@@ -78,6 +104,79 @@ class ClusterToolsKindsTest {
 			.map((c) -> (List<Map<String, String>>) c.get("kinds"))
 			.findFirst()
 			.orElseThrow();
+	}
+
+	/** Every {@code resourceId} the tool listed, in order, duplicates kept. */
+	@SuppressWarnings("unchecked")
+	private List<String> listedIds(List<Map<String, Object>> categories) {
+		return categories.stream()
+			.flatMap((c) -> ((List<Map<String, String>>) c.get("kinds")).stream())
+			.map((kind) -> kind.get("resourceId"))
+			.toList();
+	}
+
+	/** The categories the tool filed one id under — normally exactly one. */
+	private List<String> filedUnder(List<Map<String, Object>> categories, String resourceId) {
+		return categories.stream()
+			.filter((c) -> listedIds(List.of(c)).contains(resourceId))
+			.map((c) -> (String) c.get("category"))
+			.toList();
+	}
+
+	/**
+	 * The invariant, and it is about the nav rather than a kind count: an id
+	 * {@link ClusterNavService#find} resolves is an id every other tool accepts, so an id
+	 * the nav resolves and this tool does not list is a route reachable only by guessing
+	 * — which is the one thing this tool exists to remove. Asserting a number instead
+	 * would pass the day someone adds a kind and forgets the tool.
+	 *
+	 * <p>
+	 * Before #436 this failed on {@code traefik.io.ingressroutes}: the tool mapped
+	 * {@code category.items()} only, and a cluster's CRDs hang off
+	 * {@link NavCategory#subgroups()}.
+	 */
+	@Test
+	void listsEveryKindTheNavCanResolve() {
+		crd("httproutes", "HTTPRoute", "gateway.networking.k8s.io");
+		crd("ingressroutes", "IngressRoute", "traefik.io");
+		this.registry.register(INVARIANT_CLUSTER, "Test cluster", this.client);
+
+		List<String> listed = listedIds(this.tools.listResourceKinds(INVARIANT_CLUSTER));
+
+		List<String> resolvable = Stream
+			.concat(this.navCatalog.categories().stream().flatMap((c) -> c.items().stream()),
+					this.crds.customResourceDescriptors(INVARIANT_CLUSTER).stream())
+			.map(ResourceDescriptor::id)
+			.toList();
+		assertThat(listed).containsAll(resolvable);
+		assertThat(listed)
+			.allSatisfy((id) -> assertThat(this.clusterNav.find(INVARIANT_CLUSTER, id)).as(id).isPresent());
+	}
+
+	/**
+	 * A kind is filed under one category, and a promoted one under the category it was
+	 * promoted into — never there and again under its API group. The nav already removes
+	 * a promoted group (Gateway, whole) or kind (the VPA, part of
+	 * {@code autoscaling.k8s.io}) from the sub-groups it builds, so walking the tree
+	 * inherits that; a flatten that unioned the two levels would not.
+	 */
+	@Test
+	void filesEachKindUnderExactlyOneCategory() {
+		crd("httproutes", "HTTPRoute", "gateway.networking.k8s.io");
+		crd("verticalpodautoscalers", "VerticalPodAutoscaler", "autoscaling.k8s.io");
+		crd("verticalpodautoscalercheckpoints", "VerticalPodAutoscalerCheckpoint", "autoscaling.k8s.io");
+		crd("ingressroutes", "IngressRoute", "traefik.io");
+		this.registry.register(FILING_CLUSTER, "Test cluster", this.client);
+
+		List<Map<String, Object>> categories = this.tools.listResourceKinds(FILING_CLUSTER);
+
+		assertThat(listedIds(categories)).doesNotHaveDuplicates();
+		assertThat(filedUnder(categories, "gateway.networking.k8s.io.httproutes")).containsExactly("Gateway");
+		assertThat(filedUnder(categories, "autoscaling.k8s.io.verticalpodautoscalers")).containsExactly("Autoscaling");
+		// Demoted machinery, and the category names the API group that defines it.
+		assertThat(filedUnder(categories, "autoscaling.k8s.io.verticalpodautoscalercheckpoints"))
+			.containsExactly("Custom Resources / autoscaling.k8s.io");
+		assertThat(filedUnder(categories, "traefik.io.ingressroutes")).containsExactly("Custom Resources / traefik.io");
 	}
 
 	@Test
