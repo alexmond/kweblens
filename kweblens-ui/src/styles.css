@@ -3031,30 +3031,16 @@ body.row-resizing {
   margin-right: 5px;
 }
 
-/* status pills — green/amber/red by component health */
-.status-pill {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.status-ok {
-  background: var(--ok-tint);
-  color: var(--ok-fg);
-}
-
-.status-warn {
-  background: var(--warn-tint);
-  color: var(--warn-fg);
-}
-
-.status-err {
-  background: var(--danger-tint);
-  color: var(--danger-fg);
-}
+/* `.status-pill` and its `.status-ok` / `.status-warn` / `.status-err` tones used to stand here.
+   `StatusBadge` emitted `'status-pill status-' + tone` until #99 made it an `NTag`, and nothing
+   has produced any of the four since: a status pill is `StatusBadge.vue`, whose colours arrive
+   INLINE from `statusTones.ts`, and the list header's counts are `.status-chip` in
+   `ResourceListView.vue`. They were not harmless — `.status-warn` carried `var(--warn-fg)` on
+   `var(--warn-tint)`, the 4.51:1 pair #393 replaced with the derived `--warn-on-tint` that the
+   pill and the chips now share, so a reader who found it would have read the old foreground as
+   the live one. And `contrast-check.mjs` cannot say otherwise about a rule nothing renders: on
+   the very page that measures `.status-chip` at 8.52 dark / 6.92 light, all four of these
+   reported `not present`, which this repo treats as a failed measurement, not a pass (#403). */
 
 /* used/total usage bar (Nodes CPU/Memory) */
 .ubar {
