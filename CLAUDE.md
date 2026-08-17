@@ -202,6 +202,21 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     **parks**, because a test thread that only spins competes with the thread it is waiting for.
     Better still, wait for nothing: where the ordering is knowable, dispatch the exact ticks and
     wait only on a state the other thread publishes (`recoveryPending()`, a latch).
+  - **And a test MOVES the virtual clock from a state, never from a moment** (#444).
+    `ScreenSwitchFailureTest` advanced `MovableClock` five seconds while the retry it had
+    provoked was still on the recovery thread. `WatchSupervisor.adoptOutcome` arms the next
+    attempt one backoff after **the moment it runs**, so an outcome adopted *after* the jump
+    falls due at `T+5s+1s` — one second past a clock nothing will move again — and the test
+    spent `Eventually`'s whole ten seconds and ~20 000 nudges waiting for a retry scheduled
+    beyond the end of the run. **The backoff never grew; the deadline was recomputed under the
+    advance**, which is why "raise the bound" was wrong twice over. Reproduced **1 run in 10**
+    with that test pinned to a saturated core, **0 in 40** idle — a CI-only shape with no
+    product defect behind it, because a real clock always reaches `now + 1s`. Every other
+    clock-mover in the module already waits for `failures()` or `recoveryPending()` first
+    (`ScreenWatchLostTest`, `WatchSupervisorTest`, `WatchSupervisorNoticeTest`); this one was
+    the deviation. **And the fake cluster is mended AFTER that wait, not before** — mended
+    first, a first attempt slow enough to reach it simply *succeeded*, so the
+    retry-after-a-refusal the test exists for was never run at all (3 rounds in 40).
   Three things about the screen (#364) that a change will get wrong otherwise:
   - **Build widget rows for the visible window only.** Table build+render at 132×44, warmed:
     2 206 rows cost **0.69 ms** windowed vs **27.7 ms** naive (40×); 10 000 rows cost **0.68 ms**
