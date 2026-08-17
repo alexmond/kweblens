@@ -38,7 +38,7 @@ Because it runs as a server rather than on your laptop, the browser needs no kub
 | **Cluster management** | Add, edit and remove clusters at runtime from a dedicated Clusters page, not just from config |
 | **Command palette** | `Ctrl`/`⌘`-`K` to switch cluster or jump to a kind |
 | **Node detail** | Overview, the pods scheduled on the node, and its metrics |
-| **MCP server** | In-jar MCP (SSE over WebMVC) exposing **16 read-only tools** to AI assistants — see [MCP server](#mcp-server) |
+| **MCP server** | In-jar MCP (SSE over WebMVC) exposing **17 read-only tools** to AI assistants — see [MCP server](#mcp-server) |
 | **Audit** | Mutating actions recorded and queryable at `/api/v1/audit` |
 
 Write actions are **suggest → confirm → apply**: something to look at first, an explicit
@@ -155,14 +155,19 @@ Helm, metrics, multi-source logs, port-forward, node and pod-file endpoints live
 ## MCP server
 
 `kweblens-web` runs an MCP server in the same jar — SSE over WebMVC, so `GET /sse` opens the
-stream and messages post back to the endpoint it hands out. It exposes **16 read-only tools**,
+stream and messages post back to the endpoint it hands out. It exposes **17 read-only tools**,
 in three groups:
 
 | Group | Tools |
 |---|---|
 | Orientation (`ClusterTools`) | `listClusters`, `listNamespaces`, `listPods`, `listResourceKinds` |
 | Evidence (`DiagnosticTools`) | `describeResource`, `listResources`, `getEvents`, `getPodLogs` |
-| Verdicts (`HealthTools`) | `checkWorkloadHealth`, `checkNetworkHealth`, `checkStorageHealth`, `checkConfigUsage`, `checkSecurity`, `getPodUsage`, `getNodeUsage`, `listHelmReleases` |
+| Verdicts (`HealthTools`) | `diagnose`, `checkWorkloadHealth`, `checkNetworkHealth`, `checkStorageHealth`, `checkConfigUsage`, `checkSecurity`, `getPodUsage`, `getNodeUsage`, `listHelmReleases` |
+
+`diagnose` is the open-ended one: every deterministic check at once, as a single prioritised
+finding list — the same one the dashboard's diagnosis panel shows. **It reaches no model.** The
+tools inject a read-only port that has no `analyse` method, so the one call in kweblens that
+does talk to an LLM stays behind its authenticated, audited `POST`.
 
 Nothing on the tool surface writes. Output is redacted at the tool boundary: Secret `data` /
 `stringData` values and the `last-applied-configuration` annotation are replaced (keys kept),

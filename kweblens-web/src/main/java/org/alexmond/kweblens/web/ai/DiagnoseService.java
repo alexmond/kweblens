@@ -44,11 +44,17 @@ import org.alexmond.kweblens.resource.ResourceService;
  * inference costs money and ships cluster state to a third party, so it is a non-GET,
  * auth-gated in both security modes, and audited. Panel mounts and namespace switches
  * used to buy an analysis each; now they cost nothing.
+ *
+ * <p>
+ * That asymmetry is in the type system as well as in this paragraph.
+ * {@link DeterministicDiagnosis} is the read half, and it is what the MCP tool surface
+ * injects — a tool holding this class instead would be one method name away from letting
+ * a model spend money by asking.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class DiagnoseService {
+public class DiagnoseService implements DeterministicDiagnosis {
 
 	private static final ResourceDescriptor PODS = WellKnownKinds.PODS;
 
@@ -203,6 +209,7 @@ public class DiagnoseService {
 	 * tempting a cache miss makes it. The summary it returns was bought by an earlier
 	 * {@link #analyse} and is served only when the findings still fingerprint the same.
 	 */
+	@Override
 	public DiagnoseResult diagnose(String clusterId, String namespace) {
 		Checks checks = checks(clusterId, namespace);
 		return served(clusterId, namespace, checks, DiagnosisSummaryCache.fingerprint(checks.findings()));

@@ -514,10 +514,35 @@ broken. It is not; do not "fix" it.
 
 ## MCP server
 
-`kweblens-web` runs an in-jar MCP server exposing **16 read-only tools**, registered together by
+`kweblens-web` runs an in-jar MCP server exposing **17 read-only tools**, registered together by
 `McpConfig`'s `MethodToolCallbackProvider`: `ClusterTools` (orientation, 4), `DiagnosticTools`
-(evidence, 4), `HealthTools` (verdicts, 8). A new tool is one `@Tool` method on a bean wired into
-that provider — **keep the count correct here and in the README**, it is the number people check.
+(evidence, 4), `HealthTools` (verdicts, 9). A new tool is one `@Tool` method on a bean wired into
+that provider.
+
+**The count is a gate, not a habit** (#383). `McpToolSurfaceTest` asserts two things and both are
+load-bearing. **The set of `@Tool` methods in `web/mcp` must EQUAL what the provider registers** —
+a count would pass the day someone adds a tool to a bean `McpConfig` does not name, which is a
+method nobody can call. And **every live document must state the registered total**: the number is
+on the README's feature table, in `docs/deployment.md`, and on three `docs/modules/ROOT/pages/`
+pages, it is the first thing a reader checks, and it went stale. Dated snapshots (the roadmap's
+history, `CHANGELOG.adoc`, audits, research notes) are deliberately **not** in that list — theirs
+is the number that was true when they were written. A listed file that *stops* stating the count
+is also a failure, so the list cannot quietly claim coverage it no longer has.
+
+**A tool must not be able to buy an inference.** `HealthTools.diagnose` serves
+`DiagnoseService.diagnose()`'s deterministic findings, and the tool bean injects
+**`DeterministicDiagnosis`** — a port with no `analyse` method, the same enforcement `kweblens-tui`
+uses to be read-only. An interface only constrains the field someone declared, so
+`McpToolsNeverCallAModelTest` fails the build if any shipped class in `web/mcp` so much as
+*mentions* `DiagnoseService` or `org.springframework.ai.chat`, and if the port ever declares a
+second method. **`ToolRedaction` does not apply to it and that is not an omission**: it takes a
+`GenericKubernetesResource` and strips Secret `data`/`stringData` and
+`last-applied-configuration`, while a `DiagnoseResult` holds no object at all — only strings,
+booleans and an `Instant`, none copied from a `spec`, a `data` map or an annotation. The standing
+rule is about tools returning **raw objects**; `checkSecurity` and `getEvents` are already
+projections on the same footing. What it does not claim: a finding's `detail` can be an event
+message, i.e. cluster-controlled text, and `ToolRedaction` would not have caught a credential
+there either — it recognises Secret *fields*, not secret-shaped strings.
 
 **A tool that shares a UI structure must walk it, not sample its top level.**
 `list_resource_kinds` mapped `NavCategory.items()` only, so on every cluster it answered "no

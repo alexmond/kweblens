@@ -193,7 +193,7 @@ Paste it with a date on it, and treat it as a snapshot rather than a contract.
 
 == What the agent can and cannot do
 
-* *Nothing on the tool surface writes.* All 16 tools are reads. Changing the cluster stays on the
+* *Nothing on the tool surface writes.* All 17 tools are reads. Changing the cluster stays on the
   guarded suggest → preview → confirm → apply path in the UI, which is deliberately not reachable
   from here.
 * *Tool output is redacted at the boundary*, more strictly than the dashboard redacts anything —
@@ -244,6 +244,6 @@ streams the SPA uses.
 
 == Related
 
-* xref:mcp.adoc[MCP server] — the 16 tools, the transport, and what redaction does
+* xref:mcp.adoc[MCP server] — the 17 tools, the transport, and what redaction does
 * xref:security.adoc[Security and identity] — open-mode, and the one shared identity
 * xref:clusters.adoc[Connecting clusters] — where cluster ids come from

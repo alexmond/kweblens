@@ -19,6 +19,8 @@ import org.alexmond.kweblens.health.WorkloadHealth;
 import org.alexmond.kweblens.metric.MetricService;
 import org.alexmond.kweblens.metric.UsageSummary;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
+import org.alexmond.kweblens.web.ai.DeterministicDiagnosis;
+import org.alexmond.kweblens.web.ai.DiagnoseResult;
 import org.alexmond.kweblens.web.helm.HelmReleaseSummary;
 import org.alexmond.kweblens.web.helm.HelmService;
 import org.alexmond.kweblens.web.nav.NavCatalog;
@@ -55,6 +57,63 @@ public class HealthTools {
 	private final MetricService metrics;
 
 	private final HelmService helm;
+
+	/**
+	 * The read half of the diagnosis. Deliberately <b>not</b> {@code DiagnoseService}:
+	 * the port has no {@code analyse} method, so the one call in kweblens that reaches an
+	 * LLM cannot be made from a surface a model drives. See
+	 * {@link DeterministicDiagnosis}.
+	 */
+	private final DeterministicDiagnosis diagnosis;
+
+	/**
+	 * The whole finding list, which is a verdict — which is why it is here and not in
+	 * {@code DiagnosticTools}, whose job is to hand over raw evidence.
+	 *
+	 * <p>
+	 * One tool rather than one per dimension. The dimensions already have tools; what was
+	 * missing is the question an operator actually asks first, which is not about a
+	 * dimension at all. Splitting it would also hand the model the job the checks do
+	 * themselves — deduplicating an event against the container state that already
+	 * explained it, sorting by severity, and not reporting a Service twice — and a model
+	 * that called three of the four would get a confidently partial answer with nothing
+	 * saying so.
+	 *
+	 * <p>
+	 * {@code DiagnoseResult} is returned unchanged, so the assistant and the dashboard's
+	 * diagnosis panel read the same bytes from the same call. Its {@code summary} is
+	 * served only from the cache and only when the findings still fingerprint the same —
+	 * reading it never buys one.
+	 *
+	 * <p>
+	 * <b>No {@link ToolRedaction}, and the reason is the return type.</b> That guard
+	 * takes a {@code GenericKubernetesResource} and strips the two places an object
+	 * carries a secret: a Secret's {@code data}/{@code stringData} maps, and the verbatim
+	 * copy of the manifest in {@code last-applied-configuration}. A
+	 * {@code DiagnoseResult} holds no object at all — every field is a {@code String}, a
+	 * {@code boolean} or an {@code Instant}, and no validator copies a {@code spec}, a
+	 * {@code data} map or an annotation into one. The same is already true of
+	 * {@code checkSecurity} and {@code getEvents}; the standing rule is about tools
+	 * returning <i>raw objects</i>.
+	 *
+	 * <p>
+	 * What that does <b>not</b> claim: a finding's {@code detail} can be an event
+	 * message, which is cluster-controlled text, so an operator or controller that writes
+	 * a credential into an event has published it to anything that can read events — and
+	 * {@code ToolRedaction} would not have caught it either, because it recognises Secret
+	 * fields, not secret-shaped strings.
+	 */
+	@Tool(description = "Every deterministic check at once, as one prioritised finding list: failing pods with "
+			+ "the container state and exit code behind them, Services with nothing ready, unbound volume claims, "
+			+ "deduplicated warning events, and what the scope permits. Each finding names an object, the observed "
+			+ "evidence and a suggested fix. Ask this first for an open-ended 'what is wrong here?'; the check* "
+			+ "tools answer one dimension each. 'incomplete' lists checks that did not fully run over this scope — "
+			+ "what it names is UNCHECKED, not clean. No model is consulted; a 'summary', when present, is a cached "
+			+ "one an operator paid for about exactly these findings.")
+	public DiagnoseResult diagnose(@ToolParam(description = "kweblens cluster id") String clusterId,
+			@ToolParam(required = false, description = "namespace, or omit for the whole cluster") String namespace) {
+		return this.diagnosis.diagnose(clusterId, namespace);
+	}
 
 	@Tool(description = "Check workload health: per-kind tallies plus the NAMED objects needing attention, "
 			+ "each with a reason such as '2/3 ready', 'CrashLoopBackOff' or 'ImagePullBackOff'. "
