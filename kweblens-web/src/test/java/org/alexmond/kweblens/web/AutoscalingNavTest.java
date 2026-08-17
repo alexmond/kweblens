@@ -18,6 +18,7 @@ import org.alexmond.kweblens.web.nav.ClusterNavService;
 import org.alexmond.kweblens.web.nav.NavCategory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * The Autoscaling category (#428): the built-in HorizontalPodAutoscaler and the
@@ -122,6 +123,24 @@ class AutoscalingNavTest {
 
 		assertThat(category("as-1", "Autoscaling").items()).extracting("kind")
 			.containsExactly("HorizontalPodAutoscaler", "VerticalPodAutoscaler");
+	}
+
+	/**
+	 * The scene from #433: two leaves of one list, one built-in and one CRD-delivered,
+	 * and nothing on screen says which is which. The CRD's label is written the way the
+	 * catalog's is, derived by {@code KindLabel} from what the CRD declares.
+	 *
+	 * <p>
+	 * The ids are asserted in the same breath because that is what must NOT move: the
+	 * label is what a reader sees, the id is what a bookmark resolves.
+	 */
+	@Test
+	void labelsTheCrdKindTheWayTheBuiltInBesideItIsLabelled() {
+		vpaCrds();
+
+		assertThat(category("as-9", "Autoscaling").items()).extracting("label", "id")
+			.containsExactly(tuple("Horizontal Pod Autoscalers", "horizontalpodautoscalers"),
+					tuple("Vertical Pod Autoscalers", "autoscaling.k8s.io.verticalpodautoscalers"));
 	}
 
 	@Test
