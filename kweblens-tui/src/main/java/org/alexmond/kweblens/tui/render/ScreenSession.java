@@ -69,6 +69,15 @@ import org.alexmond.kweblens.tui.screen.WatchSupervisor;
  * newer than the list lands on top of it instead of being wiped by it (GH#420). The two
  * paths that list on the calling thread release the same hold at the end of
  * {@link #load(int)}.
+ *
+ * <p>
+ * <b>And a reconnect the operator navigated past installs nothing.</b> {@link #switchTo}
+ * runs on the render thread while {@link #reconnect} may be mid-flight on the recovery
+ * thread, reading a query that has since been retargeted; the rows it hands back
+ * therefore belong to a kind or a scope nobody is showing. {@link WatchSupervisor}
+ * discards them by generation, and {@link #load(int)} — which is exactly the set of paths
+ * that subscribe and list on the calling thread — is what tells it the screen is live
+ * again on its own subscription instead (GH#431).
  */
 public class ScreenSession implements Navigation, AutoCloseable {
 
@@ -199,11 +208,23 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * calling thread — the first load and {@link #switchTo} — where no tick can run in
 	 * between and the hold is therefore invisible. The reconnect is the path where it is
 	 * not, and it releases the hold in {@link #install} instead.
+	 *
+	 * <p>
+	 * <b>The supervisor is told the same thing, in the same place.</b> Reaching this line
+	 * means the screen has a subscription of its own <em>and</em> that subscription's
+	 * rows, which is the whole content of "the table is live" — so a switch typed while a
+	 * reconnect was in flight ends the loss here rather than waiting for a recovery whose
+	 * rows will be discarded (GH#431). Pairing it with the release rather than putting it
+	 * in {@link #switchTo} is deliberate: {@link #load(int)} is exactly the set of paths
+	 * that subscribe and list on the calling thread, so there is no second place to
+	 * remember. If the list throws, neither half runs and the screen keeps saying NOT
+	 * LIVE, which is true.
 	 */
 	public void load(int chunkSize) {
 		this.chunkSize = chunkSize;
 		this.cluster.list(this.query.get(), chunkSize, (page) -> this.model.upsert(this.projection.project(page)));
 		this.coalescer.installed(this.subscription.get());
+		this.supervisor.watching(this.subscription.get());
 	}
 
 	/**
@@ -240,6 +261,15 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * under the new kind's title for as long as the list took. A watch that dies is the
 	 * opposite case (nobody asked, and it can take thirty seconds), which is why
 	 * {@link WatchSupervisor} does that one off-thread.
+	 *
+	 * <p>
+	 * <b>Which is why this can land in the middle of one.</b> A recovery already in
+	 * flight reads {@link #query} on its own thread and will hand back rows for whatever
+	 * it read; the lease taken here moves the generation past it, so those rows are
+	 * discarded rather than installed, and {@link #load(int)} tells the supervisor the
+	 * screen is live on this subscription (GH#431). Nothing here waits for the recovery
+	 * thread — a navigation the operator asked for must not be held up by a network call
+	 * nobody asked for.
 	 */
 	public void switchTo(ResourceQuery next, Predicate<ResourceRow> filter) {
 		Subscription previous = this.watch.getAndSet(null);
