@@ -372,15 +372,11 @@ body {
 }
 
 /* Login modal */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
+/* `.modal-backdrop` — the hand-rolled dimming layer — stood here. Every modal is an `NModal`
+   now and the scrim is naive's `.n-modal-mask`, which is also what centres the dialog, so
+   nothing emits a backdrop element of ours. The live classes in this family are `.modal-note`
+   and `.modal-actions`; bare `.modal` below is NOT emitted either and is left only because it
+   is outside this sweep's list (#447). */
 
 .modal {
   background: var(--panel);
@@ -437,11 +433,6 @@ body {
   margin: 0 0 14px;
   font-size: 14px;
   line-height: 1.45;
-}
-
-.dialog-field {
-  display: block;
-  margin-bottom: 4px;
 }
 
 .modal-actions .btn.danger {
@@ -889,32 +880,19 @@ body {
   color: var(--text);
 }
 
-.sort-ind {
-  color: var(--accent);
-  font-size: 10px;
-}
+/* `.sort-ind` stood here — the hand-drawn sort arrow of the pre-Naive table. Sorting is
+   `NDataTable`'s `sorter` now and the arrow is `.n-data-table-sorter`. */
 
 .spacer {
   flex: 1;
 }
 
-.ns-select {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.ns-select select {
-  font-size: 13px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--text);
-  min-width: 160px;
-}
+/* `.ns-select` and `.ns-select select` stood here: a bare `<select>` for the namespace. The
+   picker moved to the brand bar and is an `NSelect` (`BrandBar.vue:60`), whose control is
+   `.n-base-selection` — the very element `contrast-check.mjs`'s header warns about, because
+   naive paints its white box as a SIBLING of the input. The live neighbour below, `.ns-note`,
+   is emitted by `ResourceListView.vue:139` and is a different thing: the "Cluster-scoped"
+   label shown where there is no namespace to pick. */
 
 /* Whether this refuses to shrink lives with `.content-head` above (#331), because that is the
    flex container whose algorithm squeezes it. */
@@ -926,56 +904,14 @@ body {
   border-radius: 10px;
 }
 
-/* Column-visibility menu (JS-free <details> dropdown) */
-.cols-menu {
-  position: relative;
-}
-
-.cols-menu > summary {
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-  font-size: 13px;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-}
-
-.cols-menu > summary::-webkit-details-marker {
-  display: none;
-}
-
-.cols-menu > ul {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 60;
-  min-width: 12rem;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
-  max-height: 320px;
-  overflow: auto;
-}
-
-.col-toggle {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  padding: 3px 6px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.col-toggle:hover {
-  background: var(--bg);
-}
+/* The column-visibility menu's first implementation stood here — a JS-free `<details>`
+   dropdown: `.cols-menu`, its `> summary` (and the `::-webkit-details-marker` reset), its
+   `> ul`, and the `.col-toggle` rows with their `:hover`. The FEATURE is still on screen and
+   that is exactly why the names mislead: it is now an `NPopover` (`ResourceListView.vue:140`)
+   whose live classes are `.cols-badge`, `.cols-pop`, `.cols-note` and `.cols-why` — and those
+   are styled in that component's OWN scoped `<style>` block, not in this file at all. So a
+   reader who searches styles.css for the column picker finds only these dead rules, which is
+   the whole trap. */
 
 /* Clickable table cell cross-links (namespace, owner, …) */
 .cell-link {
@@ -1219,12 +1155,6 @@ body {
   font-weight: 700;
 }
 
-.ov-lbl {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 2px;
-}
-
 .ov-api {
   margin: 14px 0 4px;
   font-size: 13px;
@@ -1318,21 +1248,11 @@ body {
   background: rgba(10, 122, 194, 0.1);
 }
 
-.grid tr.row-checked td {
-  background: rgba(10, 122, 194, 0.06);
-}
-
-.grid th.chk,
-.grid td.chk {
-  width: 34px;
-  text-align: center;
-  padding-right: 0;
-}
-
-.grid td.chk input,
-.grid th.chk input {
-  cursor: pointer;
-}
+/* `.grid tr.row-checked td` and the `.grid th.chk` / `.grid td.chk` checkbox-column rules
+   stood here. Bulk selection is `NDataTable`'s own: `ResourceTable.vue` passes a `selection`
+   type column and `checkedRowKeys`, so the cell is `.n-data-table-td--selection` holding an
+   `.n-checkbox`, and the checked-row tint is naive's. `.bulk-bar` below — the "N selected"
+   strip in `ResourceListView.vue:201` — is the live part of this feature. */
 
 .bulk-bar {
   display: flex;
@@ -1786,27 +1706,12 @@ body {
   margin: 0 0 6px;
 }
 
-.acc-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.acc-head:hover {
-  color: var(--fg);
-}
-
-.acc-caret {
-  display: inline-block;
-  transition: transform 0.12s ease;
-  font-size: 9px;
-}
-
-.acc-caret.open {
-  transform: rotate(90deg);
-}
+/* `.acc-head` (+`:hover`) and `.acc-caret` (+`.open`) stood here. `Accordion.vue` is an
+   `NCollapse`/`NCollapseItem` now, so the clickable header is `.n-collapse-item__header` and
+   the caret is naive's own `.n-collapse-item-arrow` — the rotation included. The one class of
+   the accordion still emitted is `.acc-count` below (`Accordion.vue:15`); the audit that
+   listed these also named `.acc`, but `Accordion.vue` does not write that either and this file
+   has no rule for it. */
 
 .acc-count {
   background: var(--subtle-bg);
@@ -2103,47 +2008,22 @@ body {
   gap: 4px;
 }
 
-.repl {
-  width: 4.5rem;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
-}
+/* Two dead generations of the YAML editor stood here. `.yaml-edit` (+`.yaml-edit.tall`) was
+   the plain `<textarea>`; `.yaml-edit-cm` and its `.cm-editor` / `.cm-editor.cm-focused`
+   descendants were the CodeMirror host that replaced it. Neither name is emitted now — the
+   editor's own class is `.yaml-editor-modal` (`YamlEditorModal.vue:149`), styled under that
+   name further down this file, and the CodeMirror rules that are still in force are written
+   against `.cm-*` directly.
 
-.yaml-edit {
-  width: 100%;
-  min-height: 300px;
-  box-sizing: border-box;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px;
-  resize: vertical;
-  color: var(--text);
-  background: #f6f8fa;
-}
+   `.yaml-edit` is a second instance of the colour trap this sweep is about: it set
+   `color: var(--text)` on a hard-coded `background: #f6f8fa`, with no dark-theme override, so
+   in dark mode it was near-white on near-white. It never shipped that way only because nothing
+   has rendered it — and `contrast-check.mjs` reports a rule nothing renders as `not present`,
+   never as a failure (#447).
 
-.yaml-edit.tall {
-  min-height: 340px;
-}
-
-/* CodeMirror 6 YAML editor (drawer edit mode) — fills a tall pane and scrolls internally. */
-.yaml-edit-cm {
-  height: 62vh;
-  min-height: 320px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.yaml-edit-cm .cm-editor {
-  height: 100%;
-}
-.yaml-edit-cm .cm-editor.cm-focused {
-  outline: none;
-}
+   Beware the name when searching: `.yaml-edit` is a SUBSTRING of the live
+   `.yaml-editor-modal`, so a plain grep for it reports hits that are not this rule. Boundary
+   aware matching is what separates them. */
 
 /* The resource table fills the flex-column list view and scrolls its own body (flex-height),
    pinning the header. Global (not scoped) so it reliably reaches the NDataTable root. */
@@ -2152,13 +2032,9 @@ body {
   min-height: 0;
 }
 
-/* Structured (form) editor tab. */
-.form-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 6px 0 14px;
-}
+/* Structured (form) editor tab. Its `.form-tab` wrapper rule stood here and is gone — the tab
+   is an `NTabPane` and the pane element carries no class of ours; `.form-section` below and
+   `.kv-*` are what the form actually emits. */
 .form-section h4 {
   margin: 0 0 8px;
   font-size: 11px;
@@ -2188,12 +2064,6 @@ body {
   display: flex;
   gap: 2px;
   align-items: center;
-}
-.form-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 2px;
 }
 .form-hint {
   color: var(--muted);
@@ -2418,11 +2288,6 @@ body {
   width: 660px;
 }
 
-.create-btn {
-  font-size: 12px;
-  padding: 4px 10px;
-}
-
 /* Dockable terminal */
 /* The right-hand panel is a vertical split: the scrolling content on top and the
    dockable terminal/log pane at the bottom. The left nav stays full height beside it. */
@@ -2551,12 +2416,6 @@ body.row-resizing {
   flex: 1;
   min-height: 0;
   display: flex;
-}
-
-.dock-slot {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
 }
 
 .dock-session {
@@ -2749,120 +2608,37 @@ body.row-resizing {
   opacity: 0.85;
 }
 
-/* Port-forward status pills */
-.pf-status {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
+/* The port-forward status pills (`.pf-status` and its `.pf-active` / `.pf-closed` /
+   `.pf-failed` tones) and the Helm origin badge (`.helm-badge`) stood here. Both surfaces are
+   now `NTag`: `PortForwards.vue` renders the status through `NTag` with
+   `type: STATUS_TYPE[status]`, and `HelmReleasesPane.vue` renders `kweblens` / `external`
+   through `NTag` with `type: 'info'` / bordered-false. The string `pf-` appears nowhere in the
+   SPA. Three of the four dead rules were also hard-coded for a light background — `.pf-closed`
+   at `#eceff1`/`#555` and `.helm-badge` at `#e6f0fb`/`#0a6cbd` — with no dark-theme override
+   anywhere, and no `contrast-check.mjs` run could ever have said so, because a rule nothing
+   renders measures `not present`, which this repo reads as a failed measurement (#447). */
 
-.pf-active {
-  background: var(--ok-tint);
-  color: var(--ok-fg);
-}
+/* The expandable workload → pods tree's `.tree-toggle` also stood here. The tree is now
+   `NDataTable`'s own: `ResourceTable.vue` passes `fetchChildren`, Naive renders the expand
+   control on the name column, and the class is `.n-data-table-expand-trigger` — which
+   `ResourceTable.vue:303` names directly when it decides a click was on a control. */
 
-.pf-closed {
-  background: #eceff1;
-  color: #555;
-}
+/* The whole hand-rolled per-row kebab menu stood here — `.rowmenu-cell`, `.rowmenu`, `.kebab`
+   (+`:hover`), `.menu`, and `.menu-item` with its `.danger` and `:hover` variants. The second
+   half of the same implementation (`.menu-sep`, `.menu-portal`, `.menu-item.has-sub`,
+   `.sub-arrow`, `.submenu`) stood further down this file and went with it.
 
-.pf-failed {
-  background: var(--danger-tint);
-  color: var(--danger-fg);
-}
+   The row kebab is an `NDropdown` now: `rowActions.ts` builds the options and
+   `ResourceTable.vue` renders them, so the DOM is naive's (`.n-dropdown-option`,
+   `.n-data-table-expand-trigger` next door), the portal is `NDropdown`'s own, and the
+   container submenu is a nested `children` array rather than a CSS `:hover` reveal. The ONE
+   class of that block still reachable is `.menu-danger`, which `rowActions.ts:365` and
+   `KebabMenu.vue:18` pass as an option's `props.class` — it is the rule immediately below, and
+   it is why deleting by prefix would have been wrong here.
 
-.helm-badge {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 9px;
-  font-size: 11px;
-  font-weight: 600;
-  background: #e6f0fb;
-  color: #0a6cbd;
-}
-
-/* expandable workload → pods tree */
-.tree-toggle {
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 10px;
-  padding: 0 6px 0 0;
-  line-height: 1;
-}
-
-.tree-toggle:hover {
-  color: var(--accent);
-}
-
-/* per-row kebab actions menu */
-.rowmenu-cell {
-  width: 30px;
-  text-align: right;
-}
-
-.rowmenu {
-  position: relative;
-  display: inline-block;
-}
-
-.kebab {
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--muted);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.kebab:hover {
-  background: #eef2f5;
-  color: var(--text);
-}
-
-.menu {
-  position: absolute;
-  right: 4px;
-  top: 100%;
-  z-index: 60;
-  min-width: 150px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-}
-
-.menu-item {
-  border: 0;
-  background: transparent;
-  text-align: left;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 13px;
-  cursor: pointer;
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.menu-item:hover {
-  background: #f0f4f7;
-}
-
-.menu-item.danger {
-  color: var(--danger-fg);
-}
-
-.menu-item.danger:hover {
-  background: var(--danger-tint);
-}
+   `.kebab`, `.menu` and `.submenu` were spared by the 2026-08-06 audit's own matcher, which
+   counted a selector as live when its bare name appeared anywhere in a source file: every one
+   of their hits is a PROSE COMMENT about the menu, not a class attribute (#447). */
 
 /* Danger items in a Naive NDropdown row-actions menu (options carry class "menu-danger"). */
 .n-dropdown-option-body.menu-danger .n-dropdown-option-body__label,
@@ -3050,17 +2826,10 @@ body.row-resizing {
   min-width: 96px;
 }
 
-.ubar-track {
-  height: 4px;
-  border-radius: 2px;
-  background: #e4e9ec;
-  overflow: hidden;
-}
-
-.ubar-fill {
-  height: 100%;
-  border-radius: 2px;
-}
+/* `.ubar-track` and `.ubar-fill` stood here. `UsageBar.vue` renders an `NProgress` between
+   `.ubar` above and `.ubar-text` below, so the bar is `.n-progress-graph-line-rail` and
+   `.n-progress-graph-line-fill` and its colour comes from the component's props. The dead
+   track also hard-coded `#e4e9ec` with no dark-theme override. */
 
 .ubar-text {
   font-size: 12px;
@@ -3073,12 +2842,6 @@ body.row-resizing {
   max-width: 520px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-actions {
-  display: flex;
-  gap: 6px;
   white-space: nowrap;
 }
 
@@ -3102,15 +2865,6 @@ body.row-resizing {
 
 .adv-options {
   margin: 4px 0 8px;
-}
-
-.adv-toggle {
-  background: none;
-  border: none;
-  padding: 4px 0;
-  font-size: 13px;
-  color: var(--accent, #2563eb);
-  cursor: pointer;
 }
 
 .adv-body {
@@ -3149,19 +2903,9 @@ body.row-resizing {
   color: #e2e8f0;
 }
 
-.yaml-view {
-  margin: 0;
-  padding: 10px;
-  max-height: 60vh;
-  overflow: auto;
-  font-size: 12px;
-  line-height: 1.4;
-  background: #0f172a;
-  color: #e2e8f0;
-  border: 1px solid var(--border, #d6dde2);
-  border-radius: 6px;
-  white-space: pre;
-}
+/* `.yaml-view` — a read-only YAML `<pre>` — stood here. The component of that name renders
+   `.yk-*` highlight tokens (`yaml.ts`) inside the drawer's own panes and never carries a
+   `.yaml-view` class; the `<pre>` this rule was written for is `.helm-preview pre` above. */
 
 .btn.danger {
   color: var(--danger-fg);
@@ -3183,13 +2927,18 @@ body.row-resizing {
   color: var(--danger-fg);
 }
 
-/* Helm "update available" chip on a release's version cell. */
-.update-chip {
-  margin-left: 6px;
-  background: var(--warn-tint);
-  color: var(--warn-fg);
-  font-weight: 600;
-}
+/* `.update-chip` — the Helm "update available" chip on a release's version cell — stood here.
+   Nothing has emitted it since the releases table became an `NDataTable`: the chip is now
+   `HelmReleasesPane.vue`'s `h(NTag, { type: 'warning' }, () => '↑ ' + latestVersion)`, which
+   takes naive's own warning tone and carries the old rule's `margin-left: 6px` as an inline
+   style. No `.vue`/`.ts` writes or composes the name at all. It carried the same defect #403
+   removed from
+   `.status-warn`: `var(--warn-fg)` on `var(--warn-tint)`, the 4.51:1 pair #393 replaced
+   everywhere it is actually painted with the derived `--warn-on-tint`. And nothing could have
+   told you — measured on the Helm/Releases page itself, in both themes, that page's own
+   `.count` reads 5.10:1 dark / 5.25:1 light while `.update-chip` reports `not present`, which
+   this repo treats as a failed measurement, not a pass (#447). No PREPARE can fix that: there
+   is no markup to bring on screen. */
 
 /* Helm repositories admin — add-repo form. */
 .repo-add {
@@ -3358,51 +3107,13 @@ body.dragging {
   cursor: default;
 }
 
-/* Separator between action groups in the row kebab menu. */
-.menu-sep {
-  height: 1px;
-  margin: 4px 0;
-  background: var(--border);
-}
-
-/* Kebab menu rendered in a body portal (fixed) so the table's overflow never clips it. */
-.menu-portal {
-  right: auto;
-  top: auto;
-  z-index: 200;
-}
-
-/* Container submenu (Attach to Pod / Shell / Logs) — opens to the left, matching Freelens. */
-.menu-item.has-sub {
-  position: relative;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 14px;
-}
-.menu-item.has-sub .sub-arrow {
-  color: var(--muted);
-  font-size: 12px;
-}
-.menu-item.has-sub .submenu {
-  position: absolute;
-  right: 100%;
-  top: -5px;
-  display: none;
-  flex-direction: column;
-  min-width: 160px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
-  padding: 4px;
-  z-index: 1;
-}
-.menu-item.has-sub:hover .submenu {
-  display: flex;
-}
+/* The rest of the hand-rolled kebab menu stood here: `.menu-sep` (group separator),
+   `.menu-portal` (the fixed body portal that kept the table's overflow from clipping it), and
+   the container submenu — `.menu-item.has-sub`, `.sub-arrow` and `.submenu`, opened by a CSS
+   `:hover`. All of it is `NDropdown`'s job now; see the tombstone at `.menu-danger` above,
+   which is the one class of that implementation still reachable. A per-container action is a
+   nested `children` array in `rowActions.ts`, not a hover-revealed absolutely-positioned
+   panel. */
 
 /* Diagnostics panel (#27): read-only capabilities + effective config. */
 .diag-modal {
