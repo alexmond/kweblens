@@ -18,7 +18,15 @@
 #     JLine reports 0x0, the renderer has zero area, and the app correctly draws nothing.
 #     One `TIOCSWINSZ` later, on the same bare pipe pair with still nobody answering a DECRQM,
 #     the same jar emitted `kweblens-tui [R] ... 7 rows` and a full table. Measured 2026-08-17:
-#     0 bytes of frame at 0x0, 1407 bytes at 44x132, one variable changed.
+#     38 bytes at 0x0 (the mode query, the alternate screen, hide cursor) and no frame at all,
+#     1407 bytes and a table at 44x132, one variable changed.
+#
+# Since #442 that silence is gone: a terminal reporting 0x0 is REFUSED before the screen goes up
+# — "No room to draw - this terminal reports 0x0 ...", exit code 6, printed on the primary screen
+# after the alternate screen is left behind. A size that goes degenerate LATER cannot be printed
+# anywhere the operator can see, so it lands in the log at WARN instead and the screen redraws
+# itself when the terminal has room again. So: on a bare pty you now get a sentence; a blank pane
+# with an empty log is once again a real symptom rather than the rig.
 #
 # So the rig is `tmux`, not a hand-rolled pty. tmux is a real terminal emulator: it owns a pty
 # WITH a size, honours a mode set, tracks the alternate screen, carries a query's reply back to

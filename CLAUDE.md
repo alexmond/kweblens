@@ -316,6 +316,21 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     startup `ESC[?2027$p` is answered by nothing here, tmux included, and is not waited on; an
     **empty `kweblens-tui.log` is what a healthy run leaves**, because root is `warn`. Captures
     land in `.tui/`, gitignored for the same reason as `.playwright/`.
+  - **A tty is not an area, and a terminal that has none is refused in words** (#442).
+    `System.console()` answers only "is there a terminal"; a pty whose window size nobody set is a
+    tty that reports **0×0**, and the app then wrote 38 bytes of setup, drew nothing, and left an
+    empty log — from outside, a hang. So `TuiScreen` reads the size **from the renderer's own
+    source** — `runner.terminal().size()`, which is exactly what `Terminal.draw` turns into
+    `Frame.area()` on every frame, never `$LINES`/`$COLUMNS` — and refuses with `EXIT_NO_AREA` (6)
+    when **either** dimension is ≤ 0 (132×0 has as much room as 0×0). **The refusal is printed
+    after every resource is closed**: between `TuiRunner.create` and its `close` the alternate
+    screen is up and `TerminalOutputGuard` owns `System.out`, so a message written there is either
+    wiped or filed in the log — the exact silence the refusal exists to end. **A startup check
+    covers only startup**: a degenerate size can arrive later from a SIGWINCH, when there is no
+    terminal left to print on, so `DrawableAreaWatch` wraps the renderer and logs one WARN **per
+    transition** naming the measurement. It does **not** quit — measured on a bare pty, one
+    `TIOCSWINSZ` back to 44×132 and the same process drew a full table, so a session is not worth
+    tearing down for a size that usually comes back.
 - **`kweblens-it`** — the module is in the `default` profile and **is** compiled every
   build; what is excluded are its `it`-**tagged tests**, via surefire `excludedGroups`.
 

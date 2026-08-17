@@ -3,6 +3,7 @@ package org.alexmond.kweblens.tui.render;
 import java.io.PrintWriter;
 import java.util.function.Consumer;
 
+import dev.tamboui.layout.Size;
 import dev.tamboui.tui.TuiConfig;
 import dev.tamboui.tui.TuiRunner;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,23 @@ import org.alexmond.kweblens.tui.screen.TickRate;
  * <p>
  * Every one of those has a {@code finally}: a watch left open holds a connection on the
  * cluster, and a redirect left installed makes the shell the operator returns to silent.
+ *
+ * <h2>Two refusals, and both of them are sentences</h2>
+ *
+ * A screen needs a tty <em>and</em> somewhere to draw, and they are different questions.
+ * A pty with no window size is a tty that reports 0×0, passes the first check and then
+ * draws nothing at all — see {@link DrawableArea}. Both refusals name the measurement and
+ * name the fix, and both are printed <b>after every resource is closed</b>: between
+ * {@code TuiRunner.create} and the runner's {@code close} the alternate screen is up (so
+ * a line written there is wiped on the way out) and {@link TerminalOutputGuard} owns
+ * {@code System.out} (so a line written through it lands in the log file). Either would
+ * reproduce the exact silence the refusal exists to end.
+ *
+ * <p>
+ * A degenerate size that arrives <em>later</em>, from a {@code SIGWINCH}, cannot be
+ * refused this way — there is no terminal left to print on — and is not fatal in any
+ * case: {@link DrawableAreaWatch} reports it to the log and the screen redraws itself
+ * when the terminal has room again.
  */
 @Service
 @RequiredArgsConstructor
@@ -46,6 +64,9 @@ public class TuiScreen implements Screen {
 
 	/** The screen could not be started or died. */
 	static final int EXIT_SCREEN_FAILED = 5;
+
+	/** A tty, but one that reports no area — so there is nowhere to draw. */
+	static final int EXIT_NO_AREA = 6;
 
 	private final ClusterDataSource cluster;
 
@@ -73,12 +94,19 @@ public class TuiScreen implements Screen {
 	 */
 	int run(ResourceQuery query, int chunkSize, TickRate tick, TuiConfig config, PrintWriter out,
 			Consumer<ScreenSession> started) {
+		Size area;
 		try (ScreenSession session = new ScreenSession(this.cluster, query, tick)
 			.kinds(this.catalog.of(query.clusterId())); TerminalOutputGuard guard = TerminalOutputGuard.open()) {
 			TuiConfig effective = (config != null) ? config : defaults(tick, guard);
 			try (TuiRunner runner = TuiRunner.create(effective)) {
-				guard.install();
-				return loop(runner, session, chunkSize, started);
+				// The renderer's own view of the terminal, not the environment's claim
+				// about it: Terminal.draw asks the backend for a size on every frame and
+				// builds the frame's buffer — hence Frame.area() — out of exactly this.
+				area = runner.terminal().size();
+				if (!DrawableArea.empty(area.width(), area.height())) {
+					guard.install();
+					return loop(runner, session, chunkSize, started);
+				}
 			}
 		}
 		catch (Exception ex) {
@@ -86,6 +114,12 @@ public class TuiScreen implements Screen {
 			out.flush();
 			return EXIT_SCREEN_FAILED;
 		}
+		// Out here, and that is the whole point: the runner has left the alternate screen
+		// and the guard has given System.out back, so this lands on the terminal the
+		// operator is looking at (GH#442).
+		out.println(DrawableArea.refusal(area.width(), area.height()));
+		out.flush();
+		return EXIT_NO_AREA;
 	}
 
 	private int loop(TuiRunner runner, ScreenSession session, int chunkSize, Consumer<ScreenSession> started)
@@ -96,7 +130,9 @@ public class TuiScreen implements Screen {
 		session.subscribe();
 		session.load(chunkSize);
 		started.accept(session);
-		runner.run(session.screen(), session.screen());
+		// The renderer is wrapped, not replaced: the wrapper is how a size that goes
+		// degenerate after the screen is up gets said out loud. See DrawableAreaWatch.
+		runner.run(session.screen(), new DrawableAreaWatch(session.screen()));
 		return 0;
 	}
 
