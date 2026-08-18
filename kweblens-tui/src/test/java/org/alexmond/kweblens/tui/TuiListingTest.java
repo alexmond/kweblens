@@ -13,6 +13,7 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
 import org.junit.jupiter.api.Test;
 
+import org.alexmond.kweblens.column.Column;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.resource.DiscoveredKind;
 import org.alexmond.kweblens.resource.WellKnownKinds;
@@ -150,6 +151,11 @@ class TuiListingTest {
 				return this.states;
 			}
 			return objects.stream().map((object) -> Optional.of(new ObjectState("Running", "ok"))).toList();
+		}
+
+		@Override
+		public List<Column> columns(ResourceQuery query) {
+			return List.of();
 		}
 
 		@Override

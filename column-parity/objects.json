@@ -1,0 +1,291 @@
+{
+  "now": "2026-01-15T12:00:00Z",
+  "statusColumns": {
+    "pods": ["status"],
+    "deployments": ["status"],
+    "nodes": ["status"],
+    "services": ["status"],
+    "events": []
+  },
+  "cases": [
+    {
+      "kind": "pods",
+      "name": "two containers, one ready, one restarting",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": { "name": "web-0", "namespace": "shop" },
+        "spec": { "nodeName": "node-a" },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            { "name": "app", "ready": true, "restartCount": 3 },
+            { "name": "sidecar", "ready": false, "restartCount": 0 }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "pods",
+      "name": "pending, nothing scheduled and no container statuses yet",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": { "name": "queued", "namespace": "shop" },
+        "spec": {},
+        "status": { "phase": "Pending" }
+      }
+    },
+    {
+      "kind": "pods",
+      "name": "a container that has never restarted omits the count",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": { "name": "steady", "namespace": "shop" },
+        "status": {
+          "containerStatuses": [{ "name": "app", "ready": true }, { "name": "log", "ready": true, "restartCount": 7 }]
+        }
+      }
+    },
+    {
+      "kind": "deployments",
+      "name": "partially available",
+      "object": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": { "name": "api", "namespace": "shop" },
+        "spec": { "replicas": 3 },
+        "status": { "readyReplicas": 2, "updatedReplicas": 3, "availableReplicas": 2 }
+      }
+    },
+    {
+      "kind": "deployments",
+      "name": "scaled to zero, which is a number and not a gap",
+      "object": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": { "name": "batch", "namespace": "shop" },
+        "spec": { "replicas": 0 },
+        "status": {}
+      }
+    },
+    {
+      "kind": "deployments",
+      "name": "never rolled out, so status carries nothing at all",
+      "object": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": { "name": "fresh", "namespace": "shop" },
+        "spec": { "replicas": 1 }
+      }
+    },
+    {
+      "kind": "nodes",
+      "name": "cordoned control plane with a role label that has no role after the slash",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Node",
+        "metadata": {
+          "name": "cp-1",
+          "labels": {
+            "node-role.kubernetes.io/control-plane": "true",
+            "node-role.kubernetes.io/etcd": "true",
+            "node-role.kubernetes.io/": "x",
+            "node.kubernetes.io/instance-type": "k3s",
+            "topology.kubernetes.io/zone": "eu-west-1a"
+          }
+        },
+        "spec": {
+          "unschedulable": true,
+          "taints": [
+            { "key": "node.kubernetes.io/unschedulable", "effect": "NoSchedule" },
+            { "key": "dedicated", "value": "etcd", "effect": "NoExecute" }
+          ]
+        },
+        "status": {
+          "addresses": [
+            { "type": "Hostname", "address": "cp-1" },
+            { "type": "InternalIP", "address": "192.0.2.5" }
+          ],
+          "conditions": [
+            { "type": "MemoryPressure", "status": "False" },
+            { "type": "Ready", "status": "True" },
+            { "type": "EtcdIsVoter", "status": "True" }
+          ],
+          "capacity": { "cpu": "8", "memory": "16265652Ki", "pods": "110" },
+          "nodeInfo": {
+            "kubeletVersion": "v1.31.3+k3s1",
+            "osImage": "Fedora Linux 42",
+            "kernelVersion": "6.19.14-108.fc42.x86_64",
+            "containerRuntimeVersion": "containerd://2.0.0",
+            "architecture": "amd64"
+          }
+        }
+      }
+    },
+    {
+      "kind": "nodes",
+      "name": "an address entry that exists but carries no address",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Node",
+        "metadata": { "name": "bare" },
+        "spec": {},
+        "status": {
+          "addresses": [{ "type": "ExternalIP" }],
+          "conditions": [],
+          "capacity": {},
+          "nodeInfo": {}
+        }
+      }
+    },
+    {
+      "kind": "nodes",
+      "name": "zone and instance type from the beta labels only",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Node",
+        "metadata": {
+          "name": "worker-2",
+          "labels": {
+            "failure-domain.beta.kubernetes.io/zone": "us-east-1b",
+            "beta.kubernetes.io/instance-type": "m5.large"
+          }
+        },
+        "status": {
+          "addresses": [
+            { "type": "InternalIP", "address": "198.51.100.9" },
+            { "type": "ExternalIP", "address": "203.0.113.9" }
+          ],
+          "conditions": [{ "type": "Ready", "status": "Unknown" }],
+          "capacity": { "cpu": "2", "pods": "58" },
+          "nodeInfo": { "kubeletVersion": "v1.30.1" }
+        }
+      }
+    },
+    {
+      "kind": "services",
+      "name": "two ports, one of them relying on the protocol default",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": { "name": "kube-dns", "namespace": "kube-system" },
+        "spec": {
+          "type": "ClusterIP",
+          "clusterIP": "192.0.2.10",
+          "ports": [
+            { "name": "dns", "port": 53, "protocol": "UDP" },
+            { "name": "metrics", "port": 9153 }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "services",
+      "name": "headless, no ports declared",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": { "name": "peers", "namespace": "shop" },
+        "spec": { "type": "ClusterIP", "clusterIP": "None" }
+      }
+    },
+    {
+      "kind": "services",
+      "name": "no spec at all",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": { "name": "stub", "namespace": "shop" }
+      }
+    },
+    {
+      "kind": "events",
+      "name": "a repeated warning about a pod",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": { "name": "web-0.17f", "namespace": "shop" },
+        "type": "Warning",
+        "reason": "BackOff",
+        "message": "Back-off restarting failed container app in pod web-0_shop",
+        "count": 12,
+        "involvedObject": { "kind": "Pod", "name": "web-0", "namespace": "shop" }
+      }
+    },
+    {
+      "kind": "events",
+      "name": "no involved object, no message, no count",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": { "name": "orphan.180", "namespace": "shop" },
+        "type": "Normal",
+        "reason": "Scheduled"
+      }
+    },
+    {
+      "kind": "events",
+      "name": "an involved object with a kind and no name",
+      "object": {
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": { "name": "partial.181", "namespace": "shop" },
+        "type": "Normal",
+        "reason": "NodeReady",
+        "message": "Node cp-1 status is now: NodeReady",
+        "count": 1,
+        "involvedObject": { "kind": "Node" }
+      }
+    }
+  ],
+  "printerColumns": [
+    {
+      "name": "a CRD declaring a path, a filter, a boolean, a date and a path to nothing",
+      "columns": [
+        { "name": "Phase", "jsonPath": ".status.phase", "type": "string" },
+        { "name": "Ready", "jsonPath": ".status.conditions[?(@.type==\"Ready\")].status", "type": "string" },
+        { "name": "Synced", "jsonPath": ".spec.synced", "type": "boolean" },
+        { "name": "Replicas", "jsonPath": ".spec.replicas", "type": "integer" },
+        { "name": "Chart", "jsonPath": ".spec.chart.name", "type": "string" },
+        { "name": "Version", "jsonPath": ".spec.versions.0.name", "type": "string" },
+        { "name": "Age", "jsonPath": ".metadata.creationTimestamp", "type": "date" },
+        { "name": "Nothing", "jsonPath": ".status.nowhere.at.all", "type": "string" }
+      ],
+      "object": {
+        "apiVersion": "helm.cattle.io/v1",
+        "kind": "HelmChart",
+        "metadata": { "name": "traefik", "namespace": "kube-system", "creationTimestamp": "2026-01-13T12:00:00Z" },
+        "spec": {
+          "synced": true,
+          "replicas": 3,
+          "chart": { "name": "traefik" },
+          "versions": [{ "name": "v1beta1" }, { "name": "v1" }]
+        },
+        "status": {
+          "phase": "Deployed",
+          "conditions": [
+            { "type": "Progressing", "status": "False" },
+            { "type": "Ready", "status": "True" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the same declarations against an object that carries none of them",
+      "columns": [
+        { "name": "Phase", "jsonPath": ".status.phase", "type": "string" },
+        { "name": "Ready", "jsonPath": ".status.conditions[?(@.type==\"Ready\")].status", "type": "string" },
+        { "name": "Synced", "jsonPath": ".spec.synced", "type": "boolean" },
+        { "name": "Age", "jsonPath": ".metadata.creationTimestamp", "type": "date" }
+      ],
+      "object": {
+        "apiVersion": "helm.cattle.io/v1",
+        "kind": "HelmChart",
+        "metadata": { "name": "empty", "namespace": "kube-system" },
+        "spec": { "synced": false }
+      }
+    }
+  ]
+}

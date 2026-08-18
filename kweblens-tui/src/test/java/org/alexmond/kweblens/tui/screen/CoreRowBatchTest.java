@@ -5,12 +5,15 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import io.fabric8.kubernetes.api.model.ContainerStatusBuilder;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
+import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import org.junit.jupiter.api.Test;
 
+import org.alexmond.kweblens.column.Column;
 import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.CoreStack;
@@ -73,6 +76,44 @@ class CoreRowBatchTest {
 		// never an empty string: a label, or nothing at all.
 		assertThat(rows).allSatisfy((row) -> assertThat(row.state())
 			.satisfiesAnyOf((state) -> assertThat(state).isNull(), (state) -> assertThat(state).isNotBlank()));
+	}
+
+	/**
+	 * The whole seam in one assertion: the cluster's objects come back as <b>strings the
+	 * server computed</b>, in the order the kind declares its columns, and the row holds
+	 * those rather than the object they came out of.
+	 */
+	@Test
+	void aRowCarriesTheKindsColumnsAlreadyComputed() {
+		ClusterDataSource source = CoreStack.dataSource(this.client);
+		this.client.pods()
+			.inNamespace("shop")
+			.resource(new PodBuilder().withNewMetadata()
+				.withNamespace("shop")
+				.withName("web-0")
+				.endMetadata()
+				.withNewSpec()
+				.withNodeName("node-a")
+				.endSpec()
+				.withNewStatus()
+				.withContainerStatuses(new ContainerStatusBuilder().withName("app")
+					.withReady(true)
+					.withRestartCount(3)
+					.withImage("nginx")
+					.withImageID("nginx")
+					.withContainerID("containerd://1")
+					.build())
+				.endStatus()
+				.build())
+			.create();
+		ResourceQuery pods = new ResourceQuery(CoreStack.CLUSTER, WellKnownKinds.PODS, "shop");
+		RowBatch batch = new CoreRowBatch(source, pods, CLOCK);
+		List<GenericKubernetesResource> objects = new java.util.ArrayList<>();
+		source.list(pods, 500, objects::addAll);
+
+		assertThat(batch.columns()).extracting(Column::header).containsExactly("Ready", "Restarts", "Node");
+		assertThat(batch.project(objects)).singleElement()
+			.satisfies((row) -> assertThat(row.values()).containsExactly("1/1", "3", "node-a"));
 	}
 
 	private List<GenericKubernetesResource> objects() {

@@ -5,10 +5,14 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
+
+import org.alexmond.kweblens.column.Column;
+import org.alexmond.kweblens.column.ColumnCatalog;
 
 /**
  * One line of the table, already reduced to text.
@@ -39,9 +43,16 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
  * "what are your labels" cannot be selected by the query the title is showing. The cost
  * is the map the client already allocated — retaining it holds the map and its strings,
  * not the object graph they came out of, which is the thing #292/#293 is about.
+ * @param values the kind-specific cells, in the order of {@link RowBatch#columns()} —
+ * empty for a kind that has none. <b>Strings, already computed</b> (GH#367): the whole
+ * point of the column work is that a Pod's {@code 1/2} is worked out once, on the server
+ * side of the seam, rather than by each surface walking {@code status.containerStatuses}
+ * and arriving at its own answer. That also keeps this record's promise — a row is short
+ * strings, not an object graph — because the alternative to holding the value is holding
+ * the object it came out of.
  */
 public record ResourceRow(String key, String namespace, String name, String state, String age,
-		Map<String, String> labels) {
+		Map<String, String> labels, List<String> values) {
 
 	private static final long MINUTE_SECONDS = 60L;
 
@@ -54,15 +65,24 @@ public record ResourceRow(String key, String namespace, String name, String stat
 		// null value, which Map.copyOf refuses and the cluster does not. The same
 		// reasoning FilterRow already records.
 		labels = (labels != null) ? Collections.unmodifiableMap(new LinkedHashMap<>(labels)) : Map.of();
+		values = (values != null) ? List.copyOf(values) : List.of();
 	}
 
 	/**
-	 * A row with no labels — every caller that is describing a row rather than projecting
-	 * an object, which is most tests and the whole of {@code WatchSupervisor}'s recovery
+	 * A row with no kind-specific cells — a kind outside the server-computed tranche, and
+	 * every test that is describing a row rather than projecting an object.
+	 */
+	public ResourceRow(String key, String namespace, String name, String state, String age,
+			Map<String, String> labels) {
+		this(key, namespace, name, state, age, labels, List.of());
+	}
+
+	/**
+	 * A row with no labels either — the whole of {@code WatchSupervisor}'s recovery
 	 * fixtures. It delegates, so there is still one canonical shape.
 	 */
 	public ResourceRow(String key, String namespace, String name, String state, String age) {
-		this(key, namespace, name, state, age, Map.of());
+		this(key, namespace, name, state, age, Map.of(), List.of());
 	}
 
 	/**
@@ -90,12 +110,43 @@ public record ResourceRow(String key, String namespace, String name, String stat
 	 * @param now the clock reading age is measured against
 	 */
 	public static ResourceRow of(GenericKubernetesResource object, String state, Instant now) {
+		return of(object, state, now, List.of());
+	}
+
+	/**
+	 * Project one object with its kind's columns evaluated.
+	 *
+	 * <p>
+	 * The columns are a parameter for the same reason the verdict is: they belong to the
+	 * <em>kind</em>, not to the object, and resolving them per row would be a lookup —
+	 * and, for a CRD, a fetch — repeated once per row of every page.
+	 * @param object the object
+	 * @param state the verdict label, or null when nothing judges it
+	 * @param now the clock reading age is measured against
+	 * @param columns the kind's columns, in order
+	 * @return the row
+	 */
+	public static ResourceRow of(GenericKubernetesResource object, String state, Instant now, List<Column> columns) {
 		ObjectMeta metadata = (object != null) ? object.getMetadata() : null;
 		String namespace = (metadata != null) ? text(metadata.getNamespace()) : "";
 		String name = (metadata != null) ? text(metadata.getName()) : "";
 		String age = (metadata != null) ? age(metadata.getCreationTimestamp(), now) : "";
 		Map<String, String> labels = (metadata != null) ? metadata.getLabels() : null;
-		return new ResourceRow(namespace + "/" + name, namespace, name, state, age, labels);
+		return new ResourceRow(namespace + "/" + name, namespace, name, state, age, labels,
+				ColumnCatalog.values(columns, object));
+	}
+
+	/**
+	 * The cell at {@code index}, or {@link ColumnCatalog#MISSING_CELL} when this row has
+	 * no such cell — which happens for one tick after a switch, while rows projected
+	 * against the previous kind are still in the model. A short row is drawn short, never
+	 * padded with a blank: a blank cell under a heading claims the object has nothing
+	 * there.
+	 * @param index the column index
+	 * @return the cell text
+	 */
+	public String cell(int index) {
+		return (index >= 0 && index < this.values.size()) ? this.values.get(index) : ColumnCatalog.MISSING_CELL;
 	}
 
 	/**

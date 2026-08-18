@@ -4,6 +4,8 @@ import java.util.List;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
+import org.alexmond.kweblens.column.Column;
+
 /**
  * Turns a <b>batch</b> of objects into rows — verdicts included.
  *
@@ -28,5 +30,21 @@ public interface RowBatch {
 	 * @return one row per object, same order
 	 */
 	List<ResourceRow> project(List<GenericKubernetesResource> objects);
+
+	/**
+	 * The kind-specific columns the rows this batch projects carry, in order — what the
+	 * table puts headings on.
+	 *
+	 * <p>
+	 * It has to be answerable with <b>no rows in hand</b>, which is why it is here rather
+	 * than read off a {@link ResourceRow}: an empty list is a correct answer for a kind
+	 * and its table still needs headings. The default is "this kind has none", which is
+	 * the honest answer for the lambdas the coalescing tests project with and for every
+	 * kind outside the first server-computed tranche.
+	 * @return the columns, never null
+	 */
+	default List<Column> columns() {
+		return List.of();
+	}
 
 }

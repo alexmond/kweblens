@@ -2,6 +2,7 @@ package org.alexmond.kweblens.tui.render;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Rect;
@@ -55,6 +56,9 @@ public class ResourceTableView {
 
 	private final Style highlight = Style.create().reversed();
 
+	/** The current kind's column headings; empty for a kind that declares none. */
+	private List<String> headers = List.of();
+
 	/**
 	 * Render the visible slice of {@code model} into {@code area}.
 	 * @return how many widget rows were constructed — the number the windowing exists to
@@ -66,7 +70,7 @@ public class ResourceTableView {
 		List<ResourceRow> visible = model.visible(window);
 		List<Row> widgetRows = new ArrayList<>(visible.size());
 		for (ResourceRow row : visible) {
-			widgetRows.add(Row.from(cells(row, layout)));
+			widgetRows.add(Row.from(cells(row, layout).stream().map(Cell::from).toList()));
 		}
 		TableState state = new TableState();
 		if (window.selectedInWindow() >= 0) {
@@ -74,7 +78,7 @@ public class ResourceTableView {
 		}
 		Table table = Table.builder()
 			.rows(widgetRows)
-			.header(Row.from(headerCells(layout)).style(this.header))
+			.header(Row.from(headings(layout).stream().map(Cell::from).toList()).style(this.header))
 			.widths(widths(layout))
 			.columnSpacing(ColumnLayout.GAP)
 			.highlightSymbol(CURSOR)
@@ -84,44 +88,87 @@ public class ResourceTableView {
 		return widgetRows.size();
 	}
 
-	private static List<Cell> cells(ResourceRow row, ColumnLayout layout) {
-		List<Cell> cells = new ArrayList<>(4);
+	/**
+	 * Point the table at a kind's own columns. Called from {@link ResourceScreen} when a
+	 * view changes, on the render thread; the headings and the widths are read from the
+	 * layout, so this only has to carry the words.
+	 */
+	void headers(List<String> headers) {
+		this.headers = (headers != null) ? List.copyOf(headers) : List.of();
+	}
+
+	/**
+	 * The order on screen is NAMESPACE · NAME · STATE · the kind's own · AGE.
+	 *
+	 * <p>
+	 * The kind's columns go <b>after</b> the verdict and before the age, which is where
+	 * {@code kubectl get} puts them: the verdict stays next to the name it is about,
+	 * because that is the pair an operator scans a list for, and AGE stays last, where
+	 * every table in this ecosystem has it.
+	 *
+	 * <p>
+	 * <b>Text, not widgets, and that is what makes it assertable.</b> {@code FakeBackend}
+	 * records that a frame was drawn, not what it said, so a test that went through
+	 * {@code Cell} could only count cells. Returning the strings and wrapping them one
+	 * line later means {@code ResourceTableViewTest} can assert the exact row an operator
+	 * reads — including the dashes, which are the part most easily got wrong.
+	 */
+	List<String> cells(ResourceRow row, ColumnLayout layout) {
+		List<String> cells = new ArrayList<>(4 + layout.extras().size());
 		if (layout.namespace() > 0) {
-			cells.add(Cell.from(row.namespace()));
+			cells.add(row.namespace());
 		}
-		cells.add(Cell.from(row.name()));
+		cells.add(row.name());
 		if (layout.state() > 0) {
-			cells.add(Cell.from((row.state() != null) ? row.state() : NO_VERDICT));
+			cells.add((row.state() != null) ? row.state() : NO_VERDICT);
+		}
+		for (int i = 0; i < layout.extras().size(); i++) {
+			cells.add(row.cell(i));
 		}
 		if (layout.age() > 0) {
-			cells.add(Cell.from(row.age()));
+			cells.add(row.age());
 		}
 		return cells;
 	}
 
-	private static List<Cell> headerCells(ColumnLayout layout) {
-		List<Cell> cells = new ArrayList<>(4);
+	/** The heading row, in the same order and of the same length as {@link #cells}. */
+	List<String> headings(ColumnLayout layout) {
+		List<String> cells = new ArrayList<>(4 + layout.extras().size());
 		if (layout.namespace() > 0) {
-			cells.add(Cell.from("NAMESPACE"));
+			cells.add("NAMESPACE");
 		}
-		cells.add(Cell.from("NAME"));
+		cells.add("NAME");
 		if (layout.state() > 0) {
-			cells.add(Cell.from("STATE"));
+			cells.add("STATE");
+		}
+		for (int i = 0; i < layout.extras().size(); i++) {
+			cells.add(heading(i));
 		}
 		if (layout.age() > 0) {
-			cells.add(Cell.from("AGE"));
+			cells.add("AGE");
 		}
 		return cells;
+	}
+
+	/**
+	 * A heading in the terminal's own voice — upper case, like the four the framework
+	 * draws. The catalog's headings are title case because that is what a browser shows.
+	 */
+	private String heading(int index) {
+		return (index < this.headers.size()) ? this.headers.get(index).toUpperCase(Locale.ROOT) : "";
 	}
 
 	private static List<Constraint> widths(ColumnLayout layout) {
-		List<Constraint> widths = new ArrayList<>(4);
+		List<Constraint> widths = new ArrayList<>(4 + layout.extras().size());
 		if (layout.namespace() > 0) {
 			widths.add(Constraint.length(layout.namespace()));
 		}
 		widths.add(Constraint.min(layout.name()));
 		if (layout.state() > 0) {
 			widths.add(Constraint.length(layout.state()));
+		}
+		for (int extra : layout.extras()) {
+			widths.add(Constraint.length(extra));
 		}
 		if (layout.age() > 0) {
 			widths.add(Constraint.length(layout.age()));

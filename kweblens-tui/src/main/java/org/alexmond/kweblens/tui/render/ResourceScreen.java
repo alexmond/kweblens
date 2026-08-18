@@ -20,6 +20,7 @@ import dev.tamboui.tui.event.ResizeEvent;
 import dev.tamboui.tui.event.TickEvent;
 import dev.tamboui.widgets.paragraph.Paragraph;
 
+import org.alexmond.kweblens.column.Column;
 import org.alexmond.kweblens.tui.TuiPosture;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.screen.ColumnLayout;
@@ -120,6 +121,9 @@ public class ResourceScreen implements EventHandler, Renderer {
 
 	private ColumnLayout columns = ColumnLayout.forWidth(0);
 
+	/** The current kind's own column headings — empty for a kind that declares none. */
+	private List<String> headers = List.of();
+
 	/**
 	 * A screen with nowhere to navigate: it draws, it moves its cursor, and every command
 	 * says the cluster serves no kinds. What the chrome tests use.
@@ -188,7 +192,24 @@ public class ResourceScreen implements EventHandler, Renderer {
 	 * NAMESPACE column and a namespaced one does.
 	 */
 	void retarget(ResourceQuery next) {
+		retarget(next, List.of());
+	}
+
+	/**
+	 * Point the screen at another kind <em>and</em> at that kind's own columns (GH#367).
+	 *
+	 * <p>
+	 * The two arrive together because they are one fact. A layout kept from the previous
+	 * kind would put the last kind's headings over this kind's cells, which is the same
+	 * defect as drawing the last kind's rows under this kind's title — invalidating the
+	 * area is what forces both to be recomputed on the next frame.
+	 * @param next the kind and scope
+	 * @param columns that kind's columns, in order
+	 */
+	void retarget(ResourceQuery next, List<Column> columns) {
 		this.query = next;
+		this.headers = columns.stream().map(Column::header).toList();
+		this.table.headers(this.headers);
 		this.area = null;
 	}
 
@@ -199,7 +220,7 @@ public class ResourceScreen implements EventHandler, Renderer {
 		if (relayout) {
 			this.area = full;
 			this.columns = ColumnLayout.forWidth(Math.max(0, full.width() - ResourceTableView.CURSOR.length()),
-					this.query.descriptor().namespaced());
+					this.query.descriptor().namespaced(), this.headers);
 		}
 		var parts = Layout.vertical()
 			.constraints(Constraint.length(1), Constraint.length(1), Constraint.fill(1), Constraint.length(1),

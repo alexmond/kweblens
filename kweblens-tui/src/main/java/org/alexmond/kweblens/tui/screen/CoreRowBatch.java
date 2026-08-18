@@ -8,6 +8,7 @@ import java.util.Optional;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
+import org.alexmond.kweblens.column.Column;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
@@ -35,6 +36,15 @@ public class CoreRowBatch implements RowBatch {
 
 	private final Clock clock;
 
+	/**
+	 * The kind's columns, asked for <b>once</b> when the batch is built rather than once
+	 * per page or once per row. A batch is built per kind ({@code ScreenSession}'s
+	 * projection factory), which is exactly the granularity the columns change at — and
+	 * for a custom kind the answer is a call to the cluster, so the difference is a
+	 * request per navigation against a request per row.
+	 */
+	private final List<Column> columns;
+
 	public CoreRowBatch(ClusterDataSource cluster, ResourceQuery query) {
 		this(cluster, query, Clock.systemUTC());
 	}
@@ -43,6 +53,7 @@ public class CoreRowBatch implements RowBatch {
 		this.cluster = cluster;
 		this.query = query;
 		this.clock = clock;
+		this.columns = cluster.columns(query);
 	}
 
 	@Override
@@ -54,9 +65,14 @@ public class CoreRowBatch implements RowBatch {
 		Instant now = this.clock.instant();
 		List<ResourceRow> rows = new ArrayList<>(objects.size());
 		for (int i = 0; i < objects.size(); i++) {
-			rows.add(ResourceRow.of(objects.get(i), label(states, i), now));
+			rows.add(ResourceRow.of(objects.get(i), label(states, i), now, this.columns));
 		}
 		return rows;
+	}
+
+	@Override
+	public List<Column> columns() {
+		return this.columns;
 	}
 
 	/**

@@ -1,8 +1,11 @@
 package org.alexmond.kweblens.tui.data;
 
 import java.io.OutputStream;
+import java.time.Clock;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -16,11 +19,15 @@ import org.springframework.stereotype.Service;
 
 import org.alexmond.kweblens.cluster.ClusterInfo;
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.column.Column;
+import org.alexmond.kweblens.column.ColumnCatalog;
+import org.alexmond.kweblens.column.PrinterColumns;
 import org.alexmond.kweblens.exec.ExecService;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.health.ObjectStates;
 import org.alexmond.kweblens.log.LogService;
 import org.alexmond.kweblens.resource.ApiDiscoveryService;
+import org.alexmond.kweblens.resource.CrdService;
 import org.alexmond.kweblens.resource.DiscoveredKind;
 import org.alexmond.kweblens.resource.ResourceService;
 
@@ -52,7 +59,20 @@ public class CoreClusterDataSource implements ClusterDataSource {
 		}
 	};
 
+	/**
+	 * Joins the two halves of the memo key with an ASCII unit separator, written as an
+	 * escape and never as a raw byte — a control character in a source file makes
+	 * {@code grep} treat the whole file as binary and report nothing for every search
+	 * over it.
+	 */
+	private static final String FIELD_SEPARATOR = "\u001f";
+
 	private final ClusterRegistry clusters;
+
+	/**
+	 * Printer columns already fetched, keyed by cluster and kind — see {@link #columns}.
+	 */
+	private final Map<String, List<Column>> declared = new ConcurrentHashMap<>();
 
 	private final ApiDiscoveryService discovery;
 
@@ -63,6 +83,8 @@ public class CoreClusterDataSource implements ClusterDataSource {
 	private final LogService logs;
 
 	private final ExecService exec;
+
+	private final CrdService crds;
 
 	@Override
 	public List<String> clusters() {
@@ -82,6 +104,30 @@ public class CoreClusterDataSource implements ClusterDataSource {
 	@Override
 	public List<Optional<ObjectState>> states(ResourceQuery query, List<GenericKubernetesResource> objects) {
 		return this.states.forList(query.clusterId(), query.kind(), query.namespace(), objects);
+	}
+
+	/**
+	 * A covered built-in answers from the static catalog; anything else is asked of its
+	 * CRD once and remembered.
+	 *
+	 * <p>
+	 * <b>Memoised per (cluster, kind), and that is the same trade {@code KindCatalog}
+	 * already takes.</b> {@code CrdService.printerColumns} lists every CRD in the cluster
+	 * to find one, so asking it on each {@code :} command would put a cluster-wide list
+	 * behind every navigation — and a kind with no CRD at all would pay it to learn
+	 * nothing. The cost of remembering is that printer columns edited while the screen is
+	 * up are not picked up until restart, exactly as a CRD installed while the screen is
+	 * up is not addressable until restart.
+	 */
+	@Override
+	public List<Column> columns(ResourceQuery query) {
+		List<Column> built = ColumnCatalog.forDescriptor(query.descriptor());
+		if (!built.isEmpty()) {
+			return built;
+		}
+		return this.declared.computeIfAbsent(query.clusterId() + FIELD_SEPARATOR + query.descriptor().id(),
+				(key) -> PrinterColumns.of(this.crds.printerColumns(query.clusterId(), query.descriptor().id()),
+						Clock.systemUTC()));
 	}
 
 	@Override
