@@ -100,6 +100,8 @@ public class ResourceScreen implements EventHandler, Renderer {
 
 	private final DetailPaneView pane = new DetailPaneView();
 
+	private final LogPaneView logs = new LogPaneView();
+
 	private final Style chrome = Style.create().dim();
 
 	private final Style titleStyle = Style.create().bold();
@@ -156,6 +158,11 @@ public class ResourceScreen implements EventHandler, Renderer {
 			// a frozen table has to change on screen or it is still a lie.
 			boolean repaint = this.supervisor.tick();
 			repaint |= this.coalescer.flush().repaints();
+			// The log pane's flush, on the same period and for the same reason (GH#369).
+			// A second timer would be a second answer to "when may the terminal repaint",
+			// and the tick is the one the keyboard budget on TickRate was computed
+			// against.
+			repaint |= this.controller.flushLogs();
 			// Counted LAST, and GH#423 is what that sentence costs when it is not.
 			// ScreenHarness.tickAndSettle uses this counter as its barrier, so a counter
 			// bumped on ENTRY means "a tick started" while claiming to mean "a tick
@@ -232,11 +239,7 @@ public class ResourceScreen implements EventHandler, Renderer {
 		frame.renderWidget(Paragraph.builder().text(header()).style(this.chrome).build(), parts.get(0));
 		frame.renderWidget(Paragraph.builder().text(title()).style(this.titleStyle).build(), parts.get(1));
 		int built = body(frame, parts.get(2));
-		// The hint bar is the projection of whichever table owns the keyboard right now.
-		// A bar naming ':' while the detail pane has the keys would be the exact failure
-		// KeyMap exists to prevent, arrived at from the other side.
-		String hints = (this.controller.paneOpen()) ? KeyMap.paneHints() : KeyMap.hints();
-		frame.renderWidget(Paragraph.builder().text(hints).style(this.chrome).build(), parts.get(3));
+		frame.renderWidget(Paragraph.builder().text(hints()).style(this.chrome).build(), parts.get(3));
 		frame.renderWidget(Paragraph.builder().text(footer()).style(this.chrome).build(), parts.get(4));
 		// Counters last, and renders last of all: an observer that waits on one of these
 		// must not be able to read a half-drawn frame's numbers. That is not tidiness —
@@ -249,10 +252,25 @@ public class ResourceScreen implements EventHandler, Renderer {
 		this.renders.incrementAndGet();
 	}
 
-	/** The table, or the detail pane, or the help pane over whichever it is. */
+	/**
+	 * The hint bar is the projection of whichever table owns the keyboard right now. A
+	 * bar naming {@code :} while a pane has the keys would be the exact failure
+	 * {@link KeyMap} exists to prevent, arrived at from the other side.
+	 */
+	String hints() {
+		if (this.controller.logsOpen()) {
+			return KeyMap.logHints();
+		}
+		return (this.controller.paneOpen()) ? KeyMap.paneHints() : KeyMap.hints();
+	}
+
+	/** The table, or one of the two panes, or the help pane over whichever it is. */
 	private int body(Frame frame, Rect area) {
 		if (this.controller.help()) {
 			return help(frame, area);
+		}
+		if (this.controller.logsOpen()) {
+			return this.logs.render(frame, area, this.controller.logs());
 		}
 		if (this.controller.paneOpen()) {
 			return this.pane.render(frame, area, this.controller.detail());
@@ -318,6 +336,13 @@ public class ResourceScreen implements EventHandler, Renderer {
 	 * can walk back through.
 	 */
 	String title() {
+		if (this.controller.logsOpen()) {
+			// The log pane's own title, and it carries "previous run (snapshot)" when
+			// that
+			// is what is on screen — a reader who takes a terminated instance's log for
+			// the live one draws exactly the wrong conclusion about a crashloop.
+			return this.controller.logs().title();
+		}
 		if (this.controller.paneOpen()) {
 			// "snapshot" is not decoration. The table under the pane goes on updating
 			// from
@@ -349,6 +374,9 @@ public class ResourceScreen implements EventHandler, Renderer {
 		if (this.controller.prompt().open()) {
 			return this.controller.prompt().rendered() + candidates();
 		}
+		if (this.controller.logsOpen()) {
+			return logFooter();
+		}
 		if (this.controller.paneOpen()) {
 			return paneFooter();
 		}
@@ -371,6 +399,18 @@ public class ResourceScreen implements EventHandler, Renderer {
 		if (!search.isEmpty()) {
 			line = line + "   │   " + search;
 		}
+		String message = this.controller.message();
+		return (message.isEmpty()) ? line : line + "   │   " + message;
+	}
+
+	/**
+	 * Where the cursor is in the log, whether lines are still arriving, and anything that
+	 * could not be done. {@code LogModel.status()} leads with a stream that has stopped,
+	 * for the reason the header leads with NOT LIVE (GH#413): every number after it is a
+	 * claim about a moment that has passed.
+	 */
+	private String logFooter() {
+		String line = this.controller.logs().status();
 		String message = this.controller.message();
 		return (message.isEmpty()) ? line : line + "   │   " + message;
 	}

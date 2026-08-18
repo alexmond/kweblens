@@ -11,6 +11,7 @@ import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.detail.DetailModel;
 import org.alexmond.kweblens.tui.detail.DetailSections;
+import org.alexmond.kweblens.tui.log.LogModel;
 
 /**
  * Every key that is not a cursor move: the command line, the filter, the view stack, the
@@ -43,6 +44,13 @@ import org.alexmond.kweblens.tui.detail.DetailSections;
  */
 public class ViewController {
 
+	/**
+	 * The one kind whose rows have containers to read a log from. Compared as a string
+	 * rather than against a descriptor, because a cluster may serve Pods through more
+	 * than one discovered id and the kind is what the API server calls it.
+	 */
+	private static final String POD_KIND = "Pod";
+
 	private final Navigation navigation;
 
 	private final ResourceModel model;
@@ -74,11 +82,19 @@ public class ViewController {
 	 */
 	private DetailModel detail;
 
+	/**
+	 * The log pane (GH#369). Unlike {@link #detail} it is <b>not</b> a snapshot: a follow
+	 * is live, and the connection behind it belongs to the session rather than to this
+	 * object — see {@link LogPane} and {@link Navigation#logs}.
+	 */
+	private final LogPane logs;
+
 	public ViewController(Navigation navigation, ResourceModel model, View root, IntSupplier pageSize) {
 		this.navigation = navigation;
 		this.model = model;
 		this.stack = new ViewStack(root);
 		this.pageSize = pageSize;
+		this.logs = new LogPane(navigation);
 		this.prompt = new CommandLineModel((prefix, limit) -> navigation.kinds().complete(prefix, limit));
 		this.favourites.remember(root.namespace());
 	}
@@ -100,10 +116,89 @@ public class ViewController {
 			this.help = false;
 			return Outcome.REPAINT;
 		}
+		if (this.logs.isOpen()) {
+			return logKey(stroke);
+		}
 		if (this.detail != null) {
 			return paneKey(stroke);
 		}
 		return KeyMap.action(stroke).map((action) -> act(action, stroke)).orElse(Outcome.NONE);
+	}
+
+	/**
+	 * One key press while the log pane is up.
+	 *
+	 * <p>
+	 * Its own binding table ({@link KeyMap#LOG_BINDINGS}) for the same reason the detail
+	 * pane has one: it is a third screen with three keys nothing else has. Every one of
+	 * {@code p}, {@code c} and {@code t} is a re-open, and every re-open releases the
+	 * previous follow inside {@link Navigation#logs} — there is no key here that can leak
+	 * one by forgetting a line.
+	 */
+	private Outcome logKey(KeyStroke stroke) {
+		this.message = "";
+		return KeyMap.logAction(stroke).map(this::logAct).orElse(Outcome.NONE);
+	}
+
+	private Outcome logAct(KeyAction action) {
+		LogModel document = this.logs.model();
+		return switch (action) {
+			case MOVE_DOWN -> repaintIf(document.moveSelection(1));
+			case MOVE_UP -> repaintIf(document.moveSelection(-1));
+			case PAGE_DOWN -> repaintIf(document.moveSelection(page()));
+			case PAGE_UP -> repaintIf(document.moveSelection(-page()));
+			case TOP -> repaintIf(document.selectTo(0));
+			case BOTTOM -> repaintIf(document.selectTo(Integer.MAX_VALUE));
+			case PREVIOUS_LOGS -> reported(this.logs.togglePrevious());
+			case NEXT_CONTAINER -> reported(this.logs.cycleContainer());
+			case TIMESTAMPS -> reported(this.logs.toggleTimestamps());
+			case BACK -> closeLogs();
+			case QUIT -> Outcome.QUIT;
+			default -> Outcome.NONE;
+		};
+	}
+
+	/**
+	 * Take what a re-open could not do. Always a repaint: the pane either changed or is
+	 * now carrying a sentence in its footer, and both need a frame.
+	 */
+	private Outcome reported(String failure) {
+		this.message = failure;
+		return Outcome.REPAINT;
+	}
+
+	/**
+	 * {@code esc} closes the pane <em>and releases the connection</em> — the one thing
+	 * GH#369 exists to get right. Not conditional on anything: a pane that closed without
+	 * releasing would look identical on screen and leave a connection to the API server
+	 * open for as long as the process runs.
+	 */
+	private Outcome closeLogs() {
+		this.logs.close();
+		return Outcome.REPAINT;
+	}
+
+	/**
+	 * Follow the selected pod, live or from its previous run.
+	 *
+	 * <p>
+	 * <b>Only from a Pod list</b>, and it says why rather than asking the cluster for the
+	 * containers of a Deployment and reporting whatever that failed with. Logs are a
+	 * container's; the route from a workload is the drill-down that already exists.
+	 */
+	private Outcome openLogs(boolean previous) {
+		if (!POD_KIND.equals(current().descriptor().kind())) {
+			this.message = current().descriptor().kind() + " has no containers — logs are a container's. "
+					+ "Press ↵ on a workload to reach its pods, then l there.";
+			return Outcome.REPAINT;
+		}
+		Optional<ResourceRow> row = this.model.selectedRow();
+		if (row.isEmpty()) {
+			this.message = "Nothing selected.";
+			return Outcome.REPAINT;
+		}
+		this.message = this.logs.open(row.get().namespace(), row.get().name(), previous);
+		return Outcome.REPAINT;
 	}
 
 	/**
@@ -213,10 +308,12 @@ public class ViewController {
 			case NAMESPACE_FAVOURITE -> namespace(stroke.character());
 			case HELP -> toggleHelp();
 			case DETAIL -> openDetail();
+			case LOGS -> openLogs(false);
+			case PREVIOUS_LOGS -> openLogs(true);
 			// Pane-only actions. Listed so this switch stays exhaustive — adding a
 			// KeyAction must force a decision here — and unreachable because no row of
 			// KeyMap.BINDINGS produces one.
-			case SEARCH, NEXT_MATCH, PREVIOUS_MATCH -> Outcome.NONE;
+			case SEARCH, NEXT_MATCH, PREVIOUS_MATCH, NEXT_CONTAINER, TIMESTAMPS -> Outcome.NONE;
 		};
 	}
 
@@ -505,6 +602,37 @@ public class ViewController {
 	/** Whether the detail pane is up. */
 	public boolean paneOpen() {
 		return this.detail != null;
+	}
+
+	/** Whether the log pane is up. */
+	public boolean logsOpen() {
+		return this.logs.isOpen();
+	}
+
+	/**
+	 * The log pane's document, or null when it is closed — ask {@link #logsOpen()} first.
+	 */
+	public LogModel logs() {
+		return this.logs.model();
+	}
+
+	/**
+	 * Move what the log reader has buffered into the document. Called once per tick, and
+	 * it is the whole of "at most one repaint per flush period" for this pane: nothing
+	 * else puts a line on screen.
+	 * @return whether a repaint is owed
+	 */
+	public boolean flushLogs() {
+		return this.logs.flush();
+	}
+
+	/**
+	 * Release the log follow, if there is one. The screen's teardown calls this so that a
+	 * session closed with the pane up does not leave a connection open — the same
+	 * obligation {@code esc} discharges, from the other end.
+	 */
+	public void releaseLogs() {
+		this.logs.close();
 	}
 
 	/**

@@ -7,6 +7,8 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.kind.KindIndex;
+import org.alexmond.kweblens.tui.log.LogOpen;
+import org.alexmond.kweblens.tui.log.LogRequest;
 import org.alexmond.kweblens.tui.screen.Navigation;
 import org.alexmond.kweblens.tui.screen.ResourceRow;
 
@@ -49,6 +51,20 @@ record NoNavigation(ResourceQuery query) implements Navigation {
 	public ObjectDetail detail(String namespace, String name) {
 		// Same posture as everything else here: say so rather than draw an empty pane.
 		return ObjectDetail.failed("This screen has no cluster behind it, so there is no detail to read.");
+	}
+
+	@Override
+	public LogOpen logs(LogRequest request) {
+		// And the same again. An empty log pane would be the claim that the container has
+		// logged nothing, which is a finding — see PreviousLog for the same trap.
+		return LogOpen.failed("This screen has no cluster behind it, so there are no logs to follow.");
+	}
+
+	@Override
+	public void closeLogs() {
+		// Nothing was ever opened, so there is nothing to release. This is the one method
+		// here that has to be a genuine no-op rather than a sentence: it is called from
+		// teardown, where there is nobody to tell.
 	}
 
 }

@@ -45,6 +45,7 @@ node scripts/perf-sweep.mjs           # on-demand hang/long-load sweep
 
 scripts/tui-drive.sh --self-check     # kweblens-tui on a REAL terminal (tmux); prove the rig first
 scripts/tui-drive.sh --context <ctx> --keys ':,svc,Enter'
+scripts/tui-log-leak.sh <ctx> 20      # does the log pane release? quiet pod, real cluster (#369)
 ```
 
 Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/ci.yml`) runs
@@ -207,6 +208,45 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     a long list of lines and a tick repaints forever. `esc` clears the search before it closes the
     pane, the same order `ViewStack.back()` keeps. **Out of scope and staying there**: porting
     `overview.ts`'s per-kind field registry, and an xray tree.
+  - **A log follow is released through `LogService.release`, and the session is the ONE owner**
+    (#369). `LogWatch.close()` does not stop the `watchLog()` flavour, so the release is
+    `LogStream.close()` and nothing else — `LogFollower` performs it, **and its reader thread
+    closes nothing**: a `try`-with-resources on the `BufferedReader` would free the connection as
+    a side effect and leave the `LogWatch`'s executor running, i.e. make a leaking close look
+    correct. There is one owner (`ScreenSession`, an `AtomicReference<LogFollower>` beside the
+    watch) and one release path, reached from `esc`, from every re-open, and from `close()`; the
+    pane holds only a document. **The new follow is opened BEFORE the old one is released**, so a
+    container the cluster refuses costs the reader a sentence and not their buffer. `l` and `p`
+    are two readings, not a mode. The gate is `ScreenLogPaneTest`, which opens and closes twenty
+    times against a pod that emits **nothing** and asserts *every* stream is closed — a pair of
+    counters would pass a double close paying for a leak, and **a chatty pod releases by
+    accident**, which is why the fake stays silent. On demand, `scripts/tui-log-leak.sh <context>`
+    measures the real thing: 20 cycles against `coredns` on `k3stest` gave **0 reader threads and
+    2 sockets** released against **20 and 22** with a close that did nothing. **The instrument
+    lied once and it was the control, not the counter**: an earlier break used
+    `reader.interrupt()`, which tears the connection down by itself, so both builds read 0 — and
+    the first reading of that was "HTTP/2 multiplexing hides it from `ss`". Before believing that
+    script, break the release into a genuine no-op and check it says 20.
+  - **The log pane buffers and flushes on the SCREEN'S tick, and the buffer is bounded too.**
+    Same rule as the list's, on the surface that meets it first: `LogBuffer.offer` touches a
+    deque on the reader thread and returns; `LogModel.flush()` is the only thing that puts a line
+    on screen, called once per tick from `ResourceScreen.handle`. **k9s's separate 50 ms timer is
+    deliberately not copied** — a second period would be a second answer to "when may the
+    terminal repaint", and `TickRate`'s keyboard budget was computed against the tick.
+    `ScreenLogPaneTest.aBurstOfLinesCostsOneRepaintPerFlushPeriod` fires the module's 157 and then
+    ticks **ten more times over an empty buffer**, asserting one repaint in total: without the
+    quiet ticks the assertion is a race, because `ticksHandled` is bumped inside `handle` before
+    the frame it owes is drawn. **Two bounds, not one** — `LogRing` (5 000 lines, a ring so
+    append and index are O(1) and the cursor is shifted by `discarded()` so a paused reader does
+    not drift) and `LogBuffer` (2 000 pending), because bounding only the document leaves the
+    heap unbounded *between two ticks*, which is the input the bound exists for.
+  - **A previous run has THREE answers and a blank pane is none of them** (#369). The API server
+    400s a container that never restarted and returns an empty 200 for a terminated instance that
+    logged nothing — "it has not crashed" against "it crashed without saying why", which is
+    exactly the pair a crashloop reader is choosing between. `PreviousLog` carries `none` /
+    `silent` / the log, all as words, and `LogModel.previous` puts "previous run (snapshot)" in
+    the **title**, never the footer. The CRUD mock serves no `/log` at all and answers an empty
+    200, so a previous-run test that does not stub the 400 tests neither state.
   - **Drill-down is a visible, editable filter, never a hidden join.** Enter on a Deployment
     opens `pods(kube-system)[1] </k8s-app=kube-dns>` — a query in **this** product's grammar
     (#366's port of `objectFilter.ts`), so it can be read, checked and widened. Where no query

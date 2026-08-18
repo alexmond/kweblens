@@ -12,11 +12,18 @@ import java.util.function.Predicate;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
+import org.alexmond.kweblens.tui.data.LogStream;
 import org.alexmond.kweblens.tui.data.ObjectDetail;
+import org.alexmond.kweblens.tui.data.PodTarget;
+import org.alexmond.kweblens.tui.data.PreviousLog;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
 import org.alexmond.kweblens.tui.data.WatchEnd;
 import org.alexmond.kweblens.tui.kind.KindIndex;
+import org.alexmond.kweblens.tui.log.LogFollower;
+import org.alexmond.kweblens.tui.log.LogModel;
+import org.alexmond.kweblens.tui.log.LogOpen;
+import org.alexmond.kweblens.tui.log.LogRequest;
 import org.alexmond.kweblens.tui.screen.CoreRowBatch;
 import org.alexmond.kweblens.tui.screen.Navigation;
 import org.alexmond.kweblens.tui.screen.ResourceModel;
@@ -133,6 +140,13 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	 * up after itself.
 	 */
 	private final AtomicBoolean closed = new AtomicBoolean();
+
+	/**
+	 * The log follow the pane is showing, or null. Held here rather than by the pane
+	 * because the release is the thing GH#369 is about: one owner, one release path, and
+	 * a session that goes away takes the connection with it whatever the pane was doing.
+	 */
+	private final AtomicReference<LogFollower> follower = new AtomicReference<>();
 
 	/** Remembered from {@link #load(int)}, so a reconnect re-lists the same way. */
 	private int chunkSize;
@@ -418,6 +432,97 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	}
 
 	/**
+	 * Open a log follow, and <b>release whatever was being followed before</b> (GH#369).
+	 *
+	 * <p>
+	 * This is the one owner of a log connection in the module, and that is the whole
+	 * defect the ticket names. fabric8's {@code LogWatch.close()} does not stop the
+	 * flavour of follow kweblens uses, so a pane that let go of its stream any other way
+	 * would leave the request to the API server open and the reader parked — and against
+	 * a <em>quiet</em> pod nothing on screen ever says so. {@link LogFollower#close()}
+	 * goes through {@code LogService.release}, and it is reached from here, from
+	 * {@link #closeLogs()} and from {@link #close()} — the three ways a follow can end.
+	 *
+	 * <p>
+	 * <b>The new follow is opened before the old one is released, and the order is
+	 * deliberate.</b> A container name the cluster refuses, or a stream it will not
+	 * serve, must not cost the operator the buffer they were already reading: on a
+	 * refusal nothing new was opened and the previous follow is untouched, so the pane
+	 * keeps showing what it had with the reason in its footer. The cost is one moment
+	 * with two streams open, which is bounded by one and self-corrects on the next line.
+	 *
+	 * <p>
+	 * <b>A previous run releases and opens nothing.</b> A terminated instance is not
+	 * producing anything, so there is nothing to follow — but the live follow it replaces
+	 * still has to go, which is why it goes through the same {@link #replaceFollower}.
+	 */
+	@Override
+	public LogOpen logs(LogRequest request) {
+		try {
+			List<String> containers = this.cluster.containers(clusterId(), request.namespace(), request.pod());
+			String container = chosen(containers, request.container());
+			PodTarget target = new PodTarget(clusterId(), request.namespace(), request.pod(), container);
+			if (request.previous()) {
+				PreviousLog previous = this.cluster.previousLog(target, LogModel.TAIL_LINES);
+				replaceFollower(null);
+				return LogOpen.of(LogModel.previous(request.namespace(), request.pod(), container, containers,
+						previous.text(), previous.reason()));
+			}
+			return LogOpen.of(follow(request, container, containers, target));
+		}
+		catch (RuntimeException ex) {
+			String reason = (ex.getMessage() != null) ? ex.getMessage() : ex.getClass().getSimpleName();
+			return LogOpen
+				.failed("Could not read logs for " + request.namespace() + "/" + request.pod() + ": " + reason);
+		}
+	}
+
+	/**
+	 * Open the stream, install the follower, then start reading — in that order, so a
+	 * throw anywhere leaves nothing running that nobody holds.
+	 */
+	private LogModel follow(LogRequest request, String container, List<String> containers, PodTarget target) {
+		LogModel model = LogModel.following(request.namespace(), request.pod(), container, containers,
+				request.timestamps());
+		LogStream stream = (request.timestamps()) ? this.cluster.logsWithTimestamps(target) : this.cluster.logs(target);
+		LogFollower opened = new LogFollower(stream, model);
+		replaceFollower(opened);
+		opened.start();
+		if (this.closed.get()) {
+			// close() ran while the stream was being opened. Nobody else will release
+			// this
+			// handle, so it releases itself — the same guard reconnect() keeps.
+			opened.close();
+		}
+		return model;
+	}
+
+	/**
+	 * Which container to read. A name the pod does not serve is not silently corrected —
+	 * it cannot arrive, because every request comes from a list this method returned — so
+	 * the fallback is only for the first open, where none was named.
+	 */
+	private static String chosen(List<String> containers, String requested) {
+		if (requested != null && !requested.isBlank() && containers.contains(requested)) {
+			return requested;
+		}
+		return (!containers.isEmpty()) ? containers.get(0) : "";
+	}
+
+	/** Install a follower and release the one it replaces. Either may be null. */
+	private void replaceFollower(LogFollower next) {
+		LogFollower previous = this.follower.getAndSet(next);
+		if (previous != null) {
+			previous.close();
+		}
+	}
+
+	@Override
+	public void closeLogs() {
+		replaceFollower(null);
+	}
+
+	/**
 	 * Re-establish the watch and re-read the kind, on the supervisor's recovery thread.
 	 *
 	 * <p>
@@ -463,6 +568,10 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	public void close() {
 		this.closed.set(true);
 		this.supervisor.close();
+		// The log follow first, and unconditionally: a session torn down with the pane
+		// still up is exactly the path that leaves a connection open for the life of the
+		// process, and it is the one nothing on screen would ever report (GH#369).
+		closeLogs();
 		Subscription open = this.watch.getAndSet(null);
 		if (open != null) {
 			open.close();

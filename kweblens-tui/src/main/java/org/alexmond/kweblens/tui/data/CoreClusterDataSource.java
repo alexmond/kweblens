@@ -28,6 +28,8 @@ import org.alexmond.kweblens.exec.ExecService;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.health.ObjectStates;
 import org.alexmond.kweblens.log.LogService;
+import org.alexmond.kweblens.log.LogSource;
+import org.alexmond.kweblens.log.LogSourceResolver;
 import org.alexmond.kweblens.resource.ApiDiscoveryService;
 import org.alexmond.kweblens.resource.CrdService;
 import org.alexmond.kweblens.resource.DiscoveredKind;
@@ -84,6 +86,12 @@ public class CoreClusterDataSource implements ClusterDataSource {
 	private final ObjectStates states;
 
 	private final LogService logs;
+
+	/**
+	 * Which containers a pod has — the SPA's own expansion of "logs for this pod", reused
+	 * rather than reimplemented. See {@link ClusterDataSource#containers}.
+	 */
+	private final LogSourceResolver logSources;
 
 	private final ExecService exec;
 
@@ -201,9 +209,42 @@ public class CoreClusterDataSource implements ClusterDataSource {
 	}
 
 	@Override
+	public List<String> containers(String clusterId, String namespace, String pod) {
+		return this.logSources.forPod(clusterId, namespace, pod, false).stream().map(LogSource::container).toList();
+	}
+
+	@Override
 	public LogStream logs(PodTarget target) {
 		LogWatch watch = this.logs.watch(target.clusterId(), target.namespace(), target.pod(), target.container());
 		return new CoreLogStream(this.logs, watch);
+	}
+
+	@Override
+	public LogStream logsWithTimestamps(PodTarget target) {
+		LogWatch watch = this.logs.watchWithTimestamps(target.clusterId(), target.namespace(), target.pod(),
+				target.container());
+		return new CoreLogStream(this.logs, watch);
+	}
+
+	/**
+	 * Three answers, because the API server gives three.
+	 *
+	 * <p>
+	 * A container that has never restarted is a 400, which {@code LogService.previous}
+	 * turns into null; a terminated instance that wrote nothing is an empty 200. Those
+	 * are different facts about the cluster and they are precisely the two a crashloop
+	 * reader is choosing between — "it has not crashed" against "it crashed without
+	 * saying why" — so both become sentences here rather than a blank pane that
+	 * manufactures the second.
+	 */
+	@Override
+	public PreviousLog previousLog(PodTarget target, int tailLines) {
+		String body = this.logs.previous(target.clusterId(), target.namespace(), target.pod(), target.container(),
+				tailLines);
+		if (body == null) {
+			return PreviousLog.none(target.container());
+		}
+		return (!body.isBlank()) ? PreviousLog.of(body) : PreviousLog.silent(target.container());
 	}
 
 	@Override

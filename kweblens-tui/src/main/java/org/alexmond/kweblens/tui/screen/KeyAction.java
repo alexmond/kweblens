@@ -67,6 +67,25 @@ public enum KeyAction {
 	 */
 	DETAIL,
 
+	/**
+	 * Follow the selected pod's container log (GH#369). k9s's {@code l}.
+	 */
+	LOGS,
+
+	/**
+	 * The log of the container's <em>previous</em> run — the crashloop diagnostic. k9s's
+	 * {@code p}, and a separate key rather than a mode because the two are different
+	 * readings: one is a live follow, the other a snapshot of a process that has already
+	 * exited.
+	 */
+	PREVIOUS_LOGS,
+
+	/** The next container of the pod, in the log pane. */
+	NEXT_CONTAINER,
+
+	/** Turn the API server's per-line timestamps on or off, in the log pane. */
+	TIMESTAMPS,
+
 	/** Open the {@code /} search prompt inside the detail pane. */
 	SEARCH,
 

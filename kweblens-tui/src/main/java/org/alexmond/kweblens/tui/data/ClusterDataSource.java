@@ -176,11 +176,58 @@ public interface ClusterDataSource {
 			Consumer<WatchEnd> onEnd);
 
 	/**
+	 * Every container of a pod, in the pod's own order — what a log pane offers when
+	 * there is more than one to choose from.
+	 *
+	 * <p>
+	 * <b>The server's answer, not a walk of the object.</b> {@code LogSourceResolver}
+	 * already expands "logs for this pod" into concrete containers for the SPA, and it is
+	 * the one place that knows what an init container does and does not count as; a
+	 * terminal that read {@code spec.containers} itself would be a second implementation
+	 * of that decision, which is the rule {@code TuiComputesNoRelationTest} exists for
+	 * one projection over.
+	 *
+	 * <p>
+	 * Init containers are excluded, deliberately: their logs are usually finished and
+	 * would dilute a live tail. The pod stuck in {@code Init:CrashLoopBackOff} is the
+	 * case that wants them and it is not covered here yet.
+	 * @throws RuntimeException if there is no such pod — the caller reports it as a
+	 * sentence, because this is called on the render thread inside a key press
+	 */
+	List<String> containers(String clusterId, String namespace, String pod);
+
+	/**
 	 * Follow a container's log from now. The returned {@link LogStream} must be closed,
 	 * and closing it really does stop the follow — see {@link LogStream} for why that
 	 * sentence needs saying.
 	 */
 	LogStream logs(PodTarget target);
+
+	/**
+	 * The same follow, with the Kubernetes-supplied timestamp on every line.
+	 *
+	 * <p>
+	 * <b>Two methods rather than one flag, because core has two</b> and the reason is in
+	 * the DSL: {@code usingTimestamps()} must be called <em>before</em>
+	 * {@code tailingLines(…)} or the option is gone from the narrowed builder type. A
+	 * boolean here would put that ordering behind an {@code if} in the adapter and read
+	 * at the call site as a parameter nobody can see the meaning of.
+	 */
+	LogStream logsWithTimestamps(PodTarget target);
+
+	/**
+	 * The log of the container's <em>previous</em> run — the crashloop diagnostic, since
+	 * the current log starts from the new process and the output that explains the crash
+	 * lives only in the terminated instance's.
+	 *
+	 * <p>
+	 * A snapshot rather than a stream, because a terminated instance is not producing
+	 * anything: there is nothing to follow. <b>It never throws for a container that has
+	 * not restarted</b> — that is an ordinary outcome, and {@link PreviousLog} carries it
+	 * as words so the pane cannot draw it as an empty document.
+	 * @param tailLines how many lines back to read
+	 */
+	PreviousLog previousLog(PodTarget target, int tailLines);
 
 	/**
 	 * Start an interactive shell in a container, writing its output to {@code output}.
