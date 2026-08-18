@@ -272,6 +272,32 @@ const SCENES = [
     selectors: ['.count', '.leaf.active .nav-badge'],
   },
   {
+    // The row the open drawer is about (#455). `row-active` was emitted and styled by nothing
+    // for as long as the table has been naive's, so this surface has never had a colour to
+    // measure — and the moment it got one, the row's own text acquired a new backdrop.
+    //
+    // That is the number this scene keeps: the tint is bounded by what the text sitting on it
+    // must still be readable against, and it is the only thing bounding it, because the mark
+    // also has a bar down the leading edge that no text sits on.
+    //
+    // The cell itself, not a span inside it: measured on a selected row, the elements carrying
+    // a direct text node are the `td`, an `a.cell-link` and an unclassed `span` — there is no
+    // `.n-ellipsis` with text of its own to aim at.
+    //
+    // `close` first, then a click that OPENS the drawer: with no drawer there is no selected
+    // row, and `.n-data-table-tr.row-active` would read `not present` — which this file counts
+    // as a failed measurement, not a pass. Column 2 is the Name cell; a row-centre click lands
+    // on the checkbox or the namespace link and opens nothing.
+    //
+    // The click LEAVES THE POINTER on that row, so this scene samples a row that is both
+    // selected and hovered. It reads the selection tint because the rule in `styles.css`
+    // deliberately out-specifies naive's hover; take that half away and this scene quietly
+    // starts measuring naive's hover grey under the selection's name.
+    name: 'selected row (drawer open)',
+    prepare: 'close;leaf:Pods;wait:900;click:.n-data-table-tbody tr td:nth-child(2);wait:900',
+    selectors: ['.n-data-table-tr.row-active .n-data-table-td'],
+  },
+  {
     // The list header's status chips — every tone the rows carry, each one named.
     //
     // These are the SAME token pairs the row pill paints (a state's tint, with the derived
