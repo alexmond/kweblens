@@ -208,6 +208,88 @@ describe('field terms narrow to one field', () => {
   });
 });
 
+// ---- ~fuzzy -----------------------------------------------------------------------------------
+// GH#411. Every case below is written twice — here and in kweblens-tui's ObjectFilterTextTest —
+// against the same fleet, because a term form implemented in one language and asserted only
+// there is the third grammar the port exists to prevent.
+
+describe('fuzzy is opt-in on ~, and it is a predicate', () => {
+  it('matches the letters in order with gaps, where a bare word matches nothing', () => {
+    // The whole difference in one pair: `pd` is not a substring of anything here, and `~pd`
+    // is p…d inside "Pod". Opt-in is what keeps the bare word what it always was.
+    expect(kept('pd', FLEET)).toEqual([]);
+    expect(kept('~pd', FLEET)).toHaveLength(FLEET.length);
+    expect(kept('~wb1', FLEET)).toEqual(['web-1']);
+    expect(kept('~WB1', FLEET)).toEqual(['web-1']);
+  });
+
+  it('is a subsequence, so the order of the letters is part of the query', () => {
+    expect(kept('~wc', FLEET)).toEqual(['web-canary']);
+    expect(kept('~cw', FLEET)).toEqual([]);
+  });
+
+  it('searches name, namespace and kind — each on its own, never joined', () => {
+    // The decision k9s makes differently: it matches over one "namespace/name" string, so
+    // `prodweb` finds prod/web-1 there. Here every hit is visible in ONE column, because a
+    // match nobody can point at is a row the reader cannot check.
+    expect(kept('~ksy', FLEET)).toEqual(['cache']);
+    expect(kept('~prodweb', FLEET)).toEqual([]);
+    expect(kept('~cakube', FLEET)).toEqual([]);
+  });
+
+  it('negates and ANDs like every other term', () => {
+    expect(kept('-~wb1', FLEET)).toEqual(['web-2', 'db-0', 'web-canary', 'cache']);
+    expect(kept('~wb ns:prod', FLEET)).toEqual(['web-1', 'web-2']);
+  });
+
+  it('narrows to one field after a prefix, like a regex does', () => {
+    expect(kept('name:~wc', FLEET)).toEqual(['web-canary']);
+    expect(kept('ns:~ksm', FLEET)).toEqual(['cache']);
+    expect(kept('name:~pd', FLEET)).toEqual([]);
+  });
+
+  it('takes the text as text — no metacharacters, and quotes for a space', () => {
+    const dotted = [pod('a.b', 'default'), pod('axb', 'default')];
+    expect(kept('~a.b', dotted)).toEqual(['a.b']);
+    const spaced = [pod('two words here', 'default'), pod('twp', 'default')];
+    expect(kept('~"o w"', spaced)).toEqual(['two words here']);
+  });
+
+  it('claims the whole token, so an operator inside it is text', () => {
+    // Same rule as `/a=b/`: a delimited or marked run is settled before anything looks for a
+    // label operator inside it. Without ~ this is the error "“~app” is not a valid label key".
+    const odd = [pod('app=web', 'default'), pod('web', 'default')];
+    expect(parseFilter('~app=web').error).toBeNull();
+    expect(kept('~app=web', odd)).toEqual(['app=web']);
+  });
+
+  it('leaves a literal ~ searchable, because quoting still means text', () => {
+    const tilde = [pod('a~x', 'default'), pod('ax', 'default')];
+    expect(kept('"~x"', tilde)).toEqual(['a~x']);
+  });
+
+  it('decides membership and never reorders the list', () => {
+    // Fuzzy usually implies a ranking. This filter is a predicate: the second object is the
+    // "better" match by any scoring anyone would write, and it stays second.
+    const ranked = [pod('xxxweb-canary', 'default'), pod('web', 'default')];
+    expect(kept('~web', ranked)).toEqual(['xxxweb-canary', 'web']);
+  });
+
+  it('refuses an empty pattern rather than matching every row', () => {
+    expect(parseFilter('~').error).toMatch(/Missing pattern after “~”/);
+    expect(parseFilter('-~').error).toMatch(/Missing pattern after “~”/);
+    expect(parseFilter('name:~').error).toMatch(/Missing pattern after “~”/);
+    expect(kept('~', FLEET)).toHaveLength(FLEET.length);
+  });
+
+  it('is refused after status:, where whole-label matching is the point', () => {
+    // status: exists so a card's number and the rows it selects are the same set. A fuzzy
+    // state would break that silently, which is exactly what the exactness rule forbids.
+    expect(parseFilter('status:~run').error).toMatch(/Fuzzy matching is not available after “status:”/);
+    expect(parseFilter('status:~run').error).toContain('status:/…/');
+  });
+});
+
 // ---- status: --------------------------------------------------------------------------------
 // The term GH#337 exists for. Its ONE requirement is that a state an overview card counted is
 // selectable and selects exactly those objects, so most of what follows is about the ways a
@@ -508,6 +590,10 @@ describe('the help the popover renders stays true', () => {
     // A /regex/ is the running engine's, and there are two of them. FilterHelp.java carries the
     // same sentence and pins the same words; that is what keeps the transcription honest.
     expect(notes).toContain('belongs to the engine that runs it');
+    // Fuzzy's two decisions a reader cannot guess: what it matches over, and that it does not
+    // rank. Same two phrases are pinned on the Java side (#411).
+    expect(notes).toContain('joined “namespace/name”');
+    expect(notes).toContain('never reorders them');
   });
 });
 

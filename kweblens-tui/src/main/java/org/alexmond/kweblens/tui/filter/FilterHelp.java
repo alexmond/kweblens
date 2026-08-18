@@ -3,7 +3,7 @@ package org.alexmond.kweblens.tui.filter;
 import java.util.List;
 
 /**
- * The syntax, as the operator reads it — the same 13 rows and 7 notes the browser's help
+ * The syntax, as the operator reads it — the same 14 rows and 8 notes the browser's help
  * popover renders.
  *
  * <p>
@@ -28,6 +28,7 @@ public final class FilterHelp {
 			new Row("web prod", "both must match; terms are separated by spaces and ANDed"),
 			new Row("\"two words\"", "text with a space in it"),
 			new Row("/^web-\\d+$/", "regex over name, namespace and kind (case-insensitive)"),
+			new Row("~wbp", "fuzzy — those letters in that order, gaps allowed, over the same three fields"),
 			new Row("ns:kube-system", "one field only — also name: and kind:"),
 			new Row("name:/^web/", "a field matched by regex"),
 			new Row("status:Pending", "the state an overview card counts — the whole word, not part of it"),
@@ -46,6 +47,10 @@ public final class FilterHelp {
 			"A /regex/ belongs to the engine that runs it, and kweblens has two of them (the browser’s and "
 					+ "the terminal’s). Unicode property classes like \\p{L} work in both; a pattern an engine "
 					+ "cannot read is refused in a sentence rather than quietly read as something else.",
+			"~ matches each of name, namespace and kind on its own, so every hit is visible in one column — "
+					+ "k9s matches fuzzily over a joined “namespace/name” instead, which is why ~prodweb finds "
+					+ "nothing here. It decides which rows to show and never reorders them, and status: takes no "
+					+ "~ because a state matches whole or not at all.",
 			"Kubernetes writes label presence as “partition” and absence as “!partition”. Here they are "
 					+ "label:partition and -label:partition, because a bare word stays a text search.",
 			"status: is the state the server computed — the one the overview cards count, so a card’s number "

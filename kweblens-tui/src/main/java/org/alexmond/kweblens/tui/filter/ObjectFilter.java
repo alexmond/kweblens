@@ -33,6 +33,8 @@ import java.util.List;
  * <li><b>{@code /regex/}</b> — a regex over the same three fields, case-insensitive.
  * Opt-in via the slashes, because a bare {@code .} or {@code *} in a substring search has
  * to keep meaning itself.
+ * <li><b>{@code ~fuzzy}</b> — those letters in that order with gaps allowed, over the
+ * same three fields. Opt-in via the {@code ~}, for the same reason.
  * <li><b>{@code name:} {@code ns:} {@code namespace:} {@code kind:}</b> — the same text
  * matching against one field only; the value may itself be a {@code /regex/} or a
  * {@code "quoted string"}.
@@ -83,10 +85,40 @@ import java.util.List;
  * feature: arbitrary JSON paths are not addressable. {@code status:} is the one field
  * selector that is, and it selects on kweblens' own state vocabulary rather than on
  * {@code status.phase}.
- * <li><b>No fuzzy matching.</b> k9s has it and #366 floats adding it; it is deliberately
- * absent here, because it would have to land in {@code objectFilter.ts} in the same
- * change or it becomes the third grammar this ticket exists to prevent.
  * </ul>
+ *
+ * <h2>{@code ~fuzzy} is four decisions (#411)</h2>
+ *
+ * k9s's {@code -f} is the one filtering thing it has that this did not, and #366
+ * conditioned the port on it landing in {@code objectFilter.ts} in the same change. It
+ * did. The four answers, which are the work rather than the code:
+ *
+ * <ol>
+ * <li><b>Its spelling is a leading {@code ~}.</b> A bare word is a case-insensitive
+ * substring and must stay one, so fuzzy needs its own opt-in character exactly as
+ * {@code /regex/} and {@code label:k} do. A {@code ~} rather than a {@code fuzzy:} prefix
+ * because it <i>composes</i>: like {@code /regex/} it is a value form, so it works bare
+ * and after {@code name:} with no second spelling. It is also a character no name,
+ * namespace or kind an operator meets can carry, so {@code ~foo} before this change was a
+ * query that could only ever return zero rows — and where a name somehow does carry one,
+ * {@code "~foo"} still searches for it literally.
+ * <li><b>It matches name, namespace and kind, each on its own.</b> k9s matches over the
+ * row's ID, one joined {@code namespace/name} string, so its subsequence can straddle the
+ * {@code /}. That difference is chosen: {@code ~} changes only how ONE string is
+ * compared, not which strings are looked at, so it stays a variant of the bare word
+ * instead of two features wearing one character — and a joined string would admit a hit
+ * no column on screen shows.
+ * <li><b>It negates and ANDs like everything else</b>, which costs nothing, because the
+ * {@code ~} lives inside the atom and negation is applied outside it.
+ * <li><b>It is a predicate and does not rank.</b> A ranking would have to become a sort
+ * mode, which is a bigger change than the term, and it would override an order the
+ * operator chose.
+ * </ol>
+ *
+ * <p>
+ * {@code status:} refuses a {@code ~} value in a sentence rather than comparing a whole
+ * state label to the text {@code ~run} and selecting nothing; {@code status:/…/} is the
+ * loose form that term already has.
  */
 public final class ObjectFilter {
 

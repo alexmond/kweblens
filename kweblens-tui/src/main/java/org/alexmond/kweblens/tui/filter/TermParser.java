@@ -63,12 +63,12 @@ final class TermParser {
 	 * One term's atom.
 	 *
 	 * <p>
-	 * <b>Order matters.</b> A delimited run is settled before anything looks for an
-	 * operator inside it, or the {@code =} in {@code /a=b/} would be read as a label
-	 * requirement.
+	 * <b>Order matters.</b> A delimited or marked run is settled before anything looks
+	 * for an operator inside it, or the {@code =} in {@code /a=b/} would be read as a
+	 * label requirement — and the same goes for the one in {@code ~app=web}.
 	 */
 	private static Atom parseAtom(String atom) {
-		if (atom.startsWith("/") || atom.startsWith("\"")) {
+		if (atom.startsWith("/") || atom.startsWith("\"") || atom.startsWith("~")) {
 			return new Atom.Text(TextMatchers.text(atom));
 		}
 		if (atom.startsWith("=") || atom.startsWith("!=")) {

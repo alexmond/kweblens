@@ -76,7 +76,7 @@ class ObjectFilterErrorTest {
 		for (FilterHelp.Row row : FilterHelp.ROWS) {
 			assertThat(ObjectFilter.parse(row.example()).error()).as("%s", row.example()).isNull();
 		}
-		assertThat(FilterHelp.ROWS).hasSize(13);
+		assertThat(FilterHelp.ROWS).hasSize(14);
 	}
 
 	@Test
@@ -85,7 +85,12 @@ class ObjectFilterErrorTest {
 		assertThat(notes).contains("label:partition").contains("field selectors").contains("nothing is truncated");
 		assertThat(notes).as("a /regex/ is the running engine's, and there are two of them")
 			.contains("belongs to the engine that runs it");
-		assertThat(FilterHelp.NOTES).hasSize(7);
+		assertThat(notes)
+			.as("fuzzy's two decisions a reader cannot guess: what it matches over, and that it "
+					+ "does not rank — the same two phrases objectFilter.test.ts pins (#411)")
+			.contains("joined “namespace/name”")
+			.contains("never reorders them");
+		assertThat(FilterHelp.NOTES).hasSize(8);
 	}
 
 }

@@ -13,11 +13,15 @@ import java.util.regex.PatternSyntaxException;
  */
 final class TextMatchers {
 
+	/** The character that opts a term into fuzzy matching. */
+	private static final String FUZZY = "~";
+
 	private TextMatchers() {
 	}
 
 	/**
-	 * A {@code /regex/}, a {@code "quoted string"}, or a bare substring.
+	 * A {@code /regex/}, a {@code ~fuzzy}, a {@code "quoted string"}, or a bare
+	 * substring.
 	 *
 	 * <p>
 	 * The substring comparison is case-<b>insensitive</b> under {@link Locale#ROOT}. The
@@ -30,6 +34,10 @@ final class TextMatchers {
 		Predicate<String> regex = regex(raw);
 		if (regex != null) {
 			return regex;
+		}
+		Predicate<String> fuzzy = fuzzy(raw);
+		if (fuzzy != null) {
+			return fuzzy;
 		}
 		String needle = unquote(raw).toLowerCase(Locale.ROOT);
 		if (needle.isEmpty()) {
@@ -55,11 +63,22 @@ final class TextMatchers {
 	 * The empty case gets its own sentence rather than "Empty search text", because
 	 * {@code status:} with nothing after it is usually a half-typed query and the useful
 	 * reply names a state.
+	 *
+	 * <p>
+	 * A {@code ~fuzzy} value is <b>refused</b>, and refusing it is the whole point: left
+	 * to fall through, {@code status:~run} would compare the whole state label to the
+	 * text {@code ~run}, match nothing, and read as "no rows are in that state". A term
+	 * whose only property is that its count agrees with an overview card's cannot have a
+	 * loose form that quietly disagrees.
 	 */
 	static Predicate<String> status(String raw) {
 		Predicate<String> regex = regex(raw);
 		if (regex != null) {
 			return regex;
+		}
+		if (raw.startsWith(FUZZY)) {
+			throw new FilterError("Fuzzy matching is not available after “status:” — a state matches whole or "
+					+ "not at all. Use status:/…/ for a loose match.");
 		}
 		String wanted = unquote(raw).toLowerCase(Locale.ROOT);
 		if (wanted.isEmpty()) {
@@ -106,6 +125,55 @@ final class TextMatchers {
 			String reason = (ex.getDescription() != null) ? ex.getDescription() : "invalid pattern";
 			throw new FilterError("Invalid regex /" + source + "/ — " + reason, ex);
 		}
+	}
+
+	/**
+	 * The compiled matcher for a {@code ~fuzzy} value, or null when the value is not one.
+	 *
+	 * <p>
+	 * The text after the {@code ~} is text: no metacharacters, and a {@code "quoted"}
+	 * body for a pattern with a space in it. It is deliberately not a second place a
+	 * regex can hide.
+	 */
+	private static Predicate<String> fuzzy(String raw) {
+		if (!raw.startsWith(FUZZY)) {
+			return null;
+		}
+		String pattern = unquote(raw.substring(1)).toLowerCase(Locale.ROOT);
+		if (pattern.isEmpty()) {
+			throw new FilterError("Missing pattern after “~” — write it as ~wbp");
+		}
+		int[] wanted = pattern.codePoints().toArray();
+		return (value) -> isSubsequence(wanted, value.toLowerCase(Locale.ROOT));
+	}
+
+	/**
+	 * Is every code point of {@code wanted} present in {@code value}, in that order?
+	 *
+	 * <p>
+	 * The whole of what "fuzzy" means here — a subsequence test, which is the membership
+	 * half of what k9s's {@code sahilm/fuzzy} computes. The other half is a score, and
+	 * this filter does not rank (see {@link ObjectFilter}). Both sides are already
+	 * lower-cased by the caller.
+	 *
+	 * <p>
+	 * Iterated by <b>code point</b> rather than by {@code char} so that a pattern cannot
+	 * match half of a surrogate pair from one character and half from another — and, more
+	 * to the point, so that {@code objectFilter.ts}'s {@code for (const ch of value)},
+	 * which iterates code points too, gives the same answer. One pass over the value,
+	 * allocating nothing per row.
+	 */
+	private static boolean isSubsequence(int[] wanted, String value) {
+		int found = 0;
+		int at = 0;
+		while (at < value.length() && found < wanted.length) {
+			int codePoint = value.codePointAt(at);
+			if (codePoint == wanted[found]) {
+				found++;
+			}
+			at += Character.charCount(codePoint);
+		}
+		return found == wanted.length;
 	}
 
 	/** {@code "quoted text"} unwrapped, or the value as typed. */

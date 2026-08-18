@@ -194,18 +194,20 @@ Feature-by-feature:
 | Negation | `!` on the whole filter | `-` on any individual term |
 | Regex | default, case-insensitive, implicit | explicit `/…/`, case-insensitive |
 | Substring | via the implicit regex | explicit, and the default |
-| Fuzzy | **yes** (`-f`), over `ns/name` | **no** |
+| Fuzzy | **yes** (`-f`), over `ns/name` | **yes** (`~`), over name, namespace and kind **separately** (#411) |
 | Field-scoped | **no** | `name:`, `ns:`, `namespace:`, `kind:` |
 | Status/state | via the implicit regex over the STATUS cell | `status:` against the server's state vocabulary, exact |
 | Label selectors | full apimachinery, **pushed to the lister** | full apimachinery, evaluated client-side |
 | Bad input | regex compile failure logged, filter ignored | named error surfaced, filter matches everything |
 
-Two real gaps in kweblens's favour-of-k9s column: **fuzzy matching** is genuinely nice for pod names
-with hash suffixes and kweblens has nothing like it; and k9s's label selectors reach the **API
+Two real gaps in kweblens's favour-of-k9s column when this was written: **fuzzy matching** — genuinely
+nice for pod names with hash suffixes — and k9s's label selectors reaching the **API
 server**, so a label filter over a huge namespace is cheap, whereas kweblens's is a client-side scan
-over an already-fetched list. The second is deliberate — kweblens's header says so, because a filter
-over a truncated page reports "no matches" for an object that exists — but the reasoning would want
-revisiting if a TUI ever pages.
+over an already-fetched list. The first is now **closed**: #411 added `~fuzzy` to both filter
+implementations at once, matching each of name, namespace and kind on its own rather than a joined
+`ns/name`, and as a predicate with no ranking. The second is deliberate — kweblens's header says so,
+because a filter over a truncated page reports "no matches" for an object that exists — but the
+reasoning would want revisiting if a TUI ever pages.
 
 **For the TUI: reuse the grammar, not the implementation.** `objectFilter.ts` is 614 lines of
 TypeScript with 60 tests; a Java port is a real cost and a real drift risk. The alternative — lift
@@ -437,7 +439,8 @@ one, but it is a thing not to reimplement by accident.
 
 Ordered roughly by how much a k9s user would miss it.
 
-1. **Fuzzy filtering** (`-f`) over names, in lists *and* inside log/YAML/describe viewers.
+1. **Fuzzy filtering** (`-f`) over names, in lists *and* inside log/YAML/describe viewers. Lists are
+   done — `~fuzzy` (#411), in both implementations — so what is left here is the *viewers*.
 2. **Marks and multi-select** (`<space>`, `ctrl-<space>`, `ctrl-\`) feeding bulk delete.
 3. **Command history and a view stack you can walk** — `[`, `]`, `-`, breadcrumbs.
 4. **Universal addressability**: any discovered GVR is reachable by name from the command line,

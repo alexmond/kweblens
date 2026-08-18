@@ -32,6 +32,8 @@ import type { KubeObject } from './types';
  * <li><b>{@code /regex/}</b> — a JavaScript regex over the same three fields, case-insensitive
  * and <b>in Unicode mode</b> (see below). Opt-in via the slashes, because a bare `.` or `*` in a
  * substring search has to keep meaning itself.
+ * <li><b>{@code ~fuzzy}</b> — those letters in that order with gaps allowed, over the same three
+ * fields. Opt-in via the `~`, for the same reason (see below).
  * <li><b>{@code name:} {@code ns:} {@code kind:}</b> — the same text matching against one
  * field only; the value may itself be a `/regex/` or a `"quoted string"`.
  * <li><b>{@code status:}</b> — the state the SERVER put the object in, matched
@@ -82,6 +84,39 @@ import type { KubeObject } from './types';
  * </ul>
  * Each of those is a REFUSAL — a sentence, and a list that stays whole — never a quiet change of
  * meaning. `[]` and `[^]` are unaffected: V8 accepts both in either mode.
+ *
+ * <h2>`~fuzzy` is four decisions, and each of them is written down (#411)</h2>
+ *
+ * k9s's `-f` is the one filtering thing it has that this did not. Porting it needed four answers,
+ * and the ticket asked for them before any of the code:
+ *
+ * <ol>
+ * <li><b>Its spelling is a leading `~`.</b> A bare word is a case-insensitive substring and must
+ * stay one, so fuzzy needs its own opt-in character exactly as `/regex/` and `label:k` do. `~` was
+ * chosen over a `fuzzy:` prefix because it composes: `/regex/` is a *value* form and works both
+ * bare and after `name:`, and `~` does the same — a prefix would have needed a second spelling for
+ * the field-scoped case. It is also a character no name, namespace or kind an operator meets can
+ * contain (DNS-1123 labels and subdomains cannot; a kind is CamelCase alphanumerics), so `~foo`
+ * before this change was a query that could only ever return zero rows. Where a name somehow does
+ * carry one, `"~foo"` still searches for it literally — the quoted form is unchanged.
+ * <li><b>It matches over name, namespace and kind — each on its own.</b> k9s matches over the
+ * row's ID, one joined `namespace/name` string, so its subsequence can straddle the `/`. That is
+ * a deliberate difference, not an oversight: `~` here changes only how ONE string is compared, not
+ * which strings are looked at, so it stays a variant of the bare word rather than two features
+ * wearing one character. Matching a joined string would also admit a hit no column on screen
+ * shows — `~prodweb` selecting `prod/web-1` — and `ns:~…` already says the narrow thing precisely.
+ * <li><b>It negates and ANDs like everything else</b>, which costs nothing because the `~` lives
+ * inside the atom and negation is applied outside it. A term form that did not would be the first
+ * special case in a grammar that has none.
+ * <li><b>It is a predicate and it does not rank.</b> Fuzzy usually implies an ordering; this
+ * filter decides membership and leaves the list's order alone. A rank would have to become a sort
+ * mode — a bigger change than the term — and it would silently override the column sort the
+ * operator chose, on a surface (the SPA) where sorting is already theirs to set.
+ * </ol>
+ *
+ * <p>`status:` refuses a `~` value in a sentence rather than comparing the whole label to the text
+ * `~run` and quietly selecting nothing. Whole-label matching is the one property that term has —
+ * see above — and `status:/…/` is already the loose form.
  *
  * <h2>Label semantics are Kubernetes', not ours</h2>
  *
@@ -368,11 +403,61 @@ function unquote(raw: string): string {
   return raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2 ? raw.slice(1, -1) : raw;
 }
 
-/** A `/regex/`, a `"quoted string"`, or a bare substring — compiled once, here. */
+/** The character that opts a term into fuzzy matching. */
+const FUZZY = '~';
+
+/**
+ * Is every code point of `wanted` present in `value`, in that order?
+ *
+ * <p>The whole of what "fuzzy" means here — a subsequence test, which is the membership half of
+ * what k9s's `sahilm/fuzzy` computes. The other half is a score, and this filter does not rank
+ * (see the header). Both are already lower-cased by the caller.
+ *
+ * <p>Iterated by <b>code point</b> rather than by UTF-16 unit so that a pattern cannot match half
+ * of a surrogate pair from one character and half from another — and, more to the point, so that
+ * `kweblens-tui`'s transcription can be written the same way and give the same answer. It is one
+ * pass over the value and allocates nothing per row.
+ */
+function isSubsequence(wanted: string[], value: string): boolean {
+  let i = 0;
+  for (const ch of value) {
+    if (ch === wanted[i]) {
+      i++;
+      if (i === wanted.length) {
+        return true;
+      }
+    }
+  }
+  return i === wanted.length;
+}
+
+/**
+ * The compiled matcher for a `~fuzzy` value, or null when the value is not one.
+ *
+ * <p>The text after the `~` is text: no metacharacters, and a `"quoted"` body for a pattern with a
+ * space in it. It is deliberately not a second place a regex can hide.
+ */
+function fuzzyMatcher(raw: string): TextMatcher | null {
+  if (!raw.startsWith(FUZZY)) {
+    return null;
+  }
+  const pattern = unquote(raw.slice(1)).toLowerCase();
+  if (!pattern) {
+    throw new FilterError('Missing pattern after “~” — write it as ~wbp');
+  }
+  const wanted = [...pattern];
+  return (v) => isSubsequence(wanted, v.toLowerCase());
+}
+
+/** A `/regex/`, a `~fuzzy`, a `"quoted string"`, or a bare substring — compiled once, here. */
 function textMatcher(raw: string): TextMatcher {
   const re = regexMatcher(raw);
   if (re) {
     return re;
+  }
+  const fuzzy = fuzzyMatcher(raw);
+  if (fuzzy) {
+    return fuzzy;
   }
   const needle = unquote(raw).toLowerCase();
   if (!needle) {
@@ -387,11 +472,21 @@ function textMatcher(raw: string): TextMatcher {
  * <p>Exact rather than substring on purpose — see the header. The empty case gets its own
  * sentence rather than "Empty search text", because `status:` with nothing after it is usually
  * a half-typed query and the useful reply names a state.
+ *
+ * <p>A `~fuzzy` value is <b>refused</b>, and refusing it is the whole point: left to fall through,
+ * `status:~run` would compare the whole state label to the text `~run`, match nothing, and read as
+ * "no rows are in that state". A term whose only property is that its count agrees with an
+ * overview card's cannot have a loose form that quietly disagrees.
  */
 function statusMatcher(raw: string): TextMatcher {
   const re = regexMatcher(raw);
   if (re) {
     return re;
+  }
+  if (raw.startsWith(FUZZY)) {
+    throw new FilterError(
+      'Fuzzy matching is not available after “status:” — a state matches whole or not at all. Use status:/…/ for a loose match.',
+    );
   }
   const wanted = unquote(raw).toLowerCase();
   if (!wanted) {
@@ -473,11 +568,12 @@ function fieldAtom(prefix: string, value: string): Atom | null {
 }
 
 /**
- * One term's atom. Order matters: a delimited run is settled before anything looks for an
- * operator inside it, or the `=` in `/a=b/` would be read as a label requirement.
+ * One term's atom. Order matters: a delimited or marked run is settled before anything looks for
+ * an operator inside it, or the `=` in `/a=b/` would be read as a label requirement — and the same
+ * goes for the one in `~app=web`.
  */
 function parseAtom(atom: string): Atom {
-  if (atom.startsWith('/') || atom.startsWith('"')) {
+  if (atom.startsWith('/') || atom.startsWith('"') || atom.startsWith(FUZZY)) {
     return { type: 'text', match: textMatcher(atom) };
   }
   if (atom.startsWith('=') || atom.startsWith('!=')) {
@@ -664,6 +760,7 @@ export const FILTER_HELP: FilterHelpRow[] = [
   { example: 'web prod', meaning: 'both must match; terms are separated by spaces and ANDed' },
   { example: '"two words"', meaning: 'text with a space in it' },
   { example: '/^web-\\d+$/', meaning: 'regex over name, namespace and kind (case-insensitive)' },
+  { example: '~wbp', meaning: 'fuzzy — those letters in that order, gaps allowed, over the same three fields' },
   { example: 'ns:kube-system', meaning: 'one field only — also name: and kind:' },
   { example: 'name:/^web/', meaning: 'a field matched by regex' },
   { example: 'status:Pending', meaning: 'the state an overview card counts — the whole word, not part of it' },
@@ -678,6 +775,7 @@ export const FILTER_HELP: FilterHelpRow[] = [
 export const FILTER_HELP_NOTES: string[] = [
   'Text matching is case-insensitive; label values compare exactly, like kubectl.',
   'A /regex/ belongs to the engine that runs it, and kweblens has two of them (the browser’s and the terminal’s). Unicode property classes like \\p{L} work in both; a pattern an engine cannot read is refused in a sentence rather than quietly read as something else.',
+  '~ matches each of name, namespace and kind on its own, so every hit is visible in one column — k9s matches fuzzily over a joined “namespace/name” instead, which is why ~prodweb finds nothing here. It decides which rows to show and never reorders them, and status: takes no ~ because a state matches whole or not at all.',
   'Kubernetes writes label presence as “partition” and absence as “!partition”. Here they are label:partition and -label:partition, because a bare word stays a text search.',
   'status: is the state the server computed — the one the overview cards count, so a card’s number and the rows it selects are the same objects. The whole label has to match, or “Complete” would take “Completed” with it and those two numbers would stop agreeing.',
   'A kind the server has no verdict for carries no state, and no status: term selects it — the absence of a claim, not a claim of health.',

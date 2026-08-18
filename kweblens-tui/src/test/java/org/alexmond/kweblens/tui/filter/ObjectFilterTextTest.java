@@ -197,6 +197,115 @@ class ObjectFilterTextTest {
 
 	}
 
+	/**
+	 * GH#411. Every case here is written twice — once here and once in
+	 * {@code objectFilter.test.ts} — against the same fleet, because a term form
+	 * implemented in one language and asserted only there is the third grammar the port
+	 * exists to prevent.
+	 */
+	@Nested
+	class FuzzyIsOptInOnTildeAndItIsAPredicate {
+
+		@Test
+		void matchesTheLettersInOrderWithGapsWhereABareWordMatchesNothing() {
+			// The whole difference in one pair: `pd` is not a substring of anything here,
+			// and `~pd` is p…d inside "Pod". Opt-in is what keeps the bare word what it
+			// always was.
+			assertThat(Rows.kept("pd", Rows.FLEET)).isEmpty();
+			assertThat(Rows.kept("~pd", Rows.FLEET)).hasSize(Rows.FLEET.size());
+			assertThat(Rows.kept("~wb1", Rows.FLEET)).containsExactly("web-1");
+			assertThat(Rows.kept("~WB1", Rows.FLEET)).containsExactly("web-1");
+		}
+
+		@Test
+		void isASubsequenceSoTheOrderOfTheLettersIsPartOfTheQuery() {
+			assertThat(Rows.kept("~wc", Rows.FLEET)).containsExactly("web-canary");
+			assertThat(Rows.kept("~cw", Rows.FLEET)).isEmpty();
+		}
+
+		/**
+		 * The decision k9s makes differently: it matches over one {@code namespace/name}
+		 * string, so {@code prodweb} finds {@code prod/web-1} there. Here every hit is
+		 * visible in ONE column, because a match nobody can point at is a row the reader
+		 * cannot check.
+		 */
+		@Test
+		void searchesNameNamespaceAndKindEachOnItsOwnNeverJoined() {
+			assertThat(Rows.kept("~ksy", Rows.FLEET)).containsExactly("cache");
+			assertThat(Rows.kept("~prodweb", Rows.FLEET)).isEmpty();
+			assertThat(Rows.kept("~cakube", Rows.FLEET)).isEmpty();
+		}
+
+		@Test
+		void negatesAndAndsLikeEveryOtherTerm() {
+			assertThat(Rows.kept("-~wb1", Rows.FLEET)).containsExactly("web-2", "db-0", "web-canary", "cache");
+			assertThat(Rows.kept("~wb ns:prod", Rows.FLEET)).containsExactly("web-1", "web-2");
+		}
+
+		@Test
+		void narrowsToOneFieldAfterAPrefixLikeARegexDoes() {
+			assertThat(Rows.kept("name:~wc", Rows.FLEET)).containsExactly("web-canary");
+			assertThat(Rows.kept("ns:~ksm", Rows.FLEET)).containsExactly("cache");
+			assertThat(Rows.kept("name:~pd", Rows.FLEET)).isEmpty();
+		}
+
+		@Test
+		void takesTheTextAsTextNoMetacharactersAndQuotesForASpace() {
+			List<FilterRow> dotted = List.of(Rows.pod("a.b", "default"), Rows.pod("axb", "default"));
+			assertThat(Rows.kept("~a.b", dotted)).containsExactly("a.b");
+			List<FilterRow> spaced = List.of(Rows.pod("two words here", "default"), Rows.pod("twp", "default"));
+			assertThat(Rows.kept("~\"o w\"", spaced)).containsExactly("two words here");
+		}
+
+		/**
+		 * Same rule as {@code /a=b/}: a delimited or marked run is settled before
+		 * anything looks for a label operator inside it. Without the {@code ~} branch
+		 * this is the error "“~app” is not a valid label key".
+		 */
+		@Test
+		void claimsTheWholeTokenSoAnOperatorInsideItIsText() {
+			List<FilterRow> odd = List.of(Rows.pod("app=web", "default"), Rows.pod("web", "default"));
+			assertThat(ObjectFilter.parse("~app=web").error()).isNull();
+			assertThat(Rows.kept("~app=web", odd)).containsExactly("app=web");
+		}
+
+		@Test
+		void leavesALiteralTildeSearchableBecauseQuotingStillMeansText() {
+			List<FilterRow> tilde = List.of(Rows.pod("a~x", "default"), Rows.pod("ax", "default"));
+			assertThat(Rows.kept("\"~x\"", tilde)).containsExactly("a~x");
+		}
+
+		/**
+		 * Fuzzy usually implies a ranking. This filter is a predicate: the second object
+		 * is the "better" match by any scoring anyone would write, and it stays second.
+		 */
+		@Test
+		void decidesMembershipAndNeverReordersTheList() {
+			List<FilterRow> ranked = List.of(Rows.pod("xxxweb-canary", "default"), Rows.pod("web", "default"));
+			assertThat(Rows.kept("~web", ranked)).containsExactly("xxxweb-canary", "web");
+		}
+
+		@Test
+		void refusesAnEmptyPatternRatherThanMatchingEveryRow() {
+			assertThat(ObjectFilter.parse("~").error()).contains("Missing pattern after “~”");
+			assertThat(ObjectFilter.parse("-~").error()).contains("Missing pattern after “~”");
+			assertThat(ObjectFilter.parse("name:~").error()).contains("Missing pattern after “~”");
+			assertThat(Rows.kept("~", Rows.FLEET)).hasSize(Rows.FLEET.size());
+		}
+
+		/**
+		 * {@code status:} exists so a card's number and the rows it selects are the same
+		 * set. A fuzzy state would break that silently, which is exactly what the
+		 * exactness rule forbids.
+		 */
+		@Test
+		void isRefusedAfterStatusWhereWholeLabelMatchingIsThePoint() {
+			String error = ObjectFilter.parse("status:~run").error();
+			assertThat(error).contains("Fuzzy matching is not available after “status:”").contains("status:/…/");
+		}
+
+	}
+
 	@Nested
 	class FieldTermsNarrowToOneField {
 
