@@ -6,6 +6,7 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinition;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import io.fabric8.kubernetes.client.utils.Serialization;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +29,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CoreClusterDataSourceColumnsTest {
 
 	KubernetesClient client;
+
+	KubernetesMockServer server;
 
 	private static final String CRD = """
 			apiVersion: apiextensions.k8s.io/v1
@@ -96,9 +99,23 @@ class CoreClusterDataSourceColumnsTest {
 		assertThat(columns.stream().map((column) -> column.render(chart))).containsExactly("traefik", "—");
 	}
 
+	/**
+	 * {@code :secret} — the keystroke #459 was reported against.
+	 *
+	 * <p>
+	 * <b>The emptiness was never the bug and asserting it never caught anything.</b> This
+	 * assertion has been here since #367 and stayed green while the same call listed
+	 * every CRD in the cluster — 10 393 833 bytes on the lab cluster, deserialized on the
+	 * render thread inside the keystroke — to discover that {@code secrets} is not a CRD.
+	 * So the request count is what is asserted: a kind with no API group cannot be
+	 * CRD-delivered, and the cluster is not asked.
+	 */
 	@Test
-	void aKindWithNoCrdAndNoCatalogEntryHasNoColumnsAtAll() {
+	void aKindWithNoCrdAndNoCatalogEntryCostsNoRequestAtAll() {
 		assertThat(source().columns(query(WellKnownKinds.SECRETS))).isEmpty();
+
+		assertThat(this.server.getRequestCount()).as("no CRD request may be issued for a kind that cannot have one")
+			.isZero();
 	}
 
 }

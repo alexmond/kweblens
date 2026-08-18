@@ -539,7 +539,17 @@ broken. It is not; do not "fix" it.
   `metadata.remainingItemCount` (`ResourceService.count`), not `listRaw().size()` — that was
   22.1 MB per call, re-fetched on every namespace switch. `remainingItemCount` is best-effort, so
   its absence is branched on explicitly: no continue token means the page is the whole collection;
-  truncated-without-the-field falls back to a full list.
+  truncated-without-the-field falls back to a full list. **And neither is a lookup** (#459):
+  `CrdService.printerColumns` listed every CRD in the cluster — **10 393 833 bytes** on the lab
+  cluster, because a CRD carries its whole OpenAPI schema — and filtered in memory to answer a
+  question about one kind, on the TUI's **render thread inside the keystroke**, once per kind
+  visited. It now fetches **one CRD by name**, and asks **nothing at all** for a kind whose API
+  group is empty, because a CRD's `spec.group` is required and its `metadata.name` is
+  `<plural>.<group>` — so "this cannot be CRD-delivered" is a fact about the id, not a table of
+  built-in groups (a suffix rule would be wrong: Gateway API's own group is
+  `gateway.networking.k8s.io`). **The gate is the REQUEST, not the emptiness**: "no columns" is
+  what both implementations return, which is why `CrdServiceTest` was green throughout —
+  `CrdPrinterColumnRequestTest` counts requests and reads their paths.
 - **fabric8 is BOM-pinned.** `kubernetes-client-bom` aligns client + model + mock-server; bump the
   one property, never individual fabric8 artifacts.
 - **JLine is pinned on the UBER artifact, and pinning the split ones overrides nothing.**
