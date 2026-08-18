@@ -188,6 +188,22 @@ public final class DetailSections {
 	/**
 	 * The YAML, one line per line and <b>unindented</b>: indenting it would change what
 	 * the document appears to say, and this is the one section a reader may want to copy.
+	 *
+	 * <p>
+	 * <b>The final newline terminates the last line; it does not start another one</b>
+	 * (GH#461). {@code Serialization.asYaml} always writes it — measured on the pinned
+	 * fabric8 for both a typed model and a {@code GenericKubernetesResource} — so
+	 * splitting on {@code \n} yields a trailing empty element that is not a line of the
+	 * document. Counting it made the header say seven for a six-line Pod and drew a blank
+	 * row under the document that {@code G} parked the cursor on. It is dropped here,
+	 * where the split happens, rather than by trimming the rendered lines afterwards: the
+	 * count in the header and the rows below it must come from the same reading, or one
+	 * of them goes stale the next time the other is touched.
+	 *
+	 * <p>
+	 * The limit stays {@code -1} deliberately, and it is now the thing that keeps a
+	 * genuinely blank last line — {@code "a\n\n"} is two lines, the second of them empty.
+	 * Only the one terminator goes.
 	 */
 	private static void yaml(List<DetailLine> lines, String yaml) {
 		if (yaml.isBlank()) {
@@ -195,7 +211,8 @@ public final class DetailSections {
 			lines.add(DetailLine.text(INDENT + "none"));
 			return;
 		}
-		String[] rows = yaml.split("\n", -1);
+		String document = (yaml.endsWith("\n")) ? yaml.substring(0, yaml.length() - 1) : yaml;
+		String[] rows = document.split("\n", -1);
 		lines.add(DetailLine.of("YAML (" + rows.length + " lines)", DetailLine.Tone.SECTION));
 		for (String row : rows) {
 			lines.add(DetailLine.of(row, DetailLine.Tone.YAML));

@@ -257,16 +257,56 @@ public class ViewController {
 		};
 	}
 
+	/**
+	 * Enter on an open prompt.
+	 *
+	 * <p>
+	 * <b>Every branch repaints, because every branch has already closed the prompt</b>
+	 * (GH#461) — the same reason {@link #closePane()}, {@link #back()} and the
+	 * {@code ESCAPE} arm of {@link #promptKey} return {@link Outcome#REPAINT} without
+	 * asking whether anything else moved. Closing it <em>is</em> the change: the frame on
+	 * screen still has the prompt drawn in its footer, and nothing else will take it
+	 * down. TamboUI skips {@code safeRender} entirely when the handler returns false, and
+	 * over a quiet cluster with a live watch neither {@code WatchSupervisor.tick} nor the
+	 * coalescer's flush owes a frame either. An operator looking at a prompt the model
+	 * has closed types their next character into the pane, where {@code q} is not a
+	 * character — it is BACK, and it closes what they were reading.
+	 *
+	 * <p>
+	 * So the question this method must not ask is "did the search find anything": that is
+	 * an answer about the document, and what changed is the prompt. {@code SEARCH} was
+	 * the only mode that ever asked it, which is why it was the only one that could
+	 * report NONE.
+	 */
 	private Outcome submit() {
 		String typed = this.prompt.text();
 		CommandLineModel.Mode mode = this.prompt.mode();
 		this.prompt.close();
-		if (mode == CommandLineModel.Mode.SEARCH) {
-			return repaintIf(this.detail != null && this.detail.search(typed));
+		return switch (mode) {
+			case SEARCH -> search(typed);
+			case FILTER -> filter(typed);
+			case COMMAND -> command(typed);
+			// Unreachable: the prompt was open or this method was not called. Listed so
+			// the switch stays exhaustive and a new mode has to decide here.
+			case OFF -> Outcome.REPAINT;
+		};
+	}
+
+	/**
+	 * Find a line in the pane. A blank term clears the search, an unmatched one is
+	 * reported in words by {@link DetailModel#searchStatus()}, and a search submitted
+	 * with the pane already gone does nothing to a document that is not there — none of
+	 * which changes what the caller owes, because the prompt is down either way.
+	 */
+	private Outcome search(String typed) {
+		if (this.detail != null) {
+			this.detail.search(typed);
 		}
-		if (mode == CommandLineModel.Mode.FILTER) {
-			return filter(typed);
-		}
+		return Outcome.REPAINT;
+	}
+
+	/** Run a {@code :} line, and remember it only if it went somewhere. */
+	private Outcome command(String typed) {
 		Outcome outcome = run(typed);
 		if (this.message.isEmpty()) {
 			this.history.record(typed);

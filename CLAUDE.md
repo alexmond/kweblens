@@ -213,6 +213,22 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     can express the relationship (a Node's pods need a field selector) `DrillDown` **declines in
     words**; it never approximates. `esc` clears a filter *before* it pops a level, and that
     applies to a drill-down's filter too.
+  - **A key's outcome is about what CHANGED, not about what the change achieved** (#461).
+    `TuiRunner` skips `safeRender` entirely when `handle` returns false — measured with
+    `javap -c` on 0.4.0 — so a `NONE` is a promise that the last frame is still true. A submit
+    closed the prompt, so it repaints, whatever the search then found: `ViewController.submit`
+    asked `DetailModel.search`, which answers `false` for an empty term, and left the `/` prompt
+    painted over a pane whose next keystroke is `q` → BACK. `closePane()`, `back()` and the
+    ESCAPE arm repaint unconditionally for exactly this reason; the fix is that rule, never "if
+    the query is empty". Nothing else covers it on a quiet cluster — a healthy tick owes no
+    frame.
+  - **A newline TERMINATES the last line; it does not start another one.** `Serialization.asYaml`
+    always writes one, so `split("\n", -1)` on it yields a trailing empty element: the detail
+    pane's header said `YAML (7 lines)` for a six-line Pod and drew a blank row under the
+    document for `G` to park on (#461). Drop the terminator **where the split happens** — the
+    header count and the rows below it are one reading — and keep the `-1`, which is what still
+    keeps a genuinely blank last line. **Assert the count against what the producer emits**, not
+    a hand-written fixture: `contains(...)` on a few lines passed this for as long as it shipped.
   - **A counter a test waits on must be bumped when the work FINISHES** (#423). `ticksHandled`
     was incremented on entry to the tick handler, so `ScreenHarness.tickAndSettle` released the
     test mid-tick; a test that then moved `MovableClock` 60 s was mutating state a live

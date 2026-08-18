@@ -6,6 +6,7 @@ import java.util.Map;
 
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.client.utils.Serialization;
 import org.junit.jupiter.api.Test;
 
 import org.alexmond.kweblens.event.EventSummary;
@@ -162,6 +163,40 @@ class DetailSectionsTest {
 		List<String> lines = text(DetailSections.of(detail));
 
 		assertThat(lines).contains("apiVersion: v1", "kind: Pod", "  name: web");
+	}
+
+	/**
+	 * <b>The header counts the document's lines, and every line it counts is a line of
+	 * the document.</b> The producer is asked for its own YAML rather than a hand-written
+	 * fixture, because the defect is a property of what it emits: it terminates the
+	 * document with a newline, and a renderer that reads that terminator as a separator
+	 * reports one line too many and then draws the line it counted — an empty one, which
+	 * {@code G} parks the cursor on.
+	 */
+	@Test
+	void theYamlHeaderCountsTheDocumentsOwnLines_andNothingIsDrawnBelowItsLastOne() {
+		String yaml = Serialization.asYaml(pod("web"));
+		assertThat(yaml).as("the producer terminates the document — that is what is being rendered").endsWith("\n");
+		long real = yaml.lines().count();
+
+		List<String> lines = text(DetailSections.of(ObjectDetail.of(yaml, Map.of(), List.of())));
+
+		assertThat(lines).contains("YAML (" + real + " lines)");
+		assertThat(lines.get(lines.size() - 1)).as("the last line of the pane is the last line of the document")
+			.isEqualTo(yaml.lines().toList().get((int) real - 1));
+	}
+
+	/**
+	 * Only the terminator goes. A document whose last line is genuinely blank still has
+	 * it — which is why the split keeps its {@code -1} limit rather than letting
+	 * {@code split} drop every trailing empty it finds.
+	 */
+	@Test
+	void aBlankLastLineOfTheDocumentSurvives_becauseOnlyTheTerminatorIsTheSeparator() {
+		List<String> lines = text(DetailSections.of(ObjectDetail.of("a: 1\nb: 2\n\n", Map.of(), List.of())));
+
+		assertThat(lines).contains("YAML (3 lines)");
+		assertThat(lines).containsSubsequence("a: 1", "b: 2", "");
 	}
 
 	@Test

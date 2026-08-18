@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import org.junit.jupiter.api.Test;
@@ -114,6 +115,43 @@ class ScreenDetailPaneTest {
 
 			assertThat(harness.screen().title()).doesNotContain("detail");
 			assertThat(harness.screen().rowsBuiltLastFrame()).as("the table is drawing rows again").isEqualTo(3);
+		}
+	}
+
+	/**
+	 * <b>The prompt stops being painted when it stops being open.</b> This is the frame
+	 * half of the same rule {@code ViewControllerDetailTest} states as an outcome: the
+	 * runner skips {@code safeRender} altogether when {@code handle} returns false, so a
+	 * submit that closes the prompt and reports "nothing changed" leaves the last frame —
+	 * the one with the {@code /} prompt in its footer — on the terminal. Nothing else
+	 * repaints it: a healthy watch over a quiet cluster owes no tick repaint either.
+	 *
+	 * <p>
+	 * The render counter is read after awaiting the {@code /} frame, because it is bumped
+	 * last of all in {@code render} — waiting on it is what makes "the next frame" a
+	 * frame and not a half-drawn one.
+	 */
+	@Test
+	void submittingAnEmptySearchRedrawsTheFooterThatWasStillShowingThePrompt() throws Exception {
+		try (ScreenHarness harness = ScreenHarness.start(cluster(10), 0)) {
+			harness.runner().dispatch(KeyEvent.ofChar('d'));
+			harness.await(() -> harness.screen().controller().paneOpen(), "the detail pane to open");
+			// Settle first: the pane's own frame has not been drawn yet when paneOpen()
+			// flips, and counting from before it would let that frame answer for the
+			// prompt's.
+			harness.tickAndSettle();
+			int beforePrompt = harness.screen().renders();
+			harness.runner().dispatch(KeyEvent.ofChar('/'));
+			harness.await(() -> harness.screen().renders() > beforePrompt, "the frame that painted the prompt");
+			assertThat(harness.screen().footer()).as("the prompt is what is on screen now").startsWith("/");
+			int painted = harness.screen().renders();
+
+			harness.runner().dispatch(KeyEvent.ofKey(KeyCode.ENTER));
+
+			harness.await(() -> !harness.screen().controller().prompt().open(), "the prompt to close");
+			harness.await(() -> harness.screen().renders() > painted,
+					"a frame after the prompt closed — without one the terminal still shows it");
+			assertThat(harness.screen().footer()).doesNotStartWith("/");
 		}
 	}
 
