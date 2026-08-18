@@ -199,6 +199,23 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-18 — **Two ways a scene can be pointed at a surface and still not have it on screen,
+  met in one run (#478).** (1) **`scroll:` CENTRES an element taller than the viewport.** The
+  2026-08-14 entry below records that it is `scrollIntoViewIfNeeded`, i.e. the minimal scroll;
+  the case it does not cover is an element with no minimal scroll — Recent Events is **1027px in
+  a 900px viewport**, so scrolling to the table put its header 63px above the fold and both
+  selectors reported `outside the viewport`. The target has to be the part being measured
+  (`.n-data-table-thead`), not the container it sits in; that is what the new `category overview:
+  the events table` scene does, and its comment says why. (2) **The theme toggle CLOSES the detail
+  drawer**, and it is not the overlay branch in `setTheme`: this drawer is non-modal, and the
+  probe measured `.n-drawer-mask = 0` throughout while `.n-drawer` went 1 → 0 and
+  `.n-data-table-tr.row-active` went 1 → 0 with it, i.e. the selection state is dropped. So a
+  probe that opens the drawer ONCE and then loops themes measures a page with no drawer in both
+  passes. `contrast-check`/`ui-shot` are immune only by accident — they run PREPARE inside the
+  theme loop, so they re-open it per theme; a hand-written probe must set the theme FIRST and
+  open the drawer per theme. Filed as **GH#480**, because losing the object you were reading to
+  an unrelated click is a product defect and not only a rig one. **A state a scene set up before
+  the theme loop is not a state the theme loop preserves — assert it is still there.**
 - 2026-08-18 — **A probe read a row's colour straight after clicking it and reported the hover
   grey as "the selected row's colour".** Two mechanisms, both of which every scene here shares.
   (1) **A Playwright click leaves the pointer ON the element**, so a sample taken after

@@ -389,6 +389,35 @@ const SCENES = [
     ],
   },
   {
+    // The two tables a category overview stacks (#478). The findings table is a hand-written
+    // `.mini` and Recent Events is an `NDataTable`, and until the `DataTable` theme override
+    // they had no colour in common — so BOTH header texts changed ground, and neither had ever
+    // been measured anywhere: `.mini th` is watched in the drawer scene above, on a `.mini`,
+    // and no scene in this file has ever sampled an `.n-data-table-th` at all.
+    //
+    // Two scenes rather than one, and the reason is the 2026-08-14 entry in the skill's
+    // Learnings: `scroll:` is `scrollIntoViewIfNeeded`, i.e. the MINIMAL scroll, so a single
+    // scene that scrolled to the events table would push the findings table above the fold and
+    // report it `outside the viewport` — a failed measurement wearing a pass's clothes. Two
+    // surfaces needing two scroll positions are two scenes.
+    name: 'category overview: the findings table',
+    prepare: 'close;leaf:Workloads/Overview;wait:1200;scroll:.attention-table',
+    selectors: ['.attention-table th', '.attention-table td', '.attention-reason'],
+  },
+  {
+    // The other half of the same page. `.ov-sec` scopes both selectors to the events pane: an
+    // unscoped `.n-data-table-th` resolves anywhere a data table is on the page, which is the
+    // #389 trap — a selector that resolves is not a selector for the surface a scene walked to.
+    // The scroll target is the THEAD, not the table: `scrollIntoViewIfNeeded` CENTRES an
+    // element taller than the viewport, and this table is 1027px in a 900px one — so scrolling
+    // to it put its header 63px above the fold and both selectors reported `outside the
+    // viewport`. The first body row sits immediately under the header, so one target serves
+    // both.
+    name: 'category overview: the events table',
+    prepare: 'close;leaf:Workloads/Overview;wait:1200;scroll:.ov-sec .n-data-table-thead',
+    selectors: ['.ov-sec .n-data-table-th', '.ov-sec .n-data-table-tbody .n-data-table-td'],
+  },
+  {
     // `.ns-note` is the "Cluster-scoped" pill, so it needs a cluster-scoped kind.
     name: 'cluster-scoped list',
     prepare: 'close;leaf:Namespaces;wait:800',
