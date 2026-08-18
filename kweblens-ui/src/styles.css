@@ -374,48 +374,21 @@ body {
 /* Login modal */
 /* `.modal-backdrop` — the hand-rolled dimming layer — stood here. Every modal is an `NModal`
    now and the scrim is naive's `.n-modal-mask`, which is also what centres the dialog, so
-   nothing emits a backdrop element of ours. The live classes in this family are `.modal-note`
-   and `.modal-actions`; bare `.modal` below is NOT emitted either and is left only because it
-   is outside this sweep's list (#447). */
-
-.modal {
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 22px 24px;
-  width: 360px;
-  max-width: 92vw;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
-}
-
-.modal h2 {
-  margin: 0 0 4px;
-  font-size: 18px;
-}
+   nothing emits a backdrop element of ours (#447).
+   Bare `.modal` and its descendants followed it (#451): the dialog box itself, `.modal h2`,
+   `.modal label`, `.modal label span`, `.modal input`, `.modal.dialog`, both `.modal.wide`
+   rules, `.modal .values` and `.modal label.check`. The panel, padding, radius and shadow are
+   `NModal`'s `preset="card"` now, and the fields inside are `NInput`/`NFormItem`. Measured on
+   a running instance with this app's own login modal open: `.modal-note` reads 1 and
+   `.n-modal` reads 1 while bare `.modal` reads 0.
+   **The live classes in this family are `.modal-note` and `.modal-actions`** — both are
+   plain `class` attributes on elements the modals put in `NModal`'s slots, and both keep
+   their rules below. */
 
 .modal-note {
   margin: 0 0 16px;
   font-size: 12px;
   color: var(--muted);
-}
-
-.modal label {
-  display: block;
-  margin-bottom: 12px;
-}
-
-.modal label span {
-  display: block;
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-
-.modal input {
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 14px;
 }
 
 .modal-actions {
@@ -425,10 +398,9 @@ body {
   margin-top: 18px;
 }
 
-.modal.dialog {
-  width: 400px;
-}
-
+/* `.dialog-message` below IS live — `DialogHost.vue:63` writes it as a plain `class` — but
+   the `.modal.dialog` width rule that used to sit above it was not: `DialogHost` is an
+   `NModal` and its width is the component's. */
 .dialog-message {
   margin: 0 0 14px;
   font-size: 14px;
@@ -869,19 +841,13 @@ body {
   width: 220px;
 }
 
-.grid th.sortable,
-.mini th.sortable {
-  cursor: pointer;
-  user-select: none;
-}
-
-.grid th.sortable:hover,
-.mini th.sortable:hover {
-  color: var(--text);
-}
-
 /* `.sort-ind` stood here — the hand-drawn sort arrow of the pre-Naive table. Sorting is
-   `NDataTable`'s `sorter` now and the arrow is `.n-data-table-sorter`. */
+   `NDataTable`'s `sorter` now and the arrow is `.n-data-table-sorter`. `.grid th.sortable`
+   and `.mini th.sortable` (and their `:hover`) stood here too and went with it (#451): the
+   `sortable` class is emitted by nothing — no `class` attribute, no `:class` binding,
+   literal or composed — so the `.mini` half was as dead as the `.grid` half even though
+   `.mini` is very much alive. A `.mini` table is a plain `<table>` written by hand
+   (`OverviewSection`, `CategoryOverview`, `PodFilesPane`) and none of them sort. */
 
 .spacer {
   flex: 1;
@@ -938,42 +904,14 @@ body {
   border-radius: 10px;
 }
 
-.grid {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.grid th,
-.grid td {
-  text-align: left;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-
-.grid th {
-  background: #f0f4f7;
-  color: var(--muted);
-  font-weight: 600;
-  position: sticky;
-  top: 0;
-}
-
-.grid tr:last-child td {
-  border-bottom: 0;
-}
-
-.grid tr:hover td {
-  background: #f7fafc;
-}
-
-.grid .name {
-  font-weight: 600;
-}
+/* `.grid` — the whole pre-Naive resource table — stood here (#451): the table box, its
+   `th`/`td` padding, the sticky light-only header (`#f0f4f7`), the last-row border reset,
+   the row hover (`#f7fafc`) and `.grid .name`. A list is an `NDataTable` now
+   (`ResourceTable.vue`), so the table is `.n-data-table` and the row is
+   `.n-data-table-tr`; nothing has emitted `grid` since. The word survived the 2026-08-06
+   audit's matcher because `grid` is a common CSS *value* — the hits were `display: grid`,
+   `.form-grid` and prose, never a class. Measured on a running instance: `.grid` is 0
+   elements on every list surface while `.mini` reads 8 in the same sample. */
 
 /* A request still in flight. Was `.empty`, shared with "there is nothing here" and with
    "this failed" — one grey line for three different claims, which is the defect R3 names.
@@ -1240,13 +1178,17 @@ body {
 }
 
 /* Clickable rows + selected highlight */
-.grid.clickable tbody tr {
-  cursor: pointer;
-}
-
-.grid tr.row-active td {
-  background: rgba(10, 122, 194, 0.1);
-}
+/* `.grid.clickable tbody tr` and `.grid tr.row-active td` stood here (#451), and the second
+   is the one worth a marker, because **`row-active` is still emitted**: `ResourceTable.vue`
+   puts it on the row through `NDataTable`'s `rowProps` when `objKey(row)` matches the open
+   drawer's key. It lands on an `.n-data-table-tr` with no `.grid` anywhere above it, so this
+   rule has not matched since the table became naive's — measured on a running instance,
+   `.row-active` reads 1 with a row selected while `.grid` reads 0 in the same sample.
+   Deleting it therefore changes nothing on screen, and what that means is that **the
+   selected row currently has no highlight of its own at all** — the class is emitted and
+   styled by nothing. Giving it one back is a design decision, not a sweep, and is filed
+   separately; do not restore this rule, which cannot reach the element. `.clickable` is
+   emitted nowhere: the row's pointer cursor is an inline `style` on the same `rowProps`. */
 
 /* `.grid tr.row-checked td` and the `.grid th.chk` / `.grid td.chk` checkbox-column rules
    stood here. Bulk selection is `NDataTable`'s own: `ResourceTable.vue` passes a `selection`
@@ -2284,9 +2226,8 @@ body {
   border-radius: 3px;
 }
 
-.modal.wide {
-  width: 660px;
-}
+/* The first of the two `.modal.wide` rules stood here (#451); see the bare-`.modal` marker
+   near the top of this file. */
 
 /* Dockable terminal */
 /* The right-hand panel is a vertical split: the scrolling content on top and the
@@ -2837,31 +2778,11 @@ body.row-resizing {
   white-space: nowrap;
 }
 
-.grid td.muted {
-  color: var(--muted);
-  max-width: 520px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.modal.wide {
-  width: min(760px, 92vw);
-  max-height: 88vh;
-  overflow-y: auto;
-}
-
-.modal .values {
-  width: 100%;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 12px;
-}
-
-.modal label.check {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-}
+/* The Helm modals' half of the dead `.grid` / bare-`.modal` families stood here (#451):
+   `.grid td.muted`, the second and winning `.modal.wide`, `.modal .values` and
+   `.modal label.check`. Every one needed an ancestor nothing emits — see the markers at the
+   `.grid` and `.modal` blocks above. The Helm dialogs are `NModal`s whose width comes from
+   the component's own `style`, and the values box is an `NInput`. */
 
 .adv-options {
   margin: 4px 0 8px;
