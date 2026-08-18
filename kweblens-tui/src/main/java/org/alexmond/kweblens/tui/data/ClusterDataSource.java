@@ -123,6 +123,36 @@ public interface ClusterDataSource {
 	GenericKubernetesResource get(ResourceQuery query, String name);
 
 	/**
+	 * Everything the detail pane shows about one object: its YAML, the relations the
+	 * server computed for it, and its events (GH#368).
+	 *
+	 * <p>
+	 * <b>One method rather than three, because it is one reading.</b> The relations are
+	 * joins over the object's own fields, so relations fetched from a second GET can
+	 * describe a spec the YAML beside them does not show. It is also one round trip for a
+	 * pane the operator is waiting on, on the render thread, exactly as a navigation's
+	 * list is.
+	 *
+	 * <p>
+	 * <b>The joins are the server's and there is no version of them here.</b> The twelve
+	 * relation keys come from {@code RelationService} in {@code kweblens-core}, which
+	 * exists so the SPA, this terminal and the agent tools share one implementation
+	 * instead of each reimplementing "which pods back this Service". A terminal that
+	 * walked {@code ownerReferences} itself would be a second answer to a question that
+	 * already has one — see {@code TuiComputesNoRelationTest}, which fails the build for
+	 * it.
+	 *
+	 * <p>
+	 * <b>It never throws for an object that is not there</b>, because that is an ordinary
+	 * outcome: a row is listed and the object is deleted before the key is pressed. It
+	 * reports it, so the pane can say so instead of drawing empty sections.
+	 * @param query the kind and cluster; the namespace is the object's
+	 * @param name the object's name
+	 * @return the detail, or one carrying the reason there is nothing to show
+	 */
+	ObjectDetail detail(ResourceQuery query, String name);
+
+	/**
 	 * Watch a kind, delivering each change as (action, object) where action is
 	 * {@code ADDED}, {@code MODIFIED} or {@code DELETED}.
 	 *

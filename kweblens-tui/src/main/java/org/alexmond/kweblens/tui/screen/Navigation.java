@@ -4,6 +4,7 @@ import java.util.function.Predicate;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
+import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.kind.KindIndex;
 
@@ -50,5 +51,20 @@ public interface Navigation {
 	 * @return what could not be done, or empty when the view was filled
 	 */
 	String show(ResourceQuery query, Predicate<ResourceRow> filter);
+
+	/**
+	 * Everything the detail pane draws about one object, as the server computed it
+	 * (GH#368).
+	 *
+	 * <p>
+	 * <b>It reports a refusal rather than throwing one</b>, for the same reason
+	 * {@link #show} does: this runs on the render thread inside a key press, and an
+	 * exception out of an {@code EventHandler} is caught by TamboUI's runner, which
+	 * replaces the screen with a stack trace it never comes back from.
+	 * @param namespace the object's namespace, empty or null for a cluster-scoped kind
+	 * @param name the object's name
+	 * @return the detail, or one carrying the reason there is nothing to show
+	 */
+	ObjectDetail detail(String namespace, String name);
 
 }

@@ -23,6 +23,7 @@ import dev.tamboui.widgets.paragraph.Paragraph;
 import org.alexmond.kweblens.column.Column;
 import org.alexmond.kweblens.tui.TuiPosture;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.detail.DetailModel;
 import org.alexmond.kweblens.tui.screen.ColumnLayout;
 import org.alexmond.kweblens.tui.screen.FrameTitle;
 import org.alexmond.kweblens.tui.screen.KeyMap;
@@ -96,6 +97,8 @@ public class ResourceScreen implements EventHandler, Renderer {
 	private final ViewController controller;
 
 	private final ResourceTableView table = new ResourceTableView();
+
+	private final DetailPaneView pane = new DetailPaneView();
 
 	private final Style chrome = Style.create().dim();
 
@@ -229,7 +232,11 @@ public class ResourceScreen implements EventHandler, Renderer {
 		frame.renderWidget(Paragraph.builder().text(header()).style(this.chrome).build(), parts.get(0));
 		frame.renderWidget(Paragraph.builder().text(title()).style(this.titleStyle).build(), parts.get(1));
 		int built = body(frame, parts.get(2));
-		frame.renderWidget(Paragraph.builder().text(KeyMap.hints()).style(this.chrome).build(), parts.get(3));
+		// The hint bar is the projection of whichever table owns the keyboard right now.
+		// A bar naming ':' while the detail pane has the keys would be the exact failure
+		// KeyMap exists to prevent, arrived at from the other side.
+		String hints = (this.controller.paneOpen()) ? KeyMap.paneHints() : KeyMap.hints();
+		frame.renderWidget(Paragraph.builder().text(hints).style(this.chrome).build(), parts.get(3));
 		frame.renderWidget(Paragraph.builder().text(footer()).style(this.chrome).build(), parts.get(4));
 		// Counters last, and renders last of all: an observer that waits on one of these
 		// must not be able to read a half-drawn frame's numbers. That is not tidiness —
@@ -242,11 +249,18 @@ public class ResourceScreen implements EventHandler, Renderer {
 		this.renders.incrementAndGet();
 	}
 
-	/** The table, or the help pane over it. */
+	/** The table, or the detail pane, or the help pane over whichever it is. */
 	private int body(Frame frame, Rect area) {
-		if (!this.controller.help()) {
-			return this.table.render(frame, area, this.model, this.columns);
+		if (this.controller.help()) {
+			return help(frame, area);
 		}
+		if (this.controller.paneOpen()) {
+			return this.pane.render(frame, area, this.controller.detail());
+		}
+		return this.table.render(frame, area, this.model, this.columns);
+	}
+
+	private int help(Frame frame, Rect area) {
 		List<Line> lines = new ArrayList<>();
 		lines.add(Line.from("Keys — every binding, including the ones the bar has no room for"));
 		for (String row : KeyMap.helpRows()) {
@@ -304,6 +318,14 @@ public class ResourceScreen implements EventHandler, Renderer {
 	 * can walk back through.
 	 */
 	String title() {
+		if (this.controller.paneOpen()) {
+			// "snapshot" is not decoration. The table under the pane goes on updating
+			// from
+			// the watch and the pane does not — its YAML, relations and events were read
+			// together to describe one moment, and refreshing one of them would put two
+			// moments on one screen. Closing and reopening is the refresh.
+			return "detail (snapshot)   │   " + this.controller.detail().subject();
+		}
 		StringBuilder line = new StringBuilder(96);
 		line.append(FrameTitle.of(this.controller.current(), this.model.size()));
 		if (this.model.size() != this.model.total()) {
@@ -327,9 +349,28 @@ public class ResourceScreen implements EventHandler, Renderer {
 		if (this.controller.prompt().open()) {
 			return this.controller.prompt().rendered() + candidates();
 		}
+		if (this.controller.paneOpen()) {
+			return paneFooter();
+		}
 		String selected = this.model.selectedRow().map(ResourceRow::name).orElse("—");
 		int position = (this.model.size() == 0) ? 0 : this.model.selectedIndex() + 1;
 		String line = position + "/" + this.model.size() + "  " + selected;
+		String message = this.controller.message();
+		return (message.isEmpty()) ? line : line + "   │   " + message;
+	}
+
+	/**
+	 * Where the cursor is in the pane, what the search found, and anything that could not
+	 * be done. The search status is in words — "no match" is a result, and a screen that
+	 * did not move after {@code /} is indistinguishable from a search that never ran.
+	 */
+	private String paneFooter() {
+		DetailModel detail = this.controller.detail();
+		String line = (detail.selectedIndex() + 1) + "/" + detail.size();
+		String search = detail.searchStatus();
+		if (!search.isEmpty()) {
+			line = line + "   │   " + search;
+		}
 		String message = this.controller.message();
 		return (message.isEmpty()) ? line : line + "   │   " + message;
 	}

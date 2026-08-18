@@ -20,6 +20,7 @@ import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ExecSession;
 import org.alexmond.kweblens.tui.data.LogStream;
+import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.PodTarget;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
@@ -161,6 +162,11 @@ class TuiListingTest {
 		@Override
 		public GenericKubernetesResource get(ResourceQuery query, String name) {
 			throw new UnsupportedOperationException();
+		}
+
+		@Override
+		public ObjectDetail detail(ResourceQuery query, String name) {
+			throw new UnsupportedOperationException("a listing has no detail pane");
 		}
 
 		@Override

@@ -63,12 +63,83 @@ class KeyMapTest {
 	void theHelpPaneCarriesEveryBinding_includingTheOnesTheBarHasNoRoomFor() {
 		List<String> rows = KeyMap.helpRows();
 
-		assertThat(rows).hasSize(KeyMap.BINDINGS.size());
+		assertThat(rows).hasSize(KeyMap.BINDINGS.size() + KeyMap.PANE_BINDINGS.size());
 		for (KeyBinding binding : KeyMap.BINDINGS) {
 			assertThat(rows).contains(binding.hint());
 		}
+		for (KeyBinding binding : KeyMap.PANE_BINDINGS) {
+			assertThat(rows).as("a key that exists only inside the detail pane is still written down")
+				.contains(KeyMap.PANE_PREFIX + binding.hint());
+		}
 		assertThat(KeyMap.visible()).as("the point of the two projections is that they differ")
 			.hasSizeLessThan(KeyMap.BINDINGS.size());
+	}
+
+	/**
+	 * <b>The same two directions, over the detail pane's own table</b> (GH#368). The pane
+	 * is a document and not a list, so it binds different keys; what must not differ is
+	 * that its hint bar is derived from its bindings rather than written by hand.
+	 *
+	 * <p>
+	 * <b>How this was proved to fail.</b> {@code paneHints()} was temporarily pointed at
+	 * {@code BINDINGS} instead of {@code PANE_BINDINGS} — the copy-paste a second table
+	 * invites. {@link #everyVisiblePaneBindingIsInThePaneHintBar()} failed on
+	 * {@code n next
+	 * match} and {@link #thePaneHintBarNamesNothingThatIsNotBoundInThePane()} failed on
+	 * {@code : command}, which is precisely the key the pane must not appear to offer.
+	 */
+	@Test
+	void everyVisiblePaneBindingIsInThePaneHintBar() {
+		String hints = KeyMap.paneHints();
+
+		for (KeyBinding binding : KeyMap.visible(KeyMap.PANE_BINDINGS)) {
+			assertThat(hints).as("the pane's hint bar must name every visible pane binding: " + binding.action())
+				.contains(binding.hint());
+		}
+	}
+
+	@Test
+	void thePaneHintBarNamesNothingThatIsNotBoundInThePane() {
+		Set<String> labels = new HashSet<>();
+		for (KeyBinding binding : KeyMap.visible(KeyMap.PANE_BINDINGS)) {
+			labels.add(binding.hint());
+		}
+
+		List<String> shown = new ArrayList<>(List.of(KeyMap.paneHints().split(KeyMap.SEPARATOR)));
+
+		assertThat(shown)
+			.allSatisfy((hint) -> assertThat(labels).as("pane hint bar shows '" + hint + "'").contains(hint));
+		assertThat(shown).hasSize(KeyMap.visible(KeyMap.PANE_BINDINGS).size());
+	}
+
+	@Test
+	void everyBoundPaneStrokeResolvesToItsOwnAction() {
+		for (KeyBinding binding : KeyMap.PANE_BINDINGS) {
+			for (KeyStroke stroke : binding.strokes()) {
+				assertThat(KeyMap.paneAction(stroke)).as(binding.label() + " -> " + binding.action())
+					.contains(binding.action());
+			}
+		}
+	}
+
+	/**
+	 * The two tables are genuinely two. A pane that answered {@code :} would open a
+	 * command line over a table nobody is looking at, and a list that answered {@code n}
+	 * would move a cursor through matches of a search that does not exist there.
+	 */
+	@Test
+	void theTwoTablesDoNotAnswerEachOthersKeys() {
+		assertThat(KeyMap.paneAction(KeyStroke.of(':'))).as("the pane has no command line").isEmpty();
+		assertThat(KeyMap.paneAction(KeyStroke.of('d'))).as("the pane is already the detail").isEmpty();
+		assertThat(KeyMap.action(KeyStroke.of('n'))).as("the list has nothing to search through").isEmpty();
+		assertThat(KeyMap.action(KeyStroke.of('N'))).isEmpty();
+	}
+
+	/** The key that opens the pane is bound, visible, and says what it does. */
+	@Test
+	void theDetailKeyIsInTheListsTableAndItsHintBar() {
+		assertThat(KeyMap.action(KeyStroke.of('d'))).contains(KeyAction.DETAIL);
+		assertThat(KeyMap.hints()).contains("d detail");
 	}
 
 	@Test

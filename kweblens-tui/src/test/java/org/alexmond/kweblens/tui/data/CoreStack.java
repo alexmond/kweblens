@@ -4,6 +4,7 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 
 import org.alexmond.kweblens.cluster.ClusterRegistry;
+import org.alexmond.kweblens.event.EventService;
 import org.alexmond.kweblens.exec.ExecService;
 import org.alexmond.kweblens.health.ConfigUsageService;
 import org.alexmond.kweblens.health.NetworkHealthService;
@@ -15,6 +16,7 @@ import org.alexmond.kweblens.metric.MetricsProperties;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
 import org.alexmond.kweblens.resource.ApiDiscoveryService;
 import org.alexmond.kweblens.resource.CrdService;
+import org.alexmond.kweblens.resource.RelationService;
 import org.alexmond.kweblens.resource.ResourceService;
 
 /**
@@ -62,7 +64,7 @@ public final class CoreStack {
 				new StorageHealthService(resources, metrics), new ConfigUsageService(registry, resources));
 		return new CoreClusterDataSource(registry, new ApiDiscoveryService(registry), resources,
 				new ObjectStates(contexts), new LogService(registry), new ExecService(registry),
-				new CrdService(registry));
+				new CrdService(registry), new RelationService(registry), new EventService(resources));
 	}
 
 	public static CoreClusterDataSource dataSource(KubernetesClient client) {

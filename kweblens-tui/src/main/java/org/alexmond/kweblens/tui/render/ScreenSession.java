@@ -12,6 +12,7 @@ import java.util.function.Predicate;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
+import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
 import org.alexmond.kweblens.tui.data.WatchEnd;
@@ -391,6 +392,29 @@ public class ScreenSession implements Navigation, AutoCloseable {
 	@Override
 	public String show(ResourceQuery target, Predicate<ResourceRow> filter) {
 		return switchTo(target, filter);
+	}
+
+	/**
+	 * One read of one object, on the render thread, for the pane the operator just asked
+	 * for — the same trade {@link #switchTo} makes for a list, and for the same reason:
+	 * they are waiting for it either way.
+	 *
+	 * <p>
+	 * <b>A refusal comes back as a sentence</b> (GH#434). This is called from inside a
+	 * key press, so an exception would leave {@code ResourceScreen.handle} for TamboUI's
+	 * runner, which answers it by replacing the screen with a stack trace it never
+	 * leaves.
+	 */
+	@Override
+	public ObjectDetail detail(String namespace, String name) {
+		ResourceQuery target = this.query.get();
+		try {
+			return this.cluster.detail(target.inNamespace(namespace), name);
+		}
+		catch (RuntimeException ex) {
+			String reason = (ex.getMessage() != null) ? ex.getMessage() : ex.getClass().getSimpleName();
+			return ObjectDetail.failed("Could not read " + target.kind() + " " + name + ": " + reason);
+		}
 	}
 
 	/**

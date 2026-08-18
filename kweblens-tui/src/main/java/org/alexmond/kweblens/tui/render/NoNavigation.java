@@ -4,6 +4,7 @@ import java.util.function.Predicate;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
+import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.kind.KindIndex;
 import org.alexmond.kweblens.tui.screen.Navigation;
@@ -42,6 +43,12 @@ record NoNavigation(ResourceQuery query) implements Navigation {
 		// Nothing to show onto. A screen built this way has no session behind it, and
 		// KindIndex.empty() means no command ever resolves far enough to reach here.
 		return "";
+	}
+
+	@Override
+	public ObjectDetail detail(String namespace, String name) {
+		// Same posture as everything else here: say so rather than draw an empty pane.
+		return ObjectDetail.failed("This screen has no cluster behind it, so there is no detail to read.");
 	}
 
 }
