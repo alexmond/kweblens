@@ -22,6 +22,7 @@ import org.alexmond.kweblens.tui.data.ExecSession;
 import org.alexmond.kweblens.tui.data.LogStream;
 import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.PodTarget;
+import org.alexmond.kweblens.tui.data.PreviousLog;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
 import org.alexmond.kweblens.tui.data.WatchEnd;
@@ -172,6 +173,21 @@ class TuiListingTest {
 		@Override
 		public Subscription watch(ResourceQuery query, BiConsumer<String, GenericKubernetesResource> onEvent,
 				Consumer<WatchEnd> onEnd) {
+			throw new UnsupportedOperationException();
+		}
+
+		@Override
+		public List<String> containers(String clusterId, String namespace, String pod) {
+			throw new UnsupportedOperationException("a listing has no log pane");
+		}
+
+		@Override
+		public LogStream logsWithTimestamps(PodTarget target) {
+			throw new UnsupportedOperationException();
+		}
+
+		@Override
+		public PreviousLog previousLog(PodTarget target, int tailLines) {
 			throw new UnsupportedOperationException();
 		}
 

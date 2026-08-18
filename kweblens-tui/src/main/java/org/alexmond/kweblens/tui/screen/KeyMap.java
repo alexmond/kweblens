@@ -24,19 +24,21 @@ import java.util.Optional;
  * <ul>
  * <li>{@link #hints()} — the footer. Only {@link KeyBinding#visible()} rows, because a
  * line that wraps is a line nobody reads.</li>
- * <li>{@link #helpRows()} — the {@code ?} pane. <b>Every</b> row of <b>both</b> tables,
+ * <li>{@link #helpRows()} — the {@code ?} pane. <b>Every</b> row of <b>every</b> table,
  * so "not in the hint bar" never means "not written down anywhere".</li>
  * </ul>
  *
- * <h2>Two tables, because two screens</h2>
+ * <h2>Three tables, because three screens</h2>
  *
  * The detail pane (GH#368) is a document, not a list: {@code /} searches it rather than
  * filtering rows, {@code n} and {@code N} walk the matches, and {@code :} would be a
- * command line over a table that is not on screen. So the pane has its own table,
- * {@link #PANE_BINDINGS}, projected by exactly the same three methods — the derivation
- * rule is per screen, and {@code KeyMapTest} runs both directions over both tables. What
- * would break the rule is a key handled in a branch somewhere with no row anywhere, and
- * that is still impossible.
+ * command line over a table that is not on screen. The log pane (GH#369) is neither — it
+ * is a document that keeps growing, so {@code c} picks another container, {@code t}
+ * re-opens the stream with timestamps and {@code G} means "follow the tail again". Each
+ * has its own table ({@link #PANE_BINDINGS}, {@link #LOG_BINDINGS}), projected by exactly
+ * the same three methods — the derivation rule is per screen, and {@code KeyMapTest} runs
+ * both directions over all three. What would break the rule is a key handled in a branch
+ * somewhere with no row anywhere, and that is still impossible.
  *
  * <h2>What this table does not cover</h2>
  *
@@ -67,6 +69,14 @@ public final class KeyMap {
 			KeyBinding.shown(KeyAction.HISTORY_NEXT, "]", "next cmd", KeyStroke.of(']')),
 			KeyBinding.shown(KeyAction.LAST_COMMAND, "-", "last cmd", KeyStroke.of('-')),
 			KeyBinding.shown(KeyAction.DETAIL, "d", "detail", KeyStroke.of('d')),
+			KeyBinding.shown(KeyAction.LOGS, "l", "logs", KeyStroke.of('l')),
+			// Hidden, and it is a width decision rather than a documentation one. The bar
+			// is 121 characters before this ticket and 130 with "l logs"; "p prev logs"
+			// would take it to 144, past a 132-column terminal, and a line that wraps is
+			// a
+			// line nobody reads. The key is in the help pane, and the log pane's OWN bar
+			// shows it — which is where a reader who has pressed l is looking.
+			KeyBinding.hidden(KeyAction.PREVIOUS_LOGS, "p", "previous run's logs", KeyStroke.of('p')),
 			KeyBinding.shown(KeyAction.NAMESPACE_FAVOURITE, "0-9", "namespace", digits()),
 			KeyBinding.shown(KeyAction.HELP, "?", "keys", KeyStroke.of('?')),
 			KeyBinding.hidden(KeyAction.MOVE_DOWN, "j/↓", "down", KeyStroke.of('j'),
@@ -110,14 +120,52 @@ public final class KeyMap {
 					KeyStroke.key(KeyStroke.Kind.END)),
 			KeyBinding.hidden(KeyAction.QUIT, "ctrl-c", "quit", KeyStroke.ctrl('c')));
 
+	/**
+	 * Every key the log pane binds (GH#369).
+	 *
+	 * <p>
+	 * A third table for a third screen, not a variant of the second: a log is neither a
+	 * list nor a document that ends. {@code c} and {@code t} exist only here because only
+	 * here is there a container to switch and a stream to re-open with timestamps, and
+	 * {@code p} is bound in <em>both</em> this table and the list's — from a row it opens
+	 * the terminated instance, and from inside the pane it toggles back and forth, which
+	 * is one behaviour reached from two places rather than two keys.
+	 *
+	 * <p>
+	 * {@code G} says "last line (follow)" rather than "last line": in this pane the two
+	 * are the same act, because the tail is followed exactly while the cursor is on it.
+	 */
+	public static final List<KeyBinding> LOG_BINDINGS = List.of(
+			KeyBinding.shown(KeyAction.PREVIOUS_LOGS, "p", "previous run", KeyStroke.of('p')),
+			KeyBinding.shown(KeyAction.NEXT_CONTAINER, "c", "next container", KeyStroke.of('c')),
+			KeyBinding.shown(KeyAction.TIMESTAMPS, "t", "timestamps", KeyStroke.of('t')),
+			KeyBinding.shown(KeyAction.BACK, "esc/q", "back", KeyStroke.key(KeyStroke.Kind.ESCAPE), KeyStroke.of('q'),
+					KeyStroke.of('Q')),
+			KeyBinding.hidden(KeyAction.MOVE_DOWN, "j/↓", "down a line", KeyStroke.of('j'),
+					KeyStroke.key(KeyStroke.Kind.DOWN)),
+			KeyBinding.hidden(KeyAction.MOVE_UP, "k/↑", "up a line", KeyStroke.of('k'),
+					KeyStroke.key(KeyStroke.Kind.UP)),
+			KeyBinding.hidden(KeyAction.PAGE_DOWN, "ctrl-d/pgdn", "half page down in the log", KeyStroke.ctrl('d'),
+					KeyStroke.key(KeyStroke.Kind.PAGE_DOWN)),
+			KeyBinding.hidden(KeyAction.PAGE_UP, "ctrl-u/pgup", "half page up in the log", KeyStroke.ctrl('u'),
+					KeyStroke.key(KeyStroke.Kind.PAGE_UP)),
+			KeyBinding.hidden(KeyAction.TOP, "g/home", "oldest line held", KeyStroke.of('g'),
+					KeyStroke.key(KeyStroke.Kind.HOME)),
+			KeyBinding.hidden(KeyAction.BOTTOM, "G/end", "last line (follow)", KeyStroke.of('G'),
+					KeyStroke.key(KeyStroke.Kind.END)),
+			KeyBinding.hidden(KeyAction.QUIT, "ctrl-c", "quit", KeyStroke.ctrl('c')));
+
 	/** What separates two hints on the footer. */
 	static final String SEPARATOR = " · ";
 
 	/**
-	 * How a pane-only binding is written in the help, so the two tables cannot be
+	 * How a pane-only binding is written in the help, so the three tables cannot be
 	 * confused.
 	 */
 	static final String PANE_PREFIX = "in the detail pane: ";
+
+	/** The same, for the log pane. */
+	static final String LOG_PREFIX = "in the log pane: ";
 
 	private KeyMap() {
 	}
@@ -144,6 +192,11 @@ public final class KeyMap {
 		return action(PANE_BINDINGS, stroke);
 	}
 
+	/** What {@code stroke} does while the log pane is up, or empty. */
+	public static Optional<KeyAction> logAction(KeyStroke stroke) {
+		return action(LOG_BINDINGS, stroke);
+	}
+
 	private static Optional<KeyAction> action(List<KeyBinding> table, KeyStroke stroke) {
 		for (KeyBinding binding : table) {
 			if (binding.matches(stroke)) {
@@ -163,6 +216,11 @@ public final class KeyMap {
 		return hints(PANE_BINDINGS);
 	}
 
+	/** The hint bar the log pane shows, derived the same way from its own table. */
+	public static String logHints() {
+		return hints(LOG_BINDINGS);
+	}
+
 	static String hints(List<KeyBinding> table) {
 		StringBuilder line = new StringBuilder(96);
 		for (KeyBinding binding : table) {
@@ -177,16 +235,19 @@ public final class KeyMap {
 	}
 
 	/**
-	 * The help pane: every row of both tables, hidden ones included, so a key that exists
-	 * only inside the detail pane is still written down somewhere.
+	 * The help pane: every row of all three tables, hidden ones included, so a key that
+	 * exists only inside a pane is still written down somewhere.
 	 */
 	public static List<String> helpRows() {
-		List<String> rows = new ArrayList<>(BINDINGS.size() + PANE_BINDINGS.size());
+		List<String> rows = new ArrayList<>(BINDINGS.size() + PANE_BINDINGS.size() + LOG_BINDINGS.size());
 		for (KeyBinding binding : BINDINGS) {
 			rows.add(binding.hint());
 		}
 		for (KeyBinding binding : PANE_BINDINGS) {
 			rows.add(PANE_PREFIX + binding.hint());
+		}
+		for (KeyBinding binding : LOG_BINDINGS) {
+			rows.add(LOG_PREFIX + binding.hint());
 		}
 		return List.copyOf(rows);
 	}

@@ -235,7 +235,21 @@ code is what `RelationService` was written for; it is the intent, not yet a ship
 that was cut off at its bound, one that failed, and one your RBAC refused are three different
 sentences on screen, never an empty section.
 
-Log follow and exec are still to come — #369 and #370.
+`l` opens a **log pane** on the selected pod, following the container from now. `c` walks the
+pod's containers when there is more than one, `t` re-opens the stream with the API server's own
+timestamps, and `p` shows the container's **previous run** — the crashloop diagnostic, labelled as
+a snapshot in the title so it cannot be mistaken for the live log. A container that has never
+restarted and one whose terminated instance wrote nothing are told apart in words, because a blank
+pane would read as "it crashed silently".
+
+The pane holds the last 5 000 lines and **flushes on the same tick the table repaints on**, never
+per line: a chatty pod would otherwise post a redraw per line, and in this stack that competes with
+your keystrokes rather than merely costing frames. `G` follows the tail, any move up pauses it, and
+the footer says which. Closing the pane releases the connection to the API server — which is worth
+stating, because `LogWatch.close()` alone does not.
+
+Wrap and timestamps-off-the-buffer toggles, a `/` filter over the held lines, and save-to-file are
+not there yet — see #369. Exec is still to come (#370).
 
 ## Container image
 

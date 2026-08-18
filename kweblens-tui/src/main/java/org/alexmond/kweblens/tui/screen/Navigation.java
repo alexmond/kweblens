@@ -7,6 +7,8 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.kind.KindIndex;
+import org.alexmond.kweblens.tui.log.LogOpen;
+import org.alexmond.kweblens.tui.log.LogRequest;
 
 /**
  * What {@link ViewController} may ask the session to do when a key means "go somewhere".
@@ -66,5 +68,30 @@ public interface Navigation {
 	 * @return the detail, or one carrying the reason there is nothing to show
 	 */
 	ObjectDetail detail(String namespace, String name);
+
+	/**
+	 * Open (or re-open) the log pane on one container (GH#369).
+	 *
+	 * <p>
+	 * <b>The session owns what this opens, and closing the previous follow is its job,
+	 * not the caller's.</b> That is the whole shape of the ticket: a pane that closes its
+	 * own stream on {@code esc} but not on a container switch, or vice versa, leaks one
+	 * connection to the API server per view — and against a quiet pod nothing on screen
+	 * ever says so. Putting the release behind this one method means there is one owner
+	 * and one release path, and {@link #closeLogs()} and the session's own
+	 * {@code close()} are the same call.
+	 *
+	 * <p>
+	 * <b>It reports a refusal rather than throwing one</b>, for the same reason
+	 * {@link #show} and {@link #detail} do.
+	 * @return the pane's document, or the reason there is not one
+	 */
+	LogOpen logs(LogRequest request);
+
+	/**
+	 * Stop following, releasing the connection. Idempotent, because every path that
+	 * closes the pane calls it and a pane can be closed more than once.
+	 */
+	void closeLogs();
 
 }

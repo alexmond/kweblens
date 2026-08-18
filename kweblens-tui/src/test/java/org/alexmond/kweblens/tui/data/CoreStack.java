@@ -12,6 +12,7 @@ import org.alexmond.kweblens.health.ObjectStates;
 import org.alexmond.kweblens.health.StatusContexts;
 import org.alexmond.kweblens.health.StorageHealthService;
 import org.alexmond.kweblens.log.LogService;
+import org.alexmond.kweblens.log.LogSourceResolver;
 import org.alexmond.kweblens.metric.MetricsProperties;
 import org.alexmond.kweblens.metric.PrometheusMetricService;
 import org.alexmond.kweblens.resource.ApiDiscoveryService;
@@ -63,8 +64,9 @@ public final class CoreStack {
 		StatusContexts contexts = new StatusContexts(new NetworkHealthService(registry, resources),
 				new StorageHealthService(resources, metrics), new ConfigUsageService(registry, resources));
 		return new CoreClusterDataSource(registry, new ApiDiscoveryService(registry), resources,
-				new ObjectStates(contexts), new LogService(registry), new ExecService(registry),
-				new CrdService(registry), new RelationService(registry), new EventService(resources));
+				new ObjectStates(contexts), new LogService(registry), new LogSourceResolver(registry, resources),
+				new ExecService(registry), new CrdService(registry), new RelationService(registry),
+				new EventService(resources));
 	}
 
 	public static CoreClusterDataSource dataSource(KubernetesClient client) {

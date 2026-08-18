@@ -12,6 +12,9 @@ import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.kind.KindIndex;
+import org.alexmond.kweblens.tui.log.LogModel;
+import org.alexmond.kweblens.tui.log.LogOpen;
+import org.alexmond.kweblens.tui.log.LogRequest;
 
 /**
  * A session that records where it was asked to go, with a small discovered vocabulary.
@@ -79,6 +82,69 @@ public class FakeNavigation implements Navigation {
 	public ObjectDetail detail(String namespace, String name) {
 		this.detailsRead.add(namespace + "/" + name);
 		return (this.detail != null) ? this.detail : ObjectDetail.missing("Pod", name);
+	}
+
+	/** Every log reading asked for, in order — including the re-opens a key causes. */
+	private final List<LogRequest> logsOpened = new ArrayList<>();
+
+	/**
+	 * How many times the session was told to release the follow. The pane's own state is
+	 * not evidence of a release; this is (GH#369).
+	 */
+	private int logsClosed;
+
+	/** What {@code logs} answers; a refusal when set. */
+	private String logRefusal;
+
+	/** The containers a log pane will be told the pod has. */
+	private List<String> containers = List.of("app");
+
+	@Override
+	public LogOpen logs(LogRequest request) {
+		this.logsOpened.add(request);
+		if (this.logRefusal != null) {
+			return LogOpen.failed(this.logRefusal);
+		}
+		// The real session releases the previous follow inside this call; a fake that did
+		// not count that would let a controller test pass while the shipped pane leaked.
+		this.logsClosed++;
+		String container = (!request.container().isBlank()) ? request.container()
+				: this.containers.isEmpty() ? "" : this.containers.get(0);
+		if (request.previous()) {
+			return LogOpen.of(LogModel.previous(request.namespace(), request.pod(), container, this.containers,
+					"crashed at boot\n", null));
+		}
+		return LogOpen.of(LogModel.following(request.namespace(), request.pod(), container, this.containers,
+				request.timestamps()));
+	}
+
+	@Override
+	public void closeLogs() {
+		this.logsClosed++;
+	}
+
+	/** What the pod's containers are. */
+	public FakeNavigation withContainers(String... names) {
+		this.containers = List.of(names);
+		return this;
+	}
+
+	/**
+	 * What every subsequent {@code logs} answers — a cluster that will not serve them.
+	 */
+	public FakeNavigation refusingLogs(String reason) {
+		this.logRefusal = reason;
+		return this;
+	}
+
+	/** Every reading the pane asked for. */
+	public List<LogRequest> logsOpened() {
+		return List.copyOf(this.logsOpened);
+	}
+
+	/** How many releases the session was asked for. */
+	public int logsClosed() {
+		return this.logsClosed;
 	}
 
 	/**

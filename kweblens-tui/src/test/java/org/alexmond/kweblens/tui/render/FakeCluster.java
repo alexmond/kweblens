@@ -1,13 +1,19 @@
 package org.alexmond.kweblens.tui.render;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,6 +34,7 @@ import org.alexmond.kweblens.tui.data.ExecSession;
 import org.alexmond.kweblens.tui.data.LogStream;
 import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.PodTarget;
+import org.alexmond.kweblens.tui.data.PreviousLog;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
 import org.alexmond.kweblens.tui.data.WatchEnd;
@@ -419,14 +426,267 @@ public class FakeCluster implements ClusterDataSource {
 		}
 	}
 
+	/** What {@link #containers} answers. One container unless a test says otherwise. */
+	private volatile List<String> containers = List.of("app");
+
+	/** When set, {@link #containers} throws it — a pod that is gone, or RBAC. */
+	private volatile RuntimeException refuseContainers;
+
+	/** When set, {@link #logs} throws it — {@code pods/log} refused. */
+	private volatile RuntimeException refuseLogs;
+
+	/** What {@link #previousLog} answers. */
+	private volatile PreviousLog previous = PreviousLog.none("app");
+
+	/**
+	 * Every log stream ever handed out, in the order they were opened, <b>including the
+	 * ones already closed</b>.
+	 *
+	 * <p>
+	 * Kept rather than counted, because "opened 20, closed 20" is not the assertion
+	 * GH#369 wants — a pane that closed the same stream twice and leaked another would
+	 * satisfy it. What is asserted is that <em>every</em> stream in this list is closed,
+	 * which a pair of counters cannot express.
+	 */
+	private final List<FakeLogStream> logStreams = new CopyOnWriteArrayList<>();
+
+	private final AtomicInteger timestamped = new AtomicInteger();
+
+	/** What the pod's containers are, so a test can drive the {@code c} key. */
+	public FakeCluster withContainers(String... names) {
+		this.containers = List.of(names);
+		return this;
+	}
+
+	/** Make {@code containers} throw, as a pod that has been deleted would. */
+	public FakeCluster refuseContainers(RuntimeException failure) {
+		this.refuseContainers = failure;
+		return this;
+	}
+
+	/** Make {@code logs} throw, as a cluster refusing {@code pods/log} would. */
+	public FakeCluster refuseLogs(RuntimeException failure) {
+		this.refuseLogs = failure;
+		return this;
+	}
+
+	/** What a previous-run read answers. */
+	public FakeCluster withPreviousLog(PreviousLog answer) {
+		this.previous = answer;
+		return this;
+	}
+
+	@Override
+	public List<String> containers(String clusterId, String namespace, String pod) {
+		RuntimeException refusal = this.refuseContainers;
+		if (refusal != null) {
+			throw refusal;
+		}
+		return this.containers;
+	}
+
 	@Override
 	public LogStream logs(PodTarget target) {
-		throw new UnsupportedOperationException("not used by the screen");
+		return openLog(target);
+	}
+
+	@Override
+	public LogStream logsWithTimestamps(PodTarget target) {
+		this.timestamped.incrementAndGet();
+		return openLog(target);
+	}
+
+	private LogStream openLog(PodTarget target) {
+		RuntimeException refusal = this.refuseLogs;
+		if (refusal != null) {
+			throw refusal;
+		}
+		FakeLogStream stream = new FakeLogStream(target.container());
+		this.logStreams.add(stream);
+		return stream;
+	}
+
+	@Override
+	public PreviousLog previousLog(PodTarget target, int tailLines) {
+		return this.previous;
+	}
+
+	/** Write one line into the most recently opened stream, as a container would. */
+	public void emitLog(String line) {
+		this.logStreams.get(this.logStreams.size() - 1).emit(line);
+	}
+
+	/**
+	 * End the most recently opened stream from the cluster's side, as an exiting
+	 * container does.
+	 */
+	public void endLog() {
+		this.logStreams.get(this.logStreams.size() - 1).end();
+	}
+
+	/** How many log streams have ever been opened. */
+	public int logStreamsOpened() {
+		return this.logStreams.size();
+	}
+
+	/**
+	 * How many are still open — the number GH#369's first done-when requires to be zero
+	 * after twenty opens and closes. Derived by asking each stream, not by subtracting
+	 * two counters, so a double close cannot pay for a leak.
+	 */
+	public long openLogStreams() {
+		return this.logStreams.stream().filter((stream) -> !stream.closed()).count();
+	}
+
+	/** Which container each opened stream was for, in order. */
+	public List<String> logContainers() {
+		return this.logStreams.stream().map(FakeLogStream::container).toList();
+	}
+
+	/** How many opens asked for timestamps. */
+	public int timestampedLogs() {
+		return this.timestamped.get();
 	}
 
 	@Override
 	public ExecSession exec(PodTarget target, OutputStream output) {
 		throw new UnsupportedOperationException("not used by the screen");
+	}
+
+	/**
+	 * A log stream a test writes into and that records whether it was released.
+	 *
+	 * <p>
+	 * Its {@link InputStream} <b>throws</b> once closed rather than reporting
+	 * end-of-stream, because that is what a closed socket does and it is what makes
+	 * {@code LogFollower}'s "a close we asked for is not a failure" branch reachable. A
+	 * fake that answered {@code -1} would make the pane say the container's log ended
+	 * every time the operator pressed {@code esc}.
+	 */
+	private static final class FakeLogStream implements LogStream {
+
+		private static final long POLL_MILLIS = 20;
+
+		private final String container;
+
+		private final BlockingQueue<byte[]> chunks = new LinkedBlockingQueue<>();
+
+		private final AtomicBoolean closed = new AtomicBoolean();
+
+		/**
+		 * Set by {@link #end()}: the container exited, which is not a close we asked for.
+		 */
+		private final AtomicBoolean ended = new AtomicBoolean();
+
+		/**
+		 * One stream, created once. A {@code stream()} that minted a new reader per call
+		 * would let a leak test pass by reading a different stream than the one the pane
+		 * closed.
+		 */
+		private final InputStream output = new QueuedBytes();
+
+		private FakeLogStream(String container) {
+			this.container = container;
+		}
+
+		private void emit(String line) {
+			this.chunks.add((line + "\n").getBytes(StandardCharsets.UTF_8));
+		}
+
+		private void end() {
+			this.ended.set(true);
+		}
+
+		private String container() {
+			return this.container;
+		}
+
+		private boolean closed() {
+			return this.closed.get();
+		}
+
+		@Override
+		public InputStream stream() {
+			return this.output;
+		}
+
+		@Override
+		public void close() {
+			this.closed.set(true);
+		}
+
+		/**
+		 * The bytes the test has queued.
+		 *
+		 * <p>
+		 * <b>{@link #read(byte[], int, int)} is overridden, and that is not tidiness.</b>
+		 * {@code InputStream}'s default bulk read loops calling {@link #read()} until it
+		 * has {@code len} bytes — and {@code StreamDecoder} asks for 8 192 — so a
+		 * single-byte-at-a-time fake whose {@code read()} <em>blocks</em> when the queue
+		 * is empty never hands the decoder anything until 8 KB has been emitted. A
+		 * 157-line burst is about 1.4 KB, so the first version of this fake made the
+		 * flush test wait ten seconds for lines that had all arrived. The instrument was
+		 * wrong, not the pane. This returns what is there once at least one byte is.
+		 */
+		private final class QueuedBytes extends InputStream {
+
+			private byte[] current = new byte[0];
+
+			private int at;
+
+			@Override
+			public int read(byte[] into, int off, int len) throws IOException {
+				if (len == 0) {
+					return 0;
+				}
+				int first = read();
+				if (first < 0) {
+					return -1;
+				}
+				into[off] = (byte) first;
+				int count = 1;
+				while (count < len && this.at < this.current.length) {
+					into[off + count] = this.current[this.at++];
+					count++;
+				}
+				return count;
+			}
+
+			@Override
+			public int available() {
+				return this.current.length - this.at;
+			}
+
+			@Override
+			public int read() throws IOException {
+				while (this.at >= this.current.length) {
+					if (FakeLogStream.this.closed.get()) {
+						throw new IOException("stream closed");
+					}
+					if (FakeLogStream.this.ended.get() && FakeLogStream.this.chunks.isEmpty()) {
+						return -1;
+					}
+					byte[] next = poll();
+					if (next != null) {
+						this.current = next;
+						this.at = 0;
+					}
+				}
+				return this.current[this.at++] & 0xFF;
+			}
+
+			private byte[] poll() throws IOException {
+				try {
+					return FakeLogStream.this.chunks.poll(POLL_MILLIS, TimeUnit.MILLISECONDS);
+				}
+				catch (InterruptedException ex) {
+					Thread.currentThread().interrupt();
+					throw new IOException("interrupted", ex);
+				}
+			}
+
+		}
+
 	}
 
 }

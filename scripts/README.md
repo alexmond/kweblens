@@ -16,6 +16,7 @@ once — the reason is in the header comment of each script.
 | [`state-link-check.mjs`](state-link-check.mjs) | Click every state on an overview card and fail unless the list it opens holds exactly the objects the card counted. |
 | [`resize-check.mjs`](resize-check.mjs) | Drag a multiline field's corner, then type: fail unless it has a grabber AND the pulled height survives. |
 | [`tui-drive.sh`](tui-drive.sh) | Run **`kweblens-tui`'s shipped jar on a real terminal**, send keys, read the frame back as text. `--self-check` proves the rig before you believe it. |
+| [`tui-log-leak.sh`](tui-log-leak.sh) | Open and close the TUI's **log pane** N times against a quiet pod on a real cluster and count what is still held. The one trap `LogService.release` exists for, measured rather than reviewed. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
 | [`alloc-probe.sh`](alloc-probe.sh) | *Which code* spends that heap, by call site and thread. A class histogram cannot say. |
@@ -498,6 +499,33 @@ frame blank), `stty size` reporting the size that was asked for, an `ESC[c` repl
 program, and a keystroke arriving at its stdin. It also **reports one debt it does not pay**:
 tmux 3.5a does not answer `ESC[?2027$p` either, and the app renders regardless — silence after
 that query is not a symptom of anything.
+
+### `tui-log-leak.sh` — does the log pane let go?
+
+```bash
+scripts/tui-log-leak.sh k3stest 20
+```
+
+`LogWatch.close()` does not stop the `watchLog()` flavour kweblens uses; only closing the stream
+does, and `LogService.release` is that call. **Only a quiet pod exposes a pane that gets it
+wrong** — a chatty one releases by accident when the failed downstream write throws out of the
+read loop — so `ScreenLogPaneTest` gates the shape hermetically against a fake that emits nothing,
+and this measures the real thing against a real API server (#369).
+
+It reads two counters off the JVM: **reader threads** (`kweblens-tui-log-<pod>`, one per live
+follow) and established sockets. Measured on `k3stest`, 20 cycles against `coredns`:
+
+| build | reader threads | sockets |
+|---|---|---|
+| release through `LogStream.close()` | **0** | 2 (3 before) |
+| a `close()` that does nothing | **20** | 22 (3 before) |
+
+**The lesson is about the control, not the counter.** An earlier run broke the release into
+`reader.interrupt()` and got 0 threads and 2 sockets — identical to the correct build — and the
+first reading of that was "fabric8 multiplexes over HTTP/2, so `ss` cannot see a leaked stream".
+It was not: interrupting the reader tears the connection down by itself, so the "leaking" build
+was not leaking. Before believing this script says nothing is wrong, break the release into a
+genuine no-op and check that it says 20.
 
 A run that produces no frame is a **failed measurement, not a pass**: it says so, dumps every
 `java` under the pane with `jcmd Thread.print`, prints the threads that matter, and exits 1.

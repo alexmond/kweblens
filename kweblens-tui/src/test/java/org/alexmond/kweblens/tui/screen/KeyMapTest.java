@@ -63,13 +63,17 @@ class KeyMapTest {
 	void theHelpPaneCarriesEveryBinding_includingTheOnesTheBarHasNoRoomFor() {
 		List<String> rows = KeyMap.helpRows();
 
-		assertThat(rows).hasSize(KeyMap.BINDINGS.size() + KeyMap.PANE_BINDINGS.size());
+		assertThat(rows).hasSize(KeyMap.BINDINGS.size() + KeyMap.PANE_BINDINGS.size() + KeyMap.LOG_BINDINGS.size());
 		for (KeyBinding binding : KeyMap.BINDINGS) {
 			assertThat(rows).contains(binding.hint());
 		}
 		for (KeyBinding binding : KeyMap.PANE_BINDINGS) {
 			assertThat(rows).as("a key that exists only inside the detail pane is still written down")
 				.contains(KeyMap.PANE_PREFIX + binding.hint());
+		}
+		for (KeyBinding binding : KeyMap.LOG_BINDINGS) {
+			assertThat(rows).as("and the same for the log pane's own keys")
+				.contains(KeyMap.LOG_PREFIX + binding.hint());
 		}
 		assertThat(KeyMap.visible()).as("the point of the two projections is that they differ")
 			.hasSizeLessThan(KeyMap.BINDINGS.size());
@@ -123,16 +127,93 @@ class KeyMapTest {
 	}
 
 	/**
-	 * The two tables are genuinely two. A pane that answered {@code :} would open a
+	 * The tables are genuinely separate. A pane that answered {@code :} would open a
 	 * command line over a table nobody is looking at, and a list that answered {@code n}
 	 * would move a cursor through matches of a search that does not exist there.
 	 */
 	@Test
-	void theTwoTablesDoNotAnswerEachOthersKeys() {
+	void theTablesDoNotAnswerEachOthersKeys() {
 		assertThat(KeyMap.paneAction(KeyStroke.of(':'))).as("the pane has no command line").isEmpty();
 		assertThat(KeyMap.paneAction(KeyStroke.of('d'))).as("the pane is already the detail").isEmpty();
 		assertThat(KeyMap.action(KeyStroke.of('n'))).as("the list has nothing to search through").isEmpty();
 		assertThat(KeyMap.action(KeyStroke.of('N'))).isEmpty();
+		assertThat(KeyMap.logAction(KeyStroke.of(':'))).as("nor does the log pane").isEmpty();
+		assertThat(KeyMap.logAction(KeyStroke.of('l'))).as("the log pane is already the log").isEmpty();
+		assertThat(KeyMap.action(KeyStroke.of('c'))).as("there is no container to switch on a list").isEmpty();
+		assertThat(KeyMap.action(KeyStroke.of('t'))).as("nor a stream to re-open with timestamps").isEmpty();
+	}
+
+	/**
+	 * <b>The same two directions, over the log pane's own table</b> (GH#369). It is a
+	 * third screen, not a variant of the detail pane: a log keeps growing, so {@code c}
+	 * picks another container, {@code t} re-opens the stream, and {@code /} — which the
+	 * detail pane binds — is not offered because nothing here searches yet.
+	 *
+	 * <p>
+	 * <b>How this was proved to fail.</b> {@code logHints()} was temporarily pointed at
+	 * {@code PANE_BINDINGS} — the copy-paste a third table invites even more than a
+	 * second. {@link #everyVisibleLogBindingIsInTheLogHintBar()} failed on
+	 * {@code c next container} and
+	 * {@link #theLogHintBarNamesNothingThatIsNotBoundInTheLogPane()} failed on
+	 * {@code / search}, which is exactly the key the log pane must not appear to offer.
+	 */
+	@Test
+	void everyVisibleLogBindingIsInTheLogHintBar() {
+		String hints = KeyMap.logHints();
+
+		for (KeyBinding binding : KeyMap.visible(KeyMap.LOG_BINDINGS)) {
+			assertThat(hints).as("the log pane's hint bar must name every visible log binding: " + binding.action())
+				.contains(binding.hint());
+		}
+	}
+
+	@Test
+	void theLogHintBarNamesNothingThatIsNotBoundInTheLogPane() {
+		Set<String> labels = new HashSet<>();
+		for (KeyBinding binding : KeyMap.visible(KeyMap.LOG_BINDINGS)) {
+			labels.add(binding.hint());
+		}
+
+		List<String> shown = new ArrayList<>(List.of(KeyMap.logHints().split(KeyMap.SEPARATOR)));
+
+		assertThat(shown)
+			.allSatisfy((hint) -> assertThat(labels).as("log hint bar shows '" + hint + "'").contains(hint));
+		assertThat(shown).hasSize(KeyMap.visible(KeyMap.LOG_BINDINGS).size());
+	}
+
+	@Test
+	void everyBoundLogStrokeResolvesToItsOwnAction() {
+		for (KeyBinding binding : KeyMap.LOG_BINDINGS) {
+			for (KeyStroke stroke : binding.strokes()) {
+				assertThat(KeyMap.logAction(stroke)).as(binding.label() + " -> " + binding.action())
+					.contains(binding.action());
+			}
+		}
+	}
+
+	/**
+	 * The keys that open the two log readings are bound, and the visible one is in the
+	 * bar.
+	 */
+	@Test
+	void theLogKeysAreInTheListsTable() {
+		assertThat(KeyMap.action(KeyStroke.of('l'))).contains(KeyAction.LOGS);
+		assertThat(KeyMap.action(KeyStroke.of('p'))).contains(KeyAction.PREVIOUS_LOGS);
+		assertThat(KeyMap.hints()).contains("l logs");
+		assertThat(KeyMap.helpRows()).as("p is hidden for width, which is not the same as undocumented")
+			.contains("p previous run's logs");
+	}
+
+	/**
+	 * The hint bar has to fit a terminal. 132 columns is what {@code ScreenHarness} draws
+	 * into and what the #364 measurements were taken at; this is why {@code p} is hidden
+	 * on the list's table and it is asserted rather than remembered.
+	 */
+	@Test
+	void theHintBarStillFitsATerminal() {
+		assertThat(KeyMap.hints().length()).isLessThanOrEqualTo(132);
+		assertThat(KeyMap.paneHints().length()).isLessThanOrEqualTo(132);
+		assertThat(KeyMap.logHints().length()).isLessThanOrEqualTo(132);
 	}
 
 	/** The key that opens the pane is bound, visible, and says what it does. */
