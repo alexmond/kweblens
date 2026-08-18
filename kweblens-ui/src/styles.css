@@ -1255,9 +1255,17 @@ body {
   font-size: 13px;
 }
 
-.bulk-bar .btn.danger {
-  margin-left: 0;
-}
+/* `.bulk-bar .btn.danger { margin-left: 0 }` stood here (#467) — the third rule of #456's
+   shape, and it went for the same reason: the ANCESTOR is live and the descendant is not.
+   `.btn.danger` carries `margin-left: auto` (see its rule further down), and this cancelled
+   that push for a bar whose buttons sit in reading order. The bar renders — `ResourceListView`
+   writes it whenever a row is checked — but its Delete and Clear are `NButton`s
+   (`type="error"` and default), so nothing in it can match. Measured on a running instance,
+   Pods with one row checked, one sample: `.bulk-bar` 1, `.bulk-bar .n-button` 2,
+   `.bulk-bar .btn` 0, `.bulk-bar .btn.danger` 0 — the 2 is what makes the zeros evidence
+   rather than a page the bar was never on. `.btn.danger` itself stays: `PodFileView.vue`'s
+   Delete and `PodFilesPane.vue`'s Replace both write it and both want the `auto` push, which
+   is what #471 settled. A destructive button in this bar is an `NButton type="error"`. */
 
 /* Detail drawer.
 
