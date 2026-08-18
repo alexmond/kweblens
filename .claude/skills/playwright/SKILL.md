@@ -199,6 +199,22 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-18 — **A probe read a row's colour straight after clicking it and reported the hover
+  grey as "the selected row's colour".** Two mechanisms, both of which every scene here shares.
+  (1) **A Playwright click leaves the pointer ON the element**, so a sample taken after
+  `click:.n-data-table-tbody tr td:nth-child(2)` is a sample of a HOVERED row — measured
+  `rgb(247, 247, 250)` where the rule under test paints `color(srgb 0.039 0.478 0.761 / 0.12)`.
+  (2) **naive transitions `background-color`**, so a read taken within ~0.3 s of any change
+  catches an interpolated `oklab(… / 0.89)` that is neither endpoint and looks like a colour
+  nobody wrote. The fix in the probe was to park the pointer off the table and wait the
+  transition out; in `contrast-check`'s new `selected row (drawer open)` scene it is a comment,
+  because the rule that scene measures deliberately out-specifies naive's hover — if that half
+  is ever removed, the scene starts measuring the hover grey under the selection's name.
+  And the *hover* claim needed its own control: moving the mouse to a guessed coordinate and
+  reporting "unchanged" is exactly what a MISSED hover reports. Asserting `row.matches(':hover')`
+  in the same sample, plus hovering an unselected row and watching THAT one change, is what
+  separated "selection wins" from "nothing hovered". **Ask the page whether the state you are
+  measuring is actually on.**
 - 2026-08-17 — **A bare `pty.fork()` reported `kweblens-tui` as producing no frames, and the
   reading was nearly "the app hangs on a terminal that is not the author's".** It was the rig,
   and by ONE variable: `pty.fork()` leaves the pty window size at **0×0** and nothing sets it, so

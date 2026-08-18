@@ -62,6 +62,15 @@
      is not a margin to put 10px text on. This measures 6.62:1 there. */
   --info-fg: #1a56c4;
   --info-line: rgba(26, 86, 196, 0.32);
+  /* The row the open drawer is about (#455). A TINT of the interactive blue rather than a
+     literal: the rule this replaces hard-coded `rgba(10, 122, 194, 0.1)`, picked when there was
+     one theme, and a light-theme literal on a dark table is the omission `--subtle-bg` exists
+     to make impossible. Declared per theme rather than once as a construction (the
+     `--ok-on-tint` pattern below), because the two grounds are not symmetrical: the light
+     table is white and the dark one is naive's near-black card, so the same alpha that reads
+     as a clear mark on white is barely a shade on the dark ground. Measured on a running
+     instance — see the rule at `.n-data-table-tr.row-active`. */
+  --row-selected-bg: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* The detail drawer is a NON-MODAL side panel (no mask): let clicks pass through its
@@ -158,6 +167,9 @@ html.kw-dark {
      one: 8.70:1 on --panel, against --accent's 5.18:1. */
   --info-fg: #8fc6ff;
   --info-line: rgba(143, 198, 255, 0.32);
+  /* See the light block: same construction, more of it, because the ground underneath is
+     naive's dark card rather than white. */
+  --row-selected-bg: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 /* TEXT ON A STATE'S OWN TINT — the derived half of the semantic palette.
    A state's `fg` was designed to read on the PANEL. On its own `tint` it is a different
@@ -407,9 +419,21 @@ body {
   line-height: 1.45;
 }
 
-.modal-actions .btn.danger {
-  margin-left: 0;
-}
+/* `.modal-actions .btn.danger { margin-left: 0 }` stood here (#456). It is a different shape
+   from the dead families above: the ANCESTOR is live and the descendant is not. `.btn.danger`
+   carries `margin-left: auto` (see its rule further down) so a destructive button pushes itself
+   away from the safe ones, and this was the override for a modal footer, where the footer's own
+   `justify-content: flex-end` already places them. But every `.modal-actions` in the app is a
+   Helm modal's `#footer` slot — `HelmActionModal`, `HelmHistoryModal`, `HelmResourcesModal`,
+   `HelmValuesModal` — and all four hold `NButton`s, so the override has nothing to override.
+   `.btn danger` survives in exactly two places, neither of them a modal footer:
+   `PodFileView.vue`'s Delete, in a `.files-header`, and `PodFilesPane.vue`'s Replace, in a
+   `.files-confirm-actions` — both want the `auto` push and neither is inside a `.modal-actions`.
+   Measured on a running instance with the Helm install modal open, one sample:
+   `.modal-actions` 1, `.modal-actions .n-button` 3, `.modal-actions .btn` 0,
+   `.modal-actions .btn.danger` 0 — the live ancestor and its live contents are what make the
+   two zeros mean something. A modal that needs a destructive button gets an
+   `NButton type="error"`, which is what `DialogHost` already does. */
 
 .btn.primary {
   background: var(--accent);
@@ -1178,17 +1202,40 @@ body {
 }
 
 /* Clickable rows + selected highlight */
-/* `.grid.clickable tbody tr` and `.grid tr.row-active td` stood here (#451), and the second
-   is the one worth a marker, because **`row-active` is still emitted**: `ResourceTable.vue`
-   puts it on the row through `NDataTable`'s `rowProps` when `objKey(row)` matches the open
-   drawer's key. It lands on an `.n-data-table-tr` with no `.grid` anywhere above it, so this
-   rule has not matched since the table became naive's — measured on a running instance,
-   `.row-active` reads 1 with a row selected while `.grid` reads 0 in the same sample.
-   Deleting it therefore changes nothing on screen, and what that means is that **the
-   selected row currently has no highlight of its own at all** — the class is emitted and
-   styled by nothing. Giving it one back is a design decision, not a sweep, and is filed
-   separately; do not restore this rule, which cannot reach the element. `.clickable` is
-   emitted nowhere: the row's pointer cursor is an inline `style` on the same `rowProps`. */
+/* `.grid.clickable tbody tr` and `.grid tr.row-active td` stood here (#451). `.clickable` is
+   emitted nowhere — the row's pointer cursor is an inline `style` on `rowProps` — but
+   **`row-active` still is**: `ResourceTable.vue` puts it on the row when `objKey(row)` matches
+   the open drawer's key. It lands on an `.n-data-table-tr` with no `.grid` anywhere above it,
+   so the old rule had not matched since the table became naive's — measured on a running
+   instance, `.row-active` reads 1 with a row selected while `.grid` reads 0 in the same
+   sample. Deleting it changed nothing on screen, and what that meant is that the selected row
+   had no highlight of its own at all: the class was emitted and styled by nothing, so with the
+   drawer open only naive's hover tint said which row it was about, and that goes with the
+   pointer (#455).
+
+   The rule below is the one that can reach the element. Three things about it:
+   - The ancestry is naive's own, and every class in the selector is one naive really renders
+     (`selectedRow.test.ts` fails the build on any other, which is what the `.grid` version
+     would trip).
+   - The extra classes are SPECIFICITY, not scope. Naive injects its component CSS into <head>
+     at runtime, so an equal-specificity rule of ours loses whatever order this file is in, and
+     its hover rule — measured off the running page, `.n-data-table .n-data-table-tr:not(
+     .n-data-table-tr--summary):hover > .n-data-table-td` — is (0,5,0). The first pass here was
+     (0,4,0) and the hover grey painted straight over the tint: measured, the pointer resting
+     on the open row turned it back into `rgb(247, 247, 250)`, i.e. an ordinary hovered row.
+     So the hovered form is spelled with the class TWICE, which is this file's existing idiom
+     for out-specifying a library rule (see `.kw-when-wide.kw-when-wide`). Selection beating
+     hover is the intended order: hover feedback on the row whose drawer is already open says
+     nothing the drawer has not.
+   - The mark is a tint AND a bar down the leading edge. The tint alone is the weaker half:
+     it is bounded by what the text on it can still be read against, and the bar is not. */
+.n-data-table .n-data-table-tr.row-active > .n-data-table-td,
+.n-data-table .n-data-table-tr.row-active.row-active:hover > .n-data-table-td {
+  background-color: var(--row-selected-bg);
+}
+.n-data-table .n-data-table-tr.row-active > .n-data-table-td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 
 /* `.grid tr.row-checked td` and the `.grid th.chk` / `.grid td.chk` checkbox-column rules
    stood here. Bulk selection is `NDataTable`'s own: `ResourceTable.vue` passes a `selection`
@@ -2797,9 +2844,16 @@ body.row-resizing {
   border-radius: 6px;
 }
 
-.adv-body .check {
-  margin-bottom: 8px;
-}
+/* `.adv-body .check { margin-bottom: 8px }` stood here (#456), the same shape as the
+   `.modal-actions` marker above: `.adv-body` IS live — `HelmAdvancedOptions.vue:30` writes it as
+   a plain `class` — and `check` is emitted by nothing. It was the spacing for the hand-rolled
+   `<label class="check">` checkbox rows that `.modal label.check` styled, and the panel holds
+   bare `NCheckbox`es and `NFormItem`-wrapped fields now, which bring their own spacing. Nothing
+   in the app writes `check` as a class in any form: no `class` attribute, no `:class` binding, no
+   composed name (the one class whose NAME contains the word is `.review-recheck` in
+   `YamlEditorModal.vue`, a different token). Measured on a running instance with the Helm
+   install modal's advanced panel expanded, one sample: `.adv-body` 1, `.adv-body .n-checkbox` 1,
+   `.adv-body .check` 0, and `.check` 0 across the whole page. */
 
 .helm-preview {
   margin-top: 10px;
