@@ -228,9 +228,12 @@ terminal, because the terminal is the screen.
 `d` opens a **detail pane** on the selected object: its YAML (with `/` to search and `n`/`N` to
 walk the matches), its **relations** — which pods back this Service, what created this pod, which
 account it runs as — and its events. Every one of those is computed by `kweblens-core` and shared
-with the web UI and the MCP tools; the terminal computes no join of its own. A relation that was
-cut off at its bound, one that failed, and one your RBAC refused are three different sentences on
-screen, never an empty section.
+with the web UI; the terminal computes no join of its own. Two of the three reach the MCP tools as
+well — the object through `describeResource`, the events through `getEvents` — but **no tool returns
+a relation**, so an assistant still has to make that join itself. Serving that surface from the same
+code is what `RelationService` was written for; it is the intent, not yet a shipped tool. A relation
+that was cut off at its bound, one that failed, and one your RBAC refused are three different
+sentences on screen, never an empty section.
 
 Log follow and exec are still to come — #369 and #370.
 

@@ -1650,10 +1650,12 @@ body {
 
 /* `.acc-head` (+`:hover`) and `.acc-caret` (+`.open`) stood here. `Accordion.vue` is an
    `NCollapse`/`NCollapseItem` now, so the clickable header is `.n-collapse-item__header` and
-   the caret is naive's own `.n-collapse-item-arrow` — the rotation included. The one class of
-   the accordion still emitted is `.acc-count` below (`Accordion.vue:15`); the audit that
-   listed these also named `.acc`, but `Accordion.vue` does not write that either and this file
-   has no rule for it. */
+   the caret is naive's own `.n-collapse-item-arrow` — the rotation included. `.acc-count`
+   below is still emitted (`Accordion.vue:15`) — and so is `.acc`: `Accordion.vue:11` writes
+   `class="ov-sec acc"` on the `NCollapse` root, so the audit that named it was right and #450's
+   note that it was not is wrong. What makes removing the two rules above safe is that this file
+   has no rule for `.acc` at all — an unstyled hook — not that the class is gone. `.ov-sec`, on
+   that same root, is styled directly above. */
 
 .acc-count {
   background: var(--subtle-bg);
