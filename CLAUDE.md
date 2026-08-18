@@ -187,6 +187,28 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     directions by the same test, and the `?` pane lists both so a pane-only key is still written
     down. Pointing `paneHints()` at the wrong table is the one mistake two tables invite, so that
     is the case `KeyMapTest` was proved to fail on.
+  - **The `?` pane carries the FILTER GRAMMAR as well as the keys, and both halves are derived**
+    (#470). `FilterHelp` — the transcription of `objectFilter.ts` that exists so the help cannot
+    drift from the parser — was read by nothing but a test for its whole life: the SPA rendered
+    its copy behind the search box and the terminal rendered none of it, so the grammar was
+    unlearnable from inside the TUI. `HelpPane` builds one document from `KeyMap.helpRows()` and
+    `FilterHelp`, and it is **a document with a cursor** (`DetailModel`, windowed by
+    `DetailPaneView`) because the three binding tables alone already overran a 44-row screen —
+    the movement keys scroll it and **any other key still closes it**. The gate is
+    `ScreenHelpPaneTest`, and it reads the **cells `FakeBackend` was actually asked to paint**
+    (`screenLines()`), not the model, because "a correct model nobody renders" is the defect.
+    Both directions, as `KeyMapTest` does it, plus a third: **every example on the pane is fed
+    to `ObjectFilter`**, so the pane cannot advertise a form the parser refuses. **A frame count
+    is not a statement about what is in the frame** — waiting for "one more draw" released the
+    first capture onto the pod table the pane was about to replace, and it read as a content bug.
+  - **A refusal names the spelling that WORKS, and never invents a second one** (#469).
+    `CommandRequest` still refuses k9s's `-f`, because this build has no flag position and
+    because `-f` is *already* a legal term here meaning "not f" — translating it would run a
+    query that means something else, which is the exact failure the refusal exists to avoid. So
+    it quotes what was typed back (`-f cored` → "spells fuzzy `~cored`"), the shape the
+    `@context` refusal already had. What made the old sentence a bug was denying a capability
+    #411 had shipped: **a refusal that sends the operator further from what they asked for than
+    the working answer is worse than no refusal.**
   - **The detail pane is made only of what the server already computes** (#368): YAML, the twelve
     relations and the object's events, fetched by **one** `ClusterDataSource.detail` call — one
     method because it is one reading, and two GETs would let the YAML show a selector the

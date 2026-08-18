@@ -105,7 +105,8 @@ class ViewControllerTest {
 	void anUnsupportedHalfOfTheGrammarIsRefusedRatherThanQuietlyDropped() {
 		command("po -f cored");
 
-		assertThat(this.controller.message()).contains("No fuzzy matching");
+		assertThat(this.controller.message()).as("refused in words, and the words name the spelling that works")
+			.contains("~cored");
 		assertThat(this.navigation.shown()).isEmpty();
 	}
 

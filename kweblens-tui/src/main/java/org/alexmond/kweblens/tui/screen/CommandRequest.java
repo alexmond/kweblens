@@ -28,12 +28,25 @@ import java.util.List;
  * <h2>What is refused rather than ignored</h2>
  *
  * k9s's full line is {@code :cmd [ns] [/filter] [-f fuzzy] [@context] ['labels']}. This
- * build has no fuzzy matching ({@code ObjectFilter} deliberately has none — it would have
- * to land in {@code objectFilter.ts} in the same change or it becomes a third grammar)
- * and does not switch cluster from the prompt. A line carrying {@code -f} or {@code @} is
- * therefore <b>an error naming what is unsupported</b>, never a line quietly run without
- * the half you asked for: a filter that silently did not apply is a list that lies about
- * what it contains.
+ * build has no {@code -f} <em>flag</em> and does not switch cluster from the prompt, so a
+ * line carrying {@code -f} or {@code @} is <b>an error naming what is unsupported</b>,
+ * never a line quietly run without the half you asked for: a filter that silently did not
+ * apply is a list that lies about what it contains. The reasoning is unchanged from the
+ * day it was written; one fact under it is not.
+ *
+ * <h2>Fuzzy exists, and it is still not {@code -f}</h2>
+ *
+ * #411 landed {@code ~fuzzy} in {@link org.alexmond.kweblens.tui.filter.ObjectFilter} and
+ * in {@code objectFilter.ts} together, so the refusal <b>names the spelling that
+ * works</b> ({@code -f cored} → "spell it {@code ~cored}") rather than denying the
+ * capability — the shape the {@code @context} refusal beside it already had. What it
+ * deliberately does not do is <b>translate</b> {@code -f xyz} into {@code ~xyz} (GH#469),
+ * for a reason this grammar owns: a leading {@code -} negates any term, so {@code -f} is
+ * already a legal filter here meaning "does not contain f". Reading it as a flag instead
+ * would take a query that means one thing and silently run another — the exact failure
+ * the paragraph above refuses to commit, arrived at from the inside. Muscle memory is
+ * served by being told the one character to change; it is not served by a second spelling
+ * of a term that already exists.
  *
  * @param kind the kind token, as typed
  * @param namespace the namespace, or null for every namespace
@@ -82,9 +95,10 @@ public record CommandRequest(String kind, String namespace, String filter, Strin
 	}
 
 	private static String unsupported(List<String> tokens) {
-		for (String token : tokens) {
+		for (int i = 0; i < tokens.size(); i++) {
+			String token = tokens.get(i);
 			if ("-f".equals(token)) {
-				return "No fuzzy matching in this build (-f). Use a /regex/ or a plain substring.";
+				return fuzzy((i + 1 < tokens.size()) ? tokens.get(i + 1) : null);
 			}
 			if (token.startsWith("@")) {
 				return "No context switching from the prompt (@" + token.substring(1)
@@ -92,6 +106,16 @@ public record CommandRequest(String kind, String namespace, String filter, Strin
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * The {@code -f} refusal, quoting the term the operator typed so the working line is
+	 * one character away rather than one paragraph away.
+	 * @param term what followed {@code -f}, or null when nothing did
+	 */
+	private static String fuzzy(String term) {
+		String spelling = (term != null) ? term : "xyz";
+		return "This build spells fuzzy ~" + spelling + ", not -f " + spelling + " (a leading - here means “not”).";
 	}
 
 	/**
