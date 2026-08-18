@@ -208,6 +208,72 @@ class ViewControllerDetailTest {
 		assertThat(this.controller.message()).endsWith("Press d for this object's detail.");
 	}
 
+	/**
+	 * <b>A submit that closed the prompt owes a frame, whatever it did with what was
+	 * typed.</b> Closing the prompt is a state change, and the screen only repaints when
+	 * {@code key} says {@code REPAINT}: TamboUI's loop skips {@code safeRender} entirely
+	 * when the handler returns false, so a {@code NONE} here leaves a {@code /} prompt
+	 * painted that the model has already closed. The operator then types into a prompt
+	 * that is not there — and in the pane {@code q} is not a character, it is BACK.
+	 *
+	 * <p>
+	 * All three ways to arrive at an empty search, because the outcome must not depend on
+	 * how the box got empty.
+	 */
+	@Test
+	void submittingAnEmptySearchStillRepaints_becauseThePromptWasClosed() {
+		seedRow("web", "Running");
+		press('d');
+		press('/');
+
+		ViewController.Outcome outcome = this.controller.key(KeyStroke.key(KeyStroke.Kind.ENTER));
+
+		assertThat(this.controller.prompt().open()).as("the model closed the prompt").isFalse();
+		assertThat(outcome).as("so the frame that still paints it is owed a redraw")
+			.isEqualTo(ViewController.Outcome.REPAINT);
+	}
+
+	@Test
+	void aSearchOfNothingButSpacesRepaintsTheSameWay() {
+		seedRow("web", "Running");
+		press('d');
+		press('/');
+		press(' ');
+		press(' ');
+
+		assertThat(this.controller.key(KeyStroke.key(KeyStroke.Kind.ENTER))).isEqualTo(ViewController.Outcome.REPAINT);
+		assertThat(this.controller.prompt().open()).isFalse();
+	}
+
+	@Test
+	void aSearchTypedAndThenBackspacedToEmptyRepaintsTheSameWay() {
+		seedRow("web", "Running");
+		press('d');
+		press('/');
+		press('k');
+		this.controller.key(KeyStroke.key(KeyStroke.Kind.BACKSPACE));
+
+		assertThat(this.controller.key(KeyStroke.key(KeyStroke.Kind.ENTER))).isEqualTo(ViewController.Outcome.REPAINT);
+		assertThat(this.controller.prompt().open()).isFalse();
+	}
+
+	/**
+	 * And the same rule from the other side: a search that <em>does</em> something still
+	 * repaints, so the fix cannot be read as "empty searches are special".
+	 */
+	@Test
+	void aSearchThatFindsSomethingRepaintsToo() {
+		seedRow("web", "Running");
+		press('d');
+		press('/');
+		press('k');
+		press('i');
+		press('n');
+		press('d');
+
+		assertThat(this.controller.key(KeyStroke.key(KeyStroke.Kind.ENTER))).isEqualTo(ViewController.Outcome.REPAINT);
+	}
+
 	@Test
 	void movingInThePaneMovesThePanesCursorAndNotTheTables() {
 		seedRow("web", "Running");
