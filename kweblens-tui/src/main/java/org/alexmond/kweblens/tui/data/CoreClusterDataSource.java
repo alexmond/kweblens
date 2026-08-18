@@ -124,13 +124,21 @@ public class CoreClusterDataSource implements ClusterDataSource {
 	 * CRD once and remembered.
 	 *
 	 * <p>
-	 * <b>Memoised per (cluster, kind), and that is the same trade {@code KindCatalog}
-	 * already takes.</b> {@code CrdService.printerColumns} lists every CRD in the cluster
-	 * to find one, so asking it on each {@code :} command would put a cluster-wide list
-	 * behind every navigation — and a kind with no CRD at all would pay it to learn
-	 * nothing. The cost of remembering is that printer columns edited while the screen is
-	 * up are not picked up until restart, exactly as a CRD installed while the screen is
-	 * up is not addressable until restart.
+	 * <b>The fallback runs on the render thread, so what it costs is this module's
+	 * problem even though it lives one module over</b> (#459). It used to list every CRD
+	 * in the cluster and filter in memory — 10 393 833 bytes on the lab cluster —
+	 * synchronously inside the keystroke, for every kind {@code ColumnCatalog} does not
+	 * cover, which is every built-in outside the #367 tranche. {@code CrdService} now
+	 * answers a core-group kind ({@code secrets}, {@code configmaps}) with no request at
+	 * all and everything else with one CRD fetched by name, so what is left behind a
+	 * navigation is a single keyed GET.
+	 *
+	 * <p>
+	 * <b>Still memoised per (cluster, kind), and that is the same trade
+	 * {@code KindCatalog} already takes.</b> One bounded GET is affordable; one per
+	 * {@code :} command, on the thread that draws, is not. The cost of remembering is
+	 * that printer columns edited while the screen is up are not picked up until restart,
+	 * exactly as a CRD installed while the screen is up is not addressable until restart.
 	 */
 	@Override
 	public List<Column> columns(ResourceQuery query) {

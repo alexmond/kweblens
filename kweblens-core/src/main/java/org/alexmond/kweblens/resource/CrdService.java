@@ -52,20 +52,40 @@ public class CrdService {
 	 * The CRD-declared printer columns for a custom kind (by its {@code group.plural}
 	 * id), or empty for built-in kinds or when the CRD cannot be read. Wide columns
 	 * (priority &gt; 0) are omitted, matching {@code kubectl}'s default view.
+	 *
+	 * <p>
+	 * <b>A count is not a list, and neither is a lookup</b> (#459). This used to fetch
+	 * every CustomResourceDefinition in the cluster and filter the result in memory —
+	 * measured at <b>10 393 833 bytes</b> on the lab cluster, because a CRD carries its
+	 * whole OpenAPI schema — to answer a question about one kind. The TUI asks this
+	 * question synchronously on the render thread, so it was a multi-second stall inside
+	 * a keystroke, once per kind visited.
+	 *
+	 * <p>
+	 * Two things replace it, and the first is free. <b>A kind with no API group cannot be
+	 * CRD-delivered</b>: a CRD's {@code spec.group} is required and its
+	 * {@code metadata.name} is {@code <plural>.<group>}, so a core-group id — which is
+	 * every built-in id {@code NavCatalog} spells, and {@code pods} / {@code secrets} /
+	 * {@code configmaps} as discovery spells them — is answered with <b>no request at
+	 * all</b>. Everything else is <b>one keyed GET</b> for that one CRD; a 404 comes back
+	 * as {@code null}, which is the quiet "no declared columns" a built-in that does live
+	 * in an API group ({@code apps.statefulsets}) must still get.
+	 *
+	 * <p>
+	 * The name is derived rather than searched for because the API server validates that
+	 * a CRD's {@code metadata.name} equals {@code spec.names.plural + "." + spec.group} —
+	 * so a CRD it would accept is always found here, and one it would reject is the only
+	 * thing this stops seeing.
 	 */
 	public List<PrinterColumn> printerColumns(String clusterId, String resourceId) {
+		String name = crdName(resourceId);
+		if (name == null) {
+			return List.of();
+		}
 		try {
 			KubernetesClient client = clusters.require(clusterId);
-			return client.apiextensions()
-				.v1()
-				.customResourceDefinitions()
-				.list()
-				.getItems()
-				.stream()
-				.filter((crd) -> resourceId.equals(idOf(crd)))
-				.findFirst()
-				.map(this::columnsOf)
-				.orElseGet(List::of);
+			CustomResourceDefinition crd = client.apiextensions().v1().customResourceDefinitions().withName(name).get();
+			return (crd != null) ? columnsOf(crd) : List.of();
 		}
 		catch (RuntimeException ex) {
 			log.warn("Could not read printer columns for '{}' on '{}': {}", resourceId, clusterId, ex.getMessage());
@@ -73,16 +93,30 @@ public class CrdService {
 		}
 	}
 
-	private String idOf(CustomResourceDefinition crd) {
-		CustomResourceDefinitionSpec spec = crd.getSpec();
-		if (spec == null || spec.getNames() == null || spec.getGroup() == null) {
+	/**
+	 * The exact inverse of the id {@link #toDescriptor} mints: this project's
+	 * {@code <group>.<plural>} back to the CRD's own {@code <plural>.<group>} name, or
+	 * {@code null} when the id names no group and therefore no CRD. The split is at the
+	 * <b>last</b> dot because a group is a DNS subdomain and may hold several of them
+	 * ({@code cert-manager.io.certificates}), while a plural is one lowercase label and
+	 * holds none.
+	 */
+	private static String crdName(String resourceId) {
+		if (resourceId == null) {
 			return null;
 		}
-		return spec.getGroup() + "." + spec.getNames().getPlural();
+		int split = resourceId.lastIndexOf('.');
+		if (split <= 0 || split == resourceId.length() - 1) {
+			return null;
+		}
+		return resourceId.substring(split + 1) + "." + resourceId.substring(0, split);
 	}
 
 	private List<PrinterColumn> columnsOf(CustomResourceDefinition crd) {
 		CustomResourceDefinitionSpec spec = crd.getSpec();
+		if (spec == null || spec.getVersions() == null) {
+			return List.of();
+		}
 		String served = servedVersion(spec);
 		CustomResourceDefinitionVersion version = spec.getVersions()
 			.stream()
