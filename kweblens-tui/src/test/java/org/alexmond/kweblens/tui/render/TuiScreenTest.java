@@ -6,6 +6,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -141,6 +142,11 @@ class TuiScreenTest {
 		AtomicInteger code = new AtomicInteger(-1);
 		Logger logger = (Logger) LoggerFactory.getLogger(DrawableAreaWatch.class);
 		ListAppender<ILoggingEvent> lines = new ListAppender<>();
+		// The render thread logs into this while THIS thread iterates it in said(), and
+		// ListAppender's own list is a plain ArrayList — which threw
+		// ConcurrentModificationException on CI and passed everywhere else (#453). The
+		// other two ListAppenders in the tree are driven from the test thread only.
+		lines.list = new CopyOnWriteArrayList<>();
 		lines.start();
 		logger.addAppender(lines);
 		try {
