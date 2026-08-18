@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import org.alexmond.kweblens.resource.PrinterColumn;
+import org.alexmond.kweblens.resource.ResourceDescriptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,6 +40,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The other half of the gate is the coverage assertion: the keys this package renders
  * must be exactly the keys the golden carries, so a column added to one side and
  * forgotten on the other is a failure rather than a value nobody compares.
+ *
+ * <p>
+ * <b>And every kind is resolved the way its consumers resolve it</b> (GH#460). The corpus
+ * is written in the SPA's vocabulary, so this file used to ask the catalog for
+ * {@code forResourceId("deployments")} and never read the {@code (group, kind)} half of
+ * the entry — which is the only half the TUI looks a kind up by. A wrong API group on an
+ * entry was therefore green here, green in {@code columnParity.test.ts}, and a terminal
+ * drawing no columns at all. So {@link #everyLookup} names every lookup the catalog
+ * offers, each case is resolved through all of them, and they must agree; a lookup added
+ * to {@code ColumnCatalog} is one line there and is then exercised by every corpus case.
+ * The group is taken from the object's <b>own</b> {@code apiVersion}, never from the
+ * catalog, because two indexes built from one literal agree with each other whatever that
+ * literal says.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ColumnParityTest {
@@ -56,9 +70,8 @@ class ColumnParityTest {
 			String kind = declared.get("kind").asText();
 			String name = kind + " / " + declared.get("name").asText();
 			assertThat(expected.get("kind").asText()).as("corpus and golden out of step at " + name).isEqualTo(kind);
-			List<Column> columns = ColumnCatalog.forResourceId(kind);
-			assertThat(columns).as("no server-side columns for " + kind).isNotEmpty();
-			Map<String, String> rendered = render(columns, object(declared));
+			GenericKubernetesResource object = object(declared);
+			Map<String, String> rendered = render(columns(kind, object, name), object);
 			// Keys first, and separately: a column the SPA has and this package does not
 			// is
 			// the failure most likely to be read as "some value is wrong" from a diff of
@@ -71,6 +84,11 @@ class ColumnParityTest {
 		assertThat(compared).hasSize(this.golden.get("cases").size());
 	}
 
+	/**
+	 * Which is also what makes the lookup check above cover the whole catalog: every
+	 * entry has at least one case, and every case resolves that entry through every
+	 * lookup.
+	 */
 	@Test
 	void everyCoveredKindAppearsInTheCorpus() {
 		List<String> inCorpus = new ArrayList<>();
@@ -92,6 +110,53 @@ class ColumnParityTest {
 			assertThat(render(PrinterColumns.of(columns, clock), object(declared))).as(declared.get("name").asText())
 				.isEqualTo(strings(expected.get("values")));
 		}
+	}
+
+	/**
+	 * The columns for one corpus case, resolved through every lookup and asserted to be
+	 * the same list each time. An empty answer from any of them is the failure the TUI
+	 * sees as a table with no kind-specific columns in it.
+	 */
+	private static List<Column> columns(String resourceId, GenericKubernetesResource object, String name) {
+		Map<String, List<Column>> found = everyLookup(resourceId, object);
+		String reference = found.keySet().iterator().next();
+		List<Column> resolved = found.get(reference);
+		found.forEach((lookup, columns) -> {
+			assertThat(columns).as(name + ": " + lookup + " found no server-side columns").isNotEmpty();
+			assertThat(columns).as(name + ": " + lookup + " and " + reference + " resolve different columns")
+				.isEqualTo(resolved);
+		});
+		return resolved;
+	}
+
+	/**
+	 * Every way a consumer asks the catalog for a kind's columns, keyed by a description
+	 * of the call so a disagreement names which one. {@code forResourceId} is the SPA's
+	 * vocabulary and {@code forDescriptor} is what {@code CoreClusterDataSource} calls
+	 * with a descriptor API discovery built. <b>A lookup added to {@code ColumnCatalog}
+	 * is added here</b>, and every corpus case then exercises it.
+	 */
+	private static Map<String, List<Column>> everyLookup(String resourceId, GenericKubernetesResource object) {
+		Map<String, List<Column>> found = new LinkedHashMap<>();
+		found.put("forResourceId(" + resourceId + ")", ColumnCatalog.forResourceId(resourceId));
+		found.put("forDescriptor(" + object.getApiVersion() + " " + object.getKind() + ")",
+				ColumnCatalog.forDescriptor(discovered(object, resourceId)));
+		return found;
+	}
+
+	/**
+	 * The descriptor API discovery would hand the catalog for this object, with the group
+	 * and version split out of the object's <b>own</b> {@code apiVersion} — the one
+	 * statement of the kind's coordinates in this corpus that the catalog did not write.
+	 */
+	private static ResourceDescriptor discovered(GenericKubernetesResource object, String resourceId) {
+		String apiVersion = object.getApiVersion();
+		assertThat(apiVersion).as("a corpus object has to declare the apiVersion it is addressed by").isNotBlank();
+		int slash = apiVersion.indexOf('/');
+		String group = (slash < 0) ? "" : apiVersion.substring(0, slash);
+		String version = (slash < 0) ? apiVersion : apiVersion.substring(slash + 1);
+		return new ResourceDescriptor(resourceId, object.getKind(), object.getKind(), group, version, resourceId, true,
+				false);
 	}
 
 	private static Map<String, String> render(List<Column> columns, GenericKubernetesResource object) {
