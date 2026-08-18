@@ -191,6 +191,58 @@ html.kw-dark {
   --danger-on-tint: color-mix(in srgb, var(--danger-fg) 65%, var(--text));
 }
 
+/* ---- ONE TABLE LOOK, TWO TABLE IMPLEMENTATIONS (#478) -------------------------------------
+   A category overview renders two tables one above the other: the findings table is a
+   hand-written `.mini` (`CategoryOverview.vue`), and Recent Events is `EventsPane`, i.e. an
+   `NDataTable`. Before this block they had no colour in common, because one was painted by
+   this file and the other by naive's theme. Measured on the running app, Workloads overview:
+
+     dark    header   ours rgb(35, 50, 64)     naive rgb(38, 38, 42)
+             row      ours rgb(32, 37, 43)     naive rgb(24, 24, 28)
+     light   header   ours rgb(226, 239, 248)  naive rgb(250, 250, 252)
+             row      ours rgb(253, 254, 254)  naive rgb(255, 255, 255)
+
+   That is what "the bottom table looks reddish" is a reading of: ours is a cool blue-grey
+   (light header B - R = +22) and naive's is near-neutral (+2), and a neutral grey beside a
+   blue one reads warm. It is NOT the other possibility, which would have outranked this
+   entirely — the `warn` row tint was measured landing only on `Type: Warning` rows
+   (`rgba(255, 193, 87, .16)` on those, plain `tdColor` on every `Normal` one), so no row was
+   being told it was a warning when it was not.
+
+   So both implementations now paint from ONE set of tokens: `.mini` uses them directly, and
+   `NDataTable` gets them through the `DataTable` theme override in `tableTheme.ts`. That is
+   the same shape as #184, where naive's primary was pointed at the app's accent rather than
+   the component being replaced — and it keeps `NDataTable`'s sorting, which restyling
+   `EventsPane` into a `.mini` would have thrown away.
+
+   A `var()` is safe on the override side: naive merges a theme override AFTER its own
+   `self()` has run, so nothing here is fed to `composite()` or any other colour maths — it
+   lands verbatim in an `--n-*` custom property and resolves against whichever palette is in
+   force. That is why these are tokens and not a per-theme pair of literals like
+   `primaryColor`, which naive DOES derive shades from.
+
+   Declared ONCE rather than per theme, like `--ok-on-tint` above and for the same reason:
+   every one is a construction over tokens `html.kw-dark` already redefines.
+
+   What is deliberately NOT here is DENSITY. `ResourceTable` hard-codes `ROW_HEIGHT = 40` for
+   the virtual scroller, measured off a running list, and the padding and font-size vars naive
+   exposes are per SIZE — every `NDataTable` in this app is `size="small"`, so there is no way
+   to shrink the events table's rows without shrinking the main list's and leaving the
+   scroller's row height a lie about the DOM. Colour and header treatment are what carry "same
+   product"; a 40px row next to a 32px one is a density, not a different component. */
+:root {
+  --table-line: var(--border);
+  --table-head-bg: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  /* The sorted column's header, and a hovered one. A stronger pull of the SAME accent, so the
+     cue is a shade of the header rather than a second surface. */
+  --table-head-active-bg: color-mix(in srgb, var(--accent) 20%, var(--panel));
+  --table-head-fg: color-mix(in srgb, var(--accent) 65%, var(--text));
+  --table-row-bg: var(--panel);
+  --table-row-fg: var(--text);
+  --table-row-alt-bg: color-mix(in srgb, var(--panel) 95%, var(--border));
+  --table-row-hover-bg: var(--subtle-bg);
+}
+
 html.kw-dark body {
   background: var(--bg);
 }
@@ -1749,11 +1801,15 @@ body {
   color: var(--muted);
 }
 
+/* Colours come from the shared `--table-*` set declared at the top of this file, which the
+   `DataTable` theme override paints naive's tables from too (#478). Sizes do not: a `.mini` is
+   the DENSE member of the family — a drawer relation table, a secret's keys — and the reason
+   its 32px row sits beside a 40px `NDataTable` one is stated with those tokens. */
 .mini {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--table-line);
   border-radius: 7px;
   overflow: hidden;
 }
@@ -1771,7 +1827,7 @@ body {
 .mini td {
   text-align: left;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--table-line);
   vertical-align: top;
 }
 
@@ -1814,26 +1870,32 @@ body {
   word-break: break-all;
 }
 
+/* Opaque, not transparent (#478). While these cells had no background of their own, a `.mini`
+   row showed whatever it happened to be sitting on: the page ground on an overview
+   (rgb(22, 25, 29) dark / rgb(244, 246, 248) light) and naive's drawer card (rgb(44, 44, 50))
+   in the detail pane — so the same table was three different colours depending on where it
+   was, and none of them was the panel colour the `NDataTable` beside it painted. */
 .mini td {
-  color: var(--text);
+  color: var(--table-row-fg);
+  background: var(--table-row-bg);
 }
 
 .mini th {
-  /* Mixed with --text, not --muted (#247). The muted mix measured 4.40:1 in the light theme
-     against this header's own tint — under the 4.5:1 floor for 11px/600 text — and cleared
-     dark by only 0.08. --text is the darker partner in light and the lighter one in dark, so
-     the SAME 65% accent share keeps the blue and now measures 5.88:1 / 5.90:1. */
-  color: color-mix(in srgb, var(--accent) 65%, var(--text));
+  /* --table-head-fg is mixed with --text, not --muted (#247). The muted mix measured 4.40:1 in
+     the light theme against this header's own tint — under the 4.5:1 floor for 11px/600 text —
+     and cleared dark by only 0.08. --text is the darker partner in light and the lighter one in
+     dark, so the SAME 65% accent share keeps the blue and now measures 5.88:1 / 5.90:1. */
+  color: var(--table-head-fg);
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   white-space: nowrap;
-  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  background: var(--table-head-bg);
 }
 
 .mini tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--panel) 95%, var(--border));
+  background: var(--table-row-alt-bg);
 }
 
 .mini tbody tr:last-child td {
@@ -1854,6 +1916,21 @@ body {
    row would stop responding to the pointer. */
 .n-data-table-tr.warn:hover > .n-data-table-td {
   background-color: color-mix(in srgb, var(--warn-tint) 60%, var(--panel));
+}
+
+/* The other half of "one table look" (#478). The COLOURS reach naive's tables through the
+   `DataTable` theme override; the header TREATMENT cannot, because naive exposes a theme var
+   for the header's weight and colour but none for its size, its case or its tracking — and the
+   size var it does expose (`fontSizeSmall`) is the whole table's, body rows included. So the
+   three declarations `.mini th` makes and naive has no name for are restated here.
+   Two classes rather than one is SPECIFICITY, not scope, for the reason the `.row-active` rule
+   above gives at length: naive injects its component CSS into <head> at runtime, so an
+   equal-specificity rule of ours loses whatever order this file is in. Nothing about colour
+   belongs here — a colour written twice is the defect this whole change removes. */
+.n-data-table .n-data-table-th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .mono {

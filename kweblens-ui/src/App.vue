@@ -24,6 +24,7 @@ import { actionFailed, bulkDeleteIncomplete, mayRetry, readMessage } from './pan
 import { loadDark, loadHiddenCols, loadKeptCols, loadNamespace, saveCluster, saveDark, saveNamespace } from './prefs';
 import { HELM_VIEW_IDS, NAV, filterObjects, isSynthetic } from './shell';
 import { buildResourceColumns } from './table';
+import { dataTableOverrides } from './tableTheme';
 import type { KubeObject, NavItem } from './types';
 
 import AppFooter from './components/AppFooter.vue';
@@ -144,6 +145,11 @@ const themeOverrides = computed(() => {
     // Unlike `primaryColor` above, Naive derives no shades from `textColorInfo` — it is
     // applied verbatim — so a computed colour is safe here where it is not there.
     Tag: { textColorInfo: 'color-mix(in srgb, var(--accent) 45%, var(--text))' },
+    // Naive's table, painted from the app's `--table-*` tokens so an `NDataTable` and a
+    // hand-written `.mini` on the same page are the same component family (#478). The whole
+    // object is `var()`s, so unlike `primaryColor` it does not need a per-theme pair — see
+    // `tableTheme.ts` for why that is safe here and not there.
+    DataTable: dataTableOverrides,
   };
 });
 const toggleTheme = () => {
