@@ -20,6 +20,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  * a 28-object fleet, and agreed exactly. What follows is the residue.
  *
  * <p>
+ * <b>{@code ~fuzzy} (#411) added nothing to it.</b> It is the one matching form that is
+ * hand-written on both surfaces rather than handed to an engine — a subsequence test over
+ * code points, on strings both sides have already lower-cased the same way — so there is
+ * no dialect for it to have. Measured the same way as everything else: 80 queries built
+ * around the new form, over a 12-object fleet carrying the awkward cases ({@code a.b},
+ * {@code a~x}, {@code app=web}, {@code two words here}, and a non-ASCII {@code É-node}
+ * for the case folding), printed from both implementations and diffed —
+ * <b>byte-identical, including every error sentence</b>. The instrument was checked the
+ * way this file insists on: with the Java matcher deliberately narrowed to a substring
+ * test the same diff reported six differing queries, so agreement here is not what a
+ * broken rig looks like.
+ *
+ * <p>
  * <b>How it was measured.</b> Both implementations printed
  * {@code query → error, term count, kept names} for the same queries against the same
  * fleet, and the two outputs were diffed. Redo it that way if you change anything here;
