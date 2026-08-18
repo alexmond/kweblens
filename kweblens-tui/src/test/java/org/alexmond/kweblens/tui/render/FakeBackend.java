@@ -1,12 +1,16 @@
 package org.alexmond.kweblens.tui.render;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import dev.tamboui.buffer.Cell;
 import dev.tamboui.buffer.DiffResult;
 import dev.tamboui.layout.Position;
 import dev.tamboui.layout.Size;
@@ -41,8 +45,46 @@ public class FakeBackend implements Backend {
 	private volatile Runnable onResize = () -> {
 	};
 
+	/**
+	 * What is on the screen: every cell TamboUI has pushed, in place.
+	 *
+	 * <p>
+	 * A {@link DiffResult} is a <em>diff</em> — it carries the cells that changed and
+	 * nothing else — so a test that read one frame's diff would be reading an edit and
+	 * calling it a screen. Applying each diff into a grid is what makes
+	 * {@link #screenLines()} the thing an operator would be looking at, which is the only
+	 * honest answer to "is this actually on screen".
+	 */
+	private final AtomicReference<String[][]> screen;
+
 	public FakeBackend(int width, int height) {
 		this.size = new AtomicReference<>(new Size(width, height));
+		this.screen = new AtomicReference<>(blank(width, height));
+	}
+
+	private static String[][] blank(int width, int height) {
+		String[][] grid = new String[Math.max(0, height)][Math.max(0, width)];
+		for (String[] row : grid) {
+			Arrays.fill(row, " ");
+		}
+		return grid;
+	}
+
+	/**
+	 * The painted screen, one string per row, trailing blanks trimmed.
+	 *
+	 * <p>
+	 * Synchronised against {@link #draw}, which runs on the render thread: a test reading
+	 * a grid mid-diff would see half a frame and could not tell that from a frame that
+	 * really was half drawn.
+	 */
+	public synchronized List<String> screenLines() {
+		String[][] grid = this.screen.get();
+		List<String> lines = new ArrayList<>(grid.length);
+		for (String[] row : grid) {
+			lines.add(String.join("", row).stripTrailing());
+		}
+		return lines;
 	}
 
 	/**
@@ -58,8 +100,9 @@ public class FakeBackend implements Backend {
 	 * {@code ResizeEvent}; {@code Terminal.draw} re-reads {@link #size()} on every frame,
 	 * which is what actually re-lays-out.
 	 */
-	public void resizeTo(int width, int height) {
+	public synchronized void resizeTo(int width, int height) {
 		this.size.set(new Size(width, height));
+		this.screen.set(blank(width, height));
 		this.onResize.run();
 	}
 
@@ -74,8 +117,17 @@ public class FakeBackend implements Backend {
 	}
 
 	@Override
-	public void draw(DiffResult diff) {
+	public synchronized void draw(DiffResult diff) {
 		this.draws.incrementAndGet();
+		String[][] grid = this.screen.get();
+		for (int i = 0; i < diff.size(); i++) {
+			int x = diff.getX(i);
+			int y = diff.getY(i);
+			if (y >= 0 && y < grid.length && x >= 0 && x < grid[y].length) {
+				Cell cell = diff.getCell(i);
+				grid[y][x] = (cell.isContinuation() || cell.symbol().isEmpty()) ? " " : cell.symbol();
+			}
+		}
 	}
 
 	@Override

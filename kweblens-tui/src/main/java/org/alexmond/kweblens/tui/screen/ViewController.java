@@ -69,7 +69,12 @@ public class ViewController {
 	/** The last thing that could not be done, and why. Empty when nothing is wrong. */
 	private String message = "";
 
-	private boolean help;
+	/**
+	 * The {@code ?} pane. It owns its own document and its own scrolling (#470) for the
+	 * reason {@link LogPane} does: a screen with content and a cursor is a screen, and
+	 * this class is already the size of one.
+	 */
+	private final HelpPane helpPane = new HelpPane();
 
 	/**
 	 * The detail pane, or null when it is closed.
@@ -110,11 +115,11 @@ public class ViewController {
 		if (this.prompt.open()) {
 			return promptKey(stroke);
 		}
-		if (this.help) {
-			// Any key at all closes the help pane. A help screen you have to find the
-			// right key to leave is a help screen that needs help.
-			this.help = false;
-			return Outcome.REPAINT;
+		if (this.helpPane.isOpen()) {
+			// The movement keys scroll it — it is twice a viewport long since it grew
+			// the filter grammar (#470) — and any OTHER key still closes it, because a
+			// help screen you have to find the key out of is a help screen needing help.
+			return repaintIf(this.helpPane.key(stroke, page()));
 		}
 		if (this.logs.isOpen()) {
 			return logKey(stroke);
@@ -306,7 +311,7 @@ public class ViewController {
 			case HISTORY_NEXT -> replay(this.history.next());
 			case LAST_COMMAND -> replay(this.history.last());
 			case NAMESPACE_FAVOURITE -> namespace(stroke.character());
-			case HELP -> toggleHelp();
+			case HELP -> repaintIf(this.helpPane.toggle(this.favourites.recent(), kindCount()));
 			case DETAIL -> openDetail();
 			case LOGS -> openLogs(false);
 			case PREVIOUS_LOGS -> openLogs(true);
@@ -514,11 +519,6 @@ public class ViewController {
 		return Outcome.REPAINT;
 	}
 
-	private Outcome toggleHelp() {
-		this.help = !this.help;
-		return Outcome.REPAINT;
-	}
-
 	private void push(View view) {
 		this.stack.push(view);
 		open(view);
@@ -596,7 +596,15 @@ public class ViewController {
 
 	/** Whether the help pane is up. */
 	public boolean help() {
-		return this.help;
+		return this.helpPane.isOpen();
+	}
+
+	/**
+	 * The help pane's document — the keys and the filter grammar — or null when it is
+	 * closed. Ask {@link #help()} first.
+	 */
+	public DetailModel helpDocument() {
+		return this.helpPane.document();
 	}
 
 	/** Whether the detail pane is up. */

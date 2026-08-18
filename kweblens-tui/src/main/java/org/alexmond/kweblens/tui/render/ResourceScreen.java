@@ -1,6 +1,5 @@
 package org.alexmond.kweblens.tui.render;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -9,8 +8,6 @@ import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
-import dev.tamboui.text.Line;
-import dev.tamboui.text.Text;
 import dev.tamboui.tui.EventHandler;
 import dev.tamboui.tui.Renderer;
 import dev.tamboui.tui.TuiRunner;
@@ -267,7 +264,10 @@ public class ResourceScreen implements EventHandler, Renderer {
 	/** The table, or one of the two panes, or the help pane over whichever it is. */
 	private int body(Frame frame, Rect area) {
 		if (this.controller.help()) {
-			return help(frame, area);
+			// The help is a document with a cursor and it is longer than a terminal
+			// (#470), so it is drawn by the same windowed view as the detail pane rather
+			// than as one paragraph the bottom of which nobody could reach.
+			return this.pane.render(frame, area, this.controller.helpDocument());
 		}
 		if (this.controller.logsOpen()) {
 			return this.logs.render(frame, area, this.controller.logs());
@@ -276,24 +276,6 @@ public class ResourceScreen implements EventHandler, Renderer {
 			return this.pane.render(frame, area, this.controller.detail());
 		}
 		return this.table.render(frame, area, this.model, this.columns);
-	}
-
-	private int help(Frame frame, Rect area) {
-		List<Line> lines = new ArrayList<>();
-		lines.add(Line.from("Keys — every binding, including the ones the bar has no room for"));
-		for (String row : KeyMap.helpRows()) {
-			lines.add(Line.from("  " + row));
-		}
-		lines.add(Line.empty());
-		lines.add(Line.from("  namespaces on 1-9: " + namespaces()));
-		lines.add(Line.from("  :<kind> [namespace] [filter]  —  " + this.controller.kindCount() + " kinds discovered"));
-		frame.renderWidget(Paragraph.builder().text(Text.from(lines)).build(), area);
-		return 0;
-	}
-
-	private String namespaces() {
-		List<String> recent = this.controller.favourites().recent();
-		return (recent.isEmpty()) ? "none yet — they fill up as you visit them" : String.join(", ", recent);
 	}
 
 	/**

@@ -252,6 +252,25 @@ public final class KeyMap {
 		return List.copyOf(rows);
 	}
 
+	/**
+	 * How an action's keys are written on screen, or {@code ""} when this table binds
+	 * none.
+	 *
+	 * <p>
+	 * The one way for prose elsewhere to name a key. {@link HelpPane}'s "these keys
+	 * scroll" line is built from this rather than typed, because a sentence naming
+	 * {@code j} is exactly as able to go stale as a hint bar naming it — and staleness in
+	 * a sentence is harder to see.
+	 */
+	public static String label(KeyAction action) {
+		for (KeyBinding binding : BINDINGS) {
+			if (binding.action() == action) {
+				return binding.label();
+			}
+		}
+		return "";
+	}
+
 	/** Just the visible rows, for a test that wants the table rather than the string. */
 	public static List<KeyBinding> visible() {
 		return visible(BINDINGS);

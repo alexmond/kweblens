@@ -18,6 +18,11 @@ import org.alexmond.kweblens.tui.screen.RowWindow;
  * Draws the detail pane — and <b>only the lines that are on screen</b>.
  *
  * <p>
+ * It draws the {@code ?} pane too (#470), because that is the same thing: a document
+ * longer than a terminal with a cursor in it. One view rather than two means the help
+ * cannot quietly stop being windowed while the detail pane stays that way.
+ *
+ * <p>
  * The same rule as {@link ResourceTableView}, and it applies here for the same measured
  * reason: a frame that builds a widget per line pays that cost again on every tick, for
  * as long as the pane is open. A table of 10 000 rows cost 0.68 ms windowed against 120.8
