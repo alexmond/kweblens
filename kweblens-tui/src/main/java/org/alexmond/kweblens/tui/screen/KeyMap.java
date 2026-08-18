@@ -24,9 +24,19 @@ import java.util.Optional;
  * <ul>
  * <li>{@link #hints()} — the footer. Only {@link KeyBinding#visible()} rows, because a
  * line that wraps is a line nobody reads.</li>
- * <li>{@link #helpRows()} — the {@code ?} pane. <b>Every</b> row, so "not in the hint
- * bar" never means "not written down anywhere".</li>
+ * <li>{@link #helpRows()} — the {@code ?} pane. <b>Every</b> row of <b>both</b> tables,
+ * so "not in the hint bar" never means "not written down anywhere".</li>
  * </ul>
+ *
+ * <h2>Two tables, because two screens</h2>
+ *
+ * The detail pane (GH#368) is a document, not a list: {@code /} searches it rather than
+ * filtering rows, {@code n} and {@code N} walk the matches, and {@code :} would be a
+ * command line over a table that is not on screen. So the pane has its own table,
+ * {@link #PANE_BINDINGS}, projected by exactly the same three methods — the derivation
+ * rule is per screen, and {@code KeyMapTest} runs both directions over both tables. What
+ * would break the rule is a key handled in a branch somewhere with no row anywhere, and
+ * that is still impossible.
  *
  * <h2>What this table does not cover</h2>
  *
@@ -56,6 +66,7 @@ public final class KeyMap {
 			KeyBinding.shown(KeyAction.HISTORY_PREVIOUS, "[", "prev cmd", KeyStroke.of('[')),
 			KeyBinding.shown(KeyAction.HISTORY_NEXT, "]", "next cmd", KeyStroke.of(']')),
 			KeyBinding.shown(KeyAction.LAST_COMMAND, "-", "last cmd", KeyStroke.of('-')),
+			KeyBinding.shown(KeyAction.DETAIL, "d", "detail", KeyStroke.of('d')),
 			KeyBinding.shown(KeyAction.NAMESPACE_FAVOURITE, "0-9", "namespace", digits()),
 			KeyBinding.shown(KeyAction.HELP, "?", "keys", KeyStroke.of('?')),
 			KeyBinding.hidden(KeyAction.MOVE_DOWN, "j/↓", "down", KeyStroke.of('j'),
@@ -71,8 +82,42 @@ public final class KeyMap {
 					KeyStroke.key(KeyStroke.Kind.END)),
 			KeyBinding.hidden(KeyAction.QUIT, "ctrl-c", "quit", KeyStroke.ctrl('c')));
 
+	/**
+	 * Every key the detail pane binds (GH#368).
+	 *
+	 * <p>
+	 * {@code esc}/{@code q} is {@link KeyAction#BACK} here as well, and it keeps the same
+	 * order it keeps over a list: <b>clear the search first, close the pane second</b>.
+	 * One press must undo one thing, or the operator has to guess which of two it undid.
+	 */
+	public static final List<KeyBinding> PANE_BINDINGS = List.of(
+			KeyBinding.shown(KeyAction.SEARCH, "/", "search", KeyStroke.of('/')),
+			KeyBinding.shown(KeyAction.NEXT_MATCH, "n", "next match", KeyStroke.of('n')),
+			KeyBinding.shown(KeyAction.PREVIOUS_MATCH, "N", "prev match", KeyStroke.of('N')),
+			KeyBinding.shown(KeyAction.BACK, "esc/q", "back", KeyStroke.key(KeyStroke.Kind.ESCAPE), KeyStroke.of('q'),
+					KeyStroke.of('Q')),
+			KeyBinding.hidden(KeyAction.MOVE_DOWN, "j/↓", "down a line", KeyStroke.of('j'),
+					KeyStroke.key(KeyStroke.Kind.DOWN)),
+			KeyBinding.hidden(KeyAction.MOVE_UP, "k/↑", "up a line", KeyStroke.of('k'),
+					KeyStroke.key(KeyStroke.Kind.UP)),
+			KeyBinding.hidden(KeyAction.PAGE_DOWN, "ctrl-d/pgdn", "half page down in the pane", KeyStroke.ctrl('d'),
+					KeyStroke.key(KeyStroke.Kind.PAGE_DOWN)),
+			KeyBinding.hidden(KeyAction.PAGE_UP, "ctrl-u/pgup", "half page up in the pane", KeyStroke.ctrl('u'),
+					KeyStroke.key(KeyStroke.Kind.PAGE_UP)),
+			KeyBinding.hidden(KeyAction.TOP, "g/home", "first line", KeyStroke.of('g'),
+					KeyStroke.key(KeyStroke.Kind.HOME)),
+			KeyBinding.hidden(KeyAction.BOTTOM, "G/end", "last line", KeyStroke.of('G'),
+					KeyStroke.key(KeyStroke.Kind.END)),
+			KeyBinding.hidden(KeyAction.QUIT, "ctrl-c", "quit", KeyStroke.ctrl('c')));
+
 	/** What separates two hints on the footer. */
 	static final String SEPARATOR = " · ";
+
+	/**
+	 * How a pane-only binding is written in the help, so the two tables cannot be
+	 * confused.
+	 */
+	static final String PANE_PREFIX = "in the detail pane: ";
 
 	private KeyMap() {
 	}
@@ -91,7 +136,16 @@ public final class KeyMap {
 	 * unbound key must cost no repaint.
 	 */
 	public static Optional<KeyAction> action(KeyStroke stroke) {
-		for (KeyBinding binding : BINDINGS) {
+		return action(BINDINGS, stroke);
+	}
+
+	/** What {@code stroke} does while the detail pane is up, or empty. */
+	public static Optional<KeyAction> paneAction(KeyStroke stroke) {
+		return action(PANE_BINDINGS, stroke);
+	}
+
+	private static Optional<KeyAction> action(List<KeyBinding> table, KeyStroke stroke) {
+		for (KeyBinding binding : table) {
 			if (binding.matches(stroke)) {
 				return Optional.of(binding.action());
 			}
@@ -101,8 +155,17 @@ public final class KeyMap {
 
 	/** The hint bar, derived from the visible rows. */
 	public static String hints() {
+		return hints(BINDINGS);
+	}
+
+	/** The hint bar the detail pane shows, derived the same way from its own table. */
+	public static String paneHints() {
+		return hints(PANE_BINDINGS);
+	}
+
+	static String hints(List<KeyBinding> table) {
 		StringBuilder line = new StringBuilder(96);
-		for (KeyBinding binding : BINDINGS) {
+		for (KeyBinding binding : table) {
 			if (binding.visible()) {
 				if (line.length() > 0) {
 					line.append(SEPARATOR);
@@ -113,18 +176,28 @@ public final class KeyMap {
 		return line.toString();
 	}
 
-	/** The help pane, derived from every row — hidden ones included. */
+	/**
+	 * The help pane: every row of both tables, hidden ones included, so a key that exists
+	 * only inside the detail pane is still written down somewhere.
+	 */
 	public static List<String> helpRows() {
-		List<String> rows = new ArrayList<>(BINDINGS.size());
+		List<String> rows = new ArrayList<>(BINDINGS.size() + PANE_BINDINGS.size());
 		for (KeyBinding binding : BINDINGS) {
 			rows.add(binding.hint());
+		}
+		for (KeyBinding binding : PANE_BINDINGS) {
+			rows.add(PANE_PREFIX + binding.hint());
 		}
 		return List.copyOf(rows);
 	}
 
 	/** Just the visible rows, for a test that wants the table rather than the string. */
 	public static List<KeyBinding> visible() {
-		return BINDINGS.stream().filter(KeyBinding::visible).toList();
+		return visible(BINDINGS);
+	}
+
+	static List<KeyBinding> visible(List<KeyBinding> table) {
+		return table.stream().filter(KeyBinding::visible).toList();
 	}
 
 }

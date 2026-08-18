@@ -13,6 +13,7 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.client.dsl.ExecListener;
 import io.fabric8.kubernetes.client.dsl.ExecWatch;
 import io.fabric8.kubernetes.client.dsl.LogWatch;
+import io.fabric8.kubernetes.client.utils.Serialization;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ import org.alexmond.kweblens.cluster.ClusterRegistry;
 import org.alexmond.kweblens.column.Column;
 import org.alexmond.kweblens.column.ColumnCatalog;
 import org.alexmond.kweblens.column.PrinterColumns;
+import org.alexmond.kweblens.event.EventService;
 import org.alexmond.kweblens.exec.ExecService;
 import org.alexmond.kweblens.health.ObjectState;
 import org.alexmond.kweblens.health.ObjectStates;
@@ -29,6 +31,7 @@ import org.alexmond.kweblens.log.LogService;
 import org.alexmond.kweblens.resource.ApiDiscoveryService;
 import org.alexmond.kweblens.resource.CrdService;
 import org.alexmond.kweblens.resource.DiscoveredKind;
+import org.alexmond.kweblens.resource.RelationService;
 import org.alexmond.kweblens.resource.ResourceService;
 
 /**
@@ -86,6 +89,16 @@ public class CoreClusterDataSource implements ClusterDataSource {
 
 	private final CrdService crds;
 
+	/**
+	 * The twelve joins, and <b>the only place in this module that names them</b>. Every
+	 * relation the detail pane draws arrives through {@link #detail}; nothing downstream
+	 * may so much as reference this type, which is what {@code TuiComputesNoRelationTest}
+	 * asserts.
+	 */
+	private final RelationService relations;
+
+	private final EventService events;
+
 	@Override
 	public List<String> clusters() {
 		return this.clusters.list().stream().map(ClusterInfo::id).toList();
@@ -133,6 +146,36 @@ public class CoreClusterDataSource implements ClusterDataSource {
 	@Override
 	public GenericKubernetesResource get(ResourceQuery query, String name) {
 		return this.resources.getRaw(query.clusterId(), query.descriptor(), query.namespace(), name);
+	}
+
+	/**
+	 * One GET, then three projections of it — and every one of them belongs to somebody
+	 * else.
+	 *
+	 * <p>
+	 * The object is read once rather than through {@code ResourceService.getYaml} plus a
+	 * second read for the relations, because two GETs straddle a change: the YAML would
+	 * show a selector the relations beside it were not computed from, and nothing on
+	 * screen would say so. {@code Serialization.asYaml} is what {@code getYaml} would
+	 * have called on the object this already holds.
+	 *
+	 * <p>
+	 * The events are scoped to the <em>object's</em> namespace, taken from the object
+	 * rather than from the query: a cluster-scoped object has none, and its events are
+	 * wherever the component that emitted them put them, so scoping those to the screen's
+	 * namespace would quietly hide them.
+	 */
+	@Override
+	public ObjectDetail detail(ResourceQuery query, String name) {
+		GenericKubernetesResource object = this.resources.getRaw(query.clusterId(), query.descriptor(),
+				query.namespace(), name);
+		if (object == null) {
+			return ObjectDetail.missing(query.kind(), name);
+		}
+		String namespace = (object.getMetadata() != null) ? object.getMetadata().getNamespace() : null;
+		return ObjectDetail.of(Serialization.asYaml(object),
+				this.relations.relationsFor(query.clusterId(), query.descriptor(), object),
+				this.events.listForObject(query.clusterId(), namespace, query.kind(), name));
 	}
 
 	/**

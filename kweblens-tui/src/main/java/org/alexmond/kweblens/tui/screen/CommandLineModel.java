@@ -164,7 +164,15 @@ public class CommandLineModel {
 		COMMAND(":"),
 
 		/** {@code /} — narrow the rows. */
-		FILTER("/");
+		FILTER("/"),
+
+		/**
+		 * {@code /} inside the detail pane — find a line. Same sigil as {@link #FILTER}
+		 * because it is the same key and the same gesture; a different <em>mode</em>
+		 * because a pane has no rows to narrow, and {@code submit()} has to know which of
+		 * the two the enter belongs to.
+		 */
+		SEARCH("/");
 
 		private final String sigil;
 

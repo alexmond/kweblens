@@ -7,7 +7,10 @@ import java.util.function.IntSupplier;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 
 import org.alexmond.kweblens.resource.ResourceDescriptor;
+import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
+import org.alexmond.kweblens.tui.detail.DetailModel;
+import org.alexmond.kweblens.tui.detail.DetailSections;
 
 /**
  * Every key that is not a cursor move: the command line, the filter, the view stack, the
@@ -60,6 +63,17 @@ public class ViewController {
 
 	private boolean help;
 
+	/**
+	 * The detail pane, or null when it is closed.
+	 *
+	 * <p>
+	 * <b>It is a snapshot and it says so in the title.</b> The table under it goes on
+	 * updating from the watch; the pane does not, because its three parts were read
+	 * together to describe one moment (see {@code ObjectDetail}) and refreshing one of
+	 * them would put two moments on one screen. Closing and reopening is the refresh.
+	 */
+	private DetailModel detail;
+
 	public ViewController(Navigation navigation, ResourceModel model, View root, IntSupplier pageSize) {
 		this.navigation = navigation;
 		this.model = model;
@@ -86,7 +100,97 @@ public class ViewController {
 			this.help = false;
 			return Outcome.REPAINT;
 		}
+		if (this.detail != null) {
+			return paneKey(stroke);
+		}
 		return KeyMap.action(stroke).map((action) -> act(action, stroke)).orElse(Outcome.NONE);
+	}
+
+	/**
+	 * One key press while the detail pane is up.
+	 *
+	 * <p>
+	 * The pane has its own binding table ({@link KeyMap#PANE_BINDINGS}) because it is a
+	 * document and not a list: {@code /} finds a line rather than narrowing rows, and
+	 * {@code :} would be a command line over a table nobody is looking at. The derivation
+	 * rule is unchanged — the pane's hint bar is that table's projection, and
+	 * {@code KeyMapTest} checks it in both directions like the other one.
+	 */
+	private Outcome paneKey(KeyStroke stroke) {
+		this.message = "";
+		return KeyMap.paneAction(stroke).map(this::paneAct).orElse(Outcome.NONE);
+	}
+
+	private Outcome paneAct(KeyAction action) {
+		return switch (action) {
+			case MOVE_DOWN -> repaintIf(this.detail.moveSelection(1));
+			case MOVE_UP -> repaintIf(this.detail.moveSelection(-1));
+			case PAGE_DOWN -> repaintIf(this.detail.moveSelection(page()));
+			case PAGE_UP -> repaintIf(this.detail.moveSelection(-page()));
+			case TOP -> repaintIf(this.detail.selectTo(0));
+			case BOTTOM -> repaintIf(this.detail.selectTo(Integer.MAX_VALUE));
+			case SEARCH -> repaintIf(this.prompt.open(CommandLineModel.Mode.SEARCH, this.detail.query()));
+			case NEXT_MATCH -> match(true);
+			case PREVIOUS_MATCH -> match(false);
+			case BACK -> closePane();
+			case QUIT -> Outcome.QUIT;
+			default -> Outcome.NONE;
+		};
+	}
+
+	/**
+	 * {@code esc} clears the search before it closes the pane — the same order
+	 * {@link ViewStack#back()} keeps for a filter and a level, for the same reason: one
+	 * press must undo one thing, or the operator has to guess which of the two it undid.
+	 */
+	private Outcome closePane() {
+		if (this.detail.clearSearch()) {
+			return Outcome.REPAINT;
+		}
+		this.detail = null;
+		return Outcome.REPAINT;
+	}
+
+	private Outcome match(boolean forwards) {
+		if (this.detail.matchCount() == 0) {
+			this.message = (this.detail.query().isEmpty()) ? "Press / to search this pane first."
+					: "No line matches '" + this.detail.query() + "'.";
+			return Outcome.REPAINT;
+		}
+		return repaintIf((forwards) ? this.detail.nextMatch() : this.detail.previousMatch());
+	}
+
+	/**
+	 * Open the pane on the selected row — YAML, the server's relations and the object's
+	 * events (GH#368).
+	 *
+	 * <p>
+	 * <b>The headline is the verdict the list already computed</b>, taken off the row
+	 * rather than asked for again: {@code ObjectStates.forList} opens one status context
+	 * per page, and a per-object verdict on the way in would open one per object opened.
+	 *
+	 * <p>
+	 * A read the cluster refuses lands in {@link #message} and the pane does not open.
+	 * That is the same shape as a navigation that could not be filled — there is nothing
+	 * to draw, and an empty pane would be a claim that this object has no relations and
+	 * no events.
+	 */
+	private Outcome openDetail() {
+		Optional<ResourceRow> row = this.model.selectedRow();
+		if (row.isEmpty()) {
+			this.message = "Nothing selected.";
+			return Outcome.REPAINT;
+		}
+		ResourceRow selected = row.get();
+		ObjectDetail read = this.navigation.detail(selected.namespace(), selected.name());
+		if (!read.available()) {
+			this.message = read.error();
+			return Outcome.REPAINT;
+		}
+		String kind = current().descriptor().kind();
+		String headline = DetailSections.headline(selected.state(), kind, selected.namespace(), selected.name());
+		this.detail = new DetailModel(headline, DetailSections.of(read));
+		return Outcome.REPAINT;
 	}
 
 	private Outcome act(KeyAction action, KeyStroke stroke) {
@@ -108,6 +212,11 @@ public class ViewController {
 			case LAST_COMMAND -> replay(this.history.last());
 			case NAMESPACE_FAVOURITE -> namespace(stroke.character());
 			case HELP -> toggleHelp();
+			case DETAIL -> openDetail();
+			// Pane-only actions. Listed so this switch stays exhaustive — adding a
+			// KeyAction must force a decision here — and unreachable because no row of
+			// KeyMap.BINDINGS produces one.
+			case SEARCH, NEXT_MATCH, PREVIOUS_MATCH -> Outcome.NONE;
 		};
 	}
 
@@ -152,6 +261,9 @@ public class ViewController {
 		String typed = this.prompt.text();
 		CommandLineModel.Mode mode = this.prompt.mode();
 		this.prompt.close();
+		if (mode == CommandLineModel.Mode.SEARCH) {
+			return repaintIf(this.detail != null && this.detail.search(typed));
+		}
 		if (mode == CommandLineModel.Mode.FILTER) {
 			return filter(typed);
 		}
@@ -247,7 +359,13 @@ public class ViewController {
 		GenericKubernetesResource object = this.navigation.object(row.get().namespace(), row.get().name());
 		DrillDown.Target target = DrillDown.from(current().descriptor().kind(), object);
 		if (!target.available()) {
-			this.message = target.reason();
+			// The decline stays DrillDown's own words — it is the class that knows why
+			// the
+			// grammar cannot express the relationship. What is added is the other door:
+			// for
+			// most kinds there is nowhere to drill to and the detail pane is what the
+			// operator wanted.
+			this.message = target.reason() + " Press d for this object's detail.";
 			return Outcome.REPAINT;
 		}
 		Optional<ResourceDescriptor> kind = this.navigation.kinds().resolve(target.kind());
@@ -342,6 +460,19 @@ public class ViewController {
 	/** Whether the help pane is up. */
 	public boolean help() {
 		return this.help;
+	}
+
+	/** Whether the detail pane is up. */
+	public boolean paneOpen() {
+		return this.detail != null;
+	}
+
+	/**
+	 * The detail pane's document, or null when it is closed — ask {@link #paneOpen()}
+	 * first.
+	 */
+	public DetailModel detail() {
+		return this.detail;
 	}
 
 	/** What a key press left the caller owing. */

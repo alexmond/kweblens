@@ -26,6 +26,7 @@ import org.alexmond.kweblens.resource.WellKnownKinds;
 import org.alexmond.kweblens.tui.data.ClusterDataSource;
 import org.alexmond.kweblens.tui.data.ExecSession;
 import org.alexmond.kweblens.tui.data.LogStream;
+import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.PodTarget;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.data.Subscription;
@@ -278,6 +279,14 @@ public class FakeCluster implements ClusterDataSource {
 	/** The object {@link #get} hands back, for a drill-down. */
 	private volatile GenericKubernetesResource object;
 
+	/** What {@link #detail} hands back; null means "no such object". */
+	private volatile ObjectDetail detail;
+
+	/** When set, {@link #detail} throws it instead of answering. */
+	private volatile RuntimeException refuseDetail;
+
+	private final AtomicInteger details = new AtomicInteger();
+
 	@Override
 	public List<String> clusters() {
 		return List.of("fake");
@@ -341,6 +350,37 @@ public class FakeCluster implements ClusterDataSource {
 	@Override
 	public GenericKubernetesResource get(ResourceQuery query, String name) {
 		return this.object;
+	}
+
+	/**
+	 * What the detail pane will be built from. Seeded rather than derived, because the
+	 * relations are the <em>server's</em> answer: a fake that computed them would be a
+	 * second implementation of the joins, in the one module that must not have one.
+	 */
+	public FakeCluster withDetail(ObjectDetail seeded) {
+		this.detail = seeded;
+		return this;
+	}
+
+	/** Make the next {@code detail} throw, as a cluster that is not answering would. */
+	public FakeCluster refuseDetail(RuntimeException failure) {
+		this.refuseDetail = failure;
+		return this;
+	}
+
+	@Override
+	public ObjectDetail detail(ResourceQuery query, String name) {
+		RuntimeException refusal = this.refuseDetail;
+		if (refusal != null) {
+			throw refusal;
+		}
+		this.details.incrementAndGet();
+		return (this.detail != null) ? this.detail : ObjectDetail.missing(query.kind(), name);
+	}
+
+	/** How many times the pane read an object. */
+	public int details() {
+		return this.details.get();
 	}
 
 	@Override

@@ -9,6 +9,7 @@ import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import org.alexmond.kweblens.resource.DiscoveredKind;
 import org.alexmond.kweblens.resource.ResourceDescriptor;
 import org.alexmond.kweblens.resource.WellKnownKinds;
+import org.alexmond.kweblens.tui.data.ObjectDetail;
 import org.alexmond.kweblens.tui.data.ResourceQuery;
 import org.alexmond.kweblens.tui.kind.KindIndex;
 
@@ -42,7 +43,12 @@ public class FakeNavigation implements Navigation {
 
 	private final List<Predicate<ResourceRow>> filters = new ArrayList<>();
 
+	private final List<String> detailsRead = new ArrayList<>();
+
 	private GenericKubernetesResource object;
+
+	/** What {@link #detail} answers; null means "no such object any more". */
+	private ObjectDetail detail;
 
 	/** What {@link #show} answers; empty means the view was filled. */
 	private String refusal = "";
@@ -67,6 +73,27 @@ public class FakeNavigation implements Navigation {
 		this.shown.add(query);
 		this.filters.add(filter);
 		return this.refusal;
+	}
+
+	@Override
+	public ObjectDetail detail(String namespace, String name) {
+		this.detailsRead.add(namespace + "/" + name);
+		return (this.detail != null) ? this.detail : ObjectDetail.missing("Pod", name);
+	}
+
+	/**
+	 * What the pane will be built from. Seeded, never computed: the relations are the
+	 * server's answer and a fake that worked them out would be the second implementation
+	 * this whole ticket exists to avoid.
+	 */
+	public FakeNavigation withDetail(ObjectDetail seeded) {
+		this.detail = seeded;
+		return this;
+	}
+
+	/** Every object the pane was opened on, as {@code namespace/name}. */
+	public List<String> detailsRead() {
+		return List.copyOf(this.detailsRead);
 	}
 
 	/**

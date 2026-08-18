@@ -181,6 +181,32 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     — a bound visible key missing from the bar, or a word in the bar no key produces. This is
     k9s's `HydrateMenu(Hints())` and it is copied on purpose: a hand-written help screen always
     eventually lies. Adding a key is a row in that table; there is no second place to edit.
+    **A second screen gets a second TABLE, never a second mechanism**: the detail pane's keys are
+    `KeyMap.PANE_BINDINGS`, projected by the same `hints`/`helpRows`/`action` and checked in both
+    directions by the same test, and the `?` pane lists both so a pane-only key is still written
+    down. Pointing `paneHints()` at the wrong table is the one mistake two tables invite, so that
+    is the case `KeyMapTest` was proved to fail on.
+  - **The detail pane is made only of what the server already computes** (#368): YAML, the twelve
+    relations and the object's events, fetched by **one** `ClusterDataSource.detail` call — one
+    method because it is one reading, and two GETs would let the YAML show a selector the
+    relations beside it were not computed from. **No join may be computed in the TUI**, and
+    `TuiComputesNoRelationTest` scans the **constant pool** of every shipped class for both halves:
+    only `CoreClusterDataSource` may name `RelationService`, and only `DrillDown` may name a join
+    input (`ownerReferences`, `matchLabels`, `subsets`, `scaleTargetRef` …), because a drill-down
+    is a *visible, editable filter* and not a hidden join. **Source-grepping cannot do this job**:
+    the javadoc that explains the rule has to name what it forbids, so a grep reports the
+    documentation as the violation. Nor can a shell grep read class files — measured here,
+    `grep -c matchLabels DrillDown.class` exits 1 while `grep -ac` answers 2. **Each relation's
+    three states are three sentences**, never an empty section: `truncated` → "we stopped at N;
+    the collection is larger than what you see" *with* its rows, `notPermitted` → "you may not see
+    this" and `error` → "this could not be loaded", both *instead of* rows — and `notPermitted` is
+    branched on FIRST, because a refusal carries an `error` too. The pane's headline is the
+    verdict **the list already computed** (off `ResourceRow`), never a fresh `states` call: that
+    would open a status context per object. It is a **snapshot and the title says so**; the watch
+    under it is not touched. Its lines are **windowed** like the table's rows — a YAML document is
+    a long list of lines and a tick repaints forever. `esc` clears the search before it closes the
+    pane, the same order `ViewStack.back()` keeps. **Out of scope and staying there**: porting
+    `overview.ts`'s per-kind field registry, and an xray tree.
   - **Drill-down is a visible, editable filter, never a hidden join.** Enter on a Deployment
     opens `pods(kube-system)[1] </k8s-app=kube-dns>` — a query in **this** product's grammar
     (#366's port of `objectFilter.ts`), so it can be read, checked and widened. Where no query

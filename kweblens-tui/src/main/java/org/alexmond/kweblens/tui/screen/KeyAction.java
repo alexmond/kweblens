@@ -59,6 +59,21 @@ public enum KeyAction {
 	NAMESPACE_FAVOURITE,
 
 	/** Show every binding, including the ones the hint bar has no room for. */
-	HELP
+	HELP,
+
+	/**
+	 * Open the detail pane on the selected object — YAML, relations and events, all of it
+	 * computed server-side (GH#368).
+	 */
+	DETAIL,
+
+	/** Open the {@code /} search prompt inside the detail pane. */
+	SEARCH,
+
+	/** Move to the next line matching the pane's search. */
+	NEXT_MATCH,
+
+	/** Move to the previous line matching the pane's search. */
+	PREVIOUS_MATCH
 
 }
