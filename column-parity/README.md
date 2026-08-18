@@ -35,6 +35,12 @@ already (`ObjectStates.forList`, GH#360) and needs a `StatusContext` opened once
 not a per-object function on either side. A column added to `columns.ts` and forgotten here fails
 the coverage check, not silently nothing.
 
+The Java side also resolves each case through **every** `ColumnCatalog` lookup — the SPA's resource
+id, which is the vocabulary this corpus is written in, and the `(group, kind)` a discovered
+descriptor carries, which is what the TUI resolves by — and fails if they disagree (GH#460). The
+group comes from the object's own `apiVersion` here, not from the catalog, so an entry declaring the
+wrong API group is red rather than an empty table in the terminal.
+
 ## Regenerating the golden
 
 ```bash

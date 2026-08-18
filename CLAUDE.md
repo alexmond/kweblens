@@ -521,6 +521,16 @@ broken. It is not; do not "fix" it.
   terminal the values travel on `ResourceRow.values` and **the kind's columns are the first thing
   dropped when the width runs out** — a row you cannot identify is worse than a column you cannot
   see. Widths stay the terminal's own; nothing about a pixel crosses the seam.
+  **And the parity gate resolves each kind the way its CONSUMER does** (#460). A corpus case is
+  looked up through *every* `ColumnCatalog` lookup — `forResourceId` for the SPA's vocabulary and
+  `forDescriptor` for the TUI's — and they must agree, with the `(group, kind)` taken from the
+  **object's own `apiVersion`**. Asserting only through `forResourceId` left the group half of
+  every entry unread by anything, so a wrong API group was green here, green in
+  `columnParity.test.ts`, and a terminal with no kind columns at all. **Asserting that the two
+  indexes agree would not have caught it**: `BY_GROUP_KIND` is built by iterating `BY_ID`, so they
+  cannot diverge and a wrong literal is simply in both — the check has to come from outside the
+  catalog. Adding a lookup means one line in `ColumnParityTest.everyLookup`, and every case then
+  exercises it.
 - **An SSE stream that never writes never notices a disconnect.** `SseEmitter` learns its client
   is gone only from a *failed write*, so a data-driven stream holds its cluster-side resource open
   on a departed subscriber for as long as the cluster stays quiet. `SseKeepAlive` writes a
