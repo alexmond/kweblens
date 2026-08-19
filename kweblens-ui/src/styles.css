@@ -44,7 +44,13 @@
   --danger-line: rgba(179, 38, 30, 0.3);
   --warn-fg: #a35b00;
   --warn-tint: rgba(224, 168, 0, 0.18);
-  --warn-wash: rgba(224, 168, 0, 0.09);
+  /* 0.13, not the 0.09 the other washes carry: since #482 this is what a WARNING ROW is
+     painted with (see `tr.warn`), and a row highlight has a job the quiet card fills do not —
+     it has to be seen. At 0.09 over white it composites to rgb(252, 247, 232), ΔE 8.4 from the
+     panel, against the 16.8 the tint it replaced had; 0.13 puts it at 12.1. Dark needed no such
+     adjustment (16.6 at its own 0.14) because its panel is dark and the same veil moves it
+     further. */
+  --warn-wash: rgba(224, 168, 0, 0.13);
   --warn-line: rgba(163, 91, 0, 0.3);
   /* Darker than the #1a7f37 this replaced: measured on its own tint that read 4.41,
      just under AA for the badge text it carries. */
@@ -156,10 +162,49 @@ html.kw-dark {
   --danger-tint: rgba(255, 138, 128, 0.16);
   --danger-wash: rgba(255, 138, 128, 0.09);
   --danger-line: rgba(255, 138, 128, 0.34);
+  /* The warn FILLS are a colour chosen for the GROUND, not the foreground with an alpha on it
+     (#482). `--warn-fg` is the amber that reads on the panel and is painted solid in the
+     overview bar; the three below are what a veil of it leaves once the panel shows through,
+     and until this change dark had no such distinction — the tint, the wash and the
+     line were all `--warn-fg`'s own hue (38°) at three alphas, while LIGHT has always used a
+     separate base (45°) for exactly this reason. Two measurements say why that mattered, both
+     taken off the running app as decoded pixels rather than declared values:
+
+       * over the table row, the old tint composited to rgb(67, 61, 49) — hue 41°, saturation
+         15%, lightness 23%, which is the definition of BROWN, and it sits among greys this app
+         deliberately blue-shifts (#478 measured the panel family at B−R ≈ +22);
+       * against the DANGER tint on the same row, rgb(67, 52, 56), that is ΔE 10.9 — the two
+         tones carry the same lightness and almost no chroma, so the only thing separating a
+         warning from an error was a hue nobody can see at 15% saturation.
+
+     So the base moves to hue 45° (the light theme's own warn hue, and 7° off the amber) and the
+     tint's alpha from 0.16 to 0.18: measured on the running app, the pill composites to
+     rgb(71, 68, 52) — hue 51°, ΔE 14.7 from danger and 21.0 from an untinted row, against 11.3
+     and 17.8 before.
+
+     The alpha is bounded from above, not chosen for looks — every step lightens the fill and
+     costs the text on it, and three ceilings meet just past 0.18: the tone family's 5.5 floor on
+     the status pill and chip (6.75 and 7.71 here), AA on the four surfaces that still put raw
+     `--warn-fg` on this tint (`.diag-warn`, the only one any scene reaches, 5.64), and — the
+     tightest, and the one that had to be dug out from under a rule about rows — AA on a warn
+     BADGE inside a warn ROW, where the tint used to composite over a copy of itself: 4.84. See
+     the `tr.warn` rule below, which is why the row now paints the wash.
+
+     The LIGHT tint is deliberately untouched: it composites to a pale yellow, not a brown, and
+     raising its alpha would take `--warn-fg` on `--warn-tint` — already 4.53:1 there, see
+     `.dx-sev-warning` — under the floor. (Its wash did move, for a reason that has nothing to
+     do with brown; the light block says why.)
+
+     The wash is 0.14 rather than the 0.09 it was, and that is arithmetic rather than taste: at
+     9% this base composites to rgb(51, 52, 47) over the panel — GREEN above red, a warm state's
+     quietest surface coming out a green-grey, because the ground's own +5 wins below alpha
+     0.116. 0.14 restores the same +1.0 red-over-green margin the old wash had.
+     `toneTints.test.ts` fails the build if any of this collapses back toward danger, toward the
+     panel, or across that crossing. */
   --warn-fg: #ffc861;
-  --warn-tint: rgba(255, 193, 87, 0.16);
-  --warn-wash: rgba(255, 193, 87, 0.09);
-  --warn-line: rgba(255, 193, 87, 0.32);
+  --warn-tint: rgba(255, 217, 102, 0.18);
+  --warn-wash: rgba(255, 217, 102, 0.14);
+  --warn-line: rgba(255, 217, 102, 0.32);
   --ok-fg: #7ee2a8;
   --ok-tint: rgba(126, 226, 168, 0.15);
   --ok-line: rgba(126, 226, 168, 0.32);
@@ -206,8 +251,9 @@ html.kw-dark {
    (light header B - R = +22) and naive's is near-neutral (+2), and a neutral grey beside a
    blue one reads warm. It is NOT the other possibility, which would have outranked this
    entirely — the `warn` row tint was measured landing only on `Type: Warning` rows
-   (`rgba(255, 193, 87, .16)` on those, plain `tdColor` on every `Normal` one), so no row was
-   being told it was a warning when it was not.
+   (`rgba(255, 193, 87, .16)` — the warn tint as it stood at #478, retuned since by #482 — on
+   those, plain `tdColor` on every `Normal` one), so no row was being told it was a warning when
+   it was not.
 
    So both implementations now paint from ONE set of tokens: `.mini` uses them directly, and
    `NDataTable` gets them through the `DataTable` theme override in `tableTheme.ts`. That is
@@ -1904,18 +1950,38 @@ body {
 
 /* A warning row in an events table.
    Two selectors because events render in two kinds of table: a plain one inside the drawer
-   sections, and Naive's NDataTable in the Events list and the Recent Events pane. Only the
-   first was ever styled, so the class was inert in the pane and what looked like an
-   inconsistent highlight was Naive's own row striping showing through. */
+   sections, and Naive's NDataTable. Only the first was ever styled, so the class was inert in
+   the pane and what looked like an inconsistent highlight was Naive's own row striping showing
+   through.
+   The class comes from `EventsPane`'s `rowClassName` and from nowhere else, so the surfaces it
+   reaches are the drawer's Events tab and a category overview's Recent Events — NOT the Events
+   nav leaf, which is an ordinary `ResourceTable` and highlights nothing. This comment used to
+   name that leaf, and a #482 scene pointed at it duly reported `not present` on a cluster with
+   Warning events on every page.
+
+   The WASH, not the tint, and that is the palette's own division of labour: `tint` is for a
+   badge or an alert body, `wash` for a full surface that must not shout (see the light block).
+   A row is the second kind, and painting it with the first had a consequence nothing was
+   watching — the Type cell of a warning row holds a `StatusBadge` in the SAME warn tone, so the
+   badge's translucent fill composited over an identical translucent fill and the text on it
+   read **5.20:1** in dark, the thinnest warn measurement in the app, on a stack neither token
+   was designed for. #482's retune made a lighter base of it and the same stack fell to 4.10:1
+   (`contrast-check.mjs`, `.ov-sec … .n-tag__content`) — i.e. the alpha of a badge tint was
+   being bounded by a rule about ROWS. Two different tokens ends that: measured after, the row is
+   rgb(62, 61, 50) — ΔE 16.6 from the panel, against the old fill's 17.8, so the highlight is as
+   strong as it was — and the badge on it reads 4.84:1 dark, 6.15:1 light.
+   `toneTints.test.ts` fails the build if the two ever name one token again, and
+   `contrast-check.mjs` has a scene of its own for the stack, because it had been covered by
+   accident and in one theme only. */
 .mini tr.warn td,
 .n-data-table-tr.warn > .n-data-table-td {
-  background-color: var(--warn-tint);
+  background-color: var(--warn-wash);
 }
 
-/* Keep hover legible: without this the tint above would swallow the hover feedback and the
+/* Keep hover legible: without this the wash above would swallow the hover feedback and the
    row would stop responding to the pointer. */
 .n-data-table-tr.warn:hover > .n-data-table-td {
-  background-color: color-mix(in srgb, var(--warn-tint) 60%, var(--panel));
+  background-color: color-mix(in srgb, var(--warn-wash) 60%, var(--panel));
 }
 
 /* The other half of "one table look" (#478). The COLOURS reach naive's tables through the
