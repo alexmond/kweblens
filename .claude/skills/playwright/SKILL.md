@@ -199,6 +199,30 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-19 — **The check that caught #482's regression caught it by luck, and the same run
+  proved it: one theme measured the defect, the other measured a different element under the same
+  name.** Retuning the warn tint turned a warn BADGE inside a warn ROW — two translucent layers of
+  one tone, because `EventsPane` marks the row and badges its Type cell from the same token — from
+  5.20:1 to **4.10:1**, and `.ov-sec .n-data-table-tbody .n-data-table-td` failed on it. But that
+  selector names a CELL: the sampler takes the first descendant carrying text, which in dark was
+  the badge and in **light was the cell's own message**, so the identical run reported the stack
+  and did not report it, and the light half of a regression that had just been introduced was
+  invisible. The third instance of #389's shape (`.n-tag`) and #393's (a Ready pill under the
+  status pill's name), and the first where the *accident* was the thing that worked. → A named
+  scene, `category overview: a warn badge inside a warn row`, selector
+  `.ov-sec .n-data-table-tr.warn .status-badge.tone-warn`, with a `REQUIRED_WHEN` whose oracle is
+  the warn ROW — the page saying a highlighted row is on screen means the badge in it must produce
+  a ratio. Deliberately **not** in `FLOOR_OVERRIDE`: 5.5 is a claim about one tint over one panel,
+  and this is a stack. Two other things that cost time in the same run: **a stylesheet comment sent
+  the probe to the wrong surface** (it said the `warn` row class reaches "the Events list", which is
+  a plain `ResourceTable` — the class comes from `EventsPane` and nowhere else, so a scene pointed
+  at the Events leaf reported `not present` on a cluster with Warning events on every page; the
+  comment is fixed), and **a colour is worth computing before it is measured** — `over()` plus the
+  WCAG formula predicted every decoded pixel in this run to ±1 and reproduced the ticket's own
+  7.42:1, which is what made "which alpha is even possible" a five-second question instead of a
+  five-build one. **Arithmetic proposes; the decoded pixel disposes — and a per-tone name is what
+  keeps the pixel attributable.**
+
 - 2026-08-18 — **Two ways a scene can be pointed at a surface and still not have it on screen,
   met in one run (#478).** (1) **`scroll:` CENTRES an element taller than the viewport.** The
   2026-08-14 entry below records that it is `scrollIntoViewIfNeeded`, i.e. the minimal scroll;

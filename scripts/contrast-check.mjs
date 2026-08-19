@@ -418,6 +418,29 @@ const SCENES = [
     selectors: ['.ov-sec .n-data-table-th', '.ov-sec .n-data-table-tbody .n-data-table-td'],
   },
   {
+    // A warn BADGE inside a warn ROW — the one surface in this app where a semantic fill lands
+    // on top of another one, because `EventsPane` marks a Warning row AND badges its Type cell
+    // in the same tone. Two translucent layers of one hue, and the text on the stack is the
+    // thinnest warn reading anywhere: 4.79:1 as it ships, against 6.68:1 for the same component
+    // one row down.
+    //
+    // It has to be named, because it was covered by ACCIDENT and in one theme only. The scene
+    // above samples `.n-data-table-tbody .n-data-table-td` and the sampler takes the first
+    // match carrying text — in dark that happened to be this tag (which is how #482's first
+    // attempt was caught at 4.10:1), and in light it happened to be a cell's own message text,
+    // so the same run reported the stack and never reported it. Same family as #389 and #393:
+    // a selector that resolves is not a selector for the thing you meant.
+    //
+    // NOT held to the tone family's 5.5 (see FLOOR_OVERRIDE, which names the pill and the chip
+    // on a plain panel). That margin is a claim about one tint over one panel; this is a
+    // different ground, and pretending otherwise would either fail a shipping surface or push
+    // the tint's alpha down to keep a promise it was never measured under. What this scene is
+    // for is the direction of travel: it fires the moment either layer gets stronger.
+    name: 'category overview: a warn badge inside a warn row',
+    prepare: 'close;leaf:Workloads/Overview;wait:1200;scroll:.ov-sec .n-data-table-tr.warn',
+    selectors: ['.ov-sec .n-data-table-tr.warn .status-badge.tone-warn'],
+  },
+  {
     // `.ns-note` is the "Cluster-scoped" pill, so it needs a cluster-scoped kind.
     name: 'cluster-scoped list',
     prepare: 'close;leaf:Namespaces;wait:800',
@@ -641,6 +664,8 @@ const WHY_ABSENT = {
   // decides, and a reason that guessed at it would contradict the verdict printed beside it.
   '[data-col-key=status] .status-badge.tone-warn': 'needs a pod in a warn state — a tinted pill is drawn only for one',
   '[data-col-key=status] .status-badge.tone-err': 'needs a pod in a failing state — a tinted pill is drawn only for one',
+  '.ov-sec .n-data-table-tr.warn .status-badge.tone-warn':
+    'needs a Warning event in this category — the row class and the badge both come from the event type',
 };
 
 /**
@@ -668,6 +693,14 @@ const REQUIRED_WHEN = {
   '[data-col-key=status] .status-badge.tone-err': {
     when: '.status-chip.tone-err',
     why: 'the list offers a failing state chip, so a row in this list carries that state',
+  },
+  // Same shape, one level in: the warn ROW is the oracle for the warn BADGE inside it. A
+  // category with no Warning event has neither and is owed nothing; a highlighted row with an
+  // unmeasurable badge in it means the stack — the app's thinnest warn reading (#482) — went
+  // unwatched, which is the state this whole mechanism exists to refuse to call a pass.
+  '.ov-sec .n-data-table-tr.warn .status-badge.tone-warn': {
+    when: '.ov-sec .n-data-table-tr.warn',
+    why: 'a warning row is on screen, so the badge in its Type cell is on screen too',
   },
 };
 
