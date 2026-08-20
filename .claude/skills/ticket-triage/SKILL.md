@@ -177,6 +177,13 @@ designs is an `architect` job. The label says where the code lives; the role say
   one-pass outcome, and never edit the Charter or Body: propose those to the user instead."*
 - **Role files are repo state, so they belong in the PR.** A worktree agent that appends a
   learning and never commits it has thrown it away.
+- **One role file, one writer per round.** Two agents in two worktrees wearing the same role
+  both append to `.claude/roles/<role>.md` and collide on merge — and the first round of this
+  rule dispatched exactly that: two `debugger`s and one `architect`. Name the owner in each
+  brief; the others are told to **report** their learning line so you apply it. And **seed the
+  registry before dispatching** if `.claude/roles/` does not yet hold the roles this round needs
+  — otherwise every agent *creates* the file rather than reading it, which is the same collision
+  one step earlier.
 - `general-purpose` stays correct for work that is genuinely none of the above — filing tickets,
   a docs sweep, running a measurement someone else will interpret. Say so when you use it.
 
@@ -357,3 +364,10 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   the role's name (the wrapper skills are `disable-model-invocation: true`), and require the
   learning to be **committed in the PR** — a worktree agent that appends a learning and does not
   commit it has thrown it away. Minting a new role needs a stated gap and a line in the report.
+- 2026-08-20 — **The role rule collided with itself on its first use.** Ranking sent two tickets
+  to `debugger` and one to `architect`, in three worktrees, against a repo where `.claude/roles/`
+  did not exist yet — so all three would have *created* their role file, two of them the same one,
+  and collided on merge. → Seed the registry on `main` **before** dispatching (#492 did), and name
+  **one writer per role file** per round; everyone else reports their learning line. A rule about
+  shared mutable state needs an owner, and this one had described the append without saying who
+  may do it.
