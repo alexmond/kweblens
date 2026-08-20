@@ -16,6 +16,7 @@ once — the reason is in the header comment of each script.
 | [`state-link-check.mjs`](state-link-check.mjs) | Click every state on an overview card and fail unless the list it opens holds exactly the objects the card counted. |
 | [`resize-check.mjs`](resize-check.mjs) | Drag a multiline field's corner, then type: fail unless it has a grabber AND the pulled height survives. |
 | [`drawer-persist-check.mjs`](drawer-persist-check.mjs) | Open the detail drawer **once**, then use the page behind it: fail unless the same object and its row are still there — and unless Escape and ✕ still close it. |
+| [`yaml-escape-check.mjs`](yaml-escape-check.mjs) | With the pop-out YAML editor open, **one Escape must close one overlay**: the editor goes, the drawer and its `row-active` row stay — and a second Escape, and each ✕, still close what they own. |
 | [`tui-drive.sh`](tui-drive.sh) | Run **`kweblens-tui`'s shipped jar on a real terminal**, send keys, read the frame back as text. `--self-check` proves the rig before you believe it. |
 | [`tui-log-leak.sh`](tui-log-leak.sh) | Open and close the TUI's **log pane** N times against a quiet pod on a real cluster and count what is still held. The one trap `LogService.release` exists for, measured rather than reviewed. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
@@ -490,6 +491,22 @@ toggle was merely the click that got measured; the footer did it too.
 Two things it does that any new probe here should copy. It **proves the port's owner is this
 checkout** before reading anything, and it asserts the theme actually flipped at each step — a
 theme that did not change makes "it survived the toggle" vacuous.
+
+### `yaml-escape-check.mjs` — does one Escape close one overlay?
+
+Opens the drawer, the YAML tab and the pop-out editor, then presses Escape **once**: the editor
+must go and the drawer must stay, about the same object, with its row still marked. Then it fails
+unless a second Escape closes the drawer and each overlay's own ✕ closes that overlay — because
+**"Escape does nothing" would pass a survival check perfectly**.
+
+```bash
+scripts/dev-run.sh --sim --port 8117
+PORT=8117 node scripts/yaml-escape-check.mjs      # LEAF=Pods, VIEW=wide
+```
+
+Written for GH#488, where naive's Escape and the drawer's hand-rolled one were both
+window-**bubble** listeners and naive's had registered first — so it closed the editor, cleared
+the flag, and the drawer's guard read the `false` its own keypress had just written.
 
 ## Checking the terminal UI
 
