@@ -121,6 +121,11 @@ const show = ref(true);
 // True while the YAML tab's pop-out editor is open. Escape closes this drawer, and the
 // editor is a separate overlay with its own Escape — so while it is open the drawer's close
 // is suppressed and Escape belongs to the editor, not to the panel underneath it.
+//
+// The flag alone was not enough (GH#488): the editor's own Escape clears it SYNCHRONOUSLY,
+// on the keypress being judged, so a handler reading it afterwards read the state its own
+// keypress had produced and closed the drawer too. `useEscapeKey` listens in the capture
+// phase for exactly that reason — see the composable, which carries the measurement.
 const yamlEditing = ref(false);
 const onShow = (v: boolean) => {
   if (!v && !yamlEditing.value) {
