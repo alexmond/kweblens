@@ -1,10 +1,17 @@
 package org.alexmond.kweblens.tui.data;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
+import io.fabric8.mockwebserver.http.RecordedRequest;
 import org.junit.jupiter.api.Test;
+
+import org.alexmond.kweblens.tui.screen.Eventually;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,8 +34,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @EnableKubernetesMockClient(crud = true)
 class CoreClusterDataSourceLogTest {
 
-	private static final String PREVIOUS_PATH = "/api/v1/namespaces/web/pods/nginx/log"
-			+ "?pretty=false&container=app&previous=true&tailLines=100";
+	private static final String LOG_PATH = "/api/v1/namespaces/web/pods/nginx/log";
+
+	private static final String PREVIOUS_PATH = LOG_PATH + "?pretty=false&container=app&previous=true&tailLines=100";
+
+	/** How long one pass of the wait below blocks on the mock server's queue. */
+	private static final long POLL_MILLIS = 50;
 
 	KubernetesClient client;
 
@@ -152,17 +163,17 @@ class CoreClusterDataSourceLogTest {
 	 * is tens of thousands of lines into a 5 000-line buffer before the first frame.
 	 */
 	@Test
-	void theTimestampedFollowAsksForTimestampsAndForNoHistory() throws InterruptedException {
+	void theTimestampedFollowAsksForTimestampsAndForNoHistory() {
 		followAndAssertPath(true, "timestamps=true");
 	}
 
 	/** And the plain follow does not ask for them. */
 	@Test
-	void thePlainFollowAsksForNoTimestamps() throws InterruptedException {
+	void thePlainFollowAsksForNoTimestamps() {
 		followAndAssertPath(false, null);
 	}
 
-	private void followAndAssertPath(boolean timestamps, String expectedFlag) throws InterruptedException {
+	private void followAndAssertPath(boolean timestamps, String expectedFlag) {
 		CoreClusterDataSource source = CoreStack.dataSource(this.client);
 		PodTarget target = new PodTarget(CoreStack.CLUSTER, "web", "nginx", "app");
 
@@ -170,16 +181,57 @@ class CoreClusterDataSourceLogTest {
 			assertThat(stream).isNotNull();
 		}
 
-		String path = this.server.getLastRequest().getPath();
-		assertThat(path).contains("/api/v1/namespaces/web/pods/nginx/log")
-			.contains("container=app")
-			.contains("follow=true")
-			.contains("tailLines=0");
+		String path = awaitFollowRequestPath();
+		assertThat(path).contains("container=app").contains("follow=true").contains("tailLines=0");
 		if (expectedFlag != null) {
 			assertThat(path).contains(expectedFlag);
 		}
 		else {
 			assertThat(path).doesNotContain("timestamps");
+		}
+	}
+
+	/**
+	 * <b>The follow's own request, found by name — never the last one in the queue</b>
+	 * (GH#485). fabric8 looks the pod up
+	 * ({@code /pods?fieldSelector=metadata.name=nginx}) around the log call, on its own
+	 * thread, so {@code getLastRequest()} answers a <em>position in a queue</em> and not
+	 * the request under test: when the lookup lands second the assertion reads it and
+	 * reports the follow as missing. Measured, pinned to one saturated core, that was
+	 * <b>5 runs in 20</b> — both tests of the pair, not just the one CI happened to show.
+	 * <p>
+	 * So this searches instead of taking, and it <b>waits</b> for the request rather than
+	 * assuming it has already been recorded — the same reason the module has only one
+	 * waiter: the bound is wall clock, and the failure names every path that did arrive
+	 * instead. {@code KubernetesMockServer.takeRequest} blocks for it, so there is no
+	 * sleep anywhere in the wait.
+	 * @return the query string of the request the two follow tests are about
+	 */
+	private String awaitFollowRequestPath() {
+		List<String> seen = new ArrayList<>();
+		Eventually.await(() -> takeOneRequestInto(seen), () -> followPath(seen) != null,
+				() -> "the follow's request to " + LOG_PATH + "; the API server was asked for " + seen);
+		return followPath(seen);
+	}
+
+	/**
+	 * The one recorded path that is a read of the pod's log, or null while there is none.
+	 */
+	private static String followPath(List<String> paths) {
+		return paths.stream().filter((path) -> path.contains(LOG_PATH)).findFirst().orElse(null);
+	}
+
+	/** One request off the mock server's queue, kept so the failure can name it. */
+	private void takeOneRequestInto(List<String> paths) {
+		try {
+			RecordedRequest request = this.server.takeRequest(POLL_MILLIS, TimeUnit.MILLISECONDS);
+			if (request != null) {
+				paths.add(String.valueOf(request.getPath()));
+			}
+		}
+		catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("interrupted while reading the mock server's recorded requests", ex);
 		}
 	}
 
