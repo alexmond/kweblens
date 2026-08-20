@@ -62,11 +62,20 @@
 //                                failure), and take it down
 //   refuse / permit              stub `GET …/detail/…` so the drawer's relations come back
 //                                refused (403), and take it down
+//   fail                         the same stub with the OTHER failure state — an error and no
+//                                `notPermitted`, i.e. the red half of the relation note.
+//                                `permit` takes it down too; they share one route.
 //   files:blocked / files:browse switch the pod file browser on for the SHELL and serve either
 //   nofiles                      a container with no shell or a directory with a binary in it;
 //                                `nofiles` takes all three routes down. RELOADS the page.
+//   schema / noschema            stub `GET …/schema` with a draft-07 document shaped like the
+//                                one `SchemaService` builds, so the YAML editor has a linter
+//                                at all; `noschema` takes it down
+//   type:<sel>=<text>            replace an editor's whole document — click, select all, type.
+//                                `\n` is a newline. `fill:` cannot do this: CodeMirror's
+//                                surface is a contenteditable it owns, not an <input>.
 //
-// The last four groups are the only faked responses in this file, and each is faked because it
+// The last groups are the only faked responses in this file, and each is faked because it
 // cannot be produced here: an admin kubeconfig is allowed everything and is never refused a
 // join, no cluster on this box refuses to list its own bindings, and the pod file browser is
 // off by default and has no container to attach to on the simulator. Without them those
@@ -537,13 +546,48 @@ const SCENES = [
     selectors: ['.review-h', '.review-cap', '.review-recheck'],
   },
   {
+    // The editor dialog's schema-error count (#501) — `.warn-badge.err`, the red state of the
+    // badge on the Warnings tab. It takes BOTH halves and neither is optional:
+    //
+    //  * a schema, or there is no linter at all. `YamlEditor` only installs `yamlSchema()`
+    //    when the `schema` prop is non-null, so without one the editor is plain YAML, emits no
+    //    diagnostics, and the badge has nothing to count. Measured on this box against the
+    //    simulator, `GET …/schema?resource=configmaps` answers **500** — the mock API server
+    //    publishes no OpenAPI v3 document for `SchemaService` to read — so the prop is null on
+    //    every simulator run and no amount of typing produces a badge. Verified: with the stub
+    //    off and the same invalid document typed, `.warn-badge` count is 0.
+    //  * an invalid document. The stub alone leaves the badge absent (also verified, 0), which
+    //    is correct — the object the drawer loaded is valid against its own kind's schema.
+    //
+    // So the scene stubs the schema and then types a document that violates it. `metadata: 7`
+    // is a scalar where the schema says object: one error, badge reads `1`, class `warn-badge
+    // err`. That is the state the red badge exists for — the operator has broken the document
+    // and Apply is about to be refused.
+    //
+    // TWO `close` steps, because the scene before this one leaves TWO layers up: the editor
+    // dialog and the drawer under it. `close` presses Escape once — it is deliberately one
+    // layer, since the app also uses Escape to leave surfaces a caller opened on purpose — and
+    // with one step the drawer survived, covered the row this scene clicks, and the badge came
+    // back `not present` in BOTH themes while the identical PREPARE run on its own measured it.
+    name: 'editor schema errors (signed in, stubbed schema)',
+    prepare:
+      'permit;schema;close;close;signin:admin;leaf:Config Maps;wait:900;' +
+      'click:.n-data-table-tbody tr td:nth-child(2);wait:1200;' +
+      '?click:.n-tabs-tab:has-text("YAML");wait:1200;?click:button:has-text("Edit");wait:2000;' +
+      'type:.cm-content=apiVersion: v1\\nkind: ConfigMap\\nmetadata: 7\\n;wait:2500',
+    selectors: ['.warn-badge.err'],
+  },
+  {
     // A `:hover` pad, which nothing here could reach before the `hover:` verb: `.btn:hover`
     // hard-coded a light background and put the button's own label at 1.16:1 in dark mode.
     // Needs the pod file browser (`dev-run.sh --files`); without it the `.btn` is absent and
     // this row is counted as unmeasured rather than passed.
     name: 'button hover',
+    // Leads with `noschema` for the reason `metrics chart tooltip` leads with `full`: it is the
+    // first scene after the one that installed the schema stub, and a later scene that opens
+    // the editor (`refused apply`) must see the app's own answer, not a fixture.
     prepare:
-      'close;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
+      'noschema;close;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
       '?click:.n-tabs-tab:has-text("Files");wait:1200;?hover:.btn',
     selectors: ['.btn'],
   },
@@ -626,6 +670,23 @@ const SCENES = [
       'close;refuse;leaf:Services;wait:800;' +
       'click:.n-data-table-tbody tr td:nth-child(2);wait:1400;?scroll:.rel-denied',
     selectors: ['.rel-denied'],
+  },
+  {
+    // The RED half of the same note (#501): a relation that could not be loaded at all. Same
+    // stub, the other state — `error` with `notPermitted` false, which is what
+    // `Relation.failed(ex.getMessage())` puts on the wire for anything that is not a 403.
+    //
+    // It needs the stub for the same reason `.rel-denied` did: nothing on this box fails a
+    // join. The simulator answers every relation, so `.rel-error` had never produced a ratio
+    // in any run here — it was carried in `textOnTint.test.ts`'s exemption list with a
+    // COMPUTED ratio and no measured one, which is the state that ends with this scene.
+    //
+    // Services, and `?scroll:` to the note itself, for the two reasons the scene above gives.
+    name: 'a relation that could not be loaded (stubbed failure)',
+    prepare:
+      'close;fail;leaf:Services;wait:800;' +
+      'click:.n-data-table-tbody tr td:nth-child(2);wait:1400;?scroll:.rel-error',
+    selectors: ['.rel-error'],
   },
   {
     // The pod file browser's amber notice — a container whose filesystem cannot be browsed
@@ -1271,7 +1332,7 @@ const REFUSED_RELATION = {
  * scene measuring a drawer nobody's cluster produces. Only the `relations` map is overwritten,
  * which is exactly the part a least-privilege deployment loses.
  */
-async function stubRefusedRelations(page) {
+async function stubRefusedRelations(page, relation = REFUSED_RELATION) {
   await page.unroute(DETAIL_URL).catch(() => {});
   await page.route(DETAIL_URL, async (route) => {
     const res = await route.fetch();
@@ -1280,9 +1341,69 @@ async function stubRefusedRelations(page) {
       return;
     }
     const detail = await res.json();
-    for (const key of Object.keys(detail.relations ?? {})) detail.relations[key] = REFUSED_RELATION;
+    for (const key of Object.keys(detail.relations ?? {})) detail.relations[key] = relation;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail) });
   });
+}
+
+/**
+ * A relation that FAILED — the other state of the same record, and the red note's input.
+ *
+ * `Relation.from(ex)` classifies a 403 as `notPermitted` and everything else as
+ * `failed(ex.getMessage())`, so the generic case carries the client's own sentence and leaves
+ * the flag false. `relationSections` branches on `notPermitted` first, which is exactly why
+ * this fixture must set it false rather than omit it: a refusal carries an `error` too, so an
+ * `error`-only object is the ONLY way to reach `.rel-error`.
+ */
+const FAILED_RELATION = {
+  items: [],
+  truncated: false,
+  error: 'Failure executing: GET at: /api/v1/namespaces/default/endpoints. Message: Read timed out.',
+  notPermitted: false,
+};
+
+// --- the YAML editor's schema ---------------------------------------------------------------
+//
+// `GET …/schema` is served by `SchemaService` from the target cluster's own OpenAPI v3
+// document. The simulator's mock API server publishes none, so the endpoint answers 500 here
+// (measured) and `YamlEditor` gets a null `schema` prop — no `yamlSchema()`, no linter, no
+// diagnostics, and therefore no `.warn-badge` in any state on any simulator run.
+//
+// The stub is shaped like what `SchemaService` builds rather than invented: a draft-07 document
+// with the kind inlined at the root and a `definitions` block the root `$ref`s into, which is
+// the rewrite its javadoc describes. Small, because the scene needs one violated constraint,
+// not the API server's whole group-version.
+const SCHEMA_URL = '**/api/v1/clusters/*/schema*';
+
+const CONFIGMAP_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  type: 'object',
+  properties: {
+    apiVersion: { type: 'string' },
+    kind: { type: 'string' },
+    metadata: { $ref: '#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta' },
+    data: { type: 'object', additionalProperties: { type: 'string' } },
+    binaryData: { type: 'object', additionalProperties: { type: 'string' } },
+    immutable: { type: 'boolean' },
+  },
+  definitions: {
+    'io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta': {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        namespace: { type: 'string' },
+        labels: { type: 'object', additionalProperties: { type: 'string' } },
+        annotations: { type: 'object', additionalProperties: { type: 'string' } },
+      },
+    },
+  },
+};
+
+async function stubSchema(page) {
+  await page.unroute(SCHEMA_URL).catch(() => {});
+  await page.route(SCHEMA_URL, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CONFIGMAP_SCHEMA) }),
+  );
 }
 
 // --- the pod file browser ---------------------------------------------------------------
@@ -1559,7 +1680,14 @@ async function runStep(page, raw) {
     // so `.rel-denied` had no scene and no ratio in any run on this box (#484). The object is
     // left real; only the `relations` map is rewritten. See stubRefusedRelations.
     else if (verb === 'refuse') await stubRefusedRelations(page);
+    // `fail` — the same route, the other failure state. Two verbs rather than an argument
+    // because they are two readings, and `permit` already means "stop faking this response".
+    else if (verb === 'fail') await stubRefusedRelations(page, FAILED_RELATION);
     else if (verb === 'permit') await page.unroute(DETAIL_URL).catch(() => {});
+    // `schema` / `noschema` — the YAML editor's linter, which the simulator cannot supply
+    // (500 on `GET …/schema`, measured). See stubSchema.
+    else if (verb === 'schema') await stubSchema(page);
+    else if (verb === 'noschema') await page.unroute(SCHEMA_URL).catch(() => {});
     // `files:blocked` / `files:browse` / `nofiles` — the pod file browser, whose two surfaces
     // (`.files-notice.blocked`, `.files-tag`) had no ratio either. `blocked` serves the listing
     // a container with no shell produces; `browse` serves a directory and a file that is not
@@ -1580,6 +1708,15 @@ async function runStep(page, raw) {
       // the old split moved half the VALUE into the selector (see lib/kw-playwright.mjs).
       const { selector, value } = splitFill(arg);
       await page.fill(selector, value);
+    } else if (verb === 'type') {
+      // `fill:` cannot drive CodeMirror. Its editing surface is a contenteditable the view
+      // owns, so a value assignment is either ignored or leaves the view's document and the
+      // DOM disagreeing; the only honest input is the keyboard. `\n` is spelled as an escape
+      // because PREPARE is a single line.
+      const { selector, value } = splitFill(arg);
+      await page.locator(selector).last().click();
+      await page.keyboard.press('Control+a');
+      await page.keyboard.type(value.replace(/\\n/g, '\n'));
     } else if (verb === 'upload') {
       // A file input, for UI that only appears once something has been picked — the pod
       // file browser's upload confirmation, for one, which is otherwise unreachable here.

@@ -959,15 +959,12 @@ body {
   }
 }
 
-.search {
-  font-size: 13px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--text);
-  width: 220px;
-}
+/* `.search` stood here — the pre-Naive text input, a 220px bordered box. Nothing writes the
+   class (#505): the list's filter is `ResourceListView.vue`'s `NInput`, the command palette has
+   its own `.palette-input` below, and the only `search` left in the sources is a
+   `type="search"` attribute and a `v-model` name, neither of which puts a class on anything.
+   That is precisely why the 2026-08-06 audit could not see it — a matcher that counts a token
+   appearing anywhere in a file called this live for four rounds. */
 
 /* `.sort-ind` stood here — the hand-drawn sort arrow of the pre-Naive table. Sorting is
    `NDataTable`'s `sorter` now and the arrow is `.n-data-table-sorter`. `.grid th.sortable`
@@ -1294,8 +1291,19 @@ body {
   color: var(--text);
 }
 
+/* The generic error box — `ErrorNotice.vue` (`class="error error-notice"`) and
+   `ActionNotice.vue` (`class="error action-notice"`), plus the dock's `.log-line.error`, which
+   overrides the colour at a higher specificity and is untouched by this.
+
+   The FOREGROUND is `--danger-on-tint`, not `--danger-fg` (#501). The danger tone has more
+   headroom than warn did, which is why #393 and #484 left it alone — but MEASURED on this
+   surface it is less than the ticket assumed: 5.62:1 light and 5.16:1 dark, not the 5.75 the
+   arithmetic gives over `--panel`, because the ground under the notice is naive's modal body
+   rather than the panel. 0.66 over AA in dark is not "a full point clear". The derived token
+   reads 8.14 / 6.02 on the same ground — a real gain in both themes, which is what settled
+   "does moving these improve anything, or only make them uniform". */
 .error {
-  color: var(--danger-fg);
+  color: var(--danger-on-tint);
   background: var(--danger-tint);
   border: 1px solid var(--danger-line);
   padding: 10px 12px;
@@ -1621,32 +1629,16 @@ body {
   }
 }
 
-.tabs {
-  display: flex;
-  gap: 2px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--border);
-}
+/* `.tabs`, `.tab`, `.tab:hover` and `.tab.active` stood here — the pre-Naive tab strip, a flex
+   row of borderless buttons with an accent underline on the active one. Every tab strip in the
+   app is an `NTabs` now: the drawer's is `Detail.vue`'s (`class="drawer-tabs"`, panes
+   `pane-class="drawer-body"`, styled just below), the editor dialog's is
+   `YamlEditorModal.vue`'s, and the dock's own row is the separate, live `.dock-tab*` family.
+   Nothing writes `tab` or `tabs` as a class (#505) — the word survives only as a `ref` name and
+   a pane name, which is why a token search read these as live.
 
-.tab {
-  border: 0;
-  background: transparent;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-
-.tab:hover {
-  color: var(--text);
-}
-
-.tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  font-weight: 600;
-}
+   Beware the name when searching: `tab` is a SUBSTRING of `.dock-tab`, `.drawer-tabs` and
+   `.n-tabs-tab`, all of which are in force. Boundary-aware matching is what separates them. */
 
 .drawer-body {
   flex: 1;
@@ -2173,11 +2165,21 @@ body {
    silently repainted a new element with a hard-coded #fafbfc background and 10px of padding
    is worse than no rule, and it did exactly that before this was measured. */
 
-.act {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
+/* `.act` stood here — an inline-flex action row from the pre-Naive UI, holding a button or two
+   and the message below them. No `.vue` or `.ts` writes the class (#505); the rows it used to
+   wrap are `.dialog-actions` and the drawer's `.drawer-actions` above.
+
+   THE NEIGHBOUR IS NOT THE SAME FAMILY, which is the only reason this note exists. `.act-msg`
+   and `.act-msg.err` (further down, near `.btn.danger`) are very much alive — `YamlTab.vue`,
+   `CreateModal.vue` and `YamlEditorModal.vue` all render `:class="'act-msg' + (err ? ' err' :
+   '')"` — and they are a DIFFERENT class, not a compound of this one, so deleting `.act` takes
+   nothing away from them. A reader who deletes the message rule as "the rest of the same
+   family" removes a live surface; the shared prefix is the whole of the resemblance.
+
+   One inheritance the removal does not disturb: `.act-msg` still carries `flex-basis: 100%`,
+   which was for THIS flex row and is inert wherever it lands now. It is left alone deliberately
+   — this change removes rules nothing selects, and retuning a live declaration would move
+   something on screen. */
 
 /* Two dead generations of the YAML editor stood here. `.yaml-edit` (+`.yaml-edit.tall`) was
    the plain `<textarea>`; `.yaml-edit-cm` and its `.cm-editor` / `.cm-editor.cm-focused`
@@ -2309,9 +2311,16 @@ body {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--accent);
 }
+/* The red state of the count: the document has schema ERRORS, not just warnings. Same move as
+   `.error` and `.rel-error` (#501) — `--danger-on-tint`, the state's own foreground mixed 65%
+   toward the theme's text, rather than the raw `fg` a state's tint was never measured against.
+   Measured on the editor dialog, an invalid ConfigMap in it: 5.62 light / 5.16 dark before,
+   8.14 / 6.02 after. It had never produced a ratio in any run on this box before that scene
+   existed — the simulator's API server publishes no OpenAPI document, so `GET …/schema` 500s,
+   the editor gets no linter, and the badge cannot render at all. */
 .warn-badge.err {
   background: var(--danger-tint);
-  color: var(--danger-fg);
+  color: var(--danger-on-tint);
 }
 .warnings-list {
   display: flex;
@@ -3432,8 +3441,16 @@ body.dragging {
   border: 1px solid var(--warn-line);
 }
 
+/* The red sibling of the note above: a relation that could not be LOADED — `Relation.failed`,
+   i.e. anything that is not a 403 — and the truncation line under a `.mini` table.
+
+   `--danger-on-tint` for the same reason `.rel-denied` takes `--warn-on-tint` (#501). The
+   danger tone's extra headroom is real but smaller here than the arithmetic over `--panel`
+   suggests: measured on the drawer, 5.62 light / 5.16 dark, against 8.14 / 6.02 with the
+   derived token. Nothing on this box fails a join either, so like its amber sibling it had no
+   ratio at all until `contrast-check.mjs` grew a `fail` verb to stub the error state. */
 .rel-error {
-  color: var(--danger-fg);
+  color: var(--danger-on-tint);
   background: var(--danger-tint);
   border: 1px solid var(--danger-line);
 }
