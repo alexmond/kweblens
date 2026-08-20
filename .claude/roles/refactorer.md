@@ -28,3 +28,4 @@ Don't over-engineer: apply only the separation the code's actual complexity just
 
 ## Learnings (solo)
 <!-- Appended by solo runs. One line each: `- YYYY-MM-DD — lesson` -->
+- 2026-08-20 — A consolidation onto an existing token is only behaviour-preserving where the surface can be rendered and measured: #484's four-line swap needed three new stub verbs and a stylesheet unit test before any of it was provable, so budget the rig as the work rather than as verification — and when the outlier rules turn out to be a wider class (three danger surfaces shared the shape without the defect), write them into the new gate as named exemptions and file them, rather than widening the change.

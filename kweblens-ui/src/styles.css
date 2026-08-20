@@ -183,17 +183,23 @@ html.kw-dark {
      and 17.8 before.
 
      The alpha is bounded from above, not chosen for looks — every step lightens the fill and
-     costs the text on it, and three ceilings meet just past 0.18: the tone family's 5.5 floor on
-     the status pill and chip (6.75 and 7.71 here), AA on the four surfaces that still put raw
-     `--warn-fg` on this tint (`.diag-warn`, the only one any scene reaches, 5.64), and — the
-     tightest, and the one that had to be dug out from under a rule about rows — AA on a warn
-     BADGE inside a warn ROW, where the tint used to composite over a copy of itself: 4.84. See
-     the `tr.warn` rule below, which is why the row now paints the wash.
+     costs the text on it, and two ceilings meet just past 0.18: the tone family's 5.5 floor on
+     the status pill and chip (6.75 and 7.71 here), and — the tighter, and the one that had to be
+     dug out from under a rule about rows — AA on a warn BADGE inside a warn ROW, where the tint
+     used to composite over a copy of itself: 4.84. See the `tr.warn` rule below, which is why
+     the row now paints the wash.
 
-     The LIGHT tint is deliberately untouched: it composites to a pale yellow, not a brown, and
-     raising its alpha would take `--warn-fg` on `--warn-tint` — already 4.53:1 there, see
-     `.dx-sev-warning` — under the floor. (Its wash did move, for a reason that has nothing to
-     do with brown; the light block says why.)
+     There was a third, and #484 removed it: four surfaces still put raw `--warn-fg` on this
+     tint, measuring 5.64:1 dark and 4.51:1 light — AA by a hundredth. They now take
+     `--warn-on-tint` like everything else that paints text on a tint, and measure 5.96 / 6.67,
+     so they are held to the tone family's 5.5 rather than to AA and no longer bound this alpha.
+
+     The LIGHT tint is deliberately untouched HERE: it composites to a pale yellow, not a brown,
+     so it never had this change's reason to move. What it did have was an obstacle — raising its
+     alpha would have taken `--warn-fg` on `--warn-tint`, already 4.53:1 there (see
+     `.dx-sev-warning`), under the floor — and that obstacle is the one #484 just removed. Moving
+     it is its own decision with its own measurements, not a consequence of this comment. (Its
+     wash did move, for a reason that has nothing to do with brown; the light block says why.)
 
      The wash is 0.14 rather than the 0.09 it was, and that is arithmetic rather than taste: at
      9% this base composites to rgb(51, 52, 47) over the panel — GREEN above red, a warm state's
@@ -3386,13 +3392,18 @@ body.dragging {
    survived: on the light modal they painted a black rectangle, the failure the dark palette's
    own comment warns about ("the Warnings card kept its near-white #fdf4f3 and turned into the
    loudest thing on a dark page"), only mirrored. A tint composites onto whatever panel it
-   lands on and cannot do that. */
+   lands on and cannot do that.
+
+   The FOREGROUND is `--warn-on-tint`, not `--warn-fg` (#484): the ground here is a naive modal
+   card rather than the panel, and on it the raw pairing measured 5.64:1 dark / 4.51:1 light — a
+   hundredth over AA, on a surface `.dx-sev-warning`'s comment is not even about. The derived
+   token reads 5.96 / 6.67 on the same card, the pair every other #484 surface lands on. */
 .diag-warn {
   margin: 12px 0 0;
   padding: 7px 9px;
   font-size: 11px;
   line-height: 1.5;
-  color: var(--warn-fg);
+  color: var(--warn-on-tint);
   background: var(--warn-tint);
   border: 1px solid var(--warn-line);
   border-radius: 4px;
@@ -3437,9 +3448,13 @@ body.dragging {
 /* An expected least-privilege refusal, not a malfunction — amber, not red. Both of these
    hard-coded a dark-theme foreground on its own near-black box, so on the light drawer they
    were black rectangles rather than tinted notes; the semantic tokens are translucent tints
-   over whatever panel they land on and hold in both themes (see the dark palette block). */
+   over whatever panel they land on and hold in both themes (see the dark palette block).
+   The FOREGROUND is the derived on-tint token, not the state's own `fg` (#484): a refusal
+   measured 5.64:1 dark / 4.51:1 light on this tint, which is AA by a hundredth. Nothing on
+   this box refuses a join to an admin kubeconfig, so it had no ratio at all until
+   `contrast-check.mjs` grew a `refuse` verb to stub the 403. */
 .rel-denied {
-  color: var(--warn-fg);
+  color: var(--warn-on-tint);
   background: var(--warn-tint);
   border: 1px solid var(--warn-line);
 }
@@ -4135,8 +4150,12 @@ body.dragging {
   border: 1px solid var(--border);
 }
 
+/* `--warn-on-tint` (#484), the same derived foreground the status pill and the list header's
+   chips take. The raw pairing was AA by a hundredth in light, and neither this notice nor the
+   tag below it could be reached by any scene: the browser is off by default and the simulator
+   has no container to attach to. `contrast-check.mjs`'s `files:` verbs are what render them. */
 .files-notice.blocked {
-  color: var(--warn-fg);
+  color: var(--warn-on-tint);
   background: var(--warn-tint);
   border: 1px solid var(--warn-line);
 }
@@ -4217,10 +4236,12 @@ body.dragging {
   color: var(--muted);
 }
 
+/* `binary` / `read-only copy` in the file view's header. Same pairing, same fix as the notice
+   above (#484) — and at 11px, where AA is the whole allowance. */
 .files-tag {
   padding: 1px 6px;
   font-size: 11px;
-  color: var(--warn-fg);
+  color: var(--warn-on-tint);
   background: var(--warn-tint);
   border: 1px solid var(--warn-line);
   border-radius: 10px;

@@ -60,11 +60,19 @@
 //   partial / full               stub `GET …/diagnose` with a scope where the audit could not
 //                                see everything (an `info` truncation notice and an RBAC read
 //                                failure), and take it down
+//   refuse / permit              stub `GET …/detail/…` so the drawer's relations come back
+//                                refused (403), and take it down
+//   files:blocked / files:browse switch the pod file browser on for the SHELL and serve either
+//   nofiles                      a container with no shell or a directory with a binary in it;
+//                                `nofiles` takes all three routes down. RELOADS the page.
 //
-// The last two pairs are the only faked responses in this file, and each is faked because it
-// cannot be produced here: an admin kubeconfig is allowed everything, and no cluster on this
-// box refuses to list its own bindings. Without them those selectors are `not present`
-// forever, which this tool's own summary calls a failed measurement and a reader calls a pass.
+// The last four groups are the only faked responses in this file, and each is faked because it
+// cannot be produced here: an admin kubeconfig is allowed everything and is never refused a
+// join, no cluster on this box refuses to list its own bindings, and the pod file browser is
+// off by default and has no container to attach to on the simulator. Without them those
+// selectors are `not present` forever, which this tool's own summary calls a failed measurement
+// and a reader calls a pass. What is faked is always the RESPONSE, never the rendering: the
+// components, the mapping tables and every rule in `styles.css` are the shipped ones.
 //
 // `scroll:` and `leaf:` exist because this tool measures a RENDERED PIXEL, so anything below
 // the fold or behind the nav could not be measured at all — it reported `outside the viewport`
@@ -197,7 +205,7 @@ const SCENES = [
     // second theme — without this, every scene in the second pass would be measuring a page
     // told that the service account can do nothing.
     prepare:
-      'close;allow;full;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
+      'close;allow;full;permit;nofiles;leaf:Pods;click:.n-data-table-tbody tr;wait:800;' +
       '?click:.n-collapse-item__header:has-text("Annotations");wait:400',
     // `.n-tag` used to sit here, meaning "the drawer's Helm marker", and never once measured
     // it — see the `Helm-managed object` scene below, which measures it for real.
@@ -601,6 +609,64 @@ const SCENES = [
     selectors: ['.dialog-denied-hint'],
   },
   {
+    // A relation the cluster REFUSED (#484). `.rel-denied` is the amber half of the drawer's
+    // two-tone relation note — `notPermitted` is branched on before `error` because a refusal
+    // carries an error too, and it is deliberately not red: a least-privilege deployment that
+    // cannot list Endpoints is configured, not broken.
+    //
+    // Services rather than Pods: measured on the simulator, a Pod's detail carries an EMPTY
+    // relations map, so a Pod drawer has no relation section for the stub to refuse and the
+    // scene would have measured nothing while looking like it had walked somewhere. A Service
+    // has three (endpoints, routedBy, selectedPods).
+    //
+    // The scroll target is the note itself, not the drawer: the relation accordions sit below
+    // the summary list, and this tool refuses to sample an element under the fold.
+    name: 'a refused relation (stubbed 403)',
+    prepare:
+      'close;refuse;leaf:Services;wait:800;' +
+      'click:.n-data-table-tbody tr td:nth-child(2);wait:1400;?scroll:.rel-denied',
+    selectors: ['.rel-denied'],
+  },
+  {
+    // The pod file browser's amber notice — a container whose filesystem cannot be browsed
+    // (#484). Behind the admin login even in open-mode, because what it returns is itself a
+    // secret, and behind `kweblens.files.enabled`, which is off by default. See the comment on
+    // `stubFilesFeature` for why all three responses are faked here.
+    //
+    // The measured selectors are the notice's CHILDREN. `.files-notice.blocked` is a `<div>`
+    // whose text all lives in its three `<p>`s, and this tool only samples elements with a
+    // direct text node — pointed at the container it reports `present, but no text of its own`,
+    // which is a note and not a ratio. The hint is measured too: it takes `--text` rather than
+    // the notice's own colour, because muted grey on this tint read 3.80:1 (#140), and that
+    // override is only known to be doing its job while something reads it.
+    name: 'pod file browser: a container that cannot be browsed (stubbed)',
+    prepare:
+      'close;files:blocked;signin:admin;leaf:Pods;wait:800;' +
+      'click:.n-data-table-tbody tr td:nth-child(2);wait:1400;' +
+      '?click:.n-tabs-tab:has-text("Files");wait:1400;?scroll:.files-notice.blocked',
+    selectors: [
+      '.files-notice.blocked .files-notice-title',
+      '.files-notice.blocked .files-notice-detail',
+      '.files-notice.blocked .files-notice-hint',
+    ],
+  },
+  {
+    // `.files-tag` — the "binary" / "read-only copy" marker in the file view's header, the
+    // fourth surface of #484 and the one nothing on this box can reach: it needs a directory
+    // listing AND a file whose bytes are not text, and the simulator has no container at all.
+    //
+    // No reload of its own — `files:blocked` above has already told the shell the feature is
+    // on, and this only swaps which responses the file endpoints give. It does re-open the
+    // drawer, because the previous scene left it on a pane whose listing had failed.
+    name: 'pod file browser: a binary file (stubbed)',
+    prepare:
+      'close;files:browse;leaf:Pods;wait:800;' +
+      'click:.n-data-table-tbody tr td:nth-child(2);wait:1400;' +
+      '?click:.n-tabs-tab:has-text("Files");wait:1400;' +
+      '?click:.files-entry:has-text("trust.db");wait:1200;?scroll:.files-tag',
+    selectors: ['.files-tag'],
+  },
+  {
     // `ActionNotice` — the failed-ACTION notice added for roadmap R3's error half. It is a
     // third rendering beside `ErrorNotice` and `EmptyState`, with its own three text classes,
     // and until this scene existed nothing in the run could reach any of them: every other way
@@ -702,6 +768,23 @@ const REQUIRED_WHEN = {
     when: '.ov-sec .n-data-table-tr.warn',
     why: 'a warning row is on screen, so the badge in its Type cell is on screen too',
   },
+  // The three surfaces of #484 whose scenes install a stub. Each oracle is the WIDER family the
+  // scene narrowed to a tone, so the check is "the surface rendered, but not in the state the
+  // stub asked for" — which is a scene that stopped working, not a cluster that has nothing to
+  // show. A drawer with no relation sections owes nothing (`.rel-note` is absent); a drawer
+  // whose sections rendered "None." while the refusal stub was in force is a failed run.
+  '.rel-denied': {
+    when: '.n-drawer .rel-note',
+    why: 'a relation section rendered a note, and every relation on this drawer was refused',
+  },
+  '.files-notice.blocked .files-notice-title': {
+    when: '.files-pane .files-notice',
+    why: 'the file pane is showing a notice, and the stubbed listing can only produce a blocked one',
+  },
+  '.files-tag': {
+    when: '.files-view-name',
+    why: 'a file is open in the viewer, and the stubbed content is binary',
+  },
 };
 
 /**
@@ -721,6 +804,16 @@ const FLOOR_OVERRIDE = {
   '.status-chip.tone-err': 5.5,
   '[data-col-key=status] .status-badge.tone-warn': 5.5,
   '[data-col-key=status] .status-badge.tone-err': 5.5,
+  // #484's four, held to the same floor for the same reason: each is text on a translucent
+  // tint, so the ratio moves with whatever panel it lands on, and each of them measured
+  // 4.51:1 in light — a pass by one hundredth — for as long as it shipped. The hint inside the
+  // blocked notice is deliberately NOT here: it takes `--text`, not a tone (see styles.css),
+  // so holding it to a tone family's margin would be asserting the wrong thing about it.
+  '.diag-warn': 5.5,
+  '.rel-denied': 5.5,
+  '.files-notice.blocked .files-notice-title': 5.5,
+  '.files-notice.blocked .files-notice-detail': 5.5,
+  '.files-tag': 5.5,
 };
 
 const args = process.argv.slice(2);
@@ -1153,8 +1246,208 @@ async function stubRefusedAccess(page) {
   );
 }
 
+/** The one request the drawer's Overview tab reads for its relation sections (#136). */
+const DETAIL_URL = '**/api/v1/clusters/*/detail/**';
+
+/**
+ * A relation the cluster refused, in the shape `Relation.notPermitted` builds — empty items, no
+ * truncation, the flag, and the server's own sentence as the error. Copied from
+ * `kweblens-core`'s `Relation.from(RuntimeException)`, which is the only thing that ever sets
+ * it, rather than invented: `relationSections` branches on `notPermitted` FIRST and prints
+ * `relation.error` verbatim, so a wrong sentence here would measure text no server sends.
+ */
+const REFUSED_RELATION = {
+  items: [],
+  truncated: false,
+  error: 'kweblens is not permitted to read this related kind',
+  notPermitted: true,
+};
+
+/**
+ * Refuse the joins while keeping the OBJECT real.
+ *
+ * The response is fetched and rewritten rather than replaced: the drawer's summary list, its
+ * tabs and its title all come from `detail.object`, and a wholesale fixture would have the
+ * scene measuring a drawer nobody's cluster produces. Only the `relations` map is overwritten,
+ * which is exactly the part a least-privilege deployment loses.
+ */
+async function stubRefusedRelations(page) {
+  await page.unroute(DETAIL_URL).catch(() => {});
+  await page.route(DETAIL_URL, async (route) => {
+    const res = await route.fetch();
+    if (!res.ok()) {
+      await route.fulfill({ response: res });
+      return;
+    }
+    const detail = await res.json();
+    for (const key of Object.keys(detail.relations ?? {})) detail.relations[key] = REFUSED_RELATION;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail) });
+  });
+}
+
+// --- the pod file browser ---------------------------------------------------------------
+//
+// Three routes, because the surface has three gates and this box can pass none of them on its
+// own. `kweblens.files.enabled` is OFF by default, so `Detail.vue` does not even render the
+// Files tab (`filesFeature.state === 'disabled'`); and even with `scripts/dev-run.sh --files`
+// the simulator has no container to attach to, so a listing can only ever fail. Measured on
+// this box against `--sim --files`: the real server answers 409 `container-not-running`, which
+// is a `blocked` notice — so `.files-notice.blocked` IS reachable there, and the stub below is
+// checked against it. `.files-tag` is not reachable at all: it needs a directory listing and
+// then a file whose bytes are not text, and nothing here can produce either.
+//
+// So the same trick as `deny` and `partial`: fake the responses, keep every component, every
+// `podFiles.ts` mapping and every rule in `styles.css` real. The shapes are copied from the
+// server's own records (`PodDirectoryListing`, `PodFileEntry`, `PodFileContent`) and from
+// `PodFileFailures`' `no-shell` sentence, so a change to the wire shape leaves this scene
+// measuring nothing instead of quietly measuring a payload the app no longer receives.
+const ABOUT_URL = '**/api/v1/about';
+const FILES_LIST_URL = '**/api/v1/clusters/*/pods/*/*/files*';
+const FILES_CONTENT_URL = '**/api/v1/clusters/*/pods/*/*/files/content*';
+
+/** `PodFileFailures.noShell` — the canonical reason a container cannot be browsed. */
+const NO_SHELL = {
+  type: 'about:blank',
+  title: 'Pod file browser',
+  status: 501,
+  detail:
+    'this container has no usable shell, so its filesystem cannot be browsed.' +
+    ' The file browser needs /bin/sh plus cat, wc and printf;' +
+    ' distroless and scratch images have none of them.',
+  code: 'no-shell',
+};
+
+/** A `PodDirectoryListing` with one directory and one file, so the file view can be opened. */
+const FILE_LISTING = {
+  path: '/etc',
+  resolvedPath: '/etc',
+  container: 'app',
+  entries: [
+    {
+      name: 'ssl',
+      type: 'dir',
+      size: null,
+      mode: '755',
+      modified: 1750000000,
+      owner: 'root',
+      group: 'root',
+      linkTarget: null,
+      linkType: null,
+    },
+    {
+      name: 'trust.db',
+      type: 'file',
+      size: 20480,
+      mode: '644',
+      modified: 1750000000,
+      owner: 'root',
+      group: 'root',
+      linkTarget: null,
+      linkType: null,
+    },
+  ],
+  truncated: false,
+};
+
+/** A `PodFileContent` that is not text — `binary` is what puts the tag in the header. */
+const BINARY_CONTENT = {
+  path: '/etc/trust.db',
+  container: 'app',
+  size: 20480,
+  binary: true,
+  truncated: false,
+  editable: false,
+  encoding: 'base64',
+  content: 'AAECAwQFBgcICQoLDA0ODw==',
+};
+
+async function stubFilesFeature(page, mode) {
+  await unstubFiles(page);
+  // `/api/v1/about` carries the feature's two gates, and `filesFeature.noteAbout` reads them
+  // ONCE at startup — so this is the one stub in this file that needs a reload to take effect.
+  // Fetched and rewritten, not replaced: the same response also carries the security posture,
+  // the AI flag and the simulator's own description, all of which the shell renders.
+  await page.route(ABOUT_URL, async (route) => {
+    const res = await route.fetch();
+    if (!res.ok()) {
+      await route.fulfill({ response: res });
+      return;
+    }
+    const about = await res.json();
+    about.podFiles = { enabled: true, writable: true, maxWriteBytes: 1048576, allowedRoots: [] };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(about) });
+  });
+  if (mode === 'blocked') {
+    await page.route(FILES_LIST_URL, (route) =>
+      route.fulfill({ status: 501, contentType: 'application/problem+json', body: JSON.stringify(NO_SHELL) }),
+    );
+  } else {
+    // Content first: Playwright matches routes newest-first, and `files*` cannot cross a `/`,
+    // so the two patterns are already disjoint — the order is belt and braces, not a fix.
+    await page.route(FILES_CONTENT_URL, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(BINARY_CONTENT) }),
+    );
+    await page.route(FILES_LIST_URL, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FILE_LISTING) }),
+    );
+  }
+  if (!filesReloaded) {
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    // A reload undoes `openNav`, whose whole job is to make the rail walkable — the `<details>`
+    // open state comes back from prefs, and `openLeafHere` then falls back to CLICKING each
+    // shut summary, which is what that function's own comment says not to rely on. Measured
+    // here before this line existed: a `leaf:Pods` immediately after the reload had not
+    // returned after 100 s, against ~2 s everywhere else in the file, and the run showed
+    // nothing at all until it finally finished — the whole scene looked like a hang. Set the
+    // state, do not flip it.
+    await openNav(page);
+    filesReloaded = true;
+  }
+}
+
+async function unstubFiles(page) {
+  for (const url of [FILES_CONTENT_URL, FILES_LIST_URL, ABOUT_URL]) await page.unroute(url).catch(() => {});
+}
+
+/**
+ * Whether the page has been reloaded since the `about` stub went in.
+ *
+ * The stub only changes what the SHELL believes about the feature, and the shell asks once, at
+ * startup — so without a reload the Files tab is still absent and every selector behind it
+ * reports `not present`, which this file counts as a failed measurement and not a pass. One
+ * reload per theme pass is enough: `nofiles` (on the first scene) clears this, so the second
+ * pass reloads again rather than trusting a page the theme toggle has since re-rendered.
+ */
+let filesReloaded = false;
+
+/**
+ * `PREPARE_TRACE=1` prints each step and how long it took, on stderr.
+ *
+ * A scene is a chain of steps with a 30 s default timeout each, and a chain that takes four
+ * minutes looks exactly like a chain that is stuck: the run prints nothing until it is over, so
+ * the only evidence is the wall clock. Adding the pod file browser's scenes cost half an hour to
+ * that confusion — the answer was `leaf:Pods` taking 100 s instead of 1.5 s because the reload
+ * before it had undone `openNav` — and one line of trace named the step immediately.
+ */
+const TRACE = process.env.PREPARE_TRACE === '1';
+
 async function runPrepare(page, spec) {
   for (const raw of (spec || '').split(';').map((s) => s.trim()).filter(Boolean)) {
+    const started = Date.now();
+    if (TRACE) process.stderr.write(`  prepare: ${raw} … `);
+    await runStep(page, raw);
+    if (TRACE) process.stderr.write(`${Date.now() - started}ms\n`);
+    await page.waitForTimeout(250);
+  }
+}
+
+/** One PREPARE step. Split out of the loop above so a step can be timed as a unit. */
+async function runStep(page, raw) {
+  // A bare block, kept so the steps below stay at the indentation they have had since this
+  // dispatcher was one function — the alternative is re-indenting 130 lines of comment and
+  // code that this change does not otherwise touch.
+  {
     const optional = raw.startsWith('?');
     const step = optional ? raw.slice(1) : raw;
     const [verb, ...rest] = step.split(':');
@@ -1163,7 +1456,10 @@ async function runPrepare(page, spec) {
     // `?step` is skipped when its target is not on screen. PREPARE runs once per theme, and
     // a step like signing in only applies the first time — without this the second pass sits
     // waiting for a modal that is already dealt with, and the run dies on a timeout.
-    if (optional && !(await page.$(selectorOf(verb, arg)))) continue;
+    if (optional && !(await page.$(selectorOf(verb, arg)))) {
+      if (TRACE) process.stderr.write('(skipped, selector absent) ');
+      return;
+    }
     if (verb === 'press') await page.keyboard.press(arg);
     else if (verb === 'click') await page.click(arg);
     else if (verb === 'wait') await page.waitForTimeout(Number(arg));
@@ -1258,6 +1554,22 @@ async function runPrepare(page, spec) {
     // forever — which reads as a pass and is how it shipped with no rule at all (#381).
     else if (verb === 'partial') await stubPartialDiagnosis(page);
     else if (verb === 'full') await page.unroute(DIAGNOSE_URL).catch(() => {});
+    // `refuse` / `permit` — the third of the same family, on the drawer's relations. A 403 on a
+    // join is what `Relation.notPermitted` is for, and an admin kubeconfig is never refused one,
+    // so `.rel-denied` had no scene and no ratio in any run on this box (#484). The object is
+    // left real; only the `relations` map is rewritten. See stubRefusedRelations.
+    else if (verb === 'refuse') await stubRefusedRelations(page);
+    else if (verb === 'permit') await page.unroute(DETAIL_URL).catch(() => {});
+    // `files:blocked` / `files:browse` / `nofiles` — the pod file browser, whose two surfaces
+    // (`.files-notice.blocked`, `.files-tag`) had no ratio either. `blocked` serves the listing
+    // a container with no shell produces; `browse` serves a directory and a file that is not
+    // text. Both also tell the shell the feature is on, which needs a reload — so a scene using
+    // them starts from a fresh page, and nothing may be carried into it.
+    else if (verb === 'files') await stubFilesFeature(page, arg);
+    else if (verb === 'nofiles') {
+      await unstubFiles(page);
+      filesReloaded = false;
+    }
     else if (verb === 'leaf') await openLeafHere(page, arg);
     // `drawer:<px>` drags the open drawer to a width inside its own 360..1400 resize range.
     // Shared with the other runner rather than copied — the rule this file's history keeps
@@ -1274,7 +1586,6 @@ async function runPrepare(page, spec) {
       const { selector, value } = splitFill(arg);
       await page.setInputFiles(selector, value);
     } else throw new Error(`unknown PREPARE verb: ${verb}`);
-    await page.waitForTimeout(250);
   }
 }
 
