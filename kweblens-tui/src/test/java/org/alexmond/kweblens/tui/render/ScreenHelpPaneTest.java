@@ -70,6 +70,9 @@ class ScreenHelpPaneTest {
 
 	private static final int BODY_LAST = ScreenHarness.HEIGHT - 2;
 
+	/** The hint bar: the fourth of the five rows the layout splits the frame into. */
+	private static final int HINTS_ROW = ScreenHarness.HEIGHT - 2;
+
 	/**
 	 * The positive control: a case whose answer is already known. The header is on every
 	 * frame, so a capture that cannot find it cannot be trusted to report a help pane
@@ -157,6 +160,55 @@ class ScreenHelpPaneTest {
 	}
 
 	/**
+	 * <b>The bar under the pane is the pane's own</b> (GH#476).
+	 *
+	 * <p>
+	 * Read off the painted row rather than off {@code screen.hints()}, for the reason
+	 * every other assertion in this class is: the defect is a bar an operator reads, and
+	 * a method returning the right string to nobody is the same shape of bug as a correct
+	 * model nobody renders. The negative half is the issue's own sentence — while the
+	 * pane was up the footer offered {@code : command}, {@code ↵ drill in} and
+	 * {@code d detail}, and not one of them did that.
+	 *
+	 * <p>
+	 * The control waits for the row to be <em>painted at all</em> and then asserts what
+	 * is in it, rather than waiting for the string it is about to assert — the harness
+	 * returns on the first {@code render} and the diff reaches the backend after that, so
+	 * a bare read here measured an empty row on the first run of this test. No second
+	 * wait after {@link #open}: it already waits for the pane's heading to be painted,
+	 * and the heading and the bar are drawn by one {@code render} into one diff, so the
+	 * row below is that same frame's.
+	 *
+	 * <p>
+	 * <b>How this was proved to fail — twice, and one of them is the shipped bug.</b>
+	 * Deleting the {@code help()} branch from {@code ResourceScreen.hints()}, i.e. the
+	 * state GH#476 was filed against: {@code expected: "j/↓ down a line · … · esc/q close
+	 * (as does any other key)" but was: ": command · / filter · ↵ drill in · esc/q back ·
+	 * …"}. And pointing {@code KeyMap.helpHints()} at {@code BINDINGS}, which fails the
+	 * negative half on its own: {@code [and names none of the list's keys, which here
+	 * only close the pane] … not to contain: ": command"}.
+	 */
+	@Test
+	void theBarUnderThePaneIsThePanesOwnKeysAndNotTheListsBar() throws Exception {
+		try (ScreenHarness harness = ScreenHarness.start(new FakeCluster().withObjects(3), 500)) {
+			harness.await(() -> !hintBar(harness).isEmpty(), "the hint bar to be painted");
+			assertThat(hintBar(harness)).as("the positive control: the list really does show the list's bar")
+				.isEqualTo(KeyMap.hints());
+
+			open(harness);
+			String bar = hintBar(harness);
+
+			assertThat(bar).as("the ? pane's bar is the projection of the ? pane's table")
+				.isEqualTo(KeyMap.helpHints());
+			assertThat(bar).as("and names none of the list's keys, which here only close the pane")
+				.doesNotContain(": command")
+				.doesNotContain("↵ drill in")
+				.doesNotContain("d detail")
+				.doesNotContain("l logs");
+		}
+	}
+
+	/**
 	 * The escape hatch is unchanged by the pane having grown a cursor: the keys that
 	 * scroll scroll, and every other key still closes.
 	 */
@@ -172,6 +224,52 @@ class ScreenHelpPaneTest {
 
 			press(harness, 'x');
 			harness.await(() -> !harness.screen().controller().help(), "any other key to close the pane");
+		}
+	}
+
+	/**
+	 * <b>The other half of the wrong-table mistake: the dispatcher</b> (GH#476).
+	 * {@code :} is the first key on the list's bar and the pane binds nothing for it, so
+	 * it must be an "any other key" and close. A {@link HelpPane} reading the
+	 * <em>list's</em> table instead of its own passes every bar assertion in this class
+	 * and fails here — it would resolve {@code :} to a command line, decline to act on
+	 * it, and leave the pane up under a bar that never offered it.
+	 *
+	 * <p>
+	 * <b>How this was proved to fail.</b> {@code HelpPane.key} was pointed back at
+	 * {@code KeyMap.action}: {@code waited 10s over 58907 passes for : to close the pane
+	 * like any other key, and it never happened}. Every bar assertion above stayed green
+	 * throughout, which is the point of having this case as well as those.
+	 */
+	@Test
+	void aKeyTheListBindsButThePaneDoesNotIsJustAnotherKeyThatCloses() throws Exception {
+		try (ScreenHarness harness = ScreenHarness.start(new FakeCluster().withObjects(3), 500)) {
+			open(harness);
+
+			press(harness, ':');
+
+			harness.await(() -> !harness.screen().controller().help(), ": to close the pane like any other key");
+			assertThat(harness.screen().controller().prompt().open())
+				.as("and it does not open a command line over the list it just uncovered")
+				.isFalse();
+		}
+	}
+
+	/**
+	 * And the key the bar actually names closes it too (GH#476). Worth its own case
+	 * because {@code esc}/{@code q} now takes a different arm from every other key — a
+	 * {@code BACK} row in the pane's table rather than the fall-through — so "the bar
+	 * says esc/q" and "esc/q closes" stopped being the same line of code.
+	 */
+	@Test
+	void theKeyTheBarNamesClosesIt() throws Exception {
+		try (ScreenHarness harness = ScreenHarness.start(new FakeCluster().withObjects(3), 500)) {
+			open(harness);
+
+			press(harness, 'q');
+
+			harness.await(() -> !harness.screen().controller().help(), "q, the key the bar names, to close the pane");
+			assertThat(harness.running()).as("and it closes the pane rather than quitting the app").isTrue();
 		}
 	}
 
@@ -198,6 +296,11 @@ class ScreenHelpPaneTest {
 		harness.await(() -> harness.screen().controller().help(), "the help pane to open");
 		harness.await(() -> body(harness).stream().anyMatch((line) -> line.contains(HelpPane.KEYS_HEADING)),
 				"the help pane to be painted");
+	}
+
+	/** The hint bar of the last painted frame — the row GH#476 is about. */
+	private static String hintBar(ScreenHarness harness) {
+		return harness.backend().screenLines().get(HINTS_ROW).strip();
 	}
 
 	/** The body of the last painted frame, without the chrome around it. */

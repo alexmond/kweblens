@@ -187,6 +187,26 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     directions by the same test, and the `?` pane lists both so a pane-only key is still written
     down. Pointing `paneHints()` at the wrong table is the one mistake two tables invite, so that
     is the case `KeyMapTest` was proved to fail on.
+    **A screen counts as a screen the moment it owns the keyboard — including the `?` pane** —
+    and it owes a table even when part of what it does is not bindable (#476). The pane had none,
+    so `ResourceScreen.hints()` had no branch for it and drew the **list's** bar: `: command`,
+    `↵ drill in`, `d detail` over a keyboard where all three merely closed it. Its keys are now
+    `KeyMap.HELP_BINDINGS`, and that table is **both what `HelpPane.key` dispatches from and what
+    its bar is projected from** — the old private "which actions scroll" set was a second,
+    invisible declaration, so a movement row deleted from `BINDINGS` would have taken a key off
+    the pane with nothing to fail. "Any other key closes it" stays prose, because it is the
+    *absence* of bindings and a table cannot hold an absence; it rides the description of the one
+    row that can carry it (`esc/q close (as does any other key)`), so it survives the pane's own
+    headline scrolling off the top. **`hints()` and `body()` branch in the same order** — they
+    answer one question, which screen is in front. **And `KeyMap.label` takes the table as a
+    parameter**: prose naming another screen's spelling of a key is the wrong-table mistake in the
+    one place no bar-against-table check reads.
+    **A derivation gate catches disagreement, never omission** — proved, not assumed: deleting
+    `k/↑` from a table removes it from the bar, from `helpRows()` and from every expectation in
+    the same edit, and the whole module stays green while `k` silently becomes "close". So one
+    check comes from **outside** the tables and its list of actions is deliberately hand-written:
+    the detail, log and `?` panes are all a document behind a window, so they must bind the **same
+    strokes** for moving through one (labels may differ). Add a table, add it there.
   - **The `?` pane carries the FILTER GRAMMAR as well as the keys, and both halves are derived**
     (#470). `FilterHelp` — the transcription of `objectFilter.ts` that exists so the help cannot
     drift from the parser — was read by nothing but a test for its whole life: the SPA rendered

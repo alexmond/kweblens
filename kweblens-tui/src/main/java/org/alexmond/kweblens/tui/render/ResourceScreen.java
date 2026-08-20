@@ -252,9 +252,20 @@ public class ResourceScreen implements EventHandler, Renderer {
 	/**
 	 * The hint bar is the projection of whichever table owns the keyboard right now. A
 	 * bar naming {@code :} while a pane has the keys would be the exact failure
-	 * {@link KeyMap} exists to prevent, arrived at from the other side.
+	 * {@link KeyMap} exists to prevent, arrived at from the other side — and for the
+	 * {@code ?} pane that is precisely what shipped, because it was not in this decision
+	 * at all (GH#476).
+	 *
+	 * <p>
+	 * <b>Same order as {@link #body}</b>, deliberately: the two answer one question —
+	 * which screen is in front — and an order that differed would put one screen's bar
+	 * under another screen's content. The help pane is first in both because it is drawn
+	 * <em>over</em> whichever of the three is underneath it.
 	 */
 	String hints() {
+		if (this.controller.help()) {
+			return KeyMap.helpHints();
+		}
 		if (this.controller.logsOpen()) {
 			return KeyMap.logHints();
 		}
