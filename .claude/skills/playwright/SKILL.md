@@ -50,6 +50,7 @@ and the reason is in its own header comment — read that before changing one.
 | `resize-check.mjs` | You changed a multiline field. Proves the corner grabber exists AND that a pulled height survives typing. `--self-test` checks the instrument. |
 | `cluster-switch-check.mjs` | You touched per-cluster state. Switches cluster and fails if a value from the previous one is still on screen. |
 | `state-link-check.mjs` | You touched an overview card, a state vocabulary, or the `status:` filter. Clicks every state and fails unless the card's number, the list header's `N of M` and the rows drawn are all the same number. |
+| `drawer-persist-check.mjs` | You touched the detail drawer, or anything that re-renders the shell. Opens the drawer ONCE, then walks both themes and clicks behind it, and fails unless the same object and its `row-active` row are still there — and unless Escape and ✕ still close it. |
 | `tui-drive.sh` | The surface is the **terminal**, not the browser. Runs `kweblens-tui`'s shipped jar in a real `tmux` pane, sends keys, returns the frame as text. `--self-check` proves the rig first. See "The other screen" below. |
 | `lib/kw-playwright.mjs` | You are writing a new browser script. Sign-in, themes, viewports, `PREPARE`, nav. |
 | `dev-verify.sh` | Before every commit. Format + full reactor. Green here means green on the PR. |
@@ -82,6 +83,9 @@ ONLY='Replica Sets,Pods' BLOCK_MS=800 node scripts/perf-sweep.mjs
 
 # Does clicking `15 No endpoints` open exactly those 15? (#336)
 CLUSTER_NS=monitoring node scripts/state-link-check.mjs cluster network storage config
+
+# Does the object you were reading survive the page around it? (#480)
+node scripts/drawer-persist-check.mjs
 ```
 
 `PREPARE` brings a surface on screen before it is sampled — `press:` `click:` `hover:<sel>`
@@ -198,6 +202,26 @@ compressed to one line, but the script change stays.
 ## Learnings
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
+
+- 2026-08-19 — **#480's two candidates were both wrong, and one keyboard press said so.** The
+  ticket (written off a good measurement) offered the `NConfigProvider` `:theme` prop
+  re-rendering its subtree, or a watcher clearing `detail`. Neither: **activating the SAME
+  toggle from the KEYBOARD** changed the theme light→dark with `.n-drawer` and
+  `.n-data-table-tr.row-active` both still 1, while a **mouse click on the footer** — no theme
+  change, no navigation — closed the drawer exactly as the toggle did. A maskless `NDrawer`
+  registers evtd's `clickoutside` trap, which is **mousedown + mouseup**, and routes it into
+  the mask-click handler whose only gate is `maskClosable`, defaulted true. So the discriminator
+  was a gesture that produces the *effect* without the *pointer event*, and it cost one run.
+  **When a symptom has two suspects, look for the input that separates them rather than the
+  code that explains one of them** — a click carries two things at once (a pointer press and
+  whatever the button does), and only one of them was guilty. → `drawer-persist-check.mjs`,
+  which asserts the general rule (the object survives BOTH themes and an unrelated click, from
+  ONE open) and, in the same run, that the drawer **still closes** on Escape and ✕ — "never
+  closes" passes a survival check perfectly. Two traps it bakes in: every toggle asserts
+  `kw-dark` actually flipped (a theme that did not change makes "it survived" vacuous), and the
+  object's name is compared after every step, because #480's real loss was the SELECTION, not
+  the panel. The 2026-08-18 entry below is now half stale: a probe still has to set the theme
+  first *if it is measuring the pre-fix build*, but on this build the drawer survives a walk.
 
 - 2026-08-19 — **The check that caught #482's regression caught it by luck, and the same run
   proved it: one theme measured the defect, the other measured a different element under the same

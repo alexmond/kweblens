@@ -116,12 +116,11 @@ const width = ref(520);
 const drawerWidth = computed<number | string>(() => (expanded.value ? '100%' : width.value));
 
 // The parent mounts Detail via v-if; keep the drawer shown while mounted and route any
-// close (the X, the mask, or Escape) to the `close` emit so the parent tears it down.
+// close (the ✕ or Escape) to the `close` emit so the parent tears it down.
 const show = ref(true);
-// True while the YAML tab's pop-out editor is open. The drawer is non-modal and closes on
-// any outside click / Escape — but a click inside the editor (a separate overlay) counts as
-// "outside", which would close the drawer and unmount the editor. Suppress the drawer's
-// close while editing; Escape then closes the editor (its own modal), not the drawer.
+// True while the YAML tab's pop-out editor is open. Escape closes this drawer, and the
+// editor is a separate overlay with its own Escape — so while it is open the drawer's close
+// is suppressed and Escape belongs to the editor, not to the panel underneath it.
 const yamlEditing = ref(false);
 const onShow = (v: boolean) => {
   if (!v && !yamlEditing.value) {
@@ -160,6 +159,16 @@ watch(
 </script>
 
 <template>
+  <!-- A NON-MODAL panel is not dismissed by using the page behind it (GH#480), which is what
+       `mask-closable` is doing here even though there is no mask to click. With `show-mask`
+       false naive registers evtd's `clickoutside` trap — a mousedown AND a mouseup outside
+       the drawer body — and routes it into the very handler the mask click uses, whose only
+       gate is `mask-closable`, which DEFAULTS TO TRUE. So every pointer press behind the
+       drawer closed it and dropped the selection with it (`row-active` went with `detail`):
+       the theme toggle is the click that got measured, but the footer and the brand bar did
+       it too, with no theme change anywhere near them. The ✕ and Escape still close the
+       drawer, and `scripts/drawer-persist-check.mjs` asserts that half as well — "never
+       closes" would pass a survival check perfectly. -->
   <NDrawer
     :show="show"
     :resizable="!expanded"
@@ -172,6 +181,7 @@ watch(
     :trap-focus="false"
     :block-scroll="false"
     :aria-label="`${kind} ${name}`"
+    :mask-closable="false"
     @update:show="onShow"
     @update:width="(w) => (width = w)"
   >
