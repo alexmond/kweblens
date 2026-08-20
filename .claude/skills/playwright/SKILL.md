@@ -203,6 +203,32 @@ compressed to one line, but the script change stays.
 
 Format: `- YYYY-MM-DD — what happened → what changed.`
 
+- 2026-08-20 — **Three of #484's four surfaces had never been rendered by any run, and reaching
+  them cost far more than the one-line fix each needed.** The pattern is now three deep: `deny`
+  (#354), `partial` (#381) and now `refuse` (a 403 on a drawer relation — an admin kubeconfig is
+  never refused a join) and `files:blocked` / `files:browse` (the pod file browser is off by
+  default *and* the simulator has no container to attach to, so a listing can only fail and a
+  file can never be opened). Three traps came out of building them, each now fixed in the script
+  rather than remembered. **(a) A reload inside PREPARE undoes `openNav`, and the symptom is
+  indistinguishable from a hang.** The `about` stub is the one that needs a reload — the shell
+  reads the feature's gates once, at startup — and after it the rail's `<details>` come back from
+  prefs, so `openLeafHere` fell back to CLICKING each shut summary: measured, a `leaf:Pods` that
+  takes ~1.5 s everywhere else had not returned after **100 s**, and because the run prints
+  nothing until it ends, the only evidence was the wall clock. `stubFilesFeature` now calls
+  `openNav` after its reload, and `PREPARE_TRACE=1` prints each step with its duration, because
+  *a slow chain and a stuck chain look identical*. **(b) A notice's container has no text of its
+  own** — `.files-notice.blocked` is a `<div>` whose three `<p>`s carry every word, and this tool
+  measures only elements with a direct text node, so the ticket's own selector reports `present,
+  but no text of its own`: point the scene at the children. **(c) An invariant no scene can reach
+  belongs in the gate, not the watchlist** — `textOnTint.test.ts` reads `styles.css` off disk and
+  fails on any rule pairing `--<state>-fg` with `--<state>-tint`, which needs no browser, no
+  cluster and no stub at all. Two self-inflicted ones worth not repeating: **`pgrep -f
+  <pattern>` matches the waiting shell that contains the pattern**, so an `until ! pgrep -f …`
+  waiter never fires and a `kill` on what it found killed the measurement it was waiting for
+  (the 2026-08-07 entry below is the same trap from the other end); and **an in-place `sed`
+  round-trip is not a way to build a control** — reverting `color: var(--warn-on-tint)` to
+  rebuild the defect flipped three unrelated warn rules with it, and only `git diff` said so.
+
 - 2026-08-19 — **#480's two candidates were both wrong, and one keyboard press said so.** The
   ticket (written off a good measurement) offered the `NConfigProvider` `:theme` prop
   re-rendering its subtree, or a watcher clearing `detail`. Neither: **activating the SAME
