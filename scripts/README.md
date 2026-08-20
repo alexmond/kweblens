@@ -458,6 +458,23 @@ Verbs both runners understand: `press:` / `click:` / `hover:<sel>` / `scroll:<se
 `fill:<sel>=<text>` / `upload:<sel>=<path>` / `wait:<ms>` / `leaf:<label>` / `drawer:<px>`.
 `goto:<path>` is shared-runner only; `signin:` and `close` are `contrast-check` only. A step
 prefixed with `?` is skipped when its selector is not on screen.
+
+**Verbs that STUB a response this box cannot produce** — `contrast-check` only, and the point of
+each is that the component and every CSS rule stay real; only the one answer the cluster will not
+give is faked. `deny` / `partial` (an access review that refuses), `refuse` / `permit` (the
+drawer's relations come back `notPermitted`, in the shape `Relation.notPermitted` builds — the
+object itself is fetched and rewritten, and the scene uses **Services**, because a Pod's detail
+carries an empty relations map and so has no section to refuse), and `files:blocked` /
+`files:browse` / `nofiles` (switch the pod file browser on for the shell — this **reloads the
+page**, because the shell reads that gate once — then serve a shell-less container or a directory
+with a binary in it). Each has a `REQUIRED_WHEN` oracle, so a scene that stops reaching its
+surface **fails** rather than printing a note. A stub is worth having only if it is faithful:
+`files:blocked` was checked against a `--files` instance's real `container-not-running` notice and
+measures identically.
+
+`PREPARE_TRACE=1` prints each step and its duration on stderr. Reach for it the moment a run seems
+to stall — a reload inside `PREPARE` undoes `openNav`, and a later `leaf:` step then took **100 s
+instead of 1.5 s** while printing nothing, which is indistinguishable from a hang.
 The `?` matters for anything behind the login: `PREPARE` runs once per theme, so a sign-in
 that only applies to the first pass would otherwise stall the second one until it times
 out. `upload:` reaches UI that only exists once a file has been picked. Measuring the pod
