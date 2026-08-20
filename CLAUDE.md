@@ -123,6 +123,29 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
   **jvmlens** (skill: `jvmlens-perf`) also pass `-a io.fabric8 -a com.fasterxml.jackson
   -a io.vertx` — this app's list cost is incurred inside the client library, and an app-only
   scope reports it as ~1%. Numbers and cases: [`docs/design/scale-measurements.md`](docs/design/scale-measurements.md).
+- **A request assertion NAMES the request; `getLastRequest()` is a queue position.** The mock
+  server records everything the client sends, including the pod lookup fabric8 issues around a
+  log follow **on its own thread** — measured, it lands on *either* side, and in some runs never
+  before the test ends — so "the last one" is whichever happened to arrive. Measured **5 failures
+  in 20** with the test JVM pinned to one core, and 1 in 2 on a single *idle* core, because the
+  race is test thread vs library thread and collapsing the JVM onto one core is what exposes it
+  (#485). Drain with the blocking `takeRequest`, **search for the path you mean**, and fail
+  naming the paths that did arrive; in `kweblens-tui` the wait is `Eventually`, whose
+  `Supplier<String>` description exists so it can name them lazily. Nothing calls
+  `getLastRequest()` any more, and that is worth keeping true.
+- **evtd puts a naive overlay's Escape on `window` in the BUBBLE phase, so a hand-rolled
+  `window` keydown listener is racing it and registration order decides.** vueuc's `FocusTrap`
+  registers through evtd, and evtd registers *every* handler as
+  `window.addEventListener(type, unified, capture)` whatever element was named — so naive's
+  Escape and `useEscapeKey`'s were both window-bubble listeners, and naive's was first. It
+  closed the YAML editor, which cleared `yamlEditing` **synchronously**, and the drawer's guard
+  then read a `false` its own keypress had just written (#488). **A guard is read in the CAPTURE
+  phase** — the state the key was pressed in, not the state the key produced — and the remove
+  must carry the same flag or the listener leaks. naive's innermost-wins is `FocusTrap`'s stack,
+  **not `eventEffectNotPerformed`** (nothing in modal or drawer marks; that check is vestigial
+  here), and a trap joins that stack only when `showMask && trapFocus` — so the maskless drawer
+  #480 established is never on it and `NDrawer`'s own `close-on-esc` has never fired for it,
+  which is why the listener is hand-rolled at all.
 - **Tests are hermetic** — no live cluster. `@EnableKubernetesMockClient(crud = true)` serves an
   in-JVM API server; web tests set `kweblens.load-kubeconfig=false` so the registry starts empty
   and the test seeds its own client. **The CRUD mock ignores `limit` and `dryRun`**, so assert on
