@@ -2156,43 +2156,16 @@ body {
   user-select: none;
 }
 
-.yaml-toggle input {
-  display: none;
-}
-
-/* Off is a quiet track derived from the theme's own text; on is the accent. The literals it
-   replaces (#cbd5e1 off, #475569 on) were both fixed slates, which inverted the affordance in
-   the dark theme: the OFF track was the pale one and the ON track a dark grey barely off the
-   panel, so the switch read as louder when it was doing nothing. */
-.yaml-toggle .switch {
-  width: 30px;
-  height: 16px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--text) 30%, var(--panel));
-  position: relative;
-  transition: background 0.15s;
-  flex: none;
-}
-
-.yaml-toggle .switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.15s;
-}
-
-.yaml-toggle input:checked + .switch {
-  background: var(--accent);
-}
-
-.yaml-toggle input:checked + .switch::after {
-  transform: translateX(14px);
-}
+/* NOTE: five rules for a hand-rolled switch stood here — `.yaml-toggle input` (hidden checkbox),
+   `.yaml-toggle .switch` (+`::after`) and the two `input:checked +` states. The label is still
+   live, but what it holds is an `NSwitch` (`YamlTab.vue`), so there was no `<input>` and no
+   `.switch` under it: measured with the toggle on screen, `.yaml-toggle` 1 and
+   `.yaml-toggle .n-switch` 1 against `.yaml-toggle input` 0, `.yaml-toggle .switch` 0 and
+   `.switch` 0 page-wide (GH#473). Their colour lesson is kept rather than the rules: the track
+   was derived from `--text`/`--accent` because the literals before it (#cbd5e1 off, #475569 on)
+   were fixed slates that INVERTED the affordance in dark — the off track was the pale one. naive
+   makes that decision from the theme now, which is why the rules are gone rather than rewritten
+   for its markup. `classesAreEmitted.test.ts` is what stops a sixth one of these accumulating. */
 
 /* NOTE: a second `.drawer-actions` rule stood here — a footer bar left behind by the deleted
    Thymeleaf UI, with no element in the SPA carrying the class. It is gone because #233 gives
