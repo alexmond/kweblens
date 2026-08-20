@@ -1124,3 +1124,12 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   544–952 px of 0.79–1.9 M (~0.05%), all of it the build stamp, a YAML `creationTimestamp` and
   the live status pill, with **zero** differing pixels inside the element under test. A diff you
   cannot attribute is not evidence; a diff you can is.
+- 2026-08-20 — **"Is this defect general?" was a grep question and it should have been a
+  measurement.** #506's pointer cursor over dead words looked unique by inspection; what settled
+  it is CDP's `DOMDebugger.getEventListeners`, which page JS **cannot** call — it walks an
+  element's ancestors and answers whether a click is handled at all. **1 of 294** pointer-cursor
+  elements on the YAML tab forwarded nothing; the other 293 were native or handled, and 0 of 286
+  on the Pods list. → **Report the denominator.** The 293 is what makes the 1 mean something, and
+  a probe that prints only its hits cannot be told from one that found nothing because it looked
+  nowhere. A template grep would have had to guess what counts as a handler. Being rebuilt as a
+  script in #511, having been written once and lost.

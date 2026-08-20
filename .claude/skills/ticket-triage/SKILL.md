@@ -371,3 +371,13 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   **one writer per role file** per round; everyone else reports their learning line. A rule about
   shared mutable state needs an owner, and this one had described the append without saying who
   may do it.
+- 2026-08-20 — **A file-ownership rule threw away a working instrument.** The #506 agent built a
+  runtime affordance sweep (CDP `getEventListeners` over every pointer-cursor element — the thing
+  that turned "is this defect general?" from a grep into 1-of-294), was correctly told `scripts/`
+  belonged to another agent that round, offered the wording instead of editing — and I removed its
+  worktree with the file in it. Refiled as #511, at the cost of writing it twice. → **Ownership
+  partitions EDITS to existing files; it must never stop an agent committing something it built.**
+  A brief that reserves a directory now says: if you write a new script or probe, **commit it** in
+  your PR under a name nobody else holds, and send me only the *documentation* wording for files
+  someone else owns. And before removing a finished worktree, ask what is in it that is not in the
+  PR.
