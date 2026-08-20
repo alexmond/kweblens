@@ -118,14 +118,14 @@ const drawerWidth = computed<number | string>(() => (expanded.value ? '100%' : w
 // The parent mounts Detail via v-if; keep the drawer shown while mounted and route any
 // close (the ✕ or Escape) to the `close` emit so the parent tears it down.
 const show = ref(true);
-// True while the YAML tab's pop-out editor is open. Escape closes this drawer, and the
-// editor is a separate overlay with its own Escape — so while it is open the drawer's close
-// is suppressed and Escape belongs to the editor, not to the panel underneath it.
+// True while the YAML tab's pop-out editor is open, so a close the EDITOR provokes is not
+// read as a close of the panel underneath it.
 //
-// The flag alone was not enough (GH#488): the editor's own Escape clears it SYNCHRONOUSLY,
-// on the keypress being judged, so a handler reading it afterwards read the state its own
-// keypress had produced and closed the drawer too. `useEscapeKey` listens in the capture
-// phase for exactly that reason — see the composable, which carries the measurement.
+// It is deliberately NOT the Escape guard any more. A flag names one overlay, so the next
+// thing rendered over the drawer took the drawer with it — GH#488 fixed the timing of this
+// flag and GH#497 was the command palette doing the identical damage with no flag to fix.
+// The drawer now asks whether it is the innermost open dialog (`useEscapeKey`, which carries
+// the measurements), which is a question about the page rather than a list of overlays.
 const yamlEditing = ref(false);
 const onShow = (v: boolean) => {
   if (!v && !yamlEditing.value) {
@@ -133,11 +133,12 @@ const onShow = (v: boolean) => {
   }
 };
 
-useEscapeKey(() => {
-  if (!yamlEditing.value) {
-    emit('close');
-  }
-});
+// `.detail-drawer` is the drawer's own root: `NDrawer` teleports, so there is no template ref
+// to hand over, and the class exists to be found here rather than to be styled.
+useEscapeKey(
+  () => emit('close'),
+  () => document.querySelector('.detail-drawer'),
+);
 
 // Fetched once, when the Events tab is first shown. `loadEvents` is also what the pane's
 // Retry calls, which is why the "already tried" guard is the caller's and not part of it: a
@@ -175,6 +176,7 @@ watch(
        drawer, and `scripts/drawer-persist-check.mjs` asserts that half as well — "never
        closes" would pass a survival check perfectly. -->
   <NDrawer
+    class="detail-drawer"
     :show="show"
     :resizable="!expanded"
     :width="drawerWidth"
