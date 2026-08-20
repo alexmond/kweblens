@@ -437,9 +437,19 @@ Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/c
     frame and an app that draws none are the same silence. What a bare `pty.fork()` gets wrong is
     the **window size** — it leaves the pty at 0×0, JLine reports zero rows, and the app correctly
     draws nothing (measured: 0 bytes at 0×0, 1 407 and a full table after one `TIOCSWINSZ`). The
-    startup `ESC[?2027$p` is answered by nothing here, tmux included, and is not waited on; an
-    **empty `kweblens-tui.log` is what a healthy run leaves**, because root is `warn`. Captures
-    land in `.tui/`, gitignored for the same reason as `.playwright/`.
+    startup `ESC[?2027$p` is answered by the emulator or not — tmux 3.5a leaves it silent, 3.7b
+    answers `ESC[?2027;0$y` — and the app draws the same table either way, so it is **reported,
+    never asserted**, and never waited on; an **empty `kweblens-tui.log` is what a healthy run
+    leaves**, because root is `warn`. Captures land in `.tui/`, gitignored for the same reason as
+    `.playwright/`. **There are two waits and only one is a knob** (#477). The startup match
+    (`kweblens-tui [R`) is fixed and is not a flag — it is the liveness proof, and the only state
+    that looks like a hang, so it is the only one that dumps threads. `--until` names the frame
+    that gets **captured**, i.e. after `--keys` and after `--hold`; it used to be tested against
+    the *startup* frame with the keys gated on it, so the script's own documented example sent
+    nothing and reported a healthy app as stuck. A second flag was rejected on purpose: **two
+    waits leave the failing invocation spellable**, and the only defence would be documentation.
+    And a rig never reports its own absence as the app's failure — no `jcmd` on the box is
+    "a JRE cannot dump threads", not "could not attach".
   - **A tty is not an area, and a terminal that has none is refused in words** (#442).
     `System.console()` answers only "is there a terminal"; a pty whose window size nobody set is a
     tty that reports **0×0**, and the app then wrote 38 bytes of setup, drew nothing, and left an

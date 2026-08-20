@@ -15,6 +15,7 @@ once — the reason is in the header comment of each script.
 | [`cluster-switch-check.mjs`](cluster-switch-check.mjs) | Switch cluster and fail if any value from the previous one is still on screen. |
 | [`state-link-check.mjs`](state-link-check.mjs) | Click every state on an overview card and fail unless the list it opens holds exactly the objects the card counted. |
 | [`resize-check.mjs`](resize-check.mjs) | Drag a multiline field's corner, then type: fail unless it has a grabber AND the pulled height survives. |
+| [`drawer-persist-check.mjs`](drawer-persist-check.mjs) | Open the detail drawer **once**, then use the page behind it: fail unless the same object and its row are still there — and unless Escape and ✕ still close it. |
 | [`tui-drive.sh`](tui-drive.sh) | Run **`kweblens-tui`'s shipped jar on a real terminal**, send keys, read the frame back as text. `--self-check` proves the rig before you believe it. |
 | [`tui-log-leak.sh`](tui-log-leak.sh) | Open and close the TUI's **log pane** N times against a quiet pod on a real cluster and count what is still held. The one trap `LogService.release` exists for, measured rather than reviewed. |
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
@@ -468,6 +469,27 @@ PREPARE='?click:.bar-btn:has-text("Sign in");?fill:.n-modal input[type=password]
 
 Measuring the panel is still usually the better call — its text-bearing children are
 sampled along with it, so one selector covers the row.
+
+### `drawer-persist-check.mjs` — does the panel survive the page behind it?
+
+Opens the detail drawer once and then *uses the page underneath* — walks both theme
+directions and clicks an unrelated surface — failing unless the same object and its
+`row-active` row are still there. Then it fails unless Escape and the header ✕ still close
+it, because **"never closes" would pass a survival check perfectly**.
+
+```bash
+scripts/dev-run.sh --sim --port 8117
+PORT=8117 node scripts/drawer-persist-check.mjs      # LEAF=Pods, VIEW=wide
+```
+
+Written for GH#480, where a maskless `NDrawer` still registered evtd's `clickoutside` trap and
+routed it into the mask-click handler — whose only gate, `mask-closable`, defaults to **true**.
+Every pointer press behind the drawer dismissed it and dropped the selection with it. The theme
+toggle was merely the click that got measured; the footer did it too.
+
+Two things it does that any new probe here should copy. It **proves the port's owner is this
+checkout** before reading anything, and it asserts the theme actually flipped at each step — a
+theme that did not change makes "it survived the toggle" vacuous.
 
 ## Checking the terminal UI
 

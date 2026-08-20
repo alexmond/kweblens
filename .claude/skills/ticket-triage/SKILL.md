@@ -57,8 +57,8 @@ draining without the user re-asking. A completion is the trigger; the steps are 
 3. **Re-rank the whole open set** (§3), not just the tail you remember. A sweep finding is ranked
    on its own merits the moment it lands, not queued behind the plan.
 4. **Pick the top startable ticket** and check it against the skip list below.
-5. **Dispatch it** with a full brief (§5), in **its own worktree** (§4), or **skip** with one line
-   saying why.
+5. **Pick the role, then dispatch it** with a full brief (§5), in **its own worktree** (§4), or
+   **skip** with one line saying why.
 6. **Wait for the next completion.** Do not poll, do not spin, do not start something weaker just
    to be starting something.
 
@@ -138,7 +138,59 @@ The most common misjudgement. Nine open tickets does not mean nine agents.
 - Say the width out loud and why. "Two, because the other four are blocked by design" is a
   result; quietly starting two and not mentioning the rest is not.
 
-## 5. Briefing an agent so the result can be trusted
+## 5. Pick the role, then write the brief
+
+### 5a. The role — `general-purpose` is the fallback, not the default
+
+Every ticket dispatched from here went to a **generic** agent for months, which meant every agent
+started from zero: no method for the kind of work in front of it, and no memory of the last time
+this repo taught it something. The `roles` plugin (`~/IdeaProjects/alexmskills/plugins/roles`) is
+the fix, and the payoff is the second half — **a role file accumulates repo-specific learnings and
+the next agent to wear it inherits them.** A generic agent has nowhere to put what it learned.
+
+**Choose the role from what the ticket IS, never from its `area/` label.** An `area/spa` ticket
+whose cause is unknown is a `debugger` job; an `area/spa` ticket that is a decision between two
+designs is an `architect` job. The label says where the code lives; the role says what the work is.
+
+| The ticket is… | Role | Worked example from this backlog |
+|---|---|---|
+| A failure whose cause is not yet established | `debugger` | #480 — two candidate causes needing different fixes; establishing which IS the work |
+| A choice between designs, or a contract others build against | `architect` | #476 — a fourth `KeyMap` table vs. a derived-but-tableless bar |
+| Something slow, allocating, or fetching more than it needs | `optimizer` | #459 — a 10 MB CRD list to answer a one-kind question |
+| Restructuring where behaviour must not move | `refactorer` | #473 — the dead-CSS sweep |
+| Mapping unfamiliar ground, or auditing quality before changing it | `reviewer` | a sweep across a slice nobody has read recently |
+| Attacking a claim that looks too clean | `skeptic` | verifying an agent's "measured 40× faster" before merging |
+| New surface from nothing | `builder` | rare here — this codebase is not greenfield |
+
+**Then dispatch like this** — the role is loaded by the agent, not merely named at it:
+
+- The role's canonical copy is **`.claude/roles/<role>.md`** in this repo. It does not exist until
+  a role is first used; the plugin seeds it from `plugins/roles/skills/<role>/role.md`.
+- The brief says: *"Work as the `<role>` role. Read `.claude/roles/<role>.md`; if it is absent,
+  copy `~/IdeaProjects/alexmskills/plugins/roles/skills/<role>/role.md` there verbatim first.
+  Adopt its Charter and Body and honour every entry under `## Learnings (core)` and
+  `## Learnings (solo)`."* The wrapper skills are `disable-model-invocation: true`, so **reading
+  the file is the reliable path** and `/roles:as <role>` is the nicety — never depend on it.
+- The brief ends with the loop that makes this worth doing: *"If the run surfaced a durable,
+  reusable lesson — a fix that took more than one cycle, a stack- or repo-specific gotcha — append
+  one line under `## Learnings (solo)`: `- YYYY-MM-DD — <one sentence>`. Do not log a routine
+  one-pass outcome, and never edit the Charter or Body: propose those to the user instead."*
+- **Role files are repo state, so they belong in the PR.** A worktree agent that appends a
+  learning and never commits it has thrown it away.
+- `general-purpose` stays correct for work that is genuinely none of the above — filing tickets,
+  a docs sweep, running a measurement someone else will interpret. Say so when you use it.
+
+**When no role fits, create one — but the bar is a stated gap, not a nicer name.** The `as` skill's
+rule is *"don't improvise a persona"*, and the same discipline applies to minting them: name the
+work the seven existing roles genuinely do not cover, in one sentence, before writing anything. Then
+write `.claude/roles/<name>.md` in the same shape as the seeds — `# <name>`, `## Charter`,
+`## When to use`, `## Body` (method and deliverables), `## Learnings (core)`, `## Learnings (solo)`
+— commit it with the PR, and **say in the report that a role was minted and why**, because a role
+nobody agreed to is a persona invented mid-run wearing a file for cover. Keep the new role in
+`.claude/roles/` only; propose graduating it into the `roles` plugin **separately**, and only if it
+is portable to a repo that is not this one.
+
+### 5b. The brief
 
 The brief is most of the quality. What has repeatedly mattered:
 
@@ -296,3 +348,12 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   real work.** Averaging them would have produced a wrong doc. Reading `relations.ts` settled it
   in one command. → When reports conflict, the code is the tiebreaker; say plainly which one was
   right rather than softening both.
+- 2026-08-19 — **Every ticket had been going to a generic agent, and the skill never said to.**
+  `general-purpose` was my habit, not a written rule — §5 talked only about the *text* of the brief,
+  so nothing ever chose a method for the work or carried anything forward between tickets. The
+  `roles` plugin already had seven personas and a learning loop (`.claude/roles/<role>.md`,
+  `## Learnings (solo)`) and triage was using none of it. → §5a: **pick the role from what the
+  ticket IS, not from its `area/` label**, have the agent *read* the role file rather than be told
+  the role's name (the wrapper skills are `disable-model-invocation: true`), and require the
+  learning to be **committed in the PR** — a worktree agent that appends a learning and does not
+  commit it has thrown it away. Minting a new role needs a stated gap and a line in the report.
