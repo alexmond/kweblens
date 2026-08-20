@@ -3,6 +3,7 @@ package org.alexmond.kweblens.tui.screen;
 import java.time.Duration;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * The one way a test in this module waits for something another thread has to do.
@@ -62,6 +63,21 @@ public final class Eventually {
 	 * @param what it in words, for the failure message
 	 */
 	public static void await(Runnable nudge, BooleanSupplier condition, String what) {
+		await(nudge, condition, () -> what);
+	}
+
+	/**
+	 * Wait for a state, describing it only if the wait fails.
+	 * <p>
+	 * The description is a {@link Supplier} for the case where naming what never happened
+	 * needs state the wait itself gathered — the mock server's recorded paths, say. Built
+	 * eagerly, such a message reports the state as it was <em>before</em> the wait, which
+	 * is the empty one.
+	 * @param nudge run once per pass, before the next look at {@code condition}
+	 * @param condition the state being waited for
+	 * @param what it in words, asked for only on failure
+	 */
+	public static void await(Runnable nudge, BooleanSupplier condition, Supplier<String> what) {
 		long deadline = System.nanoTime() + LIMIT.toNanos();
 		long passes = 0;
 		while (true) {
@@ -69,8 +85,8 @@ public final class Eventually {
 				return;
 			}
 			if (System.nanoTime() - deadline >= 0) {
-				throw new AssertionError("waited " + LIMIT.toSeconds() + "s over " + passes + " passes for " + what
-						+ ", and it never happened");
+				throw new AssertionError("waited " + LIMIT.toSeconds() + "s over " + passes + " passes for "
+						+ what.get() + ", and it never happened");
 			}
 			nudge.run();
 			passes++;

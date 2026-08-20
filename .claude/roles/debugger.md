@@ -30,3 +30,4 @@ If the root cause is uncertain, say what evidence would confirm it **before** ch
 
 ## Learnings (solo)
 <!-- Appended by solo runs. One line each: `- YYYY-MM-DD — lesson` -->
+- 2026-08-20 — To reproduce a race between the test thread and a library's own background thread, collapse the whole test JVM onto ONE core with `taskset` rather than reaching for load first: GH#485's mock-server flake failed 1 run in 2 on a single **idle** core, where the hog the technique usually adds only took it to 5 in 20.
