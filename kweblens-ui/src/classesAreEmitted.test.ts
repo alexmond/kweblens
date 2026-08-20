@@ -28,6 +28,17 @@ import { describe, expect, it } from 'vitest';
 // so a whole-word search over the sources reported a dead rule as live. A matcher that counts
 // prose as an emission is a false-NEGATIVE machine — it makes the sweep find nothing.
 //
+// The script half is LEXED, one left-to-right pass over a single alternation, not three
+// independent scans for the three quote styles. Three scans read a literal's own CONTENT as a
+// literal: `'[role="tab"]'` — a CSS attribute selector, the shape a probe or a query helper
+// writes — has the double-quote scan matching `"tab"` inside it, so writing that string in any
+// `.ts` claimed the class `tab` and turned a dead rule green. Found by the #506 agent while a
+// `.tab` exemption was still on this list, and reproduced here (below) before it was fixed:
+// `'[role="tab"]'`, `"[data-col-key='act']"` and a backticked one claimed `tab`, `act` and
+// `tabs` between them. Lexing them away changes nothing about the real sources — every class
+// this file called live before still is — because a class name in a class position is never
+// nested inside another literal.
+//
 // WHAT IT CANNOT SEE, stated so it is not mistaken for cover:
 //  * a class assembled from something other than a leading literal (`kinds[k].cls`, a map lookup).
 //    A leading literal IS handled — `'tone-' + s.tone` and `` `dx-sev-${sev}` `` claim the prefix —
@@ -175,10 +186,13 @@ const classAttributes = (text: string): string[] => {
   return out;
 };
 
+const SCRIPT_LITERAL = /'([^'\\\n]*)'|"([^"\\\n]*)"|`([^`\\$]*)`/g;
+
 const scriptLiterals = (script: string, claims: Claims): void => {
-  for (const re of [/'([^'\\\n]*)'/g, /"([^"\\\n]*)"/g, /`([^`\\$]*)`/g]) {
+  for (const m of script.matchAll(SCRIPT_LITERAL)) {
+    const body = m[1] ?? m[2] ?? m[3];
     // a single-token literal is what a composed class name looks like; one with a space is prose
-    for (const m of script.matchAll(re)) if (!/\s/.test(m[1]) && TOKEN.test(m[1])) claims.exact.add(m[1]);
+    if (!/\s/.test(body) && TOKEN.test(body)) claims.exact.add(body);
   }
 };
 
@@ -239,5 +253,23 @@ describe('every class styles.css selects on', () => {
     expect(live('row-active')).toBe(true); // a single-token literal in a script
     expect(live('ov-state')).toBe(true);
     expect(live('menu-danger')).toBe(false); // a class none of these files writes
+  });
+
+  it('does not read a literal inside a literal as an emission', () => {
+    // The #506 false-green, rebuilt. Three separate quote scans over the same text read a
+    // string's own CONTENT as a string, so a CSS attribute selector written in a `.ts` claimed
+    // the class it names — and a dead rule went green while its exemption was still on the list.
+    // Every one of these three fired before the matcher became a single lexing pass.
+    const live = emissions([
+      { name: 'a.ts', text: `const sel = '[role="tab"]';` },
+      { name: 'b.ts', text: `const q = "[data-col-key='act']";` },
+      { name: 'c.ts', text: 'const t = `[role="tabs"]`;' },
+    ]);
+    expect(live('tab')).toBe(false);
+    expect(live('act')).toBe(false);
+    expect(live('tabs')).toBe(false);
+    // …and the outer literal is still read when it IS a class-shaped token, so the tightening
+    // did not buy the false NEGATIVE it was avoiding.
+    expect(emissions([{ name: 'd.ts', text: `const cls = 'row-active';` }])('row-active')).toBe(true);
   });
 });
