@@ -457,7 +457,10 @@ those work in both runners.
 Verbs both runners understand: `press:` / `click:` / `hover:<sel>` / `scroll:<sel>` /
 `fill:<sel>=<text>` / `upload:<sel>=<path>` / `wait:<ms>` / `leaf:<label>` / `drawer:<px>`.
 `goto:<path>` is shared-runner only; `signin:` and `close` are `contrast-check` only. A step
-prefixed with `?` is skipped when its selector is not on screen.
+prefixed with `?` is skipped when its selector is not on screen. **A step that opens the detail
+drawer must click the NAME CELL** — `click:.n-data-table-tbody tr td:nth-child(2)` — because a
+bare `tr` click does not open it at `narrow`, only at normal and wide, and the resulting 30 s
+timeout at one viewport reads as a broken drawer rather than a mis-aimed step.
 
 **Verbs that STUB a response this box cannot produce** — `contrast-check` only, and the point of
 each is that the component and every CSS rule stay real; only the one answer the cluster will not

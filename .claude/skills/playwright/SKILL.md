@@ -1102,3 +1102,25 @@ Format: `- YYYY-MM-DD — what happened → what changed.`
   a real 8.12:1 reported as 1.78:1. → It composites every translucent layer down to the first
   opaque one. Verified against decoded pixels: computed `rgb(41,63,80)` vs the browser's
   `rgb(40,63,79)`.
+- 2026-08-20 — **An element count is not a statement about what is on screen, and a popover is
+  where that bites.** Chasing #500, a probe that counted `.n-select-menu` reported the namespace
+  select as orphaned over a closed drawer: naive keeps *that* menu **mounted** and closes it with
+  `display: none`, so the count stays 1 forever. Its box is 0×0 after Escape, and a control with
+  no drawer reads identically — nothing was ever orphaned. `.n-dropdown-menu` behaves the
+  **opposite** way, removed from the DOM on close, so two popovers in the same app disagree about
+  what "closed" looks like to a counter. → **Read the box, not the count, and take a control from
+  the same popover with nothing under it.** The same run also settled what `NDropdown` declares:
+  `role` and `aria-modal` are both **null** — it is not `role="menu"` — which is why an open
+  dropdown leaves `[role="dialog"][aria-modal="true"]` counting only the drawer.
+- 2026-08-20 — **`click:.n-data-table-tbody tr` does not open the drawer at `narrow`**, only at
+  normal and wide, so a `ui-shot --leaf Pods` carrying that PREPARE dies on a 30 s timeout at one
+  viewport and reads as "the drawer is broken at narrow". → Target the **name cell**:
+  `click:.n-data-table-tbody tr td:nth-child(2)`, which is what `contrast-check`'s own scenes use
+  and which works at all three widths. Every scene in this repo that opens the drawer should use
+  that form.
+- 2026-08-20 — **Byte-comparing two screenshots is the wrong instrument for "nothing moved".**
+  The footer prints the jar's build time, so every capture of two builds differs. → Decode and
+  **pixel-diff**, then bucket the differing pixels by region: #473's before/after came to
+  544–952 px of 0.79–1.9 M (~0.05%), all of it the build stamp, a YAML `creationTimestamp` and
+  the live status pill, with **zero** differing pixels inside the element under test. A diff you
+  cannot attribute is not evidence; a diff you can is.
