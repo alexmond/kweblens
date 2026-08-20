@@ -63,7 +63,8 @@ class KeyMapTest {
 	void theHelpPaneCarriesEveryBinding_includingTheOnesTheBarHasNoRoomFor() {
 		List<String> rows = KeyMap.helpRows();
 
-		assertThat(rows).hasSize(KeyMap.BINDINGS.size() + KeyMap.PANE_BINDINGS.size() + KeyMap.LOG_BINDINGS.size());
+		assertThat(rows).hasSize(KeyMap.BINDINGS.size() + KeyMap.PANE_BINDINGS.size() + KeyMap.LOG_BINDINGS.size()
+				+ KeyMap.HELP_BINDINGS.size());
 		for (KeyBinding binding : KeyMap.BINDINGS) {
 			assertThat(rows).contains(binding.hint());
 		}
@@ -74,6 +75,10 @@ class KeyMapTest {
 		for (KeyBinding binding : KeyMap.LOG_BINDINGS) {
 			assertThat(rows).as("and the same for the log pane's own keys")
 				.contains(KeyMap.LOG_PREFIX + binding.hint());
+		}
+		for (KeyBinding binding : KeyMap.HELP_BINDINGS) {
+			assertThat(rows).as("and for the ? pane's own, which is circular only in appearance")
+				.contains(KeyMap.HELP_PREFIX + binding.hint());
 		}
 		assertThat(KeyMap.visible()).as("the point of the two projections is that they differ")
 			.hasSizeLessThan(KeyMap.BINDINGS.size());
@@ -141,6 +146,132 @@ class KeyMapTest {
 		assertThat(KeyMap.logAction(KeyStroke.of('l'))).as("the log pane is already the log").isEmpty();
 		assertThat(KeyMap.action(KeyStroke.of('c'))).as("there is no container to switch on a list").isEmpty();
 		assertThat(KeyMap.action(KeyStroke.of('t'))).as("nor a stream to re-open with timestamps").isEmpty();
+		assertThat(KeyMap.helpAction(KeyStroke.of(':'))).as("nor does the ? pane — GH#476 is that it appeared to")
+			.isEmpty();
+		assertThat(KeyMap.helpAction(KeyStroke.key(KeyStroke.Kind.ENTER))).as("nothing to drill into on a help page")
+			.isEmpty();
+		assertThat(KeyMap.helpAction(KeyStroke.of('d'))).isEmpty();
+		assertThat(KeyMap.helpAction(KeyStroke.of('/'))).as("nothing here searches, so / just closes it").isEmpty();
+		assertThat(KeyMap.helpAction(KeyStroke.ctrl('c')))
+			.as("HelpPane answers a boolean and cannot quit, so no row may promise it")
+			.isEmpty();
+	}
+
+	/**
+	 * <b>The same two directions, over the {@code ?} pane's own table</b> (GH#476). It is
+	 * a fourth screen and it had no table at all: the bar under it was the list's, so it
+	 * offered {@code :}, {@code ↵} and {@code d} to a keyboard on which every one of them
+	 * simply closed the pane.
+	 *
+	 * <p>
+	 * <b>How this was proved to fail.</b> {@code helpHints()} was temporarily pointed at
+	 * {@code BINDINGS} — which is not a hypothetical copy-paste here but the literal
+	 * pre-ticket behaviour, reached through {@code ResourceScreen}.
+	 * {@link #everyVisibleHelpBindingIsInTheHelpHintBar()} failed on {@code j/↓ down a
+	 * line} and {@link #theHelpHintBarNamesNothingThatIsNotBoundInTheHelpPane()} failed
+	 * on {@code : command}, which is the exact string the issue quotes.
+	 */
+	@Test
+	void everyVisibleHelpBindingIsInTheHelpHintBar() {
+		String hints = KeyMap.helpHints();
+
+		for (KeyBinding binding : KeyMap.visible(KeyMap.HELP_BINDINGS)) {
+			assertThat(hints).as("the ? pane's hint bar must name every visible help binding: " + binding.action())
+				.contains(binding.hint());
+		}
+	}
+
+	@Test
+	void theHelpHintBarNamesNothingThatIsNotBoundInTheHelpPane() {
+		Set<String> labels = new HashSet<>();
+		for (KeyBinding binding : KeyMap.visible(KeyMap.HELP_BINDINGS)) {
+			labels.add(binding.hint());
+		}
+
+		List<String> shown = new ArrayList<>(List.of(KeyMap.helpHints().split(KeyMap.SEPARATOR)));
+
+		assertThat(shown)
+			.allSatisfy((hint) -> assertThat(labels).as("help hint bar shows '" + hint + "'").contains(hint));
+		assertThat(shown).hasSize(KeyMap.visible(KeyMap.HELP_BINDINGS).size());
+	}
+
+	@Test
+	void everyBoundHelpStrokeResolvesToItsOwnAction() {
+		for (KeyBinding binding : KeyMap.HELP_BINDINGS) {
+			for (KeyStroke stroke : binding.strokes()) {
+				assertThat(KeyMap.helpAction(stroke)).as(binding.label() + " -> " + binding.action())
+					.contains(binding.action());
+			}
+		}
+	}
+
+	/**
+	 * <b>The three document screens move identically, and this is checked from OUTSIDE
+	 * the tables</b> (GH#476).
+	 *
+	 * <p>
+	 * Everything else here compares a projection with the table it is projected from,
+	 * which catches the two halves <em>disagreeing</em> and cannot catch them agreeing on
+	 * something wrong: deleting {@code k/↑} from a table removes it from the bar, from
+	 * the help rows and from the expectation in the same edit, so a pane where {@code k}
+	 * has silently become "close" is green everywhere. Measured, before this test
+	 * existed.
+	 *
+	 * <p>
+	 * So the invariant comes from the product instead: the detail pane, the log pane and
+	 * the {@code ?} pane are all a document behind a window, and a reader who learned how
+	 * to move in one has learned all three. The list of actions below is <b>deliberately
+	 * hand-written</b> — it is the one thing in this arrangement that is not derived, and
+	 * that is exactly why it can see a row that vanished from everything derived at once.
+	 * Labels and descriptions are free to differ ("last line" against "last line
+	 * (follow)"); the <em>keys</em> may not.
+	 */
+	@Test
+	void theThreeDocumentScreensBindTheSameKeysForMovingThroughOne() {
+		List<KeyAction> movement = List.of(KeyAction.MOVE_DOWN, KeyAction.MOVE_UP, KeyAction.PAGE_DOWN,
+				KeyAction.PAGE_UP, KeyAction.TOP, KeyAction.BOTTOM);
+
+		for (KeyAction action : movement) {
+			List<KeyStroke> detail = strokesFor(KeyMap.PANE_BINDINGS, action);
+			assertThat(detail).as("the detail pane must bind " + action).isNotEmpty();
+			assertThat(strokesFor(KeyMap.LOG_BINDINGS, action))
+				.as("the log pane must move through its document the same way: " + action)
+				.isEqualTo(detail);
+			assertThat(strokesFor(KeyMap.HELP_BINDINGS, action))
+				.as("and so must the ? pane, which is a document too: " + action)
+				.isEqualTo(detail);
+		}
+	}
+
+	private static List<KeyStroke> strokesFor(List<KeyBinding> table, KeyAction action) {
+		return table.stream()
+			.filter((binding) -> binding.action() == action)
+			.flatMap((b) -> b.strokes().stream())
+			.toList();
+	}
+
+	/**
+	 * The one thing on this pane's bar that is not a binding, said in the description of
+	 * the key that is. "Any other key closes" is the <em>absence</em> of bindings and a
+	 * table cannot hold an absence, so it rides the one row that can carry it — and this
+	 * asserts it is still carried rather than trimmed for width some later afternoon.
+	 */
+	@Test
+	void theHelpBarSaysThatEveryOtherKeyClosesIt() {
+		assertThat(KeyMap.helpHints()).contains("esc/q close (as does any other key)");
+	}
+
+	/**
+	 * And the pane's headline names keys out of its OWN table. A sentence is where the
+	 * wrong-table mistake hides best, because no bar-against-table check reads prose.
+	 */
+	@Test
+	void theLabelsProseIsBuiltFromComeFromTheTableItIsAsking() {
+		assertThat(KeyMap.label(KeyMap.HELP_BINDINGS, KeyAction.MOVE_DOWN)).isEqualTo("j/↓");
+		assertThat(KeyMap.label(KeyMap.HELP_BINDINGS, KeyAction.NEXT_CONTAINER))
+			.as("a table that does not bind it says so with an empty string, never another table's answer")
+			.isEmpty();
+		assertThat(KeyMap.label(KeyMap.LOG_BINDINGS, KeyAction.NEXT_CONTAINER)).isEqualTo("c");
 	}
 
 	/**
@@ -214,6 +345,10 @@ class KeyMapTest {
 		assertThat(KeyMap.hints().length()).isLessThanOrEqualTo(132);
 		assertThat(KeyMap.paneHints().length()).isLessThanOrEqualTo(132);
 		assertThat(KeyMap.logHints().length()).isLessThanOrEqualTo(132);
+		assertThat(KeyMap.helpHints().length())
+			.as("and the ? pane's, which shows its movement keys rather than hiding "
+					+ "them — its own headline is the first line to scroll away")
+			.isLessThanOrEqualTo(132);
 	}
 
 	/** The key that opens the pane is bound, visible, and says what it does. */

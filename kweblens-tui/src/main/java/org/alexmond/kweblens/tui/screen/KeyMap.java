@@ -28,17 +28,29 @@ import java.util.Optional;
  * so "not in the hint bar" never means "not written down anywhere".</li>
  * </ul>
  *
- * <h2>Three tables, because three screens</h2>
+ * <h2>Four tables, because four screens</h2>
  *
  * The detail pane (GH#368) is a document, not a list: {@code /} searches it rather than
  * filtering rows, {@code n} and {@code N} walk the matches, and {@code :} would be a
  * command line over a table that is not on screen. The log pane (GH#369) is neither — it
  * is a document that keeps growing, so {@code c} picks another container, {@code t}
- * re-opens the stream with timestamps and {@code G} means "follow the tail again". Each
- * has its own table ({@link #PANE_BINDINGS}, {@link #LOG_BINDINGS}), projected by exactly
- * the same three methods — the derivation rule is per screen, and {@code KeyMapTest} runs
- * both directions over all three. What would break the rule is a key handled in a branch
- * somewhere with no row anywhere, and that is still impossible.
+ * re-opens the stream with timestamps and {@code G} means "follow the tail again". The
+ * {@code ?} pane (GH#470) became a screen too when it grew a cursor, and GH#476 is what
+ * leaving it out of this arrangement cost: with no table of its own it drew the
+ * <em>list's</em> bar, so the footer offered {@code :}, {@code ↵} and {@code d} while the
+ * only keys that did anything were the ones that scroll and the ones that close. Each
+ * screen has its own table ({@link #PANE_BINDINGS}, {@link #LOG_BINDINGS},
+ * {@link #HELP_BINDINGS}), projected by exactly the same three methods — the derivation
+ * rule is per screen, and {@code KeyMapTest} runs both directions over all four. What
+ * would break the rule is a key handled in a branch somewhere with no row anywhere, and
+ * that is still impossible.
+ *
+ * <p>
+ * <b>A table, not a filter over another table.</b> The {@code ?} pane used to dispatch
+ * through {@link #BINDINGS} narrowed by a private set of scrolling actions, which is a
+ * second, invisible declaration of what it binds: drop a movement row from the list's
+ * table and the pane silently loses a key with nothing to fail. Its table is now both
+ * what it dispatches from and what its bar is projected from, so the two cannot disagree.
  *
  * <h2>What this table does not cover</h2>
  *
@@ -155,6 +167,46 @@ public final class KeyMap {
 					KeyStroke.key(KeyStroke.Kind.END)),
 			KeyBinding.hidden(KeyAction.QUIT, "ctrl-c", "quit", KeyStroke.ctrl('c')));
 
+	/**
+	 * Every key the {@code ?} pane binds (GH#476).
+	 *
+	 * <p>
+	 * A fourth table for a fourth screen. Here the movement keys are <b>shown</b> rather
+	 * than hidden, which is the opposite of the other three and is not an oversight: on a
+	 * list the table itself is the evidence that a cursor moves, while this pane is twice
+	 * a viewport of prose whose own "these keys scroll" headline is the first thing to
+	 * scroll off the top — after which the bar is the only place left saying how to move
+	 * and how to leave.
+	 *
+	 * <p>
+	 * {@code esc}/{@code q} says <em>close</em> rather than <em>back</em> because there
+	 * is no level to pop, and it carries the parenthesis because "any other key closes"
+	 * is the one fact here that no binding can be: it is the <em>absence</em> of
+	 * bindings, and a table cannot hold an absence. Saying it in the description of the
+	 * key that does have a row is what puts it on screen for as long as the bar is.
+	 *
+	 * <p>
+	 * There is deliberately <b>no {@code ctrl-c quit} row</b>, the one the other three
+	 * tables all carry. {@link HelpPane} answers a key with a boolean and cannot quit, so
+	 * {@code ctrl-c} closes the pane like every other unbound key — and a row promising a
+	 * quit would be exactly the lie this class exists to prevent.
+	 */
+	public static final List<KeyBinding> HELP_BINDINGS = List.of(
+			KeyBinding.shown(KeyAction.MOVE_DOWN, "j/↓", "down a line", KeyStroke.of('j'),
+					KeyStroke.key(KeyStroke.Kind.DOWN)),
+			KeyBinding.shown(KeyAction.MOVE_UP, "k/↑", "up a line", KeyStroke.of('k'),
+					KeyStroke.key(KeyStroke.Kind.UP)),
+			KeyBinding.shown(KeyAction.PAGE_DOWN, "ctrl-d/pgdn", "half page down", KeyStroke.ctrl('d'),
+					KeyStroke.key(KeyStroke.Kind.PAGE_DOWN)),
+			KeyBinding.shown(KeyAction.PAGE_UP, "ctrl-u/pgup", "half page up", KeyStroke.ctrl('u'),
+					KeyStroke.key(KeyStroke.Kind.PAGE_UP)),
+			KeyBinding.hidden(KeyAction.TOP, "g/home", "first line", KeyStroke.of('g'),
+					KeyStroke.key(KeyStroke.Kind.HOME)),
+			KeyBinding.hidden(KeyAction.BOTTOM, "G/end", "last line", KeyStroke.of('G'),
+					KeyStroke.key(KeyStroke.Kind.END)),
+			KeyBinding.shown(KeyAction.BACK, "esc/q", "close (as does any other key)",
+					KeyStroke.key(KeyStroke.Kind.ESCAPE), KeyStroke.of('q'), KeyStroke.of('Q')));
+
 	/** What separates two hints on the footer. */
 	static final String SEPARATOR = " · ";
 
@@ -166,6 +218,9 @@ public final class KeyMap {
 
 	/** The same, for the log pane. */
 	static final String LOG_PREFIX = "in the log pane: ";
+
+	/** And for the {@code ?} pane's own keys, listed on the pane they drive. */
+	static final String HELP_PREFIX = "in the help pane: ";
 
 	private KeyMap() {
 	}
@@ -197,6 +252,14 @@ public final class KeyMap {
 		return action(LOG_BINDINGS, stroke);
 	}
 
+	/**
+	 * What {@code stroke} does while the {@code ?} pane is up, or empty — and empty is
+	 * the common answer there, because everything this table does not name closes it.
+	 */
+	public static Optional<KeyAction> helpAction(KeyStroke stroke) {
+		return action(HELP_BINDINGS, stroke);
+	}
+
 	private static Optional<KeyAction> action(List<KeyBinding> table, KeyStroke stroke) {
 		for (KeyBinding binding : table) {
 			if (binding.matches(stroke)) {
@@ -221,6 +284,11 @@ public final class KeyMap {
 		return hints(LOG_BINDINGS);
 	}
 
+	/** The hint bar the {@code ?} pane shows, derived the same way from its own table. */
+	public static String helpHints() {
+		return hints(HELP_BINDINGS);
+	}
+
 	static String hints(List<KeyBinding> table) {
 		StringBuilder line = new StringBuilder(96);
 		for (KeyBinding binding : table) {
@@ -235,11 +303,17 @@ public final class KeyMap {
 	}
 
 	/**
-	 * The help pane: every row of all three tables, hidden ones included, so a key that
+	 * The help pane: every row of all four tables, hidden ones included, so a key that
 	 * exists only inside a pane is still written down somewhere.
+	 *
+	 * <p>
+	 * Including the {@code ?} pane's own, which is circular only in appearance. A table
+	 * left out of this projection is a table with one fewer both-directions check on it,
+	 * and "this one is different" is how the exceptions start.
 	 */
 	public static List<String> helpRows() {
-		List<String> rows = new ArrayList<>(BINDINGS.size() + PANE_BINDINGS.size() + LOG_BINDINGS.size());
+		List<String> rows = new ArrayList<>(
+				BINDINGS.size() + PANE_BINDINGS.size() + LOG_BINDINGS.size() + HELP_BINDINGS.size());
 		for (KeyBinding binding : BINDINGS) {
 			rows.add(binding.hint());
 		}
@@ -249,21 +323,27 @@ public final class KeyMap {
 		for (KeyBinding binding : LOG_BINDINGS) {
 			rows.add(LOG_PREFIX + binding.hint());
 		}
+		for (KeyBinding binding : HELP_BINDINGS) {
+			rows.add(HELP_PREFIX + binding.hint());
+		}
 		return List.copyOf(rows);
 	}
 
 	/**
-	 * How an action's keys are written on screen, or {@code ""} when this table binds
-	 * none.
+	 * How an action's keys are written on screen by {@code table}, or {@code ""} when it
+	 * binds none.
 	 *
 	 * <p>
 	 * The one way for prose elsewhere to name a key. {@link HelpPane}'s "these keys
 	 * scroll" line is built from this rather than typed, because a sentence naming
 	 * {@code j} is exactly as able to go stale as a hint bar naming it — and staleness in
-	 * a sentence is harder to see.
+	 * a sentence is harder to see. <b>The table is a parameter rather than a default</b>
+	 * (GH#476): a sentence on the {@code ?} pane naming the list's spelling of a key
+	 * would be the wrong-table mistake committed in prose, where no bar-against-table
+	 * check can see it.
 	 */
-	public static String label(KeyAction action) {
-		for (KeyBinding binding : BINDINGS) {
+	public static String label(List<KeyBinding> table, KeyAction action) {
+		for (KeyBinding binding : table) {
 			if (binding.action() == action) {
 				return binding.label();
 			}

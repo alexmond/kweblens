@@ -1,10 +1,8 @@
 package org.alexmond.kweblens.tui.screen;
 
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 import org.alexmond.kweblens.tui.detail.DetailLine;
 import org.alexmond.kweblens.tui.detail.DetailModel;
@@ -49,6 +47,15 @@ import org.alexmond.kweblens.tui.filter.FilterHelp;
  * the labels of the bindings that do the scrolling — and {@code ScreenHelpPaneTest} fails
  * both ways over the result: a row of either source missing from the pane, and a row on
  * the pane that its source never produced.
+ *
+ * <h2>And the bar under it is this screen's bar</h2>
+ *
+ * {@link KeyMap#HELP_BINDINGS} (GH#476). Until it existed the footer under this pane was
+ * the <em>list's</em>, offering {@code :}, {@code ↵} and {@code d} to a keyboard on which
+ * every one of them merely closed the pane — the failure {@link KeyMap} exists to
+ * prevent, reached from the one screen the rule had never been applied to. The table is
+ * also what {@link #key} dispatches from, so "what the bar says" and "what a key does"
+ * are one declaration rather than two that happen to agree.
  */
 public final class HelpPane {
 
@@ -82,10 +89,6 @@ public final class HelpPane {
 	 */
 	public static final int WRAP = 110;
 
-	/** Keys that move the cursor here instead of closing the pane. */
-	private static final Set<KeyAction> SCROLLS = EnumSet.of(KeyAction.MOVE_DOWN, KeyAction.MOVE_UP,
-			KeyAction.PAGE_DOWN, KeyAction.PAGE_UP, KeyAction.TOP, KeyAction.BOTTOM);
-
 	/** The pane's document, or null when it is closed. */
 	private DetailModel document;
 
@@ -114,21 +117,28 @@ public final class HelpPane {
 	}
 
 	/**
-	 * One key while the pane is up.
+	 * One key while the pane is up, dispatched from {@link KeyMap#HELP_BINDINGS} — the
+	 * same table the bar under the pane is projected from (GH#476).
+	 *
+	 * <p>
+	 * <b>Which table is the whole point.</b> This used to read the <em>list's</em> table
+	 * and narrow it with a private set of scrolling actions, so what the pane bound was
+	 * declared twice and neither declaration was on screen. One table cannot disagree
+	 * with itself.
 	 * @param stroke what was pressed
 	 * @param page how far a half-page key moves — the renderer's viewport
 	 * @return whether a repaint is owed
 	 */
 	public boolean key(KeyStroke stroke, int page) {
-		Optional<KeyAction> action = KeyMap.action(stroke).filter(SCROLLS::contains);
+		Optional<KeyAction> action = KeyMap.helpAction(stroke);
 		if (action.isEmpty()) {
 			this.document = null;
 			return true;
 		}
-		return scroll(action.get(), page);
+		return act(action.get(), page);
 	}
 
-	private boolean scroll(KeyAction action, int page) {
+	private boolean act(KeyAction action, int page) {
 		return switch (action) {
 			case MOVE_DOWN -> this.document.moveSelection(1);
 			case MOVE_UP -> this.document.moveSelection(-1);
@@ -136,8 +146,16 @@ public final class HelpPane {
 			case PAGE_UP -> this.document.moveSelection(-page);
 			case TOP -> this.document.selectTo(0);
 			case BOTTOM -> this.document.selectTo(Integer.MAX_VALUE);
+			// esc/q, the one key that is written down as closing it — and the only arm
+			// that repaints unconditionally, because the pane went away either way.
+			case BACK -> close();
 			default -> false;
 		};
+	}
+
+	private boolean close() {
+		this.document = null;
+		return true;
 	}
 
 	/**
@@ -161,7 +179,8 @@ public final class HelpPane {
 	 * failure {@link KeyMap} exists to prevent.
 	 */
 	private static String scrollHint() {
-		return "HELP — " + KeyMap.label(KeyAction.MOVE_DOWN) + " and " + KeyMap.label(KeyAction.PAGE_DOWN)
+		return "HELP — " + KeyMap.label(KeyMap.HELP_BINDINGS, KeyAction.MOVE_DOWN) + " and "
+				+ KeyMap.label(KeyMap.HELP_BINDINGS, KeyAction.PAGE_DOWN)
 				+ " scroll this pane; any other key closes it";
 	}
 
