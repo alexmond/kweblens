@@ -53,15 +53,22 @@ const LIBRARY = ['n-', 'cm-', 'cm6-'];
 /**
  * Classes of ours that nothing emits, each left in place on purpose for now.
  *
- * All four are single-compound rules from the pre-Naive UI — the tab strip (`.tabs`, `.tab`), the
- * old search input (`.search`) and an action row (`.act`) — i.e. the #447/#451 family, not the
- * live-ancestor one #473 is about, and removing them is a separate judgement about a separate set
- * of rules. Tracked as GH#505.
+ * EMPTY, and that is the point (#505). The four it held — `.tabs`/`.tab` (the pre-Naive tab
+ * strip), `.search` (the pre-Naive input) and `.act` (an action row) — were all judged dead and
+ * their nine rules are gone, so the sheet is now a file this check has nothing to say "except"
+ * about. An exemption list is the part of a sheet its own rule is not being applied to; leaving
+ * one populated is how a check starts covering less than it claims.
  *
- * An entry that stops naming a dead class is itself a failure (below): an exemption list that has
- * quietly stopped exempting anything is a rule nobody is applying.
+ * A new entry is a deliberate act with a ticket behind it, not a way to make a red run green:
+ * the answer to "this rule selects on a class nothing writes" is almost always to delete the
+ * rule. An entry that stops naming a dead class is itself a failure (below).
  */
-const KNOWN = ['act', 'search', 'tab', 'tabs'];
+/* eslint-disable sonarjs/no-empty-collection -- the list being empty is the ticket's outcome,
+   not a leftover. Both assertions below must go on reading it: the first is what an entry would
+   suppress, the second is what stops an entry outliving its rule, and deleting the mechanism
+   because it currently exempts nothing is how the next exemption gets written with no guard on
+   it. sonarjs is right that these reads cannot fail today; that is the state being defended. */
+const KNOWN: string[] = [];
 
 /** Every class token in a compound, e.g. `btn`,`danger` from `.btn.danger:hover`. */
 const classesIn = (text: string): string[] => [...text.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1]);
