@@ -10,6 +10,7 @@ import { shallowRef, computed, ref, watch } from 'vue';
 import { api } from '../api';
 import { useAsyncData } from '../composables/useAsyncData';
 import { stripManagedFields } from '../kube';
+import { forwardsLabelClick } from '../labelForward';
 import type { KindAccess } from '../types';
 import ErrorNotice from './ErrorNotice.vue';
 import LoadingNotice from './LoadingNotice.vue';
@@ -104,6 +105,14 @@ const onApplied = (text: string) => {
   msg.value = 'applied';
 };
 
+// The words beside the switch operate it (GH#506). `forwardsLabelClick` is what keeps a click on
+// the SWITCH ITSELF from counting twice — it toggles on its own, and the same click then bubbles
+// to this handler; a second toggle would put the state back and read as a switch that has
+// stopped working. The decision lives in `labelForward.ts` so it is tested without a DOM.
+const onToggleClick = (e: MouseEvent) => {
+  if (forwardsLabelClick(e.target, e.currentTarget)) hideManaged.value = !hideManaged.value;
+};
+
 const copy = () => {
   if (displayYaml.value) {
     navigator.clipboard?.writeText(displayYaml.value).then(
@@ -122,10 +131,15 @@ const copy = () => {
     <div class="yaml-toolbar">
       <NButton size="small" :disabled="!yaml" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</NButton>
       <NButton size="small" :disabled="!yaml" @click="openEditor">{{ authed ? 'Edit ⤢' : 'View ⤢' }}</NButton>
-      <label class="yaml-toggle" title="Hide the verbose metadata.managedFields block">
-        <NSwitch v-model:value="hideManaged" size="small" />
+      <!-- Not a `<label>`: `NSwitch` renders a `<div role="switch">`, which is not labelable, so
+           the browser had nothing to forward a click to (`label.control === null`) while
+           `.yaml-toggle` painted `cursor: pointer` over the words — GH#506. The forward is
+           explicit now, and the switch names itself for assistive tech, which the dead label
+           never did. -->
+      <span class="yaml-toggle" title="Hide the verbose metadata.managedFields block" @click="onToggleClick">
+        <NSwitch v-model:value="hideManaged" size="small" aria-label="Hide Managed Fields" />
         Hide Managed Fields
-      </label>
+      </span>
     </div>
     <ErrorNotice v-if="yamlError" :message="yamlError" :retrying="yamlLoading" @retry="reloadYaml" />
     <LoadingNotice v-if="!yamlError && yamlLoading" />
