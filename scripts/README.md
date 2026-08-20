@@ -485,6 +485,26 @@ scripts/tui-drive.sh --context k3stest --keys '?' --until 'every binding'
 scripts/tui-drive.sh --context k3stest --size 80x20   # the resize class, at a stated size
 ```
 
+**There are two waits and only one of them is a knob** (#477). The first asks *did the app come
+up*: it is the header (`kweblens-tui [R`), it is fixed, and it is not a flag, because it is the
+liveness proof the rig exists to give rather than a question about your measurement. `--until` is
+the second — *does the frame you came for look like this* — and it is matched against the frame
+that gets **captured**, i.e. after `--keys` and `--hold`. `--wait` bounds each of them.
+
+That is the whole of the fix, and the shape was chosen over a second flag on one argument: with
+`--until` for the startup frame and a `--then` beside it, the invocation that fails is still
+spellable and the defence is the documentation. With `--until` always naming the frame you are
+about to read, there is nowhere to aim it wrongly. What it cost is a custom *pre-key* wait, which
+nothing had ever used; if one is ever needed it gets its own name.
+
+It used to be the other way round: `--until` was matched against the **startup** frame and the
+keys were sent only `if [[ $matched -eq 1 ]]`, so an `--until` naming anything a key produces
+guaranteed the keys were never pressed. The `--keys '?' --until …` example above was in this file
+and in the script's own usage block, and it sent nothing for as long as it existed. Measured
+before the fix:
+`--keys '?' --until 'FILTER'` spent the full 90 s wait, printed a thread dump of a perfectly
+healthy app and captured the pod table. After it: 12 s, the help pane, exit 0.
+
 **It exists because the previous attempt could not tell the app from the rig** (#426). A bare
 `pty.fork()` pipe pair got the startup mode query and then nothing, and the natural reading was
 "the app hangs against a terminal that is not the author's". It was the rig, and one variable
@@ -496,9 +516,10 @@ So the `--self-check` is not decoration. It drives six known-answer cases throug
 rig: two cursor-addressed writes read back from the cells they were written to, the **alternate
 screen** (the app draws on it — a capture that only read the primary screen would call a perfect
 frame blank), `stty size` reporting the size that was asked for, an `ESC[c` reply reaching the
-program, and a keystroke arriving at its stdin. It also **reports one debt it does not pay**:
-tmux 3.5a does not answer `ESC[?2027$p` either, and the app renders regardless — silence after
-that query is not a symptom of anything.
+program, and a keystroke arriving at its stdin. It also **reports one thing it never asserts**:
+the answer to `ESC[?2027$p` depends on the emulator — tmux 3.5a leaves it unanswered, 3.7b
+answers `ESC[?2027;0$y` (measured 2026-08-19) — and the app drew the same table under both, so
+neither the silence nor the reply is a symptom of anything.
 
 ### `tui-log-leak.sh` — does the log pane let go?
 
@@ -527,10 +548,15 @@ It was not: interrupting the reader tears the connection down by itself, so the 
 was not leaking. Before believing this script says nothing is wrong, break the release into a
 genuine no-op and check that it says 20.
 
-A run that produces no frame is a **failed measurement, not a pass**: it says so, dumps every
-`java` under the pane with `jcmd Thread.print`, prints the threads that matter, and exits 1.
-The frame is still printed and saved, because "no frame" and "a frame that did not match
-`--until`" are different claims.
+A run that produces no frame is a **failed measurement, not a pass**, and so is a run whose frame
+never matched — but they are **different claims and now different sentences**, which is the half
+of #477 that matters more than the flag. `NO STARTUP FRAME` means the app never drew its header:
+that is the one state indistinguishable from a hang, so it is the only one that dumps every
+`java` under the pane with `jcmd Thread.print` and prints the threads that matter. `THE KEYS WERE
+SENT AND THE FRAME NEVER MATCHED` means the app came up and is drawing and your query is not on
+screen — no threads are dumped, because there is nothing stuck to look at. Both exit 1, and both
+still print and save the frame. (`jcmd` ships with a JDK and not with a JRE; where there is none
+the script says *that*, rather than reporting its own absence as the app's state.)
 
 Output lands in `.tui/`, **gitignored and it must stay that way** — a rendered frame carries the
 context name, namespaces, node names and object names of a live cluster, exactly like

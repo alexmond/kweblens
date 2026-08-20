@@ -31,9 +31,10 @@
 # So the rig is `tmux`, not a hand-rolled pty. tmux is a real terminal emulator: it owns a pty
 # WITH a size, honours a mode set, tracks the alternate screen, carries a query's reply back to
 # the program, and `capture-pane -p` hands the rendered cells back as text. `--self-check`
-# MEASURES each of those rather than assuming it — and names the one debt tmux 3.5a does not pay
-# either: it does not answer `ESC[?2027$p`. Nothing does, here or under a bare pty, and the app
-# draws its table regardless, which is what retires the earlier attempt's DECRQM hypothesis.
+# MEASURES each of those rather than assuming it — including `ESC[?2027$p`, which it REPORTS and
+# never asserts, because the answer depends on the emulator: tmux 3.5a leaves it unanswered, 3.7b
+# answers `ESC[?2027;0$y` (measured 2026-08-19), and the app drew the same table under both. That
+# is what retires the earlier attempt's DECRQM hypothesis — not the silence, the indifference.
 #
 # NOT A BUILD GATE. This is on-demand, like `perf-sweep.mjs`. A pty rig that is flaky in CI is
 # worse than no rig (#423). Do not add it to `dev-verify.sh`.
@@ -42,12 +43,44 @@
 # name. Captures land in `.tui/`, which is gitignored and must stay that way — same reason as
 # `.playwright/`. Quote a capture in a PR by hand, after reading what is in it.
 #
+# TWO WAITS, AND ONLY ONE OF THEM IS A KNOB (#477)
+# ------------------------------------------------
+# There are two questions, they are asked in order, and confusing them is what made this script's
+# own documented example send nothing for as long as the example existed:
+#
+#   1. DID THE APP COME UP?  Waited for before any key is sent, against a FIXED match — the
+#      header (`kweblens-tui [R`). It is not a flag, because it is not a question about your
+#      measurement: it is the liveness proof this rig exists to provide. Never reaching it is
+#      the one state that is genuinely indistinguishable from a hang, so that — and only that —
+#      is where the thread dumps are printed.
+#
+#   2. DOES THE FRAME YOU CAME FOR LOOK LIKE THIS?  That is `--until`, and it is matched against
+#      the frame that gets CAPTURED — i.e. AFTER `--keys` have been sent and `--hold` has passed.
+#
+# `--until` used to be question 1, and the keys were sent only `if [[ $matched -eq 1 ]]`. So an
+# `--until` naming anything a key produces could never be true when it was tested, the keys were
+# never pressed, and the run spent the whole `--wait` and printed a thread dump of a perfectly
+# healthy app (#477). The flag was not renamed and no second flag was added, deliberately: two
+# flags leave the failing invocation spellable, and the fix would then be documentation. There is
+# now nowhere to aim a query at the wrong frame — `--until` always describes the frame you are
+# about to read.
+#
+# The two failures therefore say different things, and neither is the other's sentence:
+#
+#   NO STARTUP FRAME     the app never drew its header. Threads dumped; this may be a hang.
+#   THE KEYS WERE SENT   the app came up and is drawing, and no frame matched /--until/.
+#   AND THE FRAME NEVER  A failed measurement, not a stuck app — so no thread dump, and the
+#   MATCHED              frame it did draw is printed for you to read.
+#
 # Usage:
 #   scripts/tui-drive.sh --self-check                        # positive control; no jar, no cluster
 #   scripts/tui-drive.sh --context k3stest
 #   scripts/tui-drive.sh --context k3stest --keys ':,svc,Enter' --hold 4
 #   scripts/tui-drive.sh --context k3stest --keys '?' --until 'every binding'
 #   scripts/tui-drive.sh --context k3stest --size 80x20 --quit    # resize class, then ctrl-c
+#
+# Flags: --context/--kind/--size/--jar/--keep/--quit, --keys 'a,Enter,C-c', --hold <s> to settle
+# after the keys, --wait <s> as the bound on EACH of the two waits above, -- <args…> to the jar.
 #
 set -uo pipefail
 
@@ -61,7 +94,9 @@ KEYS=""
 SIZE="132x44"
 WAIT=90
 HOLD=3
-UNTIL='kweblens-tui \[R'
+# Question 1, fixed and not a flag. Question 2 is `--until`, empty unless asked for.
+STARTUP='kweblens-tui \[R'
+UNTIL=''
 SELF_CHECK=0
 KEEP=0
 QUIT=0
@@ -91,7 +126,7 @@ while [[ $# -gt 0 ]]; do
 		--keep) KEEP=1; shift ;;
 		--quit) QUIT=1; shift ;;
 		--) shift; EXTRA=("$@"); break ;;
-		-h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}"; exit 0 ;;
+		-h|--help) sed -n '2,83p' "${BASH_SOURCE[0]}"; exit 0 ;;
 		*) die "unknown argument: $1 (try --help)" ;;
 	esac
 done
@@ -272,38 +307,66 @@ start_pane "${cmd[*]}"
 
 trap '[[ $KEEP -eq 1 ]] || kill_session' EXIT
 
+# Poll the pane for a regex, or until the process dies or the bound runs out. Answers through
+# `waited` and its exit status; it decides nothing about what a miss means, because the two
+# waits below mean different things by one.
 waited=0
-matched=0
-while [[ $waited -lt $WAIT ]]; do
-	if frame | grep -qE "$UNTIL"; then matched=1; break; fi
-	if [[ "$(pane_dead)" == "1" ]]; then break; fi
-	sleep 1
-	waited=$((waited + 1))
-done
+wait_for() {
+	local want="$1"
+	waited=0
+	while [[ $waited -lt $WAIT ]]; do
+		if frame | grep -qE "$want"; then return 0; fi
+		if [[ "$(pane_dead)" == "1" ]]; then return 1; fi
+		sleep 1
+		waited=$((waited + 1))
+	done
+	return 1
+}
 
-if [[ $matched -eq 1 ]]; then
-	note "first frame after ${waited}s (matched /$UNTIL/)"
+# The thread dump belongs to exactly one of the two failures, so it is a function and the other
+# failure does not call it. `jcmd` ships with a JDK and not with a JRE, and "could not attach"
+# would be the wrong sentence for "there is no jcmd on this box" — a rig may not describe its
+# own absence as the app's state.
+dump_threads() {
+	local jcmd pid dump
+	jcmd="$(command -v jcmd 2>/dev/null)"
+	[[ -z "$jcmd" && -x "${JAVA_HOME:-}/bin/jcmd" ]] && jcmd="$JAVA_HOME/bin/jcmd"
+	if [[ -z "$jcmd" ]]; then
+		note "  no jcmd on PATH and none at \$JAVA_HOME/bin — a JRE cannot dump threads, so where"
+		note "  the app is parked cannot be answered here. Point JAVA_HOME at a JDK and re-run."
+		return
+	fi
+	for pid in $(java_pids); do
+		dump="$OUT_DIR/threads-$STAMP-$pid.txt"
+		if "$jcmd" "$pid" Thread.print > "$dump" 2>&1; then
+			note "  thread dump: $dump"
+			note "  --- the threads that matter ---"
+			grep -E '^"(main|TamboUI|tui-|kweblens|OkHttp|watch)' -A 4 "$dump" | head -60
+		else
+			note "  $jcmd could not attach to $pid (see $dump)"
+		fi
+	done
+}
+
+# ---- wait 1: did the app come up? The only state that looks like a hang. -----------------------
+started=0
+wait_for "$STARTUP" && started=1
+
+if [[ $started -eq 1 ]]; then
+	note "startup frame after ${waited}s (matched /$STARTUP/)"
 else
-	note "NO FRAME after ${waited}s (nothing matched /$UNTIL/) — this is a FAILED measurement."
+	note "NO STARTUP FRAME after ${waited}s (nothing matched /$STARTUP/) — a FAILED measurement."
 	note ""
 	if [[ "$(pane_dead)" == "1" ]]; then
 		note "The process EXITED, status $(pane_status). Its last screen:"
 	else
-		note "The process is still running. Where it is parked, from the outside:"
-		for pid in $(java_pids); do
-			dump="$OUT_DIR/threads-$STAMP-$pid.txt"
-			if jcmd "$pid" Thread.print > "$dump" 2>&1; then
-				note "  thread dump: $dump"
-				note "  --- the threads that matter ---"
-				grep -E '^"(main|TamboUI|tui-|kweblens|OkHttp|watch)' -A 4 "$dump" | head -60
-			else
-				note "  jcmd could not attach to $pid (see $dump)"
-			fi
-		done
+		note "The process is still running and never drew its header. Where it is parked:"
+		dump_threads
 	fi
 fi
 
-if [[ -n "$KEYS" && $matched -eq 1 ]]; then
+# ---- the keys. Sent because the app is up, not because a query matched. ------------------------
+if [[ -n "$KEYS" && $started -eq 1 ]]; then
 	note ""
 	note "keys     $KEYS"
 	IFS=',' read -r -a steps <<< "$KEYS"
@@ -314,6 +377,30 @@ if [[ -n "$KEYS" && $matched -eq 1 ]]; then
 	sleep "$HOLD"
 fi
 
+# ---- wait 2: does the frame we came for look like this? No dump — the app is drawing. ----------
+arrived=1
+if [[ -n "$UNTIL" && $started -eq 1 ]]; then
+	if wait_for "$UNTIL"; then
+		note "frame matched /$UNTIL/ after a further ${waited}s"
+	else
+		arrived=0
+		note ""
+		if [[ -n "$KEYS" ]]; then
+			note "THE KEYS WERE SENT AND THE FRAME NEVER MATCHED /$UNTIL/ (${waited}s after them)."
+		else
+			note "THE APP CAME UP AND NO FRAME MATCHED /$UNTIL/ within ${waited}s."
+		fi
+		note "This is a FAILED measurement and NOT a hang — the app drew its header and is still"
+		note "drawing, so there are no threads to dump. Read the frame below and see which it is:"
+		if [[ -n "$KEYS" ]]; then
+			note "the query is wrong, or the keys did not take the app where you meant them to."
+		else
+			note "the query is wrong, or the app never got to the state you were waiting for."
+		fi
+		[[ "$(pane_dead)" == "1" ]] && note "(The process EXITED meanwhile, status $(pane_status).)"
+	fi
+fi
+
 # Capture BEFORE any quit. A first version quit first and captured after, which read the pane
 # the app had just handed back — it leaves the alternate screen on exit, so the "frame" was 44
 # blank rows and a tmux epitaph. That is the app being correct and the rig reporting nothing.
@@ -321,7 +408,7 @@ FRAME_FILE="$OUT_DIR/frame-$STAMP.txt"
 frame > "$FRAME_FILE"
 tmux_ capture-pane -p -e -t "$SESSION" > "$OUT_DIR/frame-$STAMP.esc" 2>/dev/null
 
-if [[ $QUIT -eq 1 && $matched -eq 1 ]]; then
+if [[ $QUIT -eq 1 && $started -eq 1 ]]; then
 	tmux_ send-keys -t "$SESSION" C-c
 	# Poll for the exit rather than sleeping at it. A fixed 3s read `pane_dead_status` as empty
 	# on one run and `0` on the next — the same app, the same key, a different moment.
@@ -345,5 +432,5 @@ log="$OUT_DIR/app-$STAMP.log"
 note "log      $(wc -c < "$log" 2>/dev/null || echo 0) bytes at $log"
 [[ -n "${QUIT_NOTE:-}" ]] && note "quit     $QUIT_NOTE"
 
-[[ $matched -eq 1 ]] || exit 1
+[[ $started -eq 1 && $arrived -eq 1 ]] || exit 1
 exit 0
