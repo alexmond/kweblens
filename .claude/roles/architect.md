@@ -31,3 +31,4 @@ Call out the scaling limits and what you'd add at the next order of magnitude.
 
 ## Learnings (solo)
 <!-- Appended by solo runs. One line each: `- YYYY-MM-DD — lesson` -->
+- 2026-08-20 — Decide the SCOPE of a fix by rebuilding the pre-fix defect across every candidate surface and watching which ones fire (`ui-measure --style` here), never by reasoning about how shared a component is: the ticket named one table, the rebuilt defect named four.

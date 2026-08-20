@@ -1999,6 +1999,56 @@ body {
   letter-spacing: 0.03em;
 }
 
+/* ---- The wrap policy, for EVERY naive table in the app (#479) -----------------------------
+   Naive puts `word-break: break-word` on `.n-data-table-table`, and it inherits into every
+   cell. `break-word` is the deprecated alias for `overflow-wrap: anywhere`, and `anywhere`
+   counts toward MIN-CONTENT — so a column's minimum width is ONE GLYPH and an auto table
+   layout is free to squeeze a column below its own label. Measured in the detail drawer's
+   Events tab at the drawer's 520px default, before this rule: `"Reason" needs 46.02px in a
+   30.50px content box`, and the header row read TYP/E, REAS/ON, AG/E. At the 360px the reader
+   can drag it to, the same word had 19.31px.
+
+   WHY GLOBAL, AND WHAT THAT GIVES UP. This is the fourth sighting of one family — #257
+   (`.warn-table`), #278 (`.mini`), #326 (`.kv`), now the drawer's Events tab — and the first
+   three answers were scoped, which is exactly why the third of them did not reach the table
+   that needed it most. `EventsPane` is shared, so a class on it would have been a fifth scope
+   and left the next pane to rediscover this; the policy is not a property of one table, it is
+   this app's answer to a library default that is wrong in every table it renders. So it is
+   stated once, here, beside the other declaration naive exposes no theme var for — `#478`'s
+   `--table-*` tokens are the same move for colour, and `.mini`'s copy of this rule two
+   screens up is not a duplicate but the same policy for a DOM naive does not own.
+
+   What is given up: a genuinely narrow column with a long header can no longer wrap between
+   the halves of a word to stay narrow — it widens instead, or (once the columns' minimums no
+   longer fit) the table scrolls. That is the trade #278 argued and it is accepted here for
+   the same reason: a value the reader can scroll to is recoverable, a shredded one reads as a
+   rendering fault. `overflow-wrap: break-word` keeps the last-resort break for a token that
+   cannot fit its column at any width.
+
+   The measured risk was the resource list, whose columns declare pixel widths that
+   `columnFit.ts` adds up to avoid a horizontal scrollbar. It cannot be affected: that table
+   renders at `table-layout: fixed` (naive picks `fixed` whenever a column declares
+   `ellipsis`, which every list column does), and under fixed layout min-content contributes
+   nothing — the declared widths bind. Measured at narrow / normal / wide on Pods, Nodes and
+   Deployments, before and after: identical column widths and `scrollWidth - clientWidth = 0`
+   throughout. */
+.n-data-table .n-data-table-td,
+.n-data-table .n-data-table-th {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* A mono cell is a URL, a base64 value or a path: one token whose break opportunities are few
+   and whose whole-word minimum would bid for the column's entire width. Same answer, and same
+   reason, as `.mini td.mono` and `.kv dd.mono` — restated because the rule above matches the
+   CELL (0,2,0) and `.mono` (0,1,0) is on that same cell when a column declares
+   `className: 'mono'` (HelmRepositoriesPane's URL column), so without this it would silently
+   lose. */
+.n-data-table .n-data-table-td.mono,
+.n-data-table .n-data-table-th.mono {
+  word-break: break-all;
+}
+
 .mono {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
@@ -3408,22 +3458,15 @@ body.dragging {
   margin-bottom: 6px;
 }
 
-/* Cluster overview Warnings table (#257): the WRAP POLICY, alongside the column widths in
-   warningsTable.ts. Naive puts `word-break: break-word` on every cell, which makes a column's
-   minimum content width one glyph — so before this the headers rendered "Reas / on" and
-   "Ag / e" and object names broke mid-token. `overflow-wrap: break-word` breaks a token only
-   when it genuinely cannot fit its column, and leaves the minimum at a whole word, so a header
-   can no longer be squeezed under its own label. Headers never break at all: they are three
-   short fixed labels, and a wrapped header is always a sizing bug rather than long content. */
-.warn-table .n-data-table-th__title {
-  white-space: nowrap;
-}
-
-.warn-table .n-data-table-td,
-.warn-table .n-data-table-th {
-  word-break: normal;
-  overflow-wrap: break-word;
-}
+/* The Cluster overview Warnings table's wrap policy used to live here, scoped to `.warn-table`
+   (#257). It is now stated once for every naive table, beside the header typography — see "The
+   wrap policy, for EVERY naive table in the app (#479)". Its `white-space: nowrap` on the
+   header title went with it: with the whole word back as the column minimum, and all four of
+   this table's headers a single word each, a header cannot be broken at all — measured after
+   the move, `Reason` / `Object` / `Message` / `Age` each paint one line at narrow and at wide.
+   The class stays on the element: `contrast-check.mjs` names it as a scene selector, and a
+   named table is worth having even with no rule of its own. The column widths — the other half
+   of #257 — are unmoved, in warningsTable.ts. */
 
 /* "Needs attention" table on the Workloads overview. Leads the page, so it is allowed to be
    denser than the stat cards below it. */
