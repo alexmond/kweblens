@@ -1,19 +1,21 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
 // One rule, one surface: text that sits on a state's own TINT takes that state's `--*-on-tint`,
-// never its `--*-fg` (GH#393, GH#484).
+// never its `--*-fg` (GH#393, GH#484, GH#501).
 //
 // A state's `fg` is designed and measured against the PANEL. On its own tint it is a different
-// measurement, and this project has now got that wrong on eight surfaces in two rounds: the nav,
-// the command palette, the drawer's Naive tag and the status pill (#393), then the diagnostics
-// note, the drawer's refused relation and the pod file browser's notice and tag (#484). Every
-// one of them passed AA — the warn pairing measures 4.51:1 in light against a 4.5 floor — so
-// nothing failed and nothing was noticed, and the same hundredth of margin then had to be
-// defended every time the tint alpha or the panel behind it moved (#482 left the light tint
-// alone for exactly that reason).
+// measurement, and this project has now got that wrong on eleven surfaces in three rounds: the
+// nav, the command palette, the drawer's Naive tag and the status pill (#393), then the
+// diagnostics note, the drawer's refused relation and the pod file browser's notice and tag
+// (#484), then the three danger-tone ones this list used to exempt (#501). Every one of them
+// passed AA — the warn pairing measures 4.51:1 in light against a 4.5 floor — so nothing failed
+// and nothing was noticed, and the same hundredth of margin then had to be defended every time
+// the tint alpha or the panel behind it moved (#482 left the light tint alone for exactly that
+// reason).
 //
 // Why a unit test rather than the browser check. `contrast-check.mjs` measures what is ON
 // SCREEN, and three of #484's four surfaces could not be brought on screen at all without new
@@ -26,7 +28,13 @@ import { describe, expect, it } from 'vitest';
 // in DIFFERENT rules (an inherited colour over a tinted ancestor) is invisible here, because the
 // pairing only exists once the two rules meet on an element. That case is the browser check's,
 // and it is why both exist.
-const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+// Resolved against THIS FILE, not `process.cwd()`. The two agree only while the runner is
+// started from `kweblens-ui/`; a run from the repo root, or from a workspace root, reads a path
+// that does not exist and the failure names a missing file rather than the sheet.
+// `classesAreEmitted.test.ts` already does it this way.
+const here = dirname(fileURLToPath(import.meta.url));
+const css = readFileSync(resolve(here, 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 /**
  * Every rule in the sheet as `{ selectors, body }`.
@@ -52,20 +60,29 @@ const rules = css.split('}').flatMap((chunk) => {
 });
 
 /**
- * Rules that still carry the pairing, each with the ratio that says it is not urgent.
+ * Rules that still carry the pairing.
  *
- * All three are the DANGER tone, which has always had the headroom the warn tone did not:
- * `--danger-fg` on `--danger-tint` measures 5.62:1 light / 5.75:1 dark, a full point clear of
- * AA, against warn's 4.51. So they are the same shape without the defect, and #484 was a ticket
- * about four warn surfaces — moving three red ones would change what a reader sees with no
- * measurement behind it. Tracked as GH#501; this list is what keeps them from being forgotten
- * while a NEW pairing still fails.
+ * EMPTY (#501). It held the three DANGER-tone surfaces — `.error`, `.warn-badge.err` and
+ * `.rel-error` — on the grounds that the danger tone had the headroom warn did not: the
+ * arithmetic over `--panel` gives 5.62:1 light / 5.75:1 dark, a full point clear of AA against
+ * warn's 4.51. Two things came out of measuring them instead of computing them.
+ *
+ * The dark number was wrong. All three sit on naive's modal or drawer body, not on `--panel`,
+ * and RENDERED they read 5.62 light / **5.16** dark — 0.66 over the floor, not 1.25. And the
+ * move is not merely cosmetic: `--danger-on-tint` measures 8.14 / 6.02 on the same grounds, so
+ * every one of the six samples gained. That is the answer to "uniform, or better" — better.
  *
  * An entry that stops matching a rule is itself a failure (below): an exemption list that has
  * quietly stopped exempting anything is a rule nobody is applying, which is how a check starts
- * covering less than it claims.
+ * covering less than it claims. The list being empty is what makes this check a rule about the
+ * whole sheet rather than about most of it.
  */
-const KNOWN = ['.error', '.warn-badge.err', '.rel-error'];
+/* eslint-disable sonarjs/no-empty-collection -- the list being empty is the ticket's outcome,
+   not a leftover. Both assertions below must go on reading it: the first is what an entry would
+   suppress, the second is what stops an entry outliving its rule, and deleting the mechanism
+   because it currently exempts nothing is how the next exemption gets written with no guard on
+   it. sonarjs is right that these reads cannot fail today; that is the state being defended. */
+const KNOWN: string[] = [];
 
 /** The state named by a `color:` declaration's token, e.g. `warn` from `var(--warn-fg)`. */
 const foregroundState = (body: string) => /(?:^|[;{\s])color:\s*var\(--([a-z-]+)-fg\)/.exec(body)?.[1];

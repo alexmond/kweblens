@@ -1291,8 +1291,19 @@ body {
   color: var(--text);
 }
 
+/* The generic error box — `ErrorNotice.vue` (`class="error error-notice"`) and
+   `ActionNotice.vue` (`class="error action-notice"`), plus the dock's `.log-line.error`, which
+   overrides the colour at a higher specificity and is untouched by this.
+
+   The FOREGROUND is `--danger-on-tint`, not `--danger-fg` (#501). The danger tone has more
+   headroom than warn did, which is why #393 and #484 left it alone — but MEASURED on this
+   surface it is less than the ticket assumed: 5.62:1 light and 5.16:1 dark, not the 5.75 the
+   arithmetic gives over `--panel`, because the ground under the notice is naive's modal body
+   rather than the panel. 0.66 over AA in dark is not "a full point clear". The derived token
+   reads 8.14 / 6.02 on the same ground — a real gain in both themes, which is what settled
+   "does moving these improve anything, or only make them uniform". */
 .error {
-  color: var(--danger-fg);
+  color: var(--danger-on-tint);
   background: var(--danger-tint);
   border: 1px solid var(--danger-line);
   padding: 10px 12px;
@@ -2300,9 +2311,16 @@ body {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--accent);
 }
+/* The red state of the count: the document has schema ERRORS, not just warnings. Same move as
+   `.error` and `.rel-error` (#501) — `--danger-on-tint`, the state's own foreground mixed 65%
+   toward the theme's text, rather than the raw `fg` a state's tint was never measured against.
+   Measured on the editor dialog, an invalid ConfigMap in it: 5.62 light / 5.16 dark before,
+   8.14 / 6.02 after. It had never produced a ratio in any run on this box before that scene
+   existed — the simulator's API server publishes no OpenAPI document, so `GET …/schema` 500s,
+   the editor gets no linter, and the badge cannot render at all. */
 .warn-badge.err {
   background: var(--danger-tint);
-  color: var(--danger-fg);
+  color: var(--danger-on-tint);
 }
 .warnings-list {
   display: flex;
@@ -3423,8 +3441,16 @@ body.dragging {
   border: 1px solid var(--warn-line);
 }
 
+/* The red sibling of the note above: a relation that could not be LOADED — `Relation.failed`,
+   i.e. anything that is not a 403 — and the truncation line under a `.mini` table.
+
+   `--danger-on-tint` for the same reason `.rel-denied` takes `--warn-on-tint` (#501). The
+   danger tone's extra headroom is real but smaller here than the arithmetic over `--panel`
+   suggests: measured on the drawer, 5.62 light / 5.16 dark, against 8.14 / 6.02 with the
+   derived token. Nothing on this box fails a join either, so like its amber sibling it had no
+   ratio at all until `contrast-check.mjs` grew a `fail` verb to stub the error state. */
 .rel-error {
-  color: var(--danger-fg);
+  color: var(--danger-on-tint);
   background: var(--danger-tint);
   border: 1px solid var(--danger-line);
 }
