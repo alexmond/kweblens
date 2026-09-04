@@ -29,6 +29,7 @@ Vite + TypeScript SPA** (Naive UI, dark theme) in `kweblens-ui`, built into the 
 
 ```bash
 scripts/dev-verify.sh                 # format + whole-reactor verify — green here = green PR
+scripts/dev-verify.sh --fast          # inner loop: only modules changed since origin/main
 scripts/dev-test.sh <selector>        # targeted -Dtest run, e.g. 'ResourceServiceTest,Cluster*'
 ./mvnw spring-javaformat:apply        # auto-format (before committing)
 
@@ -50,6 +51,46 @@ scripts/tui-log-leak.sh <ctx> 20      # does the log pane release? quiet pod, re
 
 Descriptions: [`scripts/README.md`](scripts/README.md). CI (`.github/workflows/ci.yml`) runs
 `./mvnw -B verify` on JDK 21 — the same gates as `dev-verify`.
+
+- **The incremental build is a LOOP, never the GATE, and one property is what keeps that true.**
+  `.mvn/extensions.xml` carries gitflow-incremental-builder 4.7.0, which builds only the modules
+  changed since `origin/main` plus their downstream. The root POM sets **`gib.disable=true`**, so
+  `./mvnw verify` — CI, `dev-verify.sh`, `maven_release.yml` — is a whole-reactor build exactly as
+  before; `scripts/dev-verify.sh --fast` is the only thing that turns it on, per invocation.
+  `IncrementalBuildIsNotTheGateTest` fails the build if that property flips, because the symptom
+  would not be a red build but a **green one over modules that were never compiled**. Four
+  measured facts, each of which a change will otherwise get wrong:
+  - **Adding the extension without pinning `gib.referenceBranch` reds everything.** GIB's own
+    default is `refs/remotes/origin/develop`; this repo has no such branch, and a missing
+    reference branch is a **build-ending `ERROR` before the first module**, not a fallback to
+    building all. The pin is load-bearing even while the extension is disabled.
+  - **A changed path belongs to its nearest enclosing module, so anything outside one belongs to
+    the parent and rebuilds all seven** — `README.md`, `CLAUDE.md`, `docs/`, `scripts/`,
+    `column-parity/`, the root POM. That is the safe direction, and it is *why* the gates that
+    read those root files (`McpToolSurfaceTest` on the MCP tool count, `ColumnParityTest` on
+    `column-parity/expected.json`) cannot be dodged by editing their own input.
+  - **The one real hole is a gate that is repo-wide from INSIDE a module.** `kweblens-core`'s
+    `TrackedSourcesStayGreppableTest` walks every path `git ls-files` prints. Measured: a raw
+    `0x1F` appended to a `kweblens-tui` source is **RED on the full reactor and GREEN on an
+    unforced incremental run**, because the change selects `kweblens-tui` alone. So `--fast` runs
+    that gate **by name** before the verify (`REPO_WIDE_GATES`), rather than widening the
+    reactor — `-Dgib.forceBuildModules=kweblens-core` covers the same hole and costs **2m15s of
+    the 8m43s full gate, against 21s** for the one test. **A new gate that reads outside its own
+    module must be added to that list**, or the fast path silently stops covering it, and the
+    list is itself asserted.
+    **Reproduce it with a non-Java file, or the control heals itself**: `dev-verify.sh` runs
+    `spring-javaformat:apply` first, and that **strips a raw control byte out of Java source** —
+    measured, the character is gone before the gate reads the file, and the run is a green that
+    proves nothing. The honest control is a tracked file the formatter does not touch, which is
+    also where the live exposure is: `kweblens-ui/src/labelForward.ts` carrying a `0x1F` fails
+    the gate naming file and byte offset, and a `.ts` change selects `kweblens-ui` and
+    `kweblens-web` — never `kweblens-core`, which is the module holding the gate.
+  - **GIB disables itself inside a `git worktree`** — "JGit unsupported separate worktree
+    checkout" — so `--fast` is a **no-op for every agent dispatched with worktree isolation**.
+    The script says so instead of letting a full build be mistaken for a fast one. Untracked
+    files at the repo root have the same flattening effect (they read as a parent change), which
+    is why `/node_modules/` and `/skills-lock.json` are now gitignored; anything else untracked
+    up there costs the fast path its speed, and `--fast` names what did it.
 
 - **Before anything that needs to SEE or MEASURE the running UI, load the `playwright` skill**
   ([`.claude/skills/playwright/SKILL.md`](.claude/skills/playwright/SKILL.md)). It covers every
