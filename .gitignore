@@ -11,6 +11,16 @@ build/
 /data/
 *.log
 
+# `npx skills` / npm run at the REPO ROOT leave these behind. They are ignored for the usual
+# reason, and for one more: gitflow-incremental-builder attributes every changed path to the
+# nearest enclosing module, so an untracked file at the root belongs to the parent POM and makes
+# `dev-verify.sh --fast` rebuild all seven modules. Measured — with these visible, the fast path
+# never skipped anything. Any OTHER untracked root file has the same effect; that is the safe
+# direction (never a silent skip), and dev-verify.sh names the culprit rather than leaving it a
+# mystery.
+/node_modules/
+/skills-lock.json
+
 # kweblens-ui (Vite/React): build output + toolchain downloaded by frontend-maven-plugin
 kweblens-ui/node_modules/
 kweblens-ui/dist/

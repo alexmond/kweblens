@@ -106,6 +106,28 @@
         <sonar.issue.ignore.multicriteria.tuiStdout.resourceKey>**/kweblens-tui/**</sonar.issue.ignore.multicriteria.tuiStdout.resourceKey>
         <sonar.issue.ignore.multicriteria.testSources.ruleKey>*</sonar.issue.ignore.multicriteria.testSources.ruleKey>
         <sonar.issue.ignore.multicriteria.testSources.resourceKey>**/src/test/**</sonar.issue.ignore.multicriteria.testSources.resourceKey>
+
+        <!-- gitflow-incremental-builder (.mvn/extensions.xml): builds only the modules changed
+             since origin/main, plus their downstream. It is OFF here and must stay off. This is
+             the property that keeps `./mvnw verify` (CI's gate, dev-verify.sh, maven_release.yml)
+             a whole reactor build. Turn it on for a local loop with `scripts/dev-verify.sh` and
+             its `fast` flag, never by editing this value.
+
+             `gib.disable=false` alone is NOT enough to make an incremental run trustworthy: gates
+             that live in one module but assert about the WHOLE repo (kweblens-core's
+             TrackedSourcesStayGreppableTest and ColumnParityTest, kweblens-web's
+             McpToolSurfaceTest) do not run when their own module is unchanged. dev-verify.sh
+             runs those gates by name; see REPO_WIDE_GATES there, and the rules in CLAUDE.md.
+
+             referenceBranch is pinned because GIB's own default is 'refs/remotes/origin/develop',
+             which does not exist in this repo, and a missing reference branch is a hard ERROR
+             that fails the build before a single module is built, not a fallback to building
+             everything. Measured: delete this property and the whole build goes red. -->
+        <gib.disable>true</gib.disable>
+        <gib.referenceBranch>refs/remotes/origin/main</gib.referenceBranch>
+        <gib.baseBranch>HEAD</gib.baseBranch>
+        <gib.uncommitted>true</gib.uncommitted>
+        <gib.untracked>true</gib.untracked>
     </properties>
 
     <!--

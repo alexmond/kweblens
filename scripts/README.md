@@ -5,7 +5,7 @@ once — the reason is in the header comment of each script.
 
 | Script | What it does |
 |---|---|
-| [`dev-verify.sh`](dev-verify.sh) | Format + full-reactor `verify`. **Green here means green on the PR.** |
+| [`dev-verify.sh`](dev-verify.sh) | Format + full-reactor `verify`. **Green here means green on the PR.** `--fast` narrows it to the modules changed since `origin/main` — an inner loop, **not** the gate. |
 | [`dev-test.sh`](dev-test.sh) | Targeted `-Dtest` run; last argument is the selector. |
 | [`dev-run.sh`](dev-run.sh) | Run the app locally with a known login (`admin`/`admin`). |
 | [`ui-shot.mjs`](ui-shot.mjs) | Screenshot the viewport × theme matrix, reproducibly. |
@@ -32,6 +32,7 @@ once — the reason is in the header comment of each script.
 
 ```bash
 scripts/dev-verify.sh                  # the gate — mirrors CI exactly
+scripts/dev-verify.sh --fast           # inner loop: changed modules only (see below)
 scripts/dev-verify.sh -pl kweblens-web -am    # extra args pass through to Maven
 scripts/dev-verify.sh --force          # build even though a running instance reads that jar
 scripts/dev-test.sh 'ResourceServiceTest,Cluster*'
@@ -634,3 +635,46 @@ scripts/pr-watch.sh 200 --merge    # squash-merge, but only if everything passed
 See [`docs/deployment.md`](../docs/deployment.md). `deploy-k8s.sh` is argument-driven and
 carries no environment defaults; the lab-specific values live in the private deploy
 overlay, never here.
+
+## `dev-verify.sh --fast` — the incremental build
+
+`.mvn/extensions.xml` carries gitflow-incremental-builder, which builds only the modules changed
+since `origin/main` plus their downstream. It is **off by default** (`gib.disable=true` in the root
+POM) so that `./mvnw verify`, CI and the release workflow stay whole-reactor builds; `--fast` is the
+only thing that turns it on, and only for that one invocation.
+
+Measured on this reactor — what a change actually selects:
+
+| Changed | Modules built |
+|---|---|
+| `kweblens-tui/**` | `kweblens-tui` |
+| `kweblens-cli/**` | `kweblens-cli` |
+| `kweblens-ui/**` | `kweblens-ui`, `kweblens-web` |
+| `kweblens-core/**` | `kweblens-core`, `kweblens-web`, `kweblens-it`, `kweblens-tui` |
+| `README.md`, `CLAUDE.md`, `docs/`, `scripts/`, `column-parity/`, root `pom.xml` | **all seven** |
+
+That last row is the safe direction: a path outside every module is attributed to the parent POM.
+
+**A green `--fast` run is not evidence a PR is green.** It skips modules, and modules carry gates.
+One of them reaches outside itself: `kweblens-core`'s `TrackedSourcesStayGreppableTest` scans every
+path `git ls-files` prints, so a raw control byte committed into `kweblens-tui` is red on the full
+reactor and **green** on an unforced incremental run. `--fast` therefore runs that gate **by name**
+first (`REPO_WIDE_GATES`), which covers the same hole for **21s** where force-building all of
+`kweblens-core` costs **2m15s** of the 8m43s full gate. `IncrementalBuildIsNotTheGateTest` asserts
+the disabled default, the pinned reference branch and that list. Add a `module:Test` pair to it if
+a gate grows the same reach.
+
+Reproduce that hole with a **non-Java** file. `dev-verify.sh` runs `spring-javaformat:apply` before
+anything else, and that strips a raw control byte out of Java source — measured, the character is
+gone before the gate reads it, so a Java control is a green run that proves nothing. Use a tracked
+file the formatter does not touch (`.ts`, `.md`, `.json`, `.sh`), which is where the real exposure
+is anyway: a `0x1F` in `kweblens-ui/src/labelForward.ts` fails the gate with file and byte offset,
+and a `.ts` change selects `kweblens-ui` + `kweblens-web`, never the module that holds the gate.
+
+Two things that quietly turn `--fast` back into a full build, neither of them a defect:
+
+- **A git worktree.** GIB stands down inside one ("JGit unsupported separate worktree checkout"),
+  so `--fast` is a no-op for any agent dispatched with worktree isolation. The script says so.
+- **An untracked file at the repo root**, which reads as a parent-POM change. `/node_modules/` and
+  `/skills-lock.json` are gitignored for this reason; anything else up there costs the speed, and
+  `--fast` prints what did it rather than leaving it a mystery.
