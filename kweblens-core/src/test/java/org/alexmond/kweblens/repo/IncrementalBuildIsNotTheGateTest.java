@@ -78,8 +78,20 @@ class IncrementalBuildIsNotTheGateTest {
 				per invocation instead: `scripts/dev-verify.sh --fast`, or -Dgib.disable=false.""").isEqualTo("true");
 	}
 
+	/**
+	 * Asserts the pinned literal and deliberately <b>not</b> that the ref resolves here.
+	 * Whether {@code refs/remotes/origin/main} exists is a fact about a checkout, not
+	 * about this repository: {@code actions/checkout} fetches the PR merge ref into a
+	 * detached HEAD with no local {@code main} and no remote-tracking branch, and it does
+	 * not need one, because {@code gib.disable} means CI never asks GIB to resolve
+	 * anything. The first version of this test checked {@code git branch --list main} and
+	 * was green on every developer machine and red on CI — a gate that fails on things
+	 * that are fine, which is the instrument defect this repo ranks above feature work.
+	 * It also asked the wrong question: the property names a <em>remote-tracking</em>
+	 * ref, and GIB's own error text warns against confusing the two.
+	 */
 	@Test
-	void theReferenceBranchIsPinnedToOneThatExists() {
+	void theReferenceBranchIsPinned() {
 		String reference = rootPomProperty("gib.referenceBranch");
 		assertThat(reference).as("""
 				<gib.referenceBranch> must be pinned. gitflow-incremental-builder defaults to \
@@ -87,11 +99,6 @@ class IncrementalBuildIsNotTheGateTest {
 				missing reference branch as a build-ending ERROR rather than as a reason to build \
 				everything. Unpinned, every incremental invocation in this checkout is red before \
 				it starts.""").isEqualTo("refs/remotes/origin/main");
-
-		String branch = reference.substring(reference.lastIndexOf('/') + 1);
-		assertThat(git(repoRoot(), "branch", "--list", branch))
-			.as("the pinned reference branch '%s' must actually exist in this checkout", branch)
-			.contains(branch);
 	}
 
 	/**
