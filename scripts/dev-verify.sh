@@ -9,6 +9,7 @@
 #   scripts/dev-verify.sh --fast     # only the modules changed since origin/main (inner loop)
 #   scripts/dev-verify.sh -pl kweblens-web -am   # pass extra args through to Maven
 #   scripts/dev-verify.sh --force    # build anyway, with a running instance exposed
+#   KWEBLENS_VERIFY_TAP=0 scripts/dev-verify.sh   # no progress bar; bare Maven output
 #
 # Any arguments other than --force and --fast are forwarded to the `verify` invocation.
 #
@@ -184,8 +185,33 @@ if [[ ${#GIB[@]} -gt 0 ]]; then
 	done
 fi
 
+# A LIVE BAR FOR THE EIGHT MINUTES THIS TAKES. scripts/progress-tap.py reads Maven's own
+# reactor lines and each module's test output and draws one bar for the build plus one per
+# module testing now, on the progress channel. It is a pipe filter: stdin is copied to stdout
+# byte for byte, so the build's output is unchanged, and it degrades to a plain `cat` in
+# silence when the channel or python3 is missing. Run `scripts/progress-tap.py --self-test`
+# to check it, and read its header for why each of those properties is load-bearing.
+#
+# THE EXIT CODE IS THE WHOLE RISK HERE and it is worth more than the bar. A pipeline's `$?`
+# is the LAST command's — the tap's, which is always 0 — so piping this naively would make
+# every failed gate report success, in the one script whose entire job is a trustworthy
+# verdict. ${PIPESTATUS[0]} is read explicitly rather than trusting `pipefail`, and `set +e`
+# brackets the pipeline so `set -e` cannot exit before the status is captured.
+TAP=scripts/progress-tap.py
 echo "==> verify ${ARGS[*]:-(full reactor)}"
-./mvnw -B verify ${GIB[@]+"${GIB[@]}"} ${ARGS[@]+"${ARGS[@]}"}
+if [[ "${KWEBLENS_VERIFY_TAP:-1}" == 1 && -f "$TAP" ]] && command -v python3 >/dev/null 2>&1; then
+	# stderr is merged INTO the tapped stream deliberately: kweblens-ui's vitest reporter
+	# writes its `[progress]` lines there, and leaving the two streams unmerged would also
+	# let a stack trace land above the line that caused it in the combined output.
+	set +e
+	./mvnw -B verify ${GIB[@]+"${GIB[@]}"} ${ARGS[@]+"${ARGS[@]}"} 2>&1 |
+		python3 "$TAP" "mvn: verify${ARGS[*]:+ · ${ARGS[*]}}" --timeout 1800
+	RC=${PIPESTATUS[0]}
+	set -e
+	[[ "$RC" == 0 ]] || exit "$RC"
+else
+	./mvnw -B verify ${GIB[@]+"${GIB[@]}"} ${ARGS[@]+"${ARGS[@]}"}
+fi
 
 if [[ ${#GIB[@]} -gt 0 ]]; then
 	echo "==> OK — formatted, repo-wide gates run, and verified FOR THE SELECTED MODULES ONLY."

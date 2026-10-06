@@ -22,6 +22,7 @@ once — the reason is in the header comment of each script.
 | [`payload-bytes.mjs`](payload-bytes.mjs) | Bytes per object per kind — **the check that a rig is representative**. |
 | [`heap-probe.sh`](heap-probe.sh) | What one list request costs the JVM heap — **the axis that bounds the product**. |
 | [`alloc-probe.sh`](alloc-probe.sh) | *Which code* spends that heap, by call site and thread. A class histogram cannot say. |
+| [`progress-tap.py`](progress-tap.py) | Pipe filter: copies stdin to stdout byte for byte and draws the build on the live progress channel — one bar for the reactor, one per module testing now. Inside `dev-verify.sh`; `--self-test` proves it without running a build. |
 | [`lib/kw-playwright.mjs`](lib/kw-playwright.mjs) | Shared browser helpers — start here when writing a new one. |
 | [`backlog-snapshot.sh`](backlog-snapshot.sh) | Issues, open PRs, roadmap markers, live instances and stray worktrees — the facts a triage run needs. |
 | [`pr-watch.sh`](pr-watch.sh) | Wait for a PR's checks; optionally merge when they pass. |
@@ -144,6 +145,46 @@ closed.
 start without one rather than booting a build whose AI silently does nothing. Only the prose
 summary on `GET /api/v1/clusters/{id}/diagnose` depends on it; the findings themselves, the
 remediation proposals and the server-side dry run are all deterministic and need no key.
+
+## The build's progress bar
+
+`scripts/dev-verify.sh` takes about eight and a half minutes and, until now, printed nothing a
+watcher could use for minutes at a time. `progress-tap.py` reads Maven's own output and draws it
+on the live channel:
+
+```
+mvn: verify                      3/7 · building: core
+  ↳ core                       118/… · TrackedSourcesStayGreppableTest
+  ↳ ui                          41/58 · diagnosis.test.ts
+```
+
+Ported from venice-vr, where the design was worked out. Four things about it are load-bearing:
+
+- **The exit code is not the tap's.** A pipeline's `$?` is the last command's, and the tap always
+  exits 0 — so piping naively would make **every failed gate report success**, in the one script
+  whose job is a trustworthy verdict. `dev-verify.sh` reads `${PIPESTATUS[0]}` explicitly.
+  Controlled: `scripts/dev-verify.sh -pl kweblens-does-not-exist` exits **1**.
+- **It is transparent or it is nothing.** stdin is copied to stdout as bytes, never decoded on the
+  way through, and nothing is written that did not arrive. Both copy paths — the reading loop and
+  the `--quiet`/no-channel `passthrough()` — are checked, after the first version of that control
+  silently exercised only one of them.
+- **It degrades in silence.** No channel, no `python3`, no plugin: it becomes `cat`. A warning on
+  every build would be its own defect. `KWEBLENS_VERIFY_TAP=0` opts out explicitly.
+- **`-q` defeats it.** Every line it reads is logged at INFO. Use `-B`.
+
+**The denominators differ per module, and the bar says which it has.** Java modules have no total:
+the tap counts surefire's `Running <class>` lines, attributing each to the module whose
+`src/test/java` holds that class. `kweblens-ui` has a real one — `vitest-progress.ts` is a reporter
+that emits `[progress] kweblens-ui <done>/<total> · <file>`, counting **files** rather than tests
+because the test count only grows as files load and a bar that moves backwards is worse than one
+that crawls. Vantage gets real totals everywhere from a service-loaded JUnit listener in a shared
+test-jar; this reactor has neither a test-jar nor a module every other module depends on
+(`kweblens-cli` deliberately depends on fabric8 alone), so that part did not port.
+
+```bash
+scripts/progress-tap.py --self-test     # ten controls, no build, no channel needed
+PROGRESS_TAP_TRACE=/tmp/t.jsonl ./mvnw -B verify 2>&1 | scripts/progress-tap.py x  # what it WOULD post
+```
 
 ## Checking the UI
 
