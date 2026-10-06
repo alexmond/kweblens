@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DiagnosisSummaryCacheTest {
 
 	private static Finding finding(String detail) {
-		return new Finding("critical", "CrashLoopBackOff", "Pod/web/api", detail, "Check the logs.", "validator");
+		return new Finding("critical", "CrashLoopBackOff", "Pod/web/api", detail, "Check the logs.", "validator", null);
 	}
 
 	@Test
@@ -34,14 +34,14 @@ class DiagnosisSummaryCacheTest {
 
 	@Test
 	void nullFieldsDoNotCollideWithEmptyOnes() {
-		Finding nulls = new Finding("info", "t", "o", null, null, null);
-		Finding empties = new Finding("info", "t", "o", "", "", "");
+		Finding nulls = new Finding("info", "t", "o", null, null, null, null);
+		Finding empties = new Finding("info", "t", "o", "", "", "", null);
 		// Both canonicalise to empty strings, which is fine — what must NOT happen is a
 		// finding's fields running together, so a shifted field boundary is a new key.
 		assertThat(DiagnosisSummaryCache.fingerprint(List.of(nulls)))
 			.isEqualTo(DiagnosisSummaryCache.fingerprint(List.of(empties)));
-		assertThat(DiagnosisSummaryCache.fingerprint(List.of(new Finding("info", "to", "", "", "", ""))))
-			.isNotEqualTo(DiagnosisSummaryCache.fingerprint(List.of(new Finding("info", "t", "o", "", "", ""))));
+		assertThat(DiagnosisSummaryCache.fingerprint(List.of(new Finding("info", "to", "", "", "", "", null))))
+			.isNotEqualTo(DiagnosisSummaryCache.fingerprint(List.of(new Finding("info", "t", "o", "", "", "", null))));
 	}
 
 	@Test
@@ -94,6 +94,42 @@ class DiagnosisSummaryCacheTest {
 		// is still there.
 		assertThat(cache.find("c1", "ns0", key)).isNull();
 		assertThat(cache.find("c1", "ns199", key)).isNotNull();
+	}
+
+	@Test
+	void tellsTwoNamespacesApartAlthoughTheirDISPLAYStringsAreIdentical() {
+		// The control for hashing the target. `Finding.object` carries no namespace, so a
+		// pod
+		// called `web` failing the same way in two namespaces produces the same display
+		// string
+		// and the same everything else — identical keys, one cached summary, served for
+		// whichever namespace asked second. That is this cache's stated failure mode
+		// arriving
+		// through a new field rather than through SHA-256, so it is asserted rather than
+		// assumed: delete the three target lines from fingerprint() and this is the test
+		// that
+		// goes red.
+		Finding prod = new Finding("critical", "CrashLoopBackOff", "Pod/web", "exit 1", "Check the logs.", "validator",
+				new Finding.Target("Pod", "prod", "web"));
+		Finding staging = new Finding("critical", "CrashLoopBackOff", "Pod/web", "exit 1", "Check the logs.",
+				"validator", new Finding.Target("Pod", "staging", "web"));
+		assertThat(prod.object()).isEqualTo(staging.object());
+		assertThat(DiagnosisSummaryCache.fingerprint(List.of(prod)))
+			.isNotEqualTo(DiagnosisSummaryCache.fingerprint(List.of(staging)));
+	}
+
+	@Test
+	void treatsAnAbsentTargetAsItsOwnValue() {
+		// A null target is a real answer (the security-audit findings have one), so it
+		// must
+		// hash to something stable and distinct rather than throwing or colliding with a
+		// target whose parts happen to be empty strings.
+		Finding none = new Finding("info", "t", "o", "d", "f", "validator", null);
+		Finding empty = new Finding("info", "t", "o", "d", "f", "validator", new Finding.Target("", "", ""));
+		assertThat(DiagnosisSummaryCache.fingerprint(List.of(none)))
+			.isEqualTo(DiagnosisSummaryCache.fingerprint(List.of(none)));
+		assertThat(DiagnosisSummaryCache.fingerprint(List.of(none)))
+			.isEqualTo(DiagnosisSummaryCache.fingerprint(List.of(empty)));
 	}
 
 }

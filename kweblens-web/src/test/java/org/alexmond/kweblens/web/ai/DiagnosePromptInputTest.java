@@ -24,7 +24,7 @@ class DiagnosePromptInputTest {
 		List<Finding> findings = new ArrayList<>();
 		for (int i = 0; i < 16; i++) {
 			findings.add(new Finding("critical", "Service has nothing behind it", "Service/svc-" + i, "no endpoints",
-					"Check the selector.", "validator"));
+					"Check the selector.", "validator", null));
 		}
 
 		DiagnoseService.PromptInput input = DiagnoseService.promptInput(findings);
@@ -42,11 +42,11 @@ class DiagnosePromptInputTest {
 	void oneGroupWithDifferingEvidenceKeepsEachMessage() {
 		List<Finding> findings = List.of(
 				new Finding("critical", "Service has nothing behind it", "Service/a", "no endpoints", "fix",
-						"validator"),
+						"validator", null),
 				new Finding("critical", "Service has nothing behind it", "Service/b", "no endpoints", "fix",
-						"validator"),
+						"validator", null),
 				new Finding("critical", "Service has nothing behind it", "Service/c", "2 pods matched, none ready",
-						"fix", "validator"));
+						"fix", "validator", null));
 
 		String evidence = DiagnoseService.promptInput(findings).evidence();
 
@@ -56,8 +56,8 @@ class DiagnosePromptInputTest {
 	@Test
 	void distinctProblemsStayDistinct() {
 		List<Finding> findings = List.of(
-				new Finding("critical", "ImagePullBackOff", "Pod/a", "bad registry", "fix", "validator"),
-				new Finding("warning", "Unhealthy", "Pod/b", "probe failed", "fix", "validator"));
+				new Finding("critical", "ImagePullBackOff", "Pod/a", "bad registry", "fix", "validator", null),
+				new Finding("warning", "Unhealthy", "Pod/b", "probe failed", "fix", "validator", null));
 
 		String evidence = DiagnoseService.promptInput(findings).evidence();
 
@@ -70,10 +70,11 @@ class DiagnosePromptInputTest {
 	void beyondTheCapTheLeastSevereGroupsAreDroppedAndSaidSoOutLoud() {
 		List<Finding> findings = new ArrayList<>();
 		for (int i = 0; i < 30; i++) {
-			findings.add(new Finding("critical", "Problem " + i, "Pod/crit-" + i, "detail", "fix", "validator"));
+			findings.add(new Finding("critical", "Problem " + i, "Pod/crit-" + i, "detail", "fix", "validator", null));
 		}
 		for (int i = 0; i < 4; i++) {
-			findings.add(new Finding("warning", "Later problem " + i, "Pod/warn-" + i, "detail", "fix", "validator"));
+			findings
+				.add(new Finding("warning", "Later problem " + i, "Pod/warn-" + i, "detail", "fix", "validator", null));
 		}
 
 		DiagnoseService.PromptInput input = DiagnoseService.promptInput(findings);
@@ -92,7 +93,7 @@ class DiagnosePromptInputTest {
 		List<Finding> findings = new ArrayList<>();
 		for (int i = 0; i < 6; i++) {
 			findings.add(new Finding("warning", "Unhealthy", "Pod/p-" + i,
-					"Readiness probe failed: dial tcp 10.42.0." + i + ":9999", "fix", "validator"));
+					"Readiness probe failed: dial tcp 10.42.0." + i + ":9999", "fix", "validator", null));
 		}
 
 		String evidence = DiagnoseService.promptInput(findings).evidence();
@@ -106,7 +107,7 @@ class DiagnosePromptInputTest {
 	void aLongSchedulerMessageIsAbbreviatedRatherThanSentWhole() {
 		String message = "0/4 nodes are available: ".repeat(40);
 		List<Finding> findings = List
-			.of(new Finding("critical", "Unschedulable", "Pod/a", message, "fix", "validator"));
+			.of(new Finding("critical", "Unschedulable", "Pod/a", message, "fix", "validator", null));
 
 		String evidence = DiagnoseService.promptInput(findings).evidence();
 
@@ -116,7 +117,7 @@ class DiagnosePromptInputTest {
 
 	@Test
 	void aFindingWithNoDetailStillRenders() {
-		List<Finding> findings = List.of(new Finding("info", "Something", "Pod/a", null, null, "validator"));
+		List<Finding> findings = List.of(new Finding("info", "Something", "Pod/a", null, null, "validator", null));
 
 		assertThat(DiagnoseService.promptInput(findings).evidence()).contains("evidence: (no detail)");
 	}

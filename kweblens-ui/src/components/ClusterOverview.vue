@@ -195,7 +195,9 @@ const warningsCopy = computed(() =>
       :cluster="cluster"
       :namespace="namespace ?? null"
       :authed="authed"
+      :knows-kind="knowsKind"
       @require-auth="emit('require-auth')"
+      @navigate-state="(k, q) => emit('navigate-state', k, q)"
     />
 
     <section class="ov-sec">

@@ -79,6 +79,21 @@ public class DiagnosisSummaryCache {
 			append(canonical, finding.detail());
 			append(canonical, finding.suggestedFix());
 			append(canonical, finding.source());
+			// The target, field by field, because "every field" has to stay true as
+			// fields
+			// are added — and this one is not redundant with `object`. The display string
+			// carries NO namespace, so `Pod/web` in `prod` and `Pod/web` in `staging`
+			// failing the same way produced an identical key: two different finding
+			// lists,
+			// one cached summary, served for whichever namespace asked second. That is
+			// the
+			// collision this method exists to prevent, arriving through a new field
+			// rather
+			// than through SHA-256.
+			Finding.Target target = finding.target();
+			append(canonical, (target != null) ? target.kind() : null);
+			append(canonical, (target != null) ? target.namespace() : null);
+			append(canonical, (target != null) ? target.name() : null);
 			canonical.append(RECORD);
 		}
 		return HEX.formatHex(sha256(canonical.toString()));

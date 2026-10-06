@@ -520,7 +520,23 @@ const SCENES = [
     prepare: 'close;partial;leaf:Pods;wait:500;leaf:Cluster/Overview;wait:1500;scroll:.dx-item.dx-warning',
     // The text selectors resolve to their FIRST match, which is the critical card — the one
     // this scroll puts fully on screen.
-    selectors: ['.dx-sev-critical', '.dx-sev-warning', '.dx-item-title', '.dx-obj', '.dx-detail', '.dx-fix'],
+    // `.dx-obj-link` is its own entry rather than trusting `.dx-obj`: a reference the shell can
+    // reach is a <button> and one it cannot is a <div>, and the UA stylesheet gives a button a
+    // colour of its own. Both are in this scene precisely so neither stands in for the other.
+    selectors: [
+      '.dx-sev-critical',
+      '.dx-sev-warning',
+      '.dx-item-title',
+      // `:not(.dx-obj-link)` or this measures the LINK twice: the linked element carries BOTH
+      // classes, the sampler takes the first match, and the link sorts first in this scene — so
+      // a bare `.dx-obj` silently stopped watching the plain form and reported the link's ratio
+      // under its name. Same shape as GH#389's `.n-tag`, found the same way: two selectors that
+      // returned the identical number when they describe two different colours.
+      '.dx-obj:not(.dx-obj-link)',
+      '.dx-obj-link',
+      '.dx-detail',
+      '.dx-fix',
+    ],
   },
   {
     // The two findings that say the audit did not see everything. They are the reason this
@@ -1260,15 +1276,25 @@ const PARTIAL_DIAGNOSIS = {
     {
       severity: 'critical',
       title: 'ImagePullBackOff',
-      object: 'Pod/sim-ns-2/sim-pod-11',
+      // Two segments, not three: this is the shape `PodDiagnosis` really emits. The display
+      // string has never carried a namespace, which is the whole reason `target` exists.
+      object: 'Pod/sim-pod-11',
       detail: 'Back-off pulling image "registry.example.test/sim/api:1.4.2"',
       suggestedFix: 'Check the image name and tag, and whether this namespace has a pull secret for that registry.',
       source: 'validator',
+      // Carries a target, so this reference renders as `.dx-obj-link` — the only finding here
+      // that does. The two forms are deliberately both on screen: they are different tags
+      // (<button> vs <div>) and a <button> does not inherit `color`, so measuring one says
+      // nothing about the other.
+      target: { kind: 'Pod', namespace: 'sim-ns-2', name: 'sim-pod-11' },
     },
     {
       severity: 'warning',
       title: 'Container runs privileged',
-      object: 'Pod/sim-ns-1/sim-pod-4 (agent)',
+      // NO target, and that is the real state of a security finding rather than an omission
+      // here: `SecurityFinding.object` is a display string in two documented shapes, so
+      // nothing can address it. This is what keeps the plain `.dx-obj` form on screen.
+      object: 'Pod/sim-pod-4 container agent',
       detail:
         "securityContext.privileged=true on container 'agent'" +
         ' — it holds every capability the kernel has, and can reconfigure the node',
