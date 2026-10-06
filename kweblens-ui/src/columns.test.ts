@@ -194,28 +194,32 @@ describe('eventTypeTone', () => {
   });
 
   it('classifies Normal as ok, and leaves the badging decision to badgeTone', () => {
-    // Normal says what Running says, so it classifies the same way. It ends up unbadged
-    // because of the shared convention, not because of a special case hidden in here.
+    // Normal says what Running says, so it classifies the same way. Whether that ends up
+    // painted is the shared convention's call, not a special case hidden in here — which is
+    // why this assertion did not move when the convention was reversed.
     expect(eventTypeTone('Normal')).toBe('ok');
     expect(eventTypeTone('')).toBe('');
   });
 });
 
 describe('badgeTone', () => {
-  it('badges exceptions and leaves the ordinary case plain', () => {
-    // The one convention (#240): a pill marks something worth looking at. `ok` is the state
-    // nearly every row is in on a healthy cluster, so a pill there marks nothing.
+  it('paints every judged value and leaves an unjudged one plain', () => {
+    // The one convention: a judged value wears its tone, so "healthy" is a claim the column
+    // makes rather than the absence of one. `''` is the value nothing classified, and it is
+    // the only thing that stays bare — which is the distinction the previous rule could not
+    // draw, because under it `ok` and "unclassified" rendered identically.
     expect(badgeTone('err')).toBe('err');
     expect(badgeTone('warn')).toBe('warn');
-    expect(badgeTone('ok')).toBe('');
+    expect(badgeTone('ok')).toBe('ok');
     expect(badgeTone('')).toBe('');
   });
 
-  it('applies to Pods and Events identically — the point of the change', () => {
-    // Before, these two disagreed: statusTone badged everything, eventTypeTone badged only
-    // Warning. The same value class now renders the same way in both tables.
-    expect(badgeTone(statusTone('Running'))).toBe('');
-    expect(badgeTone(eventTypeTone('Normal'))).toBe('');
+  it('applies to Pods and Events identically — the point of the rule', () => {
+    // The split this rule exists to prevent: statusTone badging everything while eventTypeTone
+    // badged only Warning. Whichever way the rule is settled, the same value class must render
+    // the same way in both tables, and that is what this pins.
+    expect(badgeTone(statusTone('Running'))).toBe('ok');
+    expect(badgeTone(eventTypeTone('Normal'))).toBe('ok');
     expect(badgeTone(statusTone('CrashLoopBackOff'))).toBe('err');
     expect(badgeTone(eventTypeTone('Warning'))).toBe('warn');
   });
@@ -239,13 +243,16 @@ describe('toneFor', () => {
     expect(toneFor('ready', '0/3')).toBe('err');
   });
 
-  it('badges only exceptions, in every column it handles', () => {
-    // The single convention, at the one place the table asks for a cell's tone.
-    expect(toneFor('status', 'Running')).toBe('');
+  it('paints every judged value, in every column it handles', () => {
+    // The single convention, at the one place the table asks for a cell's tone. All three
+    // columns are listed in all three tones on purpose: this is the assertion that would fail
+    // if one of them were ever given its own rule again, which is the defect #240 was opened
+    // for and which this rule inherits the job of preventing.
+    expect(toneFor('status', 'Running')).toBe('ok');
     expect(toneFor('status', 'Pending')).toBe('warn');
     expect(toneFor('status', 'CrashLoopBackOff')).toBe('err');
-    expect(toneFor('ready', '3/3')).toBe('');
-    expect(toneFor('type', 'Normal')).toBe('');
+    expect(toneFor('ready', '3/3')).toBe('ok');
+    expect(toneFor('type', 'Normal')).toBe('ok');
     expect(toneFor('type', 'Warning')).toBe('warn');
   });
 
@@ -264,9 +271,11 @@ describe('toneFor', () => {
     });
     expect(toneFor('status', 'Unavailable', row('Unavailable', 'err'))).toBe('err');
     expect(toneFor('status', 'Pending', row('Pending', 'warn'))).toBe('warn');
-    // ok and idle both render as plain text — badgeTone's convention, unchanged: a pill marks
-    // an exception, and neither "healthy" nor "finished" is one.
-    expect(toneFor('status', 'Running', row('Running', 'ok'))).toBe('');
+    // ok is painted; idle is NOT, and the two part company here rather than in badgeTone.
+    // "Finished" and "scaled to zero by choice" are neither healthy nor broken, there is no
+    // --idle-tint to paint them with, and serverStateTone drops idle to '' before badgeTone
+    // ever sees it. So a fourth state stays plain while the three colours are a closed set.
+    expect(toneFor('status', 'Running', row('Running', 'ok'))).toBe('ok');
     expect(toneFor('status', 'Completed', row('Completed', 'idle'))).toBe('');
     // A state the keyword table would have called an error, that the server calls idle.
     expect(statusTone('Failed')).toBe('err');
@@ -279,7 +288,7 @@ describe('toneFor', () => {
     // verdict could not be reached this request.
     const pv: KubeObject = { kind: 'PersistentVolume', metadata: { name: 'pv' } };
     expect(toneFor('status', 'Failed', pv)).toBe('err');
-    expect(toneFor('status', 'Bound', pv)).toBe('');
+    expect(toneFor('status', 'Bound', pv)).toBe('ok');
   });
 });
 

@@ -386,6 +386,21 @@ const SCENES = [
     selectors: ['[data-col-key=status] .status-badge.tone-err'],
   },
   {
+    // And the ok tone, which until this change could not be measured BECAUSE it could not be
+    // painted: `badgeTone` mapped `ok` to `''`, so `--ok-on-tint` on `--ok-tint` was a pair of
+    // tokens no pixel ever carried. `statusTones.ts` had been saying so in prose for two
+    // releases. Now that a healthy value wears a green pill, this is the tone on the MOST rows
+    // in the app — a bad ratio here is the one a reader meets on every screen, not an edge
+    // case — so it is the scene that most needed to exist and the last to get one.
+    //
+    // Same shape as its two siblings for the same reasons: its own scene because the chip
+    // filter puts one tone on screen at a time, and `[data-col-key=status]` because the Ready
+    // column badges `3/3` ok from these same tokens and comes first in DOM order.
+    name: 'row status pill: ok, by name',
+    prepare: 'close;leaf:Pods;wait:900;?fill:.content-head input=;wait:400;?click:.status-chip.tone-ok;wait:800',
+    selectors: ['[data-col-key=status] .status-badge.tone-ok'],
+  },
+  {
     // Every tone of an overview card's state list, HOVERED. Named per tone rather than as a
     // bare `.ov-state-l`, because the sampler takes the first match and the first line of the
     // first card is whichever state is most populous — so one selector watches one colour and
@@ -789,6 +804,7 @@ const WHY_ABSENT = {
     'needs a finished or scaled-to-zero row — `idle` is neither healthy nor broken and is drawn muted',
   // No mention of chips in these two: whether one is on the page is what REQUIRED_WHEN below
   // decides, and a reason that guessed at it would contradict the verdict printed beside it.
+  '[data-col-key=status] .status-badge.tone-ok': 'needs a pod in a healthy state — a tinted pill is drawn only for one',
   '[data-col-key=status] .status-badge.tone-warn': 'needs a pod in a warn state — a tinted pill is drawn only for one',
   '[data-col-key=status] .status-badge.tone-err': 'needs a pod in a failing state — a tinted pill is drawn only for one',
   '.ov-sec .n-data-table-tr.warn .status-badge.tone-warn':
@@ -813,6 +829,13 @@ const WHY_ABSENT = {
  * cluster whose rows do not carry the state.
  */
 const REQUIRED_WHEN = {
+  // The ok tone is here on the same footing as the other two, and it is the one most likely to
+  // be owed: on a healthy cluster every row carries it, so "could not sample the green pill" is
+  // very nearly always a failure to look rather than a state the list lacks.
+  '[data-col-key=status] .status-badge.tone-ok': {
+    when: '.status-chip.tone-ok',
+    why: 'the list offers a healthy state chip, so a row in this list carries that state',
+  },
   '[data-col-key=status] .status-badge.tone-warn': {
     when: '.status-chip.tone-warn',
     why: 'the list offers a warn state chip, so a row in this list carries that state',
@@ -863,6 +886,7 @@ const FLOOR_OVERRIDE = {
   '.status-chip.tone-ok': 5.5,
   '.status-chip.tone-warn': 5.5,
   '.status-chip.tone-err': 5.5,
+  '[data-col-key=status] .status-badge.tone-ok': 5.5,
   '[data-col-key=status] .status-badge.tone-warn': 5.5,
   '[data-col-key=status] .status-badge.tone-err': 5.5,
   // #484's four, held to the same floor for the same reason: each is text on a translucent
@@ -1872,7 +1896,7 @@ const FIXTURE = `
     .ghost { position: relative; width: 200px; height: 24px; background: rgb(27,42,51); }
     .ghost .layer { position: absolute; inset: 0; background: rgb(255,255,255); color: rgb(0,0,0);
                     pointer-events: none; }
-    /* Per-tone addressing, and the tone that is NOT here (GH#393). Both pills would be one
+    /* Per-tone addressing, and the tone that is NOT here (GH#393). All three pills would be one
        .n-tag match, which is how one tone's ratio got reported under another's name. */
     .status-chip { background: rgb(255,255,255); color: rgb(51,54,57); padding: 2px 8px; }
     .status-badge { background: rgb(255,255,255); color: rgb(51,54,57); padding: 2px 8px; }
@@ -1886,14 +1910,17 @@ const FIXTURE = `
     <div class="cover"><div class="under">hidden under</div><div class="over"></div></div>
     <div id="offscreen">parked off-screen</div>
     <div class="ghost"><div class="layer">pointer-events none</div></div>
-    <!-- The list header says both tones are in these rows... -->
+    <!-- The list header says all three tones are in these rows... -->
     <div class="status-rail">
+      <span class="status-chip tone-ok">Running</span>
       <span class="status-chip tone-warn">Pending</span>
       <span class="status-chip tone-err">CrashLoopBackOff</span>
     </div>
-    <!-- ...and only one of them has a pill. The missing one is the control that must FIRE:
-         before GH#393 an .n-tag selector would have measured the warn pill, reported it as
-         "the status pill", and passed the run with the danger tone never sampled. -->
+    <!-- ...and only two of them have a pill. The missing one is the control that must FIRE:
+         before GH#393 an .n-tag selector would have measured whichever pill sorted first,
+         reported it as "the status pill", and passed the run with the danger tone never
+         sampled. The ok pill sitting first is what makes that failure reproducible here. -->
+    <div class="n-data-table-td" data-col-key="status"><span class="status-badge tone-ok">Running</span></div>
     <div class="n-data-table-td" data-col-key="status"><span class="status-badge tone-warn">Pending</span></div>
     <div class="n-data-table-td" data-col-key="status"></div>
     <!-- The Ready column renders the same component, and an unscoped selector reaches it: this
@@ -1926,6 +1953,11 @@ const CONTROLS = [
   // UNDER ITS OWN NAME; the tone that is not must fail, because the page's own status chip says
   // a row carries that state. These use the real scene selectors and the real REQUIRED_WHEN
   // entries, so a change to either is a change to this control.
+  {
+    sel: '[data-col-key=status] .status-badge.tone-ok',
+    want: WHITE,
+    why: 'the ok tone, measured under its own name — it sorts first, so it is what an unscoped selector would have reported as "the status pill"',
+  },
   {
     sel: '[data-col-key=status] .status-badge.tone-warn',
     want: WHITE,
