@@ -96,9 +96,32 @@ export interface FindingLink {
  * namespaces, and unescaped it matches any character, which is the same off-by-a-few bug in a
  * quieter form.
  */
-/** A field value as a term matching that value and nothing else. */
+/**
+ * A field value as a term matching that value and nothing else.
+ *
+ * The escape set is the regex one and NOTHING ELSE, which was checked rather than assumed.
+ * The value is read by two things — `objectFilter.ts`'s tokenizer, then the regex engine —
+ * and a slash in the value looks like it must break the first, since `readDelimited` ends its
+ * run at the first `/` and honours no backslash. Measured against the parser, it does not: at
+ * the TOKEN level `name:/^foo/bar$/` stays one term and the value is taken from the first
+ * slash to the LAST, so the inner one is ordinary regex content. Two field terms, the right
+ * object selected, every decoy rejected.
+ *
+ * That matters because a slash can really arrive: `EventService` builds an event's object as
+ * `kind + "/" + name` from `involvedObject.name`, which the API server does not validate, and
+ * `eventTarget` keeps everything after the FIRST slash because the rest may contain more. It
+ * is pinned by a test that goes through the real parser rather than by an escape here, since
+ * the tokenizer's behaviour is incidental rather than promised — if it ever changes, that
+ * test is what says so.
+ *
+ * What the escaping IS for is the metacharacter that turns up in ordinary Kubernetes names:
+ * `.`, which unescaped matches any character. The rest of the class keeps a name carrying
+ * `(`, `[` or `+` from forming a pattern that throws — and a query that fails to parse
+ * matches EVERY row, so the failure would be a list that looks filtered and is not.
+ */
 function exactly(value: string): string {
-  return `/^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/`;
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return `/^${escaped}$/`;
 }
 
 export function findingLink(f: Finding, knowsKind?: (kind: string) => boolean): FindingLink | null {
