@@ -13,7 +13,7 @@
 
     <groupId>org.alexmond</groupId>
     <artifactId>kweblens-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <packaging>pom</packaging>
     <name>kweblens-parent</name>
     <description>kweblens parent POM — a web-based Kubernetes IDE (Freelens on Spring Boot)</description>
