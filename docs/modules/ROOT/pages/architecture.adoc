@@ -42,10 +42,12 @@ default, so a normal `verify` only compiles the module and needs no live cluster
 
 [NOTE]
 ====
-**Nothing has been released.** `kweblens-core` and `kweblens-cli` are *configured* to publish to
-Maven Central — the `release` profile wires signing, sources, Javadoc and the central publishing
-plugin — but no tag has been cut and no artifact is on Central. The version is still
-`0.1.0-SNAPSHOT`.
+**Nothing is published to Maven Central, by decision.** kweblens is an application — its
+surface is a screen, a terminal and an MCP endpoint, not an API anyone compiles against — so a
+release is a git tag plus the three runnable jars attached to the GitHub release, and the
+signing and central-publishing plugins have been removed from the POM rather than left wired
+to a path nothing takes. The `release` profile now only builds sources and Javadoc for the two
+library modules.
 ====
 
 === Reactor shape and the profile trick

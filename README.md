@@ -8,8 +8,13 @@ manage Helm releases — and expose the same cluster view to AI assistants over 
 Because it runs as a server rather than on your laptop, the browser needs no kubeconfig, no
 `kubectl` and no local install.
 
-> **Status: 0.1.0-SNAPSHOT — working, not yet production-ready.** The surfaces below are
+> **Status: early — working, not yet production-ready.** The surfaces below are
 > implemented and used daily against real clusters.
+>
+> **Download:** the [latest release](https://github.com/alexmond/kweblens/releases/latest)
+> attaches three runnable jars — `kweblens-<ver>.jar` (the web app), `kweblens-cli-<ver>.jar`
+> and `kweblens-tui-<ver>.jar`. Nothing is published to Maven Central; kweblens is an
+> application, not a library (see CLAUDE.md's Release section).
 >
 > **kweblens is built for one trusted operator, not for a team.** There is a single shared
 > admin account, no OIDC or per-user identity, and no RBAC-awareness — kweblens acts with its
@@ -78,18 +83,20 @@ See [the roadmap](docs/design/roadmap.md) for what is next.
 
 ## Modules
 
-| Module | What it is | Publishes to |
+| Module | What it is | Ships as |
 |---|---|---|
-| `kweblens-core` | Cluster registry, kubeconfig loading, resource/log/exec/metrics/schema access | Maven Central |
-| `kweblens-cli`  | Dependency-light cluster inspector (picocli) | Maven Central |
+| `kweblens-core` | Cluster registry, kubeconfig loading, resource/log/exec/metrics/schema access | — (bundled) |
+| `kweblens-cli`  | Dependency-light cluster inspector (picocli) | `kweblens-cli-<ver>.jar` |
 | `kweblens-ui`   | The Vue SPA (bundled into `kweblens-web`) | — |
-| `kweblens-web`  | The runnable app (REST API + SPA + MCP) | container image |
-| `kweblens-tui`  | Terminal cluster browser over `kweblens-core` (read-only; no server needed) | — |
+| `kweblens-web`  | The runnable app (REST API + SPA + MCP) | `kweblens-<ver>.jar` + container image |
+| `kweblens-tui`  | Terminal cluster browser over `kweblens-core` (read-only; no server needed) | `kweblens-tui-<ver>.jar` |
 | `kweblens-it`   | On-demand operational/connectivity tasks (tag `it`) | — |
 
-> **No release has been cut yet.** Nothing is on Maven Central and no image is published, so
-> today the only way to get kweblens is to build it — see [Build & run](#build--run) and
-> [Container image](#container-image). The column above is where each module *will* publish.
+> **Nothing is published to Maven Central**, by decision: kweblens is an application, not a
+> library, and a published coordinate owes callers a stable API and a jar that starts. The
+> three runnable jars are attached to each
+> [GitHub release](https://github.com/alexmond/kweblens/releases); the container image is on
+> GHCR. To run an unreleased change, build it — see [Build & run](#build--run).
 
 ## Build & run
 
@@ -255,7 +262,7 @@ not there yet — see #369. Exec is still to come (#370).
 
 ```bash
 ./mvnw -Pdocker -pl kweblens-web -am package \
-  -Ddocker.image.name=ghcr.io/alexmond/kweblens:0.1.0 -Ddocker.publish=true
+  -Ddocker.image.name=ghcr.io/alexmond/kweblens:<version> -Ddocker.publish=true
 ```
 
 With a service account mounted, the fabric8 client auto-detects in-cluster config; otherwise it

@@ -31,7 +31,7 @@ profile that any explicit `-P` deactivates):
 
 # named tag, pushed straight to a registry
 ./mvnw -Pdocker -pl kweblens-web -am package \
-  -Ddocker.image.name=registry.example.com/kweblens:0.1.0 \
+  -Ddocker.image.name=registry.example.com/kweblens:<version> \
   -Ddocker.publish=true
 ----
 
@@ -58,14 +58,14 @@ The script has no defaults of its own beyond the namespace and release name (`kw
 helm upgrade --install kweblens deploy/helm/kweblens \
   --namespace kweblens --create-namespace \
   --set image.repository=registry.example.com/kweblens \
-  --set image.tag=0.1.0 \
+  --set image.tag=<version> \
   --set auth.openMode=false \
   --set auth.existingSecret=kweblens-auth
 ----
 
 The chart renders a Deployment, a Service, an optional Ingress, an optional ServiceAccount, an
-optional PVC, and — for hosting-cluster monitoring — a ClusterRole and binding. Chart version
-`0.1.0`, `appVersion` `0.1.0-SNAPSHOT`; the image tag defaults to `appVersion` when
+optional PVC, and — for hosting-cluster monitoring — a ClusterRole and binding. The chart's
+`appVersion` tracks the project version; the image tag defaults to `appVersion` when
 `image.tag` is empty.
 
 == Which clusters the pod sees

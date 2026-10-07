@@ -5,14 +5,20 @@ There is only one way to get kweblens today: build it. Nothing has ever been rel
 
 [IMPORTANT]
 ====
-*No artifact is published anywhere.* `kweblens-core` and `kweblens-cli` are configured to
-publish to Maven Central but no release has been cut — the version is still
-`0.1.0-SNAPSHOT`, there are no tags, and nothing resolves from a repository. There is also
-**no published container image**: the Helm chart's `values.yaml` defaults to
+*Nothing resolves from a Maven repository, and that is deliberate.* kweblens is an
+application rather than a library, so it is not published to Maven Central at all. What a
+release gives you is the
+https://github.com/alexmond/kweblens/releases/latest[GitHub release^] and three runnable jars:
+
+* `kweblens-<version>.jar` — the web app. `java -jar` it and open a browser.
+* `kweblens-cli-<version>.jar` — the dependency-light inspector.
+* `kweblens-tui-<version>.jar` — the terminal browser.
+
+There is also **no published container image**: the Helm chart's `values.yaml` defaults to
 `repository: kweblens` with no registry, so it assumes an image you built locally and
 pushed somewhere the cluster can pull from.
 
-Every route below therefore starts from a clone of the source.
+The routes below build from a clone, which is still the way to run an unreleased change.
 ====
 
 == What you need
@@ -135,12 +141,13 @@ is no Dockerfile. Only `kweblens-web` declares that plugin, so only it produces 
 ./mvnw -Pdocker -pl kweblens-web -am package
 ----
 
-That builds `kweblens:0.1.0-SNAPSHOT` locally. To name it and push it:
+That builds `kweblens:<project version>` locally — the tag follows `${project.version}`, so
+it is whatever the checkout says. To name it and push it:
 
 [source,bash]
 ----
 ./mvnw -Pdocker -pl kweblens-web -am package \
-  -Ddocker.image.name=registry.example.com/kweblens:0.1.0-SNAPSHOT \
+  -Ddocker.image.name=registry.example.com/kweblens:<version> \
   -Ddocker.publish=true
 ----
 
@@ -158,8 +165,8 @@ profile that needs the app has to do the same.
 
 == Helm chart
 
-The chart is in `deploy/helm/kweblens` (chart version `0.1.0`, `appVersion`
-`0.1.0-SNAPSHOT`). It is not published to a chart repository either — install it from the
+The chart is in `deploy/helm/kweblens`; its `appVersion` tracks the project version in
+`Chart.yaml`. It is not published to a chart repository either — install it from the
 checkout.
 
 [source,bash]
@@ -167,7 +174,7 @@ checkout.
 helm upgrade --install kweblens deploy/helm/kweblens \
   --namespace kweblens --create-namespace \
   --set image.repository=registry.example.com/kweblens \
-  --set image.tag=0.1.0-SNAPSHOT \
+  --set image.tag=<version> \
   --set auth.existingSecret=kweblens-auth \
   --set auth.openMode=false
 ----

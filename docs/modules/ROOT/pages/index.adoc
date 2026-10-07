@@ -21,8 +21,10 @@ xref:getting-started.adoc[First run].
 
 [IMPORTANT]
 ====
-*Status: 0.1.0-SNAPSHOT — working, not yet production-ready.* The surfaces below are implemented
-and used daily against real clusters. Nothing has been published to Maven Central yet.
+*Status: early — working, not yet production-ready.* The surfaces below are implemented
+and used daily against real clusters. Releases are GitHub releases with the runnable jars
+attached; nothing is published to Maven Central, because kweblens is an application rather
+than a library.
 
 *kweblens is built for one trusted operator, not for a team.* There is a single shared admin
 account, no OIDC or per-user identity, and no RBAC-awareness — kweblens acts with *its own*
