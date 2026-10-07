@@ -64,14 +64,19 @@ final class PodDiagnosis {
 	static List<Finding> forPod(GenericKubernetesResource pod) {
 		Map<String, Object> status = map(pod.getAdditionalProperties().get("status"));
 		String phase = str(status.get("phase"));
+		// Built ONCE, from the object itself, and handed to every finding below. The
+		// private methods used to take the pod's name as a bare String, which is why
+		// the namespace never reached a finding and nothing downstream could address
+		// one: the information was here the whole time and stopped at this line.
+		Finding.Target target = new Finding.Target("Pod", pod.getMetadata().getNamespace(), name(pod));
 		if ("Running".equals(phase) || "Succeeded".equals(phase)) {
-			return containerFindings(name(pod), status);
+			return containerFindings(target, status);
 		}
-		List<Finding> findings = containerFindings(name(pod), status);
+		List<Finding> findings = containerFindings(target, status);
 		if (!findings.isEmpty()) {
 			return findings;
 		}
-		Finding scheduling = schedulingFinding(name(pod), status, phase);
+		Finding scheduling = schedulingFinding(target, status, phase);
 		if (scheduling != null) {
 			findings.add(scheduling);
 			return findings;
@@ -84,10 +89,10 @@ final class PodDiagnosis {
 		// will not mount wearing a normal-looking state.
 		boolean starting = starting(status);
 		findings.add(new Finding(starting ? "info" : "warning", starting ? "Pod still starting" : "Pod not running",
-				"Pod/" + name(pod), "phase=" + phase,
+				"Pod/" + target.name(), "phase=" + phase,
 				starting ? "Normal for a new pod. If it persists, check the pod's events for a volume or image problem."
 						: "Check the pod's events and container states.",
-				"validator"));
+				"validator", target));
 		return findings;
 	}
 
@@ -113,7 +118,7 @@ final class PodDiagnosis {
 	 * This message is the diagnosis: it names how many nodes were considered and why each
 	 * was rejected — insufficient CPU, a taint, an unmatched affinity, an unbound claim.
 	 */
-	private static Finding schedulingFinding(String pod, Map<String, Object> status, String phase) {
+	private static Finding schedulingFinding(Finding.Target pod, Map<String, Object> status, String phase) {
 		Map<String, Object> unscheduled = list(status.get("conditions")).stream()
 			.filter((c) -> "PodScheduled".equals(c.get("type")) && "False".equals(str(c.get("status"))))
 			.findFirst()
@@ -123,22 +128,22 @@ final class PodDiagnosis {
 		}
 		String reason = str(unscheduled.get("reason"));
 		String message = str(unscheduled.get("message"));
-		return new Finding("critical", (reason != null) ? reason : "Not scheduled", "Pod/" + pod,
+		return new Finding("critical", (reason != null) ? reason : "Not scheduled", "Pod/" + pod.name(),
 				(message != null) ? message : "phase=" + phase,
 				"The scheduler's message says which constraint failed — resolve that, "
 						+ "or relax the request, affinity or toleration it names.",
-				"validator");
+				"validator", pod);
 	}
 
 	/** Init containers first: they block everything after them, so they are the cause. */
-	private static List<Finding> containerFindings(String pod, Map<String, Object> status) {
+	private static List<Finding> containerFindings(Finding.Target pod, Map<String, Object> status) {
 		List<Finding> findings = new ArrayList<>();
 		findings.addAll(scan(pod, status.get("initContainerStatuses"), true));
 		findings.addAll(scan(pod, status.get("containerStatuses"), false));
 		return findings;
 	}
 
-	private static List<Finding> scan(String pod, Object statuses, boolean init) {
+	private static List<Finding> scan(Finding.Target pod, Object statuses, boolean init) {
 		List<Finding> findings = new ArrayList<>();
 		for (Map<String, Object> container : list(statuses)) {
 			Finding finding = forContainer(pod, container, init);
@@ -149,7 +154,7 @@ final class PodDiagnosis {
 		return findings;
 	}
 
-	private static Finding forContainer(String pod, Map<String, Object> container, boolean init) {
+	private static Finding forContainer(Finding.Target pod, Map<String, Object> container, boolean init) {
 		String containerName = str(container.get("name"));
 		Map<String, Object> waiting = map(map(container.get("state")).get("waiting"));
 		Map<String, Object> lastTerminated = map(map(container.get("lastState")).get("terminated"));
@@ -164,12 +169,13 @@ final class PodDiagnosis {
 		if (init && !terminated.isEmpty() && exit != 0) {
 			return new Finding("critical", "Init container failed", where(pod, containerName, true),
 					"exit code " + exit + describeReason(terminated) + " — the app containers stay in PodInitializing",
-					"Read this init container's log (including the previous run) to see why it exited.", "validator");
+					"Read this init container's log (including the previous run) to see why it exited.", "validator",
+					pod);
 		}
 		return null;
 	}
 
-	private static Finding waitingFinding(String pod, String container, boolean init, String reason,
+	private static Finding waitingFinding(Finding.Target pod, String container, boolean init, String reason,
 			Map<String, Object> waiting, Map<String, Object> lastTerminated) {
 		int exit = num(lastTerminated.get("exitCode"), 0);
 		String lastReason = str(lastTerminated.get("reason"));
@@ -183,11 +189,12 @@ final class PodDiagnosis {
 					"the container was killed rather than exiting on its own"
 							+ ((exit != 0) ? " (exit code " + exit + ")" : ""),
 					"Compare the container's memory usage against its limit; raise the limit or fix the leak.",
-					"validator");
+					"validator", pod);
 		}
 		String detail = (exit != 0) ? "last exit code " + exit + describeReason(lastTerminated)
 				: str(waiting.get("message"));
-		return new Finding("critical", reason, where(pod, container, init), detail, suggestFor(reason), "validator");
+		return new Finding("critical", reason, where(pod, container, init), detail, suggestFor(reason), "validator",
+				pod);
 	}
 
 	private static String describeReason(Map<String, Object> terminated) {
@@ -195,11 +202,19 @@ final class PodDiagnosis {
 		return (reason != null && !reason.isBlank()) ? " (" + reason + ")" : "";
 	}
 
-	private static String where(String pod, String container, boolean init) {
+	/**
+	 * The DISPLAY string, which names the container when there is one.
+	 *
+	 * <p>
+	 * The container suffix lives here and never in {@link Finding.Target}: a container is
+	 * not an addressable object, so a link built from this string would have had to strip
+	 * it again. The reader gets the container's name; the link gets the pod.
+	 */
+	private static String where(Finding.Target pod, String container, boolean init) {
 		if (container == null || container.isBlank()) {
-			return "Pod/" + pod;
+			return "Pod/" + pod.name();
 		}
-		return "Pod/" + pod + (init ? " init container " : " container ") + container;
+		return "Pod/" + pod.name() + (init ? " init container " : " container ") + container;
 	}
 
 	private static String suggestFor(String reason) {

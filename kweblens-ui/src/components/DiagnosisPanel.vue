@@ -24,6 +24,8 @@ import {
   countLine,
   coverageNotice,
   type DiagnoseResult,
+  type Finding,
+  findingLink,
   groupFindings,
   parseSummary,
   sortFindings,
@@ -31,8 +33,24 @@ import {
 import { useAsyncData } from '../composables/useAsyncData';
 import ErrorNotice from './ErrorNotice.vue';
 
-const props = defineProps<{ cluster: string; namespace: string | null; authed?: boolean }>();
-const emit = defineEmits<{ (e: 'require-auth'): void }>();
+const props = defineProps<{
+  cluster: string;
+  namespace: string | null;
+  authed?: boolean;
+  /** Whether the shell can navigate to a kind — a reference with nowhere to go must not look clickable. */
+  knowsKind?: (kind: string) => boolean;
+}>();
+const emit = defineEmits<{
+  (e: 'require-auth'): void;
+  (e: 'navigate-state', kind: string, query: string): void;
+}>();
+
+/**
+ * Where a finding's object reference goes, or null when it stays text.
+ *
+ * The rule itself is in `diagnosis.ts` and tested without a DOM; this is only the binding.
+ */
+const linkFor = (f: Finding) => findingLink(f, props.knowsKind);
 
 const { data, loading, error, reload } = useAsyncData<DiagnoseResult>(
   () => [props.cluster, props.namespace],
@@ -135,7 +153,25 @@ const analyse = async () => {
             <span v-if="g.findings.length > 1" class="dx-times">×{{ g.findings.length }}</span>
           </div>
           <div v-for="(f, i) in g.findings" :key="i" class="dx-one">
-            <div class="dx-obj">{{ f.object }}</div>
+            <!-- A reference the shell can reach is a <button>, so it is keyboard-reachable and
+                 announced as a control; one it cannot reach is the plain text it has always been.
+                 The tag changes with the state, which is why `.dx-obj` has to set its own colour
+                 explicitly — a <button> does not inherit `color`, and that is exactly how
+                 `.ov-card.danger` once shipped at 1.34:1. -->
+            <component
+              :is="linkFor(f) ? 'button' : 'div'"
+              :type="linkFor(f) ? 'button' : undefined"
+              :class="'dx-obj' + (linkFor(f) ? ' dx-obj-link' : '')"
+              :title="linkFor(f) ? `Show ${f.object} in the ${linkFor(f)?.kind} list` : undefined"
+              @click="
+                () => {
+                  const l = linkFor(f);
+                  if (l) emit('navigate-state', l.kind, l.query);
+                }
+              "
+            >
+              {{ f.object }}
+            </component>
             <p v-if="f.detail" class="dx-detail">{{ f.detail }}</p>
           </div>
           <p v-if="g.findings[0].suggestedFix" class="dx-fix"><strong>Try:</strong> {{ g.findings[0].suggestedFix }}</p>

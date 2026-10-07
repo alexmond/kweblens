@@ -6,11 +6,11 @@ nav:
   - modules/ROOT/nav.adoc
 asciidoc:
   attributes:
-    # No `api-*` javadoc.io attributes yet, deliberately. javadoc.io serves versioned Javadoc
-    # only for artifacts that are actually on Maven Central, and kweblens has never been
-    # released — no tags, version still 0.1.0-SNAPSHOT. Adding the links now would ship a page
-    # full of 404s. Add `api-core` / `api-cli` here, and the API section to installation.adoc,
-    # in the same change that cuts the first release.
+    # No `api-*` javadoc.io attributes, and there will not be any. javadoc.io serves versioned
+    # Javadoc only for artifacts on Maven Central, and kweblens does not publish there — it is
+    # an application, released as a GitHub release with runnable jars attached. Adding the
+    # links would ship a page of permanent 404s. If that decision is ever reversed, they go in
+    # here together with the API section in installation.adoc.
     toc: left
     sectnums: ''
     keywords: 'Kubernetes, Kubernetes IDE, Kubernetes dashboard, Spring Boot, fabric8, Helm, MCP, Vue'

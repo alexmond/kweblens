@@ -757,26 +757,37 @@ broken. It is not; do not "fix" it.
   in-cluster config, otherwise it uses the mounted kubeconfig. Give the pod a (read-only, to
   start) RBAC role scoped to what the dashboard lists.
 
-## Release (Maven Central)
+## Release
 
-- **Nothing has ever been released** — no tags, no GitHub releases, version still
-  `0.1.0-SNAPSHOT`, both library artifacts 404 on Central. Do not describe any module as
-  "published"; it is roadmap item **R2**. The *machinery* is no longer the gap:
-  `.github/workflows/image.yml` (#311) builds `kweblens-web`, smoke-tests that the image reaches
-  a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch` where
-  `publish` is explicitly true (it defaults to **false**). That tag exists only because a human
-  ran `maven_release.yml`.
-- **Only the libraries publish**: `kweblens-core`, `kweblens-cli` (+ parent). `kweblens-web` and
-  `kweblens-tui` are not in the top-level `<modules>` — they live in an `activeByDefault`
-  `default` profile, so `-Prelease` drops them and the `docker` profile re-adds only the web app.
-  **Any new `-P` profile that needs the app must also list `<module>kweblens-web</module>`.**
-  The applications stay off the publishing path on purpose: their public surface is a screen, not
-  an API anyone compiles against, and a published coordinate owes callers a jar that starts —
-  which `kweblens-cli`, the one application that does publish, failed for its entire life (#363).
-- **Cut a release** via the `Maven release` workflow (`versions:set` → `verify` → tag → `deploy
-  -Prelease` → next SNAPSHOT). Publishing is **irreversible — never trigger without explicit
-  go-ahead.** Versions are numeric `MAJOR.MINOR.PATCH`; `-SNAPSHOT` only on dev.
-- Secrets: `OSSRH_USERNAME`, `OSSRH_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`.
+- **kweblens does NOT publish to Maven Central, and that is a decision rather than a gap.**
+  It is an application: its surface is a screen, a terminal and an MCP endpoint, not an API
+  anyone compiles against. A published coordinate owes callers a jar that starts and a stable
+  API across versions, and this repo has already paid for the other reading once —
+  `kweblens-cli` sat on the publishing path and shipped a fat jar that died on its first line
+  for as long as the module existed (#363). So there are no OSSRH or GPG secrets, and
+  `maven-gpg-plugin` / `central-publishing-maven-plugin` are **gone from the POM**: signing
+  with no key does not degrade, it fails, and a publishing plugin in a repo that never
+  publishes is a trap. Reversing this costs those two plugins plus four secrets.
+- **A release is a tag plus three runnable jars on the GitHub release.** `maven_release.yml`
+  (manual only) sets the version, runs `clean verify` — the whole reactor, the same gates CI
+  and `dev-verify.sh` run, so a release that would not survive review cannot be cut — tags,
+  then attaches `kweblens-<ver>.jar` (the web app), `kweblens-cli-<ver>.jar` and
+  `kweblens-tui-<ver>.jar`. They are **renamed on upload** because `finalName` is fixed in
+  each POM, so three releases would otherwise offer three indistinguishable `kweblens.jar`s.
+  The tag is created locally and pushed near the end, so a failure leaves no dangling remote
+  tag and nothing half-released.
+- **The `-Prelease` / `default` module split outlives the reason it was built for.**
+  `kweblens-web`, `kweblens-ui`, `kweblens-it` and `kweblens-tui` live in an `activeByDefault`
+  `default` profile and are therefore dropped by `-Prelease`, which existed to keep the
+  applications off the publishing path. Nothing publishes now, so what `-Prelease` still buys
+  is a source/javadoc build of the two library modules. **Any new `-P` profile that needs the
+  app must still list `<module>kweblens-web</module>`**, because explicitly activating a
+  profile deactivates `default`.
+- **`.github/workflows/image.yml`** (#311) builds `kweblens-web`, smoke-tests that the image
+  reaches a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch`
+  where `publish` is explicitly true (it defaults to **false**). A `v*` tag now exists, so
+  that trigger is live.
+- Versions are numeric `MAJOR.MINOR.PATCH`; `-SNAPSHOT` only on dev.
 
 ## MCP server
 

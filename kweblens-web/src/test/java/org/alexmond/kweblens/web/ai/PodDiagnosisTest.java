@@ -210,4 +210,77 @@ class PodDiagnosisTest {
 				"""))).singleElement().satisfies((f) -> assertThat(f.title()).isEqualTo("Pod not running"));
 	}
 
+	@Test
+	void namesTheObjectADDRESSABLYAsWellAsReadably() {
+		// The two strings answer different questions and this is why both exist. `object`
+		// is
+		// for a reader and says which CONTAINER is broken; `target` is what a link is
+		// built
+		// from and names the pod, because a container is not an addressable object. A UI
+		// that
+		// parsed the display string would have had to strip " container app" with a regex
+		// —
+		// and would still have had no namespace, which is not in that string at all.
+		List<Finding> findings = PodDiagnosis.forPod(pod("""
+				apiVersion: v1
+				kind: Pod
+				metadata: {name: web, namespace: prod}
+				status:
+				  phase: Running
+				  containerStatuses:
+				  - name: app
+				    state: {waiting: {reason: CrashLoopBackOff, message: "back-off"}}
+				    lastState: {terminated: {exitCode: 1, reason: Error}}
+				"""));
+		assertThat(findings).singleElement().satisfies((f) -> {
+			assertThat(f.object()).isEqualTo("Pod/web container app");
+			assertThat(f.target()).isEqualTo(new Finding.Target("Pod", "prod", "web"));
+		});
+	}
+
+	@Test
+	void carriesTheNamespaceThatNeverReachedAFindingBefore() {
+		// The regression that made this change necessary: every private method here took
+		// the
+		// pod's NAME as a bare String, so the namespace stopped at forPod and no finding
+		// could
+		// address a namespaced object. Asserted on the unschedulable path too because it
+		// is a
+		// different producer — four of them build `object` in four shapes, and the target
+		// is
+		// the one thing they now all agree on.
+		List<Finding> findings = PodDiagnosis.forPod(pod("""
+				apiVersion: v1
+				kind: Pod
+				metadata: {name: stuck, namespace: kube-system}
+				status:
+				  phase: Pending
+				  conditions:
+				  - {type: PodScheduled, status: "False", reason: Unschedulable, message: "0/5 nodes are available"}
+				"""));
+		assertThat(findings).singleElement().satisfies((f) -> {
+			assertThat(f.object()).isEqualTo("Pod/stuck");
+			assertThat(f.target()).isEqualTo(new Finding.Target("Pod", "kube-system", "stuck"));
+		});
+	}
+
+	@Test
+	void leavesTheNamespaceNullForAPodThatDeclaresNone() {
+		// Not a failure: a target with a null namespace is how `findingLink` knows to
+		// leave the
+		// `ns:` term off, and `ns:""` would match nothing and empty the list it just
+		// opened.
+		List<Finding> findings = PodDiagnosis.forPod(pod("""
+				apiVersion: v1
+				kind: Pod
+				metadata: {name: loose}
+				status:
+				  phase: Pending
+				  conditions:
+				  - {type: PodScheduled, status: "False", reason: Unschedulable, message: "nope"}
+				"""));
+		assertThat(findings).singleElement()
+			.satisfies((f) -> assertThat(f.target()).isEqualTo(new Finding.Target("Pod", null, "loose")));
+	}
+
 }

@@ -3,19 +3,66 @@ include::_header.adoc[]
 
 [IMPORTANT]
 ====
-**No release has been cut.** There are no git tags, no GitHub releases, and nothing on Maven
-Central. The version is `0.1.0-SNAPSHOT` and the only way to get kweblens today is to build it —
-see xref:installation.adoc[Installation].
-
-The section below is therefore not release history. It is a summary of what exists in `main`
-today, derived from the commit log, so that the first release has something to be measured
-against.
+**Nothing is published to Maven Central**, and that is a decision rather than a gap: kweblens is
+an application, not a library. A release is a git tag plus the three runnable jars attached to
+the https://github.com/alexmond/kweblens/releases[GitHub release^] —
+`kweblens-<version>.jar` (the web app), `kweblens-cli-<version>.jar` and
+`kweblens-tui-<version>.jar`. See xref:installation.adoc[Installation].
 ====
 
-== Unreleased — `0.1.0-SNAPSHOT`
+== 0.1.0
 
-The whole project to date: 238 commits between **2026-07-23** and **2026-08-07**, starting from an
-empty multi-module scaffold. Entries carry the pull-request number where one identifies the work.
+The first release. Everything below is the project to date: 352 commits from an empty
+multi-module scaffold. Entries carry the pull-request number where one identifies the work.
+
+=== Since the 0.1.0 body below was written
+
+The sections after this one were compiled at 238 commits (**2026-07-23** to **2026-08-07**).
+A further **113** landed before the tag, and they are summarised here rather than merged into
+the prose above, because what they mostly did was add a third front end and harden the
+instruments — not change the surfaces already described.
+
+kweblens-tui, a terminal cluster browser::
+* The whole module (#362), on TamboUI + JLine, reading the cluster through `kweblens-core`
+  directly and never through a running server, on the operator's own kubeconfig and RBAC.
+  Read-only in v1, enforced by a port with no write method (#143's epic, broken into
+  #360–#370 and delivered across #364–#370, #411–#477).
+* A screen that windows its rows rather than building a widget per object (#364, measured flat
+  in list size against linear), a watch supervisor that says when it has stopped being live
+  (#413, #417, #420, #431, #434), a detail pane made only of what the server already computed
+  (#368), a log pane that actually releases its stream (#369), drill-down as a visible,
+  editable filter (#366), and a command line that makes every discovered kind addressable
+  (#365).
+* The last inch is a real terminal: `scripts/tui-drive.sh` runs the shipped jar in tmux and
+  reads the frame back as text (#426, #442, #477).
+
+Columns computed once, server-side::
+* `kweblens-core`'s `column/` holds the kind-specific columns for the five kinds a terminal
+  opens first, and a parity gate renders the expected values from the SPA's own `columns.ts`
+  rather than hand-writing them twice (#367, #460).
+
+MCP::
+* `HealthTools.diagnose` gives an agent the deterministic diagnosis, through a port with no
+  `analyse` method so a tool cannot buy an inference (#383).
+* `list_resource_kinds` walks the nav tree instead of sampling its top level — it had been
+  answering "no custom kinds" on every cluster (#436).
+
+Correctness a reader can see::
+* A tri-state access affordance that fails open and is never a gate (#354).
+* Security findings with a cross-manifest rule (#353), one wrap policy for every table (#479),
+  the Escape key going to the innermost dialog (#488, #497), and a status-pill vocabulary the
+  cards and rows agree on.
+* A CRD lookup that stopped listing every CRD in the cluster to answer about one kind —
+  10.4 MB to 55 KB (#459).
+
+Instruments, which outrank features here::
+* `contrast-check.mjs` measures per tone rather than whichever sorted first (#393), and the
+  warn and danger tints are now measurably distinct on the ground they land on (#478, #482,
+  #484).
+* Dead CSS swept in three passes once a runtime sweep could tell a live rule from a dead one
+  (#403, #447, #451, #455, #456, #473).
+* `gitflow-incremental-builder` wired as a loop and never as the gate (#515), and the build
+  grew a live progress bar read from Maven's own output.
 
 === Features
 

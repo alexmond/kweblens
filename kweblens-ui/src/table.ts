@@ -22,9 +22,11 @@ export interface TableColumn extends ColumnDef {
  * A server-computed state's tone, mapped onto the table's three.
  *
  * `idle` has no pill and no colour: "finished", "scaled to zero by choice" and "nothing to
- * report" are neither healthy nor broken, and the overview mutes them for exactly that reason
- * (`StateCount.IDLE`). `ok` reaches badgeTone as `ok` and is left unbadged there, so the one
- * convention still lives in one place.
+ * report" are neither healthy nor broken, there is no `--idle-tint` to paint, and the overview
+ * mutes them for exactly that reason (`StateCount.IDLE`). It is dropped to `''` HERE rather
+ * than in `badgeTone`, which is what keeps the painted tones a closed set of three: `ok`
+ * reaches badgeTone as `ok` and is painted green there, so the one convention still lives in
+ * one place.
  */
 function serverStateTone(o: KubeObject): StatusTone | null {
   const tone = objStateTone(o);
@@ -37,8 +39,8 @@ function serverStateTone(o: KubeObject): StatusTone | null {
 /**
  * Tone for a text cell, keyed off the stable column key (not the display header).
  *
- * Every branch goes through badgeTone, so all three columns follow the one convention: a pill
- * is an exception, an ordinary value is plain text. See badgeTone for why, and for the cost.
+ * Every branch goes through badgeTone, so all three columns follow the one convention: a judged
+ * value wears its tone, an unclassified one is plain text. See badgeTone for why, and the cost.
  *
  * `row` is what lets the Status column be coloured by the verdict that produced its text
  * instead of by a keyword search over that text. Where the server computed a state, its tone

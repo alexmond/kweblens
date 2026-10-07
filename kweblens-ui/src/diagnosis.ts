@@ -25,6 +25,21 @@ export interface SummaryBlock {
 /** Severity as the server reports it. Anything unrecognised is treated as info. */
 export type Severity = 'critical' | 'warning' | 'info';
 
+/**
+ * The object a finding is about, in the three parts it takes to reach it.
+ *
+ * Sent by the server precisely so this file never parses {@link Finding.object}. That string
+ * is for a READER: it carries a container suffix (`Pod/web-0 container api`) and has never
+ * carried a namespace, so a namespaced object was not addressable from it at all. Four
+ * producers build it in four shapes, and a regex here would be a fifth opinion that any one
+ * of them could invalidate without this file knowing.
+ */
+interface FindingTarget {
+  kind: string;
+  namespace?: string | null;
+  name: string;
+}
+
 export interface Finding {
   severity: string;
   title: string;
@@ -32,6 +47,93 @@ export interface Finding {
   detail?: string | null;
   suggestedFix?: string | null;
   source?: string | null;
+  /** Absent when the finding names nothing a reader can be sent to — see {@link findingLink}. */
+  target?: FindingTarget | null;
+}
+
+/**
+ * Where a finding's object reference goes, or null when it goes nowhere.
+ *
+ * Deliberately the same two values `navigate-state` already takes, so a finding reuses the
+ * path the overview cards have used since #338 rather than introducing a second way to open
+ * a filtered list. The namespace is INSIDE the query rather than beside it: passing it
+ * separately would change the shell's own namespace filter — a side effect well beyond
+ * "show me this object" — while a `ns:` term narrows only this list and stays visible and
+ * editable next to the name.
+ */
+export interface FindingLink {
+  kind: string;
+  /** The list filter to install, in the app's own grammar (`objectFilter.ts`). */
+  query: string;
+}
+
+/**
+ * The destination for a finding's object reference, or null if it must stay plain text.
+ *
+ * Three ways a finding has nowhere to go, and all three are REAL answers rather than
+ * failures: the server sent no target (a security audit line, whose own `object` is a
+ * display string in two shapes and so cannot be addressed); the target is missing a kind or
+ * a name; or the shell does not model that kind, which is `knowsKind` — the same guard the
+ * Warnings table has used since its rows became clickable. A reference with nowhere to go
+ * renders exactly as it always did, because a control that looks clickable and does nothing
+ * is worse than one that never offered.
+ *
+ * The destination is the kind's LIST with a `name:` filter, not the object's drawer. That
+ * keeps it the app's one way of pointing at an object: a visible, editable query the reader
+ * can widen to see the object's siblings, and which degrades to an honest empty list when
+ * the finding has outlived the thing it is about — a diagnosis routinely does.
+ *
+ * The terms are ANCHORED REGEXES, and that is the whole difference between landing on the
+ * object and landing near it. `name:` `ns:` and `kind:` are SUBSTRING matches — deliberately,
+ * because half a pod name is the useful question in a search box — so `name:sim-pod-2` also
+ * brings back `sim-pod-20` through `sim-pod-29`. Measured: a finding about one pod opened a
+ * list of five. Quoting does not fix it; `objectFilter.ts` documents "a quoted value is exact
+ * too" under `status:`, which is the one field that compares whole values. For these three
+ * the only exact form the grammar has is `/^…$/`.
+ *
+ * The value is escaped because it is cluster-supplied text going into a pattern, and the
+ * metacharacter that actually turns up in Kubernetes names is `.` — common in both names and
+ * namespaces, and unescaped it matches any character, which is the same off-by-a-few bug in a
+ * quieter form.
+ */
+/**
+ * A field value as a term matching that value and nothing else.
+ *
+ * The escape set is the regex one and NOTHING ELSE, which was checked rather than assumed.
+ * The value is read by two things — `objectFilter.ts`'s tokenizer, then the regex engine —
+ * and a slash in the value looks like it must break the first, since `readDelimited` ends its
+ * run at the first `/` and honours no backslash. Measured against the parser, it does not: at
+ * the TOKEN level `name:/^foo/bar$/` stays one term and the value is taken from the first
+ * slash to the LAST, so the inner one is ordinary regex content. Two field terms, the right
+ * object selected, every decoy rejected.
+ *
+ * That matters because a slash can really arrive: `EventService` builds an event's object as
+ * `kind + "/" + name` from `involvedObject.name`, which the API server does not validate, and
+ * `eventTarget` keeps everything after the FIRST slash because the rest may contain more. It
+ * is pinned by a test that goes through the real parser rather than by an escape here, since
+ * the tokenizer's behaviour is incidental rather than promised — if it ever changes, that
+ * test is what says so.
+ *
+ * What the escaping IS for is the metacharacter that turns up in ordinary Kubernetes names:
+ * `.`, which unescaped matches any character. The rest of the class keeps a name carrying
+ * `(`, `[` or `+` from forming a pattern that throws — and a query that fails to parse
+ * matches EVERY row, so the failure would be a list that looks filtered and is not.
+ */
+function exactly(value: string): string {
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return `/^${escaped}$/`;
+}
+
+export function findingLink(f: Finding, knowsKind?: (kind: string) => boolean): FindingLink | null {
+  const t = f.target;
+  if (!t || !t.kind || !t.name) {
+    return null;
+  }
+  if (knowsKind && !knowsKind(t.kind)) {
+    return null;
+  }
+  const ns = t.namespace ? ` ns:${exactly(t.namespace)}` : '';
+  return { kind: t.kind, query: `name:${exactly(t.name)}${ns}` };
 }
 
 /**

@@ -1,12 +1,28 @@
-name: Maven release
+name: Release
 
-# Cuts a release of the publishable libraries (kweblens-core, kweblens-cli) to Maven Central.
-# Manual only. The runnable app (kweblens-web) is excluded from the release reactor (see the
-# parent pom's 'default'/'release' profiles) and ships as a container image.
+# Cuts a release of kweblens: sets the version, runs the full gate, tags, and publishes a
+# GitHub release with the three runnable jars attached. Manual only.
 #
-# Required repo secrets (set via infra/scripts/gh-release-secrets.sh apply alexmond/kweblens):
-#   OSSRH_USERNAME, OSSRH_PASSWORD  — Central Portal user token
-#   GPG_PRIVATE_KEY, GPG_PASSPHRASE — armoured signing key + its passphrase
+# NOTHING IS PUBLISHED TO MAVEN CENTRAL, and that is a decision rather than a gap. kweblens is
+# an application: its public surface is a screen, a terminal and an MCP endpoint, not an API
+# anyone compiles against. A published coordinate owes callers a jar that starts and a stable
+# API across versions, and this repo has already paid for the other reading once — kweblens-cli
+# sat on the publishing path and shipped a fat jar that died on its first line for as long as
+# the module existed (#363). So the release is a tag plus downloadable jars, which is what a
+# reader of this project actually wants, and the repo needs no OSSRH or GPG secrets at all.
+#
+# WHAT A USER GETS, and why these three:
+#   kweblens-<ver>.jar       the web app — `java -jar` it and open a browser
+#   kweblens-cli-<ver>.jar   the dependency-light inspector
+#   kweblens-tui-<ver>.jar   the terminal browser
+# Each is the module's `exec`/fat jar, renamed on upload because `finalName` is fixed in the
+# POMs and an asset called `kweblens.jar` on three different releases is not downloadable with
+# any confidence about which one it is.
+#
+# THE GATE RUNS BEFORE THE TAG. `clean verify` is the whole reactor — the same gates CI and
+# scripts/dev-verify.sh run — so a release that would not have passed review cannot be cut. The
+# tag is created locally and pushed only at the end, so a failure anywhere leaves no dangling
+# tag on the remote and nothing half-released.
 on:
   workflow_dispatch:
     inputs:
@@ -32,11 +48,6 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-          server-id: central
-          server-username: OSSRH_USERNAME
-          server-password: OSSRH_PASSWORD
-          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-          gpg-passphrase: GPG_PASSPHRASE
 
       - name: Configure Git
         run: |
@@ -58,12 +69,63 @@ jobs:
           git commit -am "release: $RELEASE_VERSION"
           git tag -a "v$RELEASE_VERSION" -m "Release $RELEASE_VERSION"
 
-      - name: Deploy to Maven Central
+      # Named with the version. `finalName` is fixed in each POM, so the files on disk carry no
+      # version at all and three releases would offer three indistinguishable `kweblens.jar`s.
+      - name: Stage release assets
         env:
-          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-          OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: ./mvnw -B -Prelease -DskipTests deploy -Dgpg.passphrase="$GPG_PASSPHRASE"
+          RELEASE_VERSION: ${{ inputs.releaseVersion }}
+        run: |
+          mkdir -p dist
+          cp kweblens-web/target/kweblens.jar          "dist/kweblens-$RELEASE_VERSION.jar"
+          cp kweblens-cli/target/kweblens-cli-exec.jar "dist/kweblens-cli-$RELEASE_VERSION.jar"
+          cp kweblens-tui/target/kweblens-tui-exec.jar "dist/kweblens-tui-$RELEASE_VERSION.jar"
+          ls -l dist
+
+      # The tag goes first: `gh release create` needs it on the remote, and pushing it here
+      # rather than with the next-version commit keeps the release and the version bump
+      # independently recoverable if the second one fails.
+      - name: Push the tag
+        env:
+          RELEASE_VERSION: ${{ inputs.releaseVersion }}
+        run: git push origin "v$RELEASE_VERSION"
+
+      # `--notes` carries the body and `--generate-notes` appends GitHub's own commit/PR list
+      # under it. The body is not optional: on a release with no predecessor the generated
+      # section is every commit in the repo's history, which says nothing about what to
+      # download or how to run it.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.releaseVersion }}
+        run: |
+          gh release create "v$RELEASE_VERSION" \
+            --title "kweblens $RELEASE_VERSION" \
+            --notes "$(cat <<EOF
+          A web-based Kubernetes IDE — browse resources, edit and apply YAML, stream logs, view
+          events and metrics, exec into pods and manage Helm releases from a browser, a terminal,
+          or an MCP client.
+
+          ## Download and run
+
+          \`\`\`bash
+          java -jar kweblens-$RELEASE_VERSION.jar          # the web app, then open http://localhost:8080
+          java -jar kweblens-cli-$RELEASE_VERSION.jar      # the dependency-light inspector
+          java -jar kweblens-tui-$RELEASE_VERSION.jar      # the terminal browser
+          \`\`\`
+
+          Java 21+. kweblens reads your kubeconfig and registers every context as a cluster. The
+          web app generates an admin password at startup and logs it unless you set one.
+
+          There is also a container image on GHCR, and a Helm chart in \`deploy/helm/kweblens\`.
+
+          **Nothing is published to Maven Central** — kweblens is an application, not a library.
+          The jars above are the release.
+
+          Full notes: see the changelog in the docs.
+          EOF
+          )" \
+            --generate-notes \
+            dist/*.jar
 
       - name: Set next development version
         env:
@@ -75,4 +137,4 @@ jobs:
           NEXT_VERSION: ${{ inputs.nextVersion }}
         run: |
           git commit -am "chore: prepare for next development iteration $NEXT_VERSION"
-          git push origin HEAD:"$GITHUB_REF_NAME" --follow-tags
+          git push origin HEAD:"$GITHUB_REF_NAME"

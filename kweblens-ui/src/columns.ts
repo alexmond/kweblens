@@ -118,29 +118,41 @@ export function statusTone(value: string): StatusTone {
 }
 
 /**
- * THE convention for status-ish columns, in one place (#240): **a pill marks an exception.**
- * `warn` and `err` get one; `ok` renders as plain text, like an unclassified value.
+ * THE convention for status-ish columns, in one place: **every judged value wears its tone.**
+ * `ok` is green, `warn` amber, `err` red. A value nothing classified stays plain text.
  *
- * Before this, the app used two conventions a click apart — Pods badged every value including
- * `Running`, Events badged only `Warning` — which read as an oversight rather than a decision.
- * This is the decision, and it is the Events one:
+ * This REVERSES #240, which had the same job and chose the opposite rule — "a pill marks an
+ * exception", `ok` rendered bare. Both rules fix the thing #240 was actually opened for, which
+ * was two conventions a click apart (Pods badged every value including `Running`, Events badged
+ * only `Warning`); they differ on which way to settle it. What that rule cost, and why it was
+ * traded away:
  *
- * - A pill's whole job is to pull the eye. On a 600-row list where ~all rows are Running (or
- *   Normal, or Bound, or Deployed), a pill on every row pulls the eye to nothing at all, and
- *   the two rows that are actually broken lose the contrast that made them findable.
- * - It scales the right way. The healthier the cluster, the quieter the table; a table that
- *   has gone loud has something in it.
- * - Cost, stated plainly: a plain `Running` is no longer visibly distinct from a value we
- *   could not classify, and an all-healthy table loses its affirmative "all green" read. The
- *   opposite choice is defensible on exactly that ground. It loses on the big lists, which is
- *   where a status column earns its keep, so this is the trade taken.
+ * - **A reader cannot tell "healthy" from "we could not classify this".** Both rendered as bare
+ *   text, in the one column whose entire job is to answer that question. #240 names this cost
+ *   itself and calls the opposite choice defensible on exactly this ground.
+ * - **An all-healthy table never says so.** Absence of a pill is not a statement; it reads the
+ *   same as a column that failed to load. An affirmative green is a claim the app is making,
+ *   and it is one the app can support — the tone was always computed for `ok`, it just had
+ *   nowhere to go.
  *
- * Note the tone itself is still computed for `ok` — callers that want an affirmative signal
- * without chrome (Pods' container squares, the overview cards) read the classification and are
- * unaffected by this rule.
+ * What is given up, stated as plainly as #240 stated its own cost: on a 600-row list where
+ * nearly every row is `Running`, a pill on every row no longer pulls the eye on its own, and
+ * the broken row is found by its COLOUR rather than by being the only thing with chrome. That
+ * is a real loss of contrast and it is the reason the previous rule existed. It is accepted
+ * because the three tones are measurably distinct from each other (`toneTints.test.ts` pins
+ * ΔE ≥ 12 between every pair, in both themes), so a red row among green ones is still the one
+ * thing a reader lands on.
+ *
+ * `idle` never reaches here as a pill: `table.ts`'s `serverStateTone` maps it to `''` first.
+ * "Finished", "scaled to zero by choice" and "nothing to report" are neither healthy nor
+ * broken, there is no `--idle-tint` to paint, and no fourth colour was wanted.
+ *
+ * The function is now an identity over the three painted tones, and it stays because it is the
+ * seam: `statusTones.test.ts` derives the set of paintable tones FROM it, so this rule and the
+ * colour map cannot drift apart, and the next change to the rule still has exactly one place.
  */
 export function badgeTone(tone: StatusTone): StatusTone {
-  return tone === 'ok' ? '' : tone;
+  return tone;
 }
 
 /**
@@ -151,9 +163,10 @@ export function badgeTone(tone: StatusTone): StatusTone {
  * errors would put the loudest tone on the most common non-Normal row, which is how a list
  * stops being scannable.
  *
- * Normal classifies as `ok` — it says the same thing Running does — and is then left unbadged
+ * Normal classifies as `ok` — it says the same thing Running does — and is then painted green
  * by badgeTone, not by a special case hidden in here. Anything else (`type` is also a column
- * on Services and Secrets, and this sees only the column key) has no tone at all.
+ * on Services and Secrets, and this sees only the column key) has no tone at all, which is what
+ * keeps `ClusterIP` and `Opaque` from being coloured by a column key they happen to share.
  */
 export function eventTypeTone(value: string): StatusTone {
   const t = value.trim().toLowerCase();

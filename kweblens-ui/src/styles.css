@@ -4530,7 +4530,34 @@ body.dragging {
   margin-top: 2px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
+  /* Set explicitly, and that is load-bearing: this element is a <button> when the shell can
+     reach the object it names and a <div> when it cannot. A <button> does not inherit
+     `color` — the UA stylesheet hands it black, which is invisible on a dark panel and fine
+     on a light one, which is exactly how `.ov-card.danger` shipped at 1.34:1 and was
+     reported twice before anyone investigated. Any element that changes tag by state can
+     change colour by state. */
   color: var(--muted);
+}
+
+/* The linked form. A reference that opens the object's list looks like the other things in
+   this app that open something, and it keeps the monospace of the plain form because it is
+   still an object name — the affordance is the underline and the pointer, not a restyle. */
+.dx-obj-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  /* `--accent`, the same token `.cell-link` and `.cp-link` use. There is no `--link` token in
+     this sheet and inventing one here would be a second answer to "what colour is a link". */
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dx-obj-link:hover,
+.dx-obj-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* Bounded to a readable measure, in `ch` so it tracks the font rather than a guess at

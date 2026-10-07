@@ -323,7 +323,13 @@ public class DiagnoseService implements DeterministicDiagnosis {
 	private List<Finding> checkSecurity(SecurityAudit audit) {
 		return audit.findings()
 			.stream()
-			.map((f) -> new Finding(f.severity(), f.title(), f.object(), f.detail(), f.fix(), "validator"))
+			// No target: `SecurityFinding.object` is a display string in TWO documented
+			// shapes (`Kind/name` or `Kind/namespace/name`), so there is nothing here to
+			// address an object with that would be right in both. Giving it one means
+			// `kweblens-core` carrying structured identity too; until then these render
+			// as the plain text they always were, which is honest rather than a link
+			// that lands on the wrong object half the time.
+			.map((f) -> new Finding(f.severity(), f.title(), f.object(), f.detail(), f.fix(), "validator", null))
 			.toList();
 	}
 
@@ -344,9 +350,10 @@ public class DiagnoseService implements DeterministicDiagnosis {
 	 */
 	private Finding serviceFinding(KindHealth.UnhealthyItem item, ServiceBacking backing) {
 		String object = item.kind() + "/" + item.name();
+		Finding.Target target = new Finding.Target(item.kind(), item.namespace(), item.name());
 		if (!"no endpoints".equals(item.reason())) {
 			return new Finding("critical", "Service has nothing behind it", object, item.reason(),
-					"The pods exist but are not ready — check their readiness probe and logs.", "validator");
+					"The pods exist but are not ready — check their readiness probe and logs.", "validator", target);
 		}
 		// The detail is left EXACTLY as the health check produced it. RemediationService
 		// selects the scale-up proposal with `NO_ENDPOINTS.equals(finding.detail())`, so
@@ -356,9 +363,10 @@ public class DiagnoseService implements DeterministicDiagnosis {
 		// anyone matches on.
 		String fix = (backing != null) ? fixFor(backing) : SELECTOR_ADVICE;
 		if (backing != null && backing.cause() == ServiceBacking.Cause.IDLE_WORKLOAD) {
-			return new Finding("warning", IDLE_TITLE, object, item.reason(), fix, "validator");
+			return new Finding("warning", IDLE_TITLE, object, item.reason(), fix, "validator", target);
 		}
-		return new Finding("critical", "Service has nothing behind it", object, item.reason(), fix, "validator");
+		return new Finding("critical", "Service has nothing behind it", object, item.reason(), fix, "validator",
+				target);
 	}
 
 	private String fixFor(ServiceBacking backing) {
@@ -403,7 +411,7 @@ public class DiagnoseService implements DeterministicDiagnosis {
 						item.reason().startsWith("Pending")
 								? "The claim is not bound — check that its StorageClass exists and has a provisioner."
 								: "The volume is nearly full — free space or expand the claim.",
-						"validator"));
+						"validator", new Finding.Target(item.kind(), item.namespace(), item.name())));
 			}
 		}
 		return findings;
@@ -420,6 +428,29 @@ public class DiagnoseService implements DeterministicDiagnosis {
 	 * the ONLY evidence (a claim's provisioning error lives nowhere else); they are just
 	 * no longer allowed to drown it.
 	 */
+	/**
+	 * An event's involved object, addressably.
+	 *
+	 * <p>
+	 * Safe to split where {@link Finding#object()} is not: {@code EventSummary.object} is
+	 * one declared shape, {@code Kind/name}, and the namespace is its own field rather
+	 * than a third segment. Only the FIRST slash divides it — a name may itself contain
+	 * one, and the kind may not — which is the same rule the SPA's `eventObjectKind` has
+	 * followed since the Warnings table started linking its rows.
+	 *
+	 * <p>
+	 * Returns null rather than guessing when there is no kind or no name: a finding that
+	 * cannot say what it is about should be inert, not point somewhere arbitrary.
+	 */
+	private static Finding.Target eventTarget(EventSummary event) {
+		String object = (event.object() != null) ? event.object() : "";
+		int slash = object.indexOf('/');
+		if (slash <= 0 || slash == object.length() - 1) {
+			return null;
+		}
+		return new Finding.Target(object.substring(0, slash), event.namespace(), object.substring(slash + 1));
+	}
+
 	private List<Finding> checkEvents(String clusterId, String namespace, List<Finding> already) {
 		Set<String> explained = new HashSet<>();
 		for (Finding finding : already) {
@@ -437,7 +468,8 @@ public class DiagnoseService implements DeterministicDiagnosis {
 				continue;
 			}
 			findings.add(new Finding("warning", event.reason(), event.object(), event.message(),
-					"This event is the only record of the problem — start from the object it names.", "validator"));
+					"This event is the only record of the problem — start from the object it names.", "validator",
+					eventTarget(event)));
 		}
 		return findings;
 	}

@@ -23,7 +23,7 @@ const props = defineProps<{ text: string; tone?: StatusTone }>();
 
 // Callers that pass a `tone` have already applied badgeTone; the text fallback applies it here
 // so the callers that pass only a string (Helm release/history status, the node's pod list)
-// follow the same one convention — a pill is an exception, an ordinary value is plain text.
+// follow the same one convention — a judged value wears its tone, an unclassified one is bare.
 const tone = computed(() => props.tone ?? badgeTone(statusTone(props.text)));
 const colour = computed(() => TONE_VARS[tone.value] ?? null);
 </script>

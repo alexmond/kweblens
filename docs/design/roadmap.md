@@ -179,12 +179,21 @@ much is resident, `scripts/alloc-probe.sh` says which code allocated it — reac
 whenever the first surprises you. **Secret count per cluster is the thing to watch**, not pod
 count and not payload size. GH#293 is closed.
 
-### R2 — Cut a release and publish an image — **HALF DONE** (#311); the rest needs a human
+### R2 — Cut a release and publish an image — **DONE** (#311, 0.1.0)
 
-The gap in §4(b). Concretely: a numeric `0.1.0` (never `-RC`/`-M`), the two library artifacts to
-Central through the existing `maven_release.yml`, a workflow that builds and pushes the
-`kweblens-web` image, and a chart default that points at it. Until this exists every other item
-on this list improves software nobody can install.
+The gap in §4(b): until a release existed, every other item on this list improved software
+nobody could install. Closed by **0.1.0**.
+
+**Central was dropped, and that is the one thing this item got wrong for its whole life.** Every
+revision of R2 above assumed the two library artifacts go to Maven Central. They do not.
+kweblens is an application — its surface is a screen, a terminal and an MCP endpoint, not an API
+anyone compiles against — and a published coordinate owes callers a jar that starts and a stable
+API, which is a promise this repo already broke once (`kweblens-cli` shipped a fat jar that died
+on its first line for as long as the module existed, #363). So a release is a tag plus the three
+runnable jars on the GitHub release, the repo holds no OSSRH or GPG secrets, and
+`maven-gpg-plugin` / `central-publishing-maven-plugin` are gone from the POM rather than left
+wired to a path nothing takes. The paragraphs below are kept as written for the record; read
+"to Central" in them as "as a GitHub release".
 
 **Shipped (#311).** `.github/workflows/image.yml` builds `kweblens-web` through the `docker`
 profile, **smoke-tests that the image reaches a healthy actuator before publishing** — a

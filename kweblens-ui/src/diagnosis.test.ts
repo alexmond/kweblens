@@ -8,6 +8,7 @@ import {
   coverageNotice,
   type DiagnoseResult,
   type Finding,
+  findingLink,
   groupFindings,
   KEY_SEPARATOR,
   parseSummary,
@@ -15,6 +16,8 @@ import {
   severityOf,
   sortFindings,
 } from './diagnosis';
+import { matchesFilter, parseFilter } from './objectFilter';
+import type { KubeObject } from './types';
 
 const f = (severity: string, title = 't'): Finding => ({ severity, title, object: 'Pod/x' });
 
@@ -334,5 +337,165 @@ describe('analysisNote', () => {
   it('says nothing when nothing has been analysed', () => {
     expect(analysisNote(result(), now)).toBeNull();
     expect(analysisNote(result({ aiAvailable: false }), now)).toBeNull();
+  });
+});
+
+describe('findingLink', () => {
+  const f = (target: unknown) => ({ severity: 'critical', title: 't', object: 'Pod/web-0', target }) as never;
+
+  it('sends a finding to its kind list, filtered to exactly that object', () => {
+    expect(findingLink(f({ kind: 'Pod', namespace: 'prod', name: 'web-0' }))).toEqual({
+      kind: 'Pod',
+      query: 'name:/^web-0$/ ns:/^prod$/',
+    });
+  });
+
+  it('ANCHORS the terms, because these fields are substring matches', () => {
+    // The bug this caught in review, measured on a running app before it was believed: a
+    // finding about `sim-pod-2` opened a list of FIVE rows, because `name:` is a substring
+    // match and `sim-pod-20`..`29` all contain it. Quoting does not help — `objectFilter.ts`
+    // documents "a quoted value is exact too" under `status:`, the one field that compares
+    // whole values; `name:`, `ns:` and `kind:` are substrings on purpose, since half a pod
+    // name is the useful question in a search box. `/^…$/` is the only exact form they have.
+    const link = findingLink(f({ kind: 'Pod', namespace: 'prod', name: 'web' }));
+    expect(link?.query).toBe('name:/^web$/ ns:/^prod$/');
+    // The property, stated as the regexes themselves rather than as the string: the term the
+    // reader lands with must take `web` and leave `web-2` and `webhook` behind.
+    const name = new RegExp(/^web$/);
+    expect(name.test('web')).toBe(true);
+    expect(name.test('web-2')).toBe(false);
+    expect(name.test('webhook')).toBe(false);
+  });
+
+  it('escapes a dot, which is a real character in a real name', () => {
+    // `.` is both a regex metacharacter and ordinary in Kubernetes names and namespaces, so
+    // unescaped it matches ANY character — the same off-by-a-few defect in a quieter form.
+    const link = findingLink(f({ kind: 'Service', namespace: 'kube-system', name: 'my.app' }));
+    expect(link?.query).toBe('name:/^my\\.app$/ ns:/^kube-system$/');
+    expect(new RegExp('^my\\.app$').test('myXapp')).toBe(false);
+  });
+
+  it('puts the namespace in the QUERY, not beside it', () => {
+    // Passing a namespace separately would retarget the shell's own namespace filter — a side
+    // effect well past "show me this object". As a term it narrows this list only, and stays
+    // visible and editable next to the name. Both terms AND, which is what makes one row.
+    const link = findingLink(f({ kind: 'Pod', namespace: 'kube-system', name: 'coredns-abc' }));
+    expect(link?.query).toContain('ns:/^kube-system$/');
+    expect(Object.keys(link ?? {})).toEqual(['kind', 'query']);
+  });
+
+  it('omits the namespace term for a cluster-scoped object', () => {
+    // An `ns:` term would match nothing and the list would be honestly, uselessly empty.
+    expect(findingLink(f({ kind: 'Node', namespace: null, name: 'node-1' }))?.query).toBe('name:/^node-1$/');
+  });
+
+  it('declines when the server sent no target', () => {
+    // The security-audit case. Its own `object` is a display string in two documented shapes,
+    // so there is nothing to address it with — and a reference that LOOKS clickable and lands
+    // on the wrong object is worse than one that never offered.
+    expect(findingLink(f(null))).toBeNull();
+    expect(findingLink(f(undefined))).toBeNull();
+  });
+
+  it('declines on a half-built target rather than guessing', () => {
+    expect(findingLink(f({ kind: 'Pod', namespace: 'prod', name: '' }))).toBeNull();
+    expect(findingLink(f({ kind: '', namespace: 'prod', name: 'web-0' }))).toBeNull();
+  });
+
+  it('declines a kind the shell does not model, and asks BEFORE building anything', () => {
+    // The same guard the Warnings table has used since its rows became clickable. A CRD the
+    // nav has no leaf for has nowhere to send anyone, so the reference stays text.
+    const target = { kind: 'Widget', namespace: 'prod', name: 'w-1' };
+    expect(findingLink(f(target), (k) => k !== 'Widget')).toBeNull();
+    expect(findingLink(f(target), (k) => k === 'Widget')).toEqual({
+      kind: 'Widget',
+      query: 'name:/^w-1$/ ns:/^prod$/',
+    });
+  });
+
+  it('never reads the display string, however broken it is', () => {
+    // The regression this design exists to prevent. `object` carries a container suffix and no
+    // namespace, and four producers build it in four shapes — so a link parsed out of it would
+    // be a fifth opinion any one of them could invalidate silently. Here the display string is
+    // deliberate nonsense and the link is still right.
+    const finding = {
+      severity: 'critical',
+      title: 'CrashLoopBackOff',
+      object: 'Pod/web-0 container api',
+      target: { kind: 'Pod', namespace: 'prod', name: 'web-0' },
+    } as never;
+    expect(findingLink(finding)).toEqual({ kind: 'Pod', query: 'name:/^web-0$/ ns:/^prod$/' });
+  });
+});
+
+describe('findingLink: the query, fed to the REAL parser', () => {
+  // String equality is what let BOTH of this function's bugs through: it agreed with
+  // `name:"x"` while that selected five rows, and it would have agreed with an unescaped
+  // slash while that silently widened the query. So these go through `objectFilter` itself.
+  const obj = (name: string, namespace = 'prod', kind = 'Pod'): KubeObject =>
+    ({ kind, metadata: { name, namespace } }) as KubeObject;
+
+  const selects = (query: string, o: KubeObject): boolean => {
+    const parsed = parseFilter(query);
+    // Load-bearing, not a formality: `matchesFilter` returns TRUE for everything when the
+    // query failed to parse ("a broken pattern is not zero rows"). Without this line a
+    // mangled query reads as a passing test — the exact failure mode these tests exist for.
+    expect(parsed.error, `query did not parse: ${query}`).toBeNull();
+    return matchesFilter(o, parsed);
+  };
+
+  const queryFor = (name: string, namespace: string | null) =>
+    findingLink({ severity: 'critical', title: 't', object: 'o', target: { kind: 'Pod', namespace, name } } as never)
+      ?.query ?? '';
+
+  it('selects the object the finding named, and nothing that merely contains it', () => {
+    const q = queryFor('sim-pod-2', 'sim-ns-2');
+    expect(selects(q, obj('sim-pod-2', 'sim-ns-2'))).toBe(true);
+    expect(selects(q, obj('sim-pod-20', 'sim-ns-2'))).toBe(false);
+    expect(selects(q, obj('sim-pod-2', 'sim-ns-20'))).toBe(false);
+  });
+
+  it('survives a SLASH in the name, although the term then contains the regex delimiter', () => {
+    // This looked like a parser differential and is not — checked against the parser rather
+    // than argued from `readDelimited`, which does stop at the first `/`. At the TOKEN level
+    // the whole `name:/^foo/bar$/` stays one term and the value is taken from the first slash
+    // to the LAST, so the inner one is ordinary regex content. Measured: two field terms,
+    // `foo/bar` selected, `foo` and `foo/bar/baz` both rejected.
+    //
+    // So no escape is needed, and none is applied — but this is incidental behaviour of the
+    // tokenizer rather than a stated guarantee, and a name CAN contain a slash: `EventService`
+    // builds an event's object as `kind + "/" + name` from `involvedObject.name`, which the
+    // API server does not validate, and `eventTarget` keeps everything after the FIRST slash
+    // because the rest may contain more. Hence this test: if the tokenizer ever starts ending
+    // the run at the inner slash, this is what says so.
+    const q = queryFor('foo/bar', 'prod');
+    expect(selects(q, obj('foo/bar'))).toBe(true);
+    expect(selects(q, obj('foo'))).toBe(false);
+    expect(selects(q, obj('foo/bar/baz'))).toBe(false);
+  });
+
+  it('survives a dot, which is ordinary in a name and a metacharacter in a pattern', () => {
+    const q = queryFor('my.app', 'prod');
+    expect(selects(q, obj('my.app'))).toBe(true);
+    expect(selects(q, obj('myXapp'))).toBe(false);
+  });
+
+  it('survives a namespace with a slash in it too', () => {
+    // The namespace goes through the same builder, so it gets the same proof rather than the
+    // assumption that whatever is true of the name is true here — the two are separate terms
+    // in the same query, and only the first one was measured above.
+    const q = queryFor('web', 'ns/odd');
+    expect(selects(q, obj('web', 'ns/odd'))).toBe(true);
+    expect(selects(q, obj('web', 'ns'))).toBe(false);
+  });
+
+  it('still parses when the name carries regex metacharacters that could unbalance it', () => {
+    // An unescaped `(` or `[` is an unterminated group: the regex throws, `parseFilter` reports
+    // an error, and `matchesFilter` then matches EVERY row — a list that looks filtered and is
+    // not. `selects` asserts the parse, so this fails loudly rather than quietly passing.
+    for (const name of ['web(1)', 'web[0]', 'a+b', 'a|b', 'a$b', 'a^b', 'a*b', 'a?b']) {
+      expect(selects(queryFor(name, 'prod'), obj(name)), name).toBe(true);
+      expect(selects(queryFor(name, 'prod'), obj('web')), name).toBe(false);
+    }
   });
 });

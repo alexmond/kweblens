@@ -15,10 +15,12 @@ import { TONE_VARS } from './statusTones';
 //
 //   * A tone in the map that no caller can produce is a colour nothing can render and nothing
 //     can measure. `ok` was one for as long as the map existed: every call site routes through
-//     `badgeTone`, which maps `ok` to `''` (#240 — a pill marks an exception), so the one tone
-//     that had never been contrast-measured was the one the app cannot paint. A permanently
-//     unmeasurable selector reads as a pass, which is exactly what `contrast-check`'s own
-//     header calls the worst outcome available.
+//     `badgeTone`, which mapped `ok` to `''` (#240 — a pill marks an exception), so the one
+//     tone that had never been contrast-measured was the one the app cannot paint. A
+//     permanently unmeasurable selector reads as a pass, which is exactly what
+//     `contrast-check`'s own header calls the worst outcome available. `badgeTone` now passes
+//     `ok` through, so the map carries it again — and this check is what ties the two together
+//     in either direction, including the one just taken.
 //   * A foreground re-picked per tone drifts from the surface it sits on. The pill carried the
 //     state's `fg`, which is designed to read on the PANEL, and on its own tint the warn tone
 //     measured 4.51:1 in light against a 4.5 floor.
