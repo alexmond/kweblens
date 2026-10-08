@@ -84,6 +84,9 @@ xref:security.adoc[Security and identity] and ADR-001. Set
 
 == What is on screen
 
+.The cluster Overview: the brand bar on top, the cluster rail and navigation tree on the left, and objects that need attention named rather than only counted
+image::cluster-overview.png[The kweblens cluster overview, width=900]
+
 The UI is one page — there are no per-view URLs to bookmark.
 
 * *Brand bar*, across the top: the namespace selector, a Helm-release filter that scopes the
@@ -132,6 +135,9 @@ The full picture is in xref:clusters.adoc[Connecting clusters].
 
 == Browse a kind
 
+.The Pods list. It is live, the chips under the title filter by status, and the coloured squares are the pod's containers
+image::resource-list.png[The Pods list, width=900]
+
 Pick a cluster tile, then a kind in the nav — *Workloads → Pods* is the usual first stop.
 
 * The list is *live*. It is fetched once and then kept current from a Kubernetes watch
@@ -148,6 +154,9 @@ ConfigMap/Secret `data` is sent as keys with `null` values, which the table rend
 "we did not send it", not "it is empty". Opening a row refetches the full object.
 
 == Open the detail drawer
+
+.The detail drawer on a pod, open at Overview. `Controlled By` and `Service Account` are server-resolved relations, not links kweblens guessed
+image::pod-detail-drawer.png[The pod detail drawer, width=900]
 
 Click a row. The drawer slides in from the right with:
 
