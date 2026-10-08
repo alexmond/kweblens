@@ -8,6 +8,9 @@ because the difference matters when something goes wrong.
 
 == Opening the editor
 
+.The YAML tab of the drawer. `Hide Managed Fields` is on by default, so the manifest reads as something a person wrote
+image::drawer-yaml.png[The YAML tab of the detail drawer, width=900]
+
 The detail drawer's **YAML** tab shows the object read-only, with `Copy` and a
 **Hide Managed Fields** switch that removes the verbose `metadata.managedFields` block from the
 view.
@@ -20,6 +23,9 @@ disabled.
 A row's kebab menu offers `Edit` as a shortcut, which opens the drawer with the editor already up.
 
 == The four tabs
+
+.The editor, popped out over the list. The four tabs are always present; `Apply` is the only control that writes
+image::yaml-editor.png[The YAML editor with its four tabs, width=900]
 
 === Editor
 
