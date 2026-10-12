@@ -785,8 +785,14 @@ broken. It is not; do not "fix" it.
   profile deactivates `default`.
 - **`.github/workflows/image.yml`** (#311) builds `kweblens-web`, smoke-tests that the image
   reaches a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch`
-  where `publish` is explicitly true (it defaults to **false**). A `v*` tag now exists, so
-  that trigger is live.
+  where `publish` is explicitly true (it defaults to **false**).
+  **Its `v*` trigger does NOT fire from a release, and that is measured, not assumed.** The
+  0.1.0 run pushed `v0.1.0` with the default `GITHUB_TOKEN`, and GitHub does not start a
+  workflow from an event a `GITHUB_TOKEN` push created — the recursion guard. `image.yml` has
+  therefore **never run**, and no image is on GHCR. Publishing one today is a
+  `workflow_dispatch` with `publish: true`. Making it automatic means pushing the tag with a
+  PAT, or having the release workflow dispatch `image.yml` itself — a decision, because it is
+  a second publish on top of the release.
 - Versions are numeric `MAJOR.MINOR.PATCH`; `-SNAPSHOT` only on dev.
 
 ## MCP server
