@@ -111,6 +111,9 @@ looks like a total but is really the number of menu entries.
 [#filtering]
 == Filtering a list
 
+.The status chips are the `status:` vocabulary made clickable — the same words the filter box accepts
+image::resource-list.png[Filtering the Pods list by status, width=900]
+
 The box in the list header takes a filter expression. Typing a plain word is a case-insensitive
 substring search over name, namespace and kind, exactly as it has always been; everything else is
 opt-in on a character a substring never contained. The `?` button beside the box shows the same
@@ -210,6 +213,9 @@ so a filter that runs in the browser sees every object and cannot give that answ
 
 == What a list row shows
 
+.The Events list. `Normal` and `Warning` wear the same green/amber vocabulary the status column uses, so one glance reads the same way on every table
+image::events-list.png[The cluster Events list, width=900]
+
 Every list has the same frame — a selection checkbox, `Name`, `Namespace` (for namespaced kinds;
 clicking it sets the namespace filter), the kind's own columns, `Age`, and a `⋮` menu — with the
 middle columns varying by kind. ConfigMaps add a `Keys` count; Secrets add `Type` and `Keys`.
@@ -285,6 +291,9 @@ you. Per the identity model, an operator may read any Secret the underlying cred
 reach, and the drawer shows the real values — see xref:security.adoc[Security and identity].
 
 == Global search
+
+.Ctrl/⌘-K: switch cluster, or jump straight to a kind
+image::command-palette.png[The command palette, width=900]
 
 The command palette (`Ctrl`/`⌘`-`K`) is both the navigation jump — switch cluster, jump to a kind
 — and the global object search. Typing at least two characters queries

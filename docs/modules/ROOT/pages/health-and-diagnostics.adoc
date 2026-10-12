@@ -13,6 +13,9 @@ button.
 
 == The deterministic checks
 
+.The Workloads category overview. Every state on a card is a link, and `Needs attention` names the objects rather than only counting them
+image::workloads-overview.png[The Workloads category overview, width=900]
+
 The checks live in `kweblens-core` under `health/`, so the dashboard, the diagnosis endpoint and
 the xref:mcp.adoc[MCP tools] all read the *same* verdicts. A diagnosis and the Network page cannot
 disagree about whether a Service is broken, because there is one implementation.
@@ -234,7 +237,34 @@ allowed roots) are withheld until the caller signs in.
 
 `DiagnoseService` runs deterministic validators over the current state and returns findings sorted
 most-severe-first. Each finding carries a severity (`critical` / `warning` / `info`), a title, the
-object as `Kind/name`, the observed evidence, a suggested next step, and a source.
+object, the observed evidence, a suggested next step, a source — and a `target`.
+
+The object is named *twice*, deliberately, because one string cannot do both jobs:
+
+[cols="1,3"]
+|===
+| Field | What it is
+
+| `object`
+| The display string, for a reader. Its shape varies on purpose — `Pod/web-0`,
+  `Pod/web-0 container api`, `Service/api` — and *nothing parses it*. It carries no namespace,
+  so a namespaced object is not addressable from it at all.
+
+| `target`
+| The same object addressably: `kind`, `namespace`, `name`, with no container suffix. It is
+  `null` when the finding names nothing a reader can be sent to — a cluster-scoped audit line,
+  or an object that was never resolved — and that is a real answer rather than a gap.
+|===
+
+Where a finding has a target, the UI renders its object reference as a *link* that opens that
+kind's list filtered to exactly that one object. The filter it builds is anchored
+(`name:/^web-0$/`), because the `name:` term is a *substring* match: an unanchored query for
+`sim-pod-2` also selects `sim-pod-20` through `sim-pod-29`. A finding whose target names a kind
+the nav does not know stays plain text rather than offering a link that would go nowhere.
+
+Security findings carry no target today — `SecurityFinding.object` is a display string in two
+documented shapes, and guessing identity back out of it is exactly the parse the `target` field
+exists to avoid. They render as the plain text they always were.
 
 The validators are:
 

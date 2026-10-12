@@ -8,6 +8,12 @@ manage Helm releases — and expose the same cluster view to AI assistants over 
 Because it runs as a server rather than on your laptop, the browser needs no kubeconfig, no
 `kubectl` and no local install.
 
+![The kweblens cluster overview](docs/modules/ROOT/images/cluster-overview.png)
+
+<sub>Every screenshot here is taken against kweblens's built-in **simulator**, not a real
+cluster — the names and addresses are generated. You can run the same thing with no cluster
+at all: see [the simulator](#no-cluster-use-the-built-in-simulator).</sub>
+
 > **Status: early — working, not yet production-ready.** The surfaces below are
 > implemented and used daily against real clusters.
 >
@@ -71,6 +77,17 @@ What none of that covers: the `apply` that actually writes is still
 `forceConflicts().serverSideApply()` with no `dryRun`, because that *is* the write. The preview
 is a separate request an operator can choose to run; nothing forces them to look at it first.
 See [the roadmap](docs/design/roadmap.md) for what is next.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Pods list](docs/modules/ROOT/images/resource-list.png) | ![Detail drawer](docs/modules/ROOT/images/pod-detail-drawer.png) |
+| **Resource lists are live.** The chips under the title are the `status:` filter vocabulary made clickable; the coloured squares are a pod's containers. | **The detail drawer.** `Controlled By`, `Service Account` and the other relations are resolved server-side, not guessed in the browser. |
+| ![YAML editor](docs/modules/ROOT/images/yaml-editor.png) | ![Workloads overview](docs/modules/ROOT/images/workloads-overview.png) |
+| **The YAML editor**, with completion and validation driven by the cluster's own OpenAPI v3 schema. *Review Changes* diffs your edit against what was loaded **and** against what a real `dryRun=All` says the cluster would store. | **Category overviews** name the objects that need attention rather than only counting them, and every state on a card is a link to that filtered list. |
+
+More, in context, in the [documentation](docs/modules/ROOT/pages/index.adoc).
 
 ## Stack
 

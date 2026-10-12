@@ -46,6 +46,9 @@ revision 1, and defaulting to the previous revision) and `Uninstall`.
 
 === Charts
 
+.The Charts pane, searchable across every configured repository. Everything here comes through jhelm — there is no `helm` binary on the box
+image::helm-charts.png[The Helm Charts pane, width=900]
+
 The charts available from the configured repositories, searchable. `Install` opens the install
 dialog.
 
