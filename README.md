@@ -112,10 +112,11 @@ More, in context, in the [documentation](docs/modules/ROOT/pages/index.adoc).
 > **Nothing is published to Maven Central**, by decision: kweblens is an application, not a
 > library, and a published coordinate owes callers a stable API and a jar that starts. The
 > three runnable jars are attached to each
-> [GitHub release](https://github.com/alexmond/kweblens/releases). There is **no container
-> image on GHCR yet** — the workflow that would push one has never run (its `v*` trigger
-> cannot fire from a `GITHUB_TOKEN` tag push), so build your own: see
-> [Build & run](#build--run) and [Deploying to Kubernetes](docs/modules/ROOT/pages/deployment.adoc).
+> [GitHub release](https://github.com/alexmond/kweblens/releases), and the container image is
+> on GHCR at `ghcr.io/alexmond/kweblens` (`0.2.0`, `latest`). Note it is published by a **manual
+> workflow dispatch**, not by the release: `image.yml`'s `v*` trigger cannot fire from a tag
+> pushed with the default `GITHUB_TOKEN`. See
+> [Deploying to Kubernetes](docs/modules/ROOT/pages/deployment.adoc).
 
 ## Build & run
 

@@ -10,20 +10,22 @@ image, how the pod finds its credentials, and the RBAC it needs.
 
 [IMPORTANT]
 ====
-*There is no image on GHCR, and the workflow that would push one has never run.*
+*The image is published, but not by the release — and that distinction matters if you expect
+a new tag to appear on its own.*
 
-`.github/workflows/image.yml` exists: it builds `kweblens-web`, smoke-tests that the image
-reaches a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch`
-where `publish` is explicitly true (it defaults to false). Its `v*` trigger did **not** fire
-for `v0.1.0`, and that is measured rather than assumed: the release workflow pushes the tag
-with the default `GITHUB_TOKEN`, and GitHub does not start a workflow from an event a
-`GITHUB_TOKEN` push created — the recursion guard. So the tag that was supposed to publish
-the image published nothing, and `ghcr.io/alexmond/kweblens` does not resolve.
+`ghcr.io/alexmond/kweblens` serves `0.2.0` and `latest`, which the chart pulls by default.
 
-The chart's `image.repository` default is `ghcr.io/alexmond/kweblens`, which therefore does
-not pull today. *Until an image is published, build and push your own* and set
-`image.repository` to it. Publishing the official one is a `workflow_dispatch` on
-`image.yml` with `publish: true`.
+`.github/workflows/image.yml` builds `kweblens-web`, smoke-tests that the image reaches a
+healthy actuator, and pushes on a `v*` tag or on a `workflow_dispatch` where `publish` is
+explicitly true (it defaults to false). **The `v*` trigger has never fired**, and that is
+measured rather than assumed: the release workflow pushes the tag with the default
+`GITHUB_TOKEN`, and GitHub does not start a workflow from an event a `GITHUB_TOKEN` push
+created — the recursion guard. `v0.1.0` published nothing, and `v0.2.0`'s image was pushed by
+hand afterwards.
+
+So *a release does not publish an image*. Until the tag is pushed with a PAT, or the release
+workflow dispatches `image.yml` itself, each release needs a `workflow_dispatch` with
+`publish: true` — and a version with no image is a version the chart cannot pull.
 ====
 
 == The image
