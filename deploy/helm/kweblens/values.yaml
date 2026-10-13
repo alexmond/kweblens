@@ -11,8 +11,10 @@ image:
   # rule is about lab-internal registries, hosts and secrets, which still come from a private
   # overlay. A private mirror overrides this, e.g. registry.example.com/kweblens.
   #
-  # NOTE: no release has been cut yet (roadmap R2), so this tag does not exist in GHCR until
-  # the first `v*` tag is pushed. Until then, build locally:
+  # NOTE: releases have been cut, but no tag exists in GHCR — image.yml's `v*`
+  # trigger does not fire from a tag pushed with the default GITHUB_TOKEN (the recursion
+  # guard), so the workflow has never run. Publishing is a workflow_dispatch with
+  # `publish: true`. Until then, build locally:
   #   ./mvnw -Pdocker -pl kweblens-web -am package
   # and point `repository` at whatever that produced.
   repository: ghcr.io/alexmond/kweblens

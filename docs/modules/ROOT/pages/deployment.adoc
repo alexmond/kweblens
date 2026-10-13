@@ -10,11 +10,20 @@ image, how the pod finds its credentials, and the RBAC it needs.
 
 [IMPORTANT]
 ====
-*There is no published image and no workflow that builds one.* `.github/workflows/` contains
-`ci.yml` and `maven_release.yml` only, and the release workflow publishes libraries to Maven
-Central, not a container. The chart's `image.repository` default is the bare name `kweblens`
-with no registry — so *the chart assumes an image you built and pushed yourself*. Set
-`image.repository` to your own registry path before installing.
+*There is no image on GHCR, and the workflow that would push one has never run.*
+
+`.github/workflows/image.yml` exists: it builds `kweblens-web`, smoke-tests that the image
+reaches a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch`
+where `publish` is explicitly true (it defaults to false). Its `v*` trigger did **not** fire
+for `v0.1.0`, and that is measured rather than assumed: the release workflow pushes the tag
+with the default `GITHUB_TOKEN`, and GitHub does not start a workflow from an event a
+`GITHUB_TOKEN` push created — the recursion guard. So the tag that was supposed to publish
+the image published nothing, and `ghcr.io/alexmond/kweblens` does not resolve.
+
+The chart's `image.repository` default is `ghcr.io/alexmond/kweblens`, which therefore does
+not pull today. *Until an image is published, build and push your own* and set
+`image.repository` to it. Publishing the official one is a `workflow_dispatch` on
+`image.yml` with `publish: true`.
 ====
 
 == The image

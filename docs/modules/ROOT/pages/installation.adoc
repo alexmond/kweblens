@@ -14,9 +14,11 @@ https://github.com/alexmond/kweblens/releases/latest[GitHub release^] and three 
 * `kweblens-cli-<version>.jar` — the dependency-light inspector.
 * `kweblens-tui-<version>.jar` — the terminal browser.
 
-There is also **no published container image**: the Helm chart's `values.yaml` defaults to
-`repository: kweblens` with no registry, so it assumes an image you built locally and
-pushed somewhere the cluster can pull from.
+There is also **no published container image yet**. `.github/workflows/image.yml` would push
+one, but it has never run: its `v*` trigger does not fire from a tag pushed with the default
+`GITHUB_TOKEN`. The Helm chart's `values.yaml` points at `ghcr.io/alexmond/kweblens`, which
+therefore does not pull — build an image and push it somewhere the cluster can reach. See
+xref:deployment.adoc[Deploying to Kubernetes].
 
 The routes below build from a clone, which is still the way to run an unreleased change.
 ====
