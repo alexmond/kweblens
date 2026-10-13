@@ -14,10 +14,9 @@ https://github.com/alexmond/kweblens/releases/latest[GitHub release^] and three 
 * `kweblens-cli-<version>.jar` — the dependency-light inspector.
 * `kweblens-tui-<version>.jar` — the terminal browser.
 
-There is also a container image at `ghcr.io/alexmond/kweblens` (`0.2.0`, `latest`), which the
-Helm chart pulls by default. It is published by a **manual** `workflow_dispatch` rather than by
-the release — `image.yml`'s `v*` trigger cannot fire from a tag pushed with the default
-`GITHUB_TOKEN` — so do not assume a given release has a matching image tag. See
+There is also a container image at `ghcr.io/alexmond/kweblens`, which the Helm chart pulls by
+default. The release dispatches the image build as its last step, so the image lands a few
+minutes after the release rather than with it. See
 xref:deployment.adoc[Deploying to Kubernetes].
 
 The routes below build from a clone, which is still the way to run an unreleased change.

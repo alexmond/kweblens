@@ -10,22 +10,26 @@ image, how the pod finds its credentials, and the RBAC it needs.
 
 [IMPORTANT]
 ====
-*The image is published, but not by the release — and that distinction matters if you expect
-a new tag to appear on its own.*
-
-`ghcr.io/alexmond/kweblens` serves `0.2.0` and `latest`, which the chart pulls by default.
+`ghcr.io/alexmond/kweblens` serves the released versions, and the chart pulls from it by
+default.
 
 `.github/workflows/image.yml` builds `kweblens-web`, smoke-tests that the image reaches a
 healthy actuator, and pushes on a `v*` tag or on a `workflow_dispatch` where `publish` is
-explicitly true (it defaults to false). **The `v*` trigger has never fired**, and that is
-measured rather than assumed: the release workflow pushes the tag with the default
-`GITHUB_TOKEN`, and GitHub does not start a workflow from an event a `GITHUB_TOKEN` push
-created — the recursion guard. `v0.1.0` published nothing, and `v0.2.0`'s image was pushed by
-hand afterwards.
+explicitly true (it defaults to false).
 
-So *a release does not publish an image*. Until the tag is pushed with a PAT, or the release
-workflow dispatches `image.yml` itself, each release needs a `workflow_dispatch` with
-`publish: true` — and a version with no image is a version the chart cannot pull.
+[NOTE]
+======
+*The image is published by the release workflow dispatching `image.yml`, not by its own `v*`
+trigger* — which has never fired, and that is measured rather than assumed. The release pushes
+the tag with the default `GITHUB_TOKEN`, and GitHub does not raise a workflow from an event
+that token created (the recursion guard), so `v0.1.0` published nothing. A `workflow_dispatch`
+is explicitly exempt from that guard, so the release's last step dispatches the build
+directly; no PAT is involved.
+
+Two consequences. The image appears a few minutes *after* the release, as a separate workflow
+run. And `0.2.0`'s image was pushed by hand, because this step was added after it — so for
+that one version the two were not produced together.
+======
 ====
 
 == The image

@@ -116,9 +116,9 @@ jobs:
           Java 21+. kweblens reads your kubeconfig and registers every context as a cluster. The
           web app generates an admin password at startup and logs it unless you set one.
 
-          A Helm chart is in \`deploy/helm/kweblens\`. Container images are on GHCR at
-          \`ghcr.io/alexmond/kweblens\`, published by a manual workflow run — so this release may
-          not have a matching image tag yet.
+          A Helm chart is in \`deploy/helm/kweblens\`, and the container image for this version is
+          on GHCR at \`ghcr.io/alexmond/kweblens:$RELEASE_VERSION\` — this release dispatches the
+          image build, so give it a few minutes after the release appears.
 
           **Nothing is published to Maven Central** — kweblens is an application, not a library.
           The jars above are the release.
@@ -140,3 +140,29 @@ jobs:
         run: |
           git commit -am "chore: prepare for next development iteration $NEXT_VERSION"
           git push origin HEAD:"$GITHUB_REF_NAME"
+
+      # THE TAG PUSH ABOVE CANNOT START `image.yml` ITSELF, so the release dispatches it.
+      # GitHub does not raise a workflow from an event the default `GITHUB_TOKEN` created —
+      # the recursion guard — which is why `v0.1.0` published no image at all and `v0.2.0`'s
+      # had to be pushed by hand afterwards. A `workflow_dispatch` is explicitly NOT such an
+      # event: "With the exception of `workflow_dispatch` and `repository_dispatch`, other
+      # `GITHUB_TOKEN`-triggered events do not create workflow runs at all." It is an API
+      # call this job makes, which is what `actions: write` in the permissions block is for;
+      # no PAT is needed.
+      #
+      # LAST on purpose. The tag, the release and the version bump are all complete by the
+      # time this runs, so a refused dispatch costs only the image — recoverable with a
+      # manual run, which is the state every release before this one was already in. Putting
+      # it earlier would let a dispatch failure skip the next-version commit and leave `main`
+      # sitting on the release version.
+      - name: Publish the container image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.releaseVersion }}
+        run: |
+          gh workflow run image.yml \
+            --ref "v$RELEASE_VERSION" \
+            -f version="$RELEASE_VERSION" \
+            -f publish=true
+          echo "Dispatched image.yml for v$RELEASE_VERSION (builds the tag, pushes to GHCR)."
+          echo "It runs as its own workflow — this job does not wait for it."
