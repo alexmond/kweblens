@@ -116,7 +116,8 @@ jobs:
           Java 21+. kweblens reads your kubeconfig and registers every context as a cluster. The
           web app generates an admin password at startup and logs it unless you set one.
 
-          There is also a container image on GHCR, and a Helm chart in \`deploy/helm/kweblens\`.
+          A Helm chart is in \`deploy/helm/kweblens\`. There is no published container image yet —
+          build one with \`./mvnw -Pdocker -pl kweblens-web -am package\`.
 
           **Nothing is published to Maven Central** — kweblens is an application, not a library.
           The jars above are the release.
