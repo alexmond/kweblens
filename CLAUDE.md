@@ -786,13 +786,19 @@ broken. It is not; do not "fix" it.
 - **`.github/workflows/image.yml`** (#311) builds `kweblens-web`, smoke-tests that the image
   reaches a healthy actuator, and pushes to GHCR on a `v*` tag or on a `workflow_dispatch`
   where `publish` is explicitly true (it defaults to **false**).
-  **Its `v*` trigger does NOT fire from a release, and that is measured, not assumed.** The
-  0.1.0 run pushed `v0.1.0` with the default `GITHUB_TOKEN`, and GitHub does not start a
-  workflow from an event a `GITHUB_TOKEN` push created — the recursion guard. `image.yml` has
-  therefore **never run**, and no image is on GHCR. Publishing one today is a
-  `workflow_dispatch` with `publish: true`. Making it automatic means pushing the tag with a
-  PAT, or having the release workflow dispatch `image.yml` itself — a decision, because it is
-  a second publish on top of the release.
+  **Its `v*` trigger has never fired, and that is measured, not assumed.** The 0.1.0 run
+  pushed `v0.1.0` with the default `GITHUB_TOKEN`, and GitHub does not start a workflow from
+  an event a `GITHUB_TOKEN` push created — the recursion guard — so `v0.1.0` published
+  nothing and `v0.2.0`'s image was pushed by hand. **`maven_release.yml`'s last step now
+  dispatches `image.yml` itself**, which works on the same token because a
+  `workflow_dispatch` is explicitly exempt from that guard ("with the exception of
+  `workflow_dispatch` and `repository_dispatch`, other `GITHUB_TOKEN`-triggered events do not
+  create workflow runs at all") — that is what the job's `actions: write` is for, and no PAT
+  is involved. **Do not "fix" the dead `v*` trigger by pushing the tag with a PAT**; it would
+  double-publish alongside the dispatch. The dispatch is **last** in the job on purpose: the
+  tag, release and version bump are all done by then, so a refusal costs only the image.
+  Two consequences worth knowing: the image lands a few minutes *after* the release as its
+  own run, and `0.2.0` is the one version whose image was not produced by its release.
 - Versions are numeric `MAJOR.MINOR.PATCH`; `-SNAPSHOT` only on dev.
 
 ## MCP server

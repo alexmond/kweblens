@@ -113,9 +113,9 @@ More, in context, in the [documentation](docs/modules/ROOT/pages/index.adoc).
 > library, and a published coordinate owes callers a stable API and a jar that starts. The
 > three runnable jars are attached to each
 > [GitHub release](https://github.com/alexmond/kweblens/releases), and the container image is
-> on GHCR at `ghcr.io/alexmond/kweblens` (`0.2.0`, `latest`). Note it is published by a **manual
-> workflow dispatch**, not by the release: `image.yml`'s `v*` trigger cannot fire from a tag
-> pushed with the default `GITHUB_TOKEN`. See
+> on GHCR at `ghcr.io/alexmond/kweblens`. Each release publishes its own tag — the release
+> workflow dispatches the image build as its last step. (`0.2.0`'s image was pushed by hand,
+> because that step was added after it.) See
 > [Deploying to Kubernetes](docs/modules/ROOT/pages/deployment.adoc).
 
 ## Build & run
